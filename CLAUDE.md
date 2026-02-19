@@ -62,7 +62,7 @@ A SuiteApp (SDF) project that adds browser-to-PSTN calling to NetSuite. App ID: 
 ## Architecture — Zero External Hosting
 
 Everything lives in two places:
-1. **NetSuite SuiteScripts** — 5 scripts (Client, Suitelet, RESTlet, Scheduled, library module)
+1. **NetSuite SuiteScripts** — 6 scripts (Client, UserEvent, Suitelet, RESTlet, Scheduled, library module)
 2. **Twilio's managed platform** — TwiML Bin, TwiML App, Conversational Intelligence (no custom server code)
 
 No middleware. No Node.js server. No OCI Compute. No external hosting.
@@ -97,15 +97,18 @@ src/
 │   └── SuiteApps/
 │       └── com.netsuite.clicktocall/
 │           └── click_to_call/
-│               ├── ctc_cl_phone_button.js       # Client Script
-│               ├── ctc_sl_softphone.js          # Suitelet
-│               ├── ctc_rl_token.js              # RESTlet
-│               ├── ctc_ss_poll_transcripts.js   # Scheduled Script
+│               ├── ctc_cl_phone_button.js       # Client Script (edit-mode phone icon)
+│               ├── ctc_ue_phone_button.js      # UserEvent Script (toolbar button + view-mode phone icon)
+│               ├── ctc_sl_softphone.js          # Suitelet (softphone popup HTML)
+│               ├── ctc_rl_token.js              # RESTlet (JWT token endpoint)
+│               ├── ctc_ss_poll_transcripts.js   # Scheduled Script (poll Twilio)
 │               └── lib/
-│                   └── ctc_twilio_jwt.js        # JWT module
+│                   ├── ctc_twilio_jwt.js        # JWT module
+│                   └── twilio.min.js            # Twilio Voice SDK 2.7.3 (bundled)
 ├── Objects/
 │   ├── customrecord_ctc_config.xml
 │   ├── customscript_ctc_cl_phone_button.xml
+│   ├── customscript_ctc_ue_phone_button.xml
 │   ├── customscript_ctc_sl_softphone.xml
 │   ├── customscript_ctc_rl_token.xml
 │   ├── customscript_ctc_ss_poll.xml
@@ -119,8 +122,9 @@ src/
 1. `lib/ctc_twilio_jwt.js` — no dependencies, test independently
 2. `ctc_rl_token.js` — depends on #1 + config record
 3. `ctc_sl_softphone.js` — depends on #2 (resolves RESTlet URL)
-4. `ctc_cl_phone_button.js` — depends on #3 (resolves Suitelet URL)
-5. `ctc_ss_poll_transcripts.js` — independent of #1-4, depends on config record + Phone Call fields
+4. `ctc_ue_phone_button.js` — depends on #3 (resolves Suitelet URL, adds toolbar button + view-mode icon)
+5. `ctc_cl_phone_button.js` — depends on #3 (resolves Suitelet URL, adds edit-mode field icon)
+6. `ctc_ss_poll_transcripts.js` — independent of #1-5, depends on config record + Phone Call fields
 
 ## Critical Gotchas
 
@@ -130,7 +134,9 @@ src/
 - **RESTlet auth**: The Suitelet's client-side JS calls the RESTlet using the user's existing NetSuite session (same-origin). No separate auth needed.
 - **Phone Call record type**: Use `record.Type.PHONE_CALL` enum (not string `'phonecall'`). Required fields: `title`, `status` (COMPLETE/SCHEDULED).
 - **N/llm JSON parsing**: Model may wrap JSON in markdown code fences. Strip ` ```json ` and ` ``` ` before parsing.
-- **Twilio Voice SDK version**: Use 2.x (`@twilio/voice-sdk`). The CDN URL is `https://sdk.twilio.com/js/client/releases/2.7.3/twilio.min.js`. API differs from 1.x.
+- **Twilio Voice SDK version**: Use 2.x. SDK is bundled in File Cabinet (`lib/twilio.min.js`) — loaded via `N/file.load()` at runtime. CDN blocked by NetSuite CSP.
+- **Twilio codec preferences**: Use string literals `'opus'`, `'pcmu'` — NOT `Twilio.Device.Codec.Opus` (enum doesn't exist in SDK 2.7.3).
+- **RESTlet URL in Suitelet**: Use `returnExternalUrl: false` — internal URL stays same-origin with Suitelet popup. `returnExternalUrl: true` resolves to `restlets.api.netsuite.com` which causes CORS failure.
 
 ## SDF Gotchas
 
@@ -155,6 +161,44 @@ src/
 - **Config**: `.eslintrc.json` extends `plugin:suitescript/recommended` (all 10 rules at error level)
 - **Key rules**: `api-version`, `script-type`, `entry-points`, `module-vars`, `no-extra-modules`, `no-invalid-modules`
 - **Scope**: Lints only `src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/`
+
+## Deployment (SDF + M2M Auth)
+
+### Account & Credentials
+- **Account ID**: `td3061543` (MFG 25.2 AI — sandbox)
+- **Auth method**: M2M (machine-to-machine) certificate auth
+- **Certificate ID**: `ibNoJEIe0oFFvNSjmLYndlWzmUXA8kLoOqWAbYB0vu0`
+- **Private key**: `/Users/brettwhite/Projects/ns-twilio-c2c/private-key.pem`
+- **CI passkey**: stored in macOS Keychain under service `suitecloud-ci-passkey` — retrieve with `security find-generic-password -s "suitecloud-ci-passkey" -w`
+
+### Deploy Command (copy-paste ready)
+```bash
+# From the repo root (not src/) — suitecloud auto-detects src/
+SUITECLOUD_CI=1 \
+SUITECLOUD_CI_PASSKEY=$(security find-generic-password -s "suitecloud-ci-passkey" -w) \
+suitecloud project:deploy
+```
+
+### First-Time Setup Per Context (auth ID must be linked to project)
+If deploy fails with "No account has been set up for this project", run:
+```bash
+SUITECLOUD_CI=1 \
+SUITECLOUD_CI_PASSKEY=$(security find-generic-password -s "suitecloud-ci-passkey" -w) \
+suitecloud account:setup:ci \
+  --account td3061543 \
+  --authid ctc-m2m-deploy \
+  --certificateid ibNoJEIe0oFFvNSjmLYndlWzmUXA8kLoOqWAbYB0vu0 \
+  --privatekeypath /Users/brettwhite/Projects/ns-twilio-c2c/private-key.pem
+```
+**Important**: If the authid is already taken ("This authentication ID is already in use"), just pick a new unique name (e.g., `ctc-m2m-3`, `ctc-m2m-deploy`). The name is arbitrary — it just links credentials to the project.
+
+### Common Deploy Issues
+- **"No account has been set up"** — run `account:setup:ci` as above. This happens when context is cleared or `.suitecloud` project config is missing.
+- **"authentication ID already in use"** — change the `--authid` value to something new. Old IDs persist globally in `~/.suitecloud-sdk/credentials_ci.p12`.
+- **"cannot decrypt credentials file"** — passkey changed since `.p12` was created. Delete `~/.suitecloud-sdk/credentials_ci.p12` and re-run setup.
+- **`SUITECLOUD_CI` env var** — must be set for CLI to use M2M auth. Without it, CLI tries browser-based login (which fails in headless/CLI contexts).
+- **`--select` doesn't work with `SUITECLOUD_CI` set** — the `--select` flag on `account:setup:ci` is incompatible with the CI env var. Use full setup instead.
+- **Deploy warnings are safe to ignore** — `loglevel`, `status`, `title` on clientscript deployments, `allowinlineinsert` on custom records — all cosmetic, don't affect functionality.
 
 ## Git & GitHub
 
