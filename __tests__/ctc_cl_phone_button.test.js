@@ -220,6 +220,7 @@ describe('ctc_cl_phone_button', () => {
 
         it('skips injection when no DOM target found', () => {
             document.getElementById.mockReturnValue(null);
+            document.querySelector = jest.fn().mockReturnValue(null);
             setFieldValues({ phone: '+15551234567', companyname: 'Test' });
 
             clientScript.pageInit({ currentRecord: mockRec });

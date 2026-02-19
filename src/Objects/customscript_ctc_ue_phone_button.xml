@@ -1,0 +1,28 @@
+<usereventscript scriptid="customscript_ctc_ue_phone_button">
+    <name>CTC Phone Button</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_ue_phone_button.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <isinactive>F</isinactive>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_ue_phone_button_cust">
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <recordtype>CUSTOMER</recordtype>
+            <allroles>T</allroles>
+        </scriptdeployment>
+        <scriptdeployment scriptid="customdeploy_ctc_ue_phone_button_cont">
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <recordtype>CONTACT</recordtype>
+            <allroles>T</allroles>
+        </scriptdeployment>
+        <scriptdeployment scriptid="customdeploy_ctc_ue_phone_button_lead">
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <recordtype>LEAD</recordtype>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</usereventscript>

@@ -1,6 +1,6 @@
 <crmcustomfield scriptid="custevent_ctc_tone_keywords">
     <label>Tone Keywords</label>
-    <fieldtype>FREEFORMTEXT</fieldtype>
+    <fieldtype>CLOBTEXT</fieldtype>
     <appliestophonecall>T</appliestophonecall>
     <displaytype>NORMAL</displaytype>
     <ismandatory>F</ismandatory>

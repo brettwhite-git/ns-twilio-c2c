@@ -65,3 +65,91 @@ Track corrections, debugging insights, and validated patterns across sessions.
 - Deep research before coding caught 4 approach issues that would have caused runtime failures
 - Validating Twilio JWT format against their GitHub source code (twilio-node AccessToken.ts) confirmed exact payload structure
 - N/crypto + API Secrets approach gives both security (no plain text secrets in code) and usability (plain string output for browser)
+
+---
+
+## 2026-02-19 — SDF Deployment: M2M Auth & Manifest Fix
+
+### Errors Found
+
+1. **`credentials_ci.p12` encrypted with stale passkey**
+   - `account:setup:ci` failed: "The current passkey cannot decrypt the credentials file"
+   - Fix: Delete `/Users/brettwhite/.suitecloud-sdk/credentials_ci.p12` and re-run setup
+   - Why: Passkey changed (or was regenerated) since the .p12 was created; SDK doesn't auto-recover
+
+2. **`SUITECLOUD_CI` env var not exported to shell**
+   - `.env` file had `SUITECLOUD_CI=1` but it wasn't sourced/exported
+   - Fix: `export SUITECLOUD_CI=1` before running any `suitecloud` CLI commands
+   - Why: `.env` files aren't auto-loaded — must be explicitly sourced or exported
+
+3. **Missing `<projectversion>` in manifest.xml**
+   - Deploy failed: "The project version must be three numbers separated by two dots"
+   - Fix: Added `<projectversion>1.0.0</projectversion>` to manifest.xml
+   - Why: SuiteApp manifests require a three-part version number; ACP projects don't
+
+### What Worked
+
+- M2M auth (`ctc-m2m`) successfully re-created with correct certificate + PEM key
+
+4. **`deploy.xml` missing `<objects>` section**
+   - First deploy only uploaded files — no custom objects were created
+   - Fix: Added `<objects><path>~/Objects/*</path></objects>` to deploy.xml
+   - Why: SuiteApp deploy.xml needs both `<files>` and `<objects>` sections
+
+5. **`FREEFORMTEXT` not a valid SDF field type**
+   - All FREEFORMTEXT fields failed validation
+   - Fix: Changed to `CLOBTEXT` (works for both CRM custom fields and custom record fields)
+
+6. **`<includename>` must be boolean, not string**
+   - Had `<includename>CTC Configuration</includename>`
+   - Fix: `<includename>T</includename>` (T/F boolean)
+
+7. **Scheduled Script deployment `RELEASED` status invalid**
+   - SDF doesn't accept `RELEASED` for scriptdeployment status
+   - Fix: Changed to `SCHEDULED`
+
+8. **`<title>` required on Scheduled Script deployments but "not supported" on Client Script deployments**
+   - SDF inconsistency: warns `title` is unsupported on clientscript deployments, but errors if missing on scheduledscript deployments
+
+### What Worked
+
+- Full deploy completed in 5 seconds — 14 objects + 5 files
+- All CRM fields, config record, and script deployments created successfully
+
+---
+
+## 2026-02-19 — Post-Deploy Fixes: CORS + View Mode Phone Icon
+
+### Errors Found
+
+1. **CORS blocks RESTlet token fetch from Suitelet popup**
+   - Suitelet at `td3061543.app.netsuite.com`, RESTlet resolved to `td3061543.restlets.api.netsuite.com` — different origins
+   - Fix: `returnExternalUrl: true` → `false` in `ctc_sl_softphone.js`
+   - Internal URL resolves against same origin, browser session cookie handles auth
+
+2. **Phone icon only appeared in edit mode, not view mode**
+   - NetSuite renders field labels with different DOM IDs in view vs edit mode
+   - First attempt: Added `_val` selector and `querySelector` fallback — did NOT work
+   - Second attempt: Added UserEvent `beforeLoad` script with `form.addButton()` — "Call" button now appears in toolbar in BOTH view and edit mode ✅
+   - Field-level phone icon (📞 next to Phone label) still only works in edit mode — NOT FIXED
+   - Root cause: Client Script DOM injection selectors don't match view-mode DOM structure
+
+3. **Twilio CDN SDK blocked by NetSuite CSP**
+   - `<script src="https://sdk.twilio.com/...">` returned 403 (CDN deprecated)
+   - Fix: Downloaded SDK from jsdelivr, bundled in File Cabinet as `lib/twilio.min.js`
+   - Loaded via `N/file.load()` to get internal URL
+
+4. **"Cannot read properties of undefined (reading 'Opus')" — NOT a token fetch error**
+   - Token fetch now succeeds (CORS fix + local SDK loading worked)
+   - Error occurs in `initDevice()`: `Twilio.Device.Codec.Opus` doesn't exist in SDK 2.7.3
+   - `Twilio.Device.Codec` is undefined — codec prefs should be strings (`'opus'`, `'pcmu'`), not enum refs
+   - NOT FIXED — needs code change in Suitelet HTML
+
+### What Worked
+- CORS fix (internal URL) ✅
+- UserEvent "Call" button in toolbar (view + edit) ✅
+- Bundled Twilio SDK loads from File Cabinet ✅
+
+### What Did NOT Work
+- Client Script DOM selectors for view mode — still can't find field labels
+- `Twilio.Device.Codec.Opus` enum reference — doesn't exist in bundled SDK 2.7.3

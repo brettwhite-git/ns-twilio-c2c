@@ -2,6 +2,7 @@
     <projectname>ClickToCall</projectname>
     <publisherid>com.netsuite</publisherid>
     <projectid>clicktocall</projectid>
+    <projectversion>1.0.0</projectversion>
     <frameworkversion>1.0</frameworkversion>
     <dependencies>
         <features>

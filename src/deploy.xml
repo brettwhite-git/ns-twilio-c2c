@@ -2,4 +2,7 @@
     <files>
         <path>~/FileCabinet/SuiteApps/com.netsuite.clicktocall/*</path>
     </files>
+    <objects>
+        <path>~/Objects/*</path>
+    </objects>
 </deploy>

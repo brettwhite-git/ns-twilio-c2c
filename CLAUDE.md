@@ -137,6 +137,8 @@ src/
 - **XML element names**: Use `<restlet>`, `<suitelet>`, `<scheduledscript>`, `<clientscript>` — NOT `<restletscripttype>` etc.
 - **`isinactive` filter**: Not valid on all record types — test before assuming it works on a given type
 - **deploy.xml differences**: SuiteApp projects don't support `<configuration>` or `<translationcollections>` sections. This project is a SuiteApp — deploy.xml has only `<files>`.
+- **SuiteApp scriptfile paths**: XML `<scriptfile>` refs must use `/SuiteApps/com.netsuite.clicktocall/click_to_call/...` (not `/SuiteScripts/...`). Physical files live at `src/FileCabinet/SuiteApps/<appId>/`
+- **SuiteApp manifest requirements**: `projecttype="SUITEAPP"` requires `<publisherid>` and `<projectid>` — Jest's `ProjectInfoService` reads these from manifest.xml at test time
 
 ## Unit Testing
 
@@ -144,6 +146,8 @@ src/
 - **Config**: `jest.config.js` uses `SuiteCloudJestConfiguration.build()` which auto-provides stubs for all `N/` modules and transforms AMD `define([...])` to CommonJS
 - **Test location**: `__tests__/` at project root (keeps tests out of `src/` which gets deployed)
 - **Stubs**: All `N/*` modules are auto-mocked — use `jest.fn()` / `mockReturnValue()` / `mockImplementation()` to control behavior in tests
+- **N/llm stub missing**: `@oracle/suitecloud-unit-testing` has no `N/llm` stub. Manual mock at `__mocks__/llm.js`, mapped via `moduleNameMapper['^N/llm$']` in `jest.config.js`
+- **Test imports**: Use `SuiteScripts/click_to_call/...` in test imports — the Jest moduleNameMapper transparently redirects to the SuiteApps directory regardless of project type
 
 ## Linting
 
@@ -151,6 +155,12 @@ src/
 - **Config**: `.eslintrc.json` extends `plugin:suitescript/recommended` (all 10 rules at error level)
 - **Key rules**: `api-version`, `script-type`, `entry-points`, `module-vars`, `no-extra-modules`, `no-invalid-modules`
 - **Scope**: Lints only `src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/`
+
+## Git & GitHub
+
+- **Repo**: `brettwhite-git/ns-twilio-c2c` (private)
+- **Branch**: `main`
+- **gh CLI**: authenticated, use for PR/issue workflows
 
 ## What NOT to Build
 

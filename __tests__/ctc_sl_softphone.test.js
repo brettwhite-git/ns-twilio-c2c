@@ -2,21 +2,25 @@ import suitelet from 'SuiteScripts/click_to_call/ctc_sl_softphone';
 import url from 'N/url';
 import runtime from 'N/runtime';
 import log from 'N/log';
+import file from 'N/file';
 
 jest.mock('N/url');
 jest.mock('N/runtime');
 jest.mock('N/log');
+jest.mock('N/file');
 
 describe('ctc_sl_softphone', () => {
     let mockContext;
 
-    const MOCK_TOKEN_URL = 'https://12345.restlets.api.netsuite.com/app/site/hosting/restlet.nl?script=1&deploy=1';
+    const MOCK_TOKEN_URL = '/app/site/hosting/restlet.nl?script=1&deploy=1';
+    const MOCK_SDK_URL = '/SuiteApps/com.netsuite.clicktocall/click_to_call/lib/twilio.min.js';
 
     beforeEach(() => {
         jest.clearAllMocks();
 
         url.resolveScript.mockReturnValue(MOCK_TOKEN_URL);
         runtime.getCurrentUser.mockReturnValue({ id: 42, name: 'Test User' });
+        file.load.mockReturnValue({ url: MOCK_SDK_URL });
 
         mockContext = {
             request: {
@@ -39,7 +43,7 @@ describe('ctc_sl_softphone', () => {
             expect(url.resolveScript).toHaveBeenCalledWith({
                 scriptId: 'customscript_ctc_rl_token',
                 deploymentId: 'customdeploy_ctc_rl_token',
-                returnExternalUrl: true
+                returnExternalUrl: false
             });
         });
 
@@ -80,11 +84,14 @@ describe('ctc_sl_softphone', () => {
             expect(html).toContain('100');
         });
 
-        it('includes Twilio SDK CDN reference', () => {
+        it('includes Twilio SDK reference from File Cabinet', () => {
             suitelet.onRequest(mockContext);
 
             const html = mockContext.response.write.mock.calls[0][0];
-            expect(html).toContain('https://sdk.twilio.com/js/client/releases/2.7.3/twilio.min.js');
+            expect(html).toContain(MOCK_SDK_URL);
+            expect(file.load).toHaveBeenCalledWith({
+                id: '/SuiteApps/com.netsuite.clicktocall/click_to_call/lib/twilio.min.js'
+            });
         });
 
         it('handles missing phone parameter gracefully', () => {
@@ -149,6 +156,14 @@ describe('ctc_sl_softphone', () => {
             expect(mockContext.response.write).toHaveBeenCalledTimes(1);
             const html = mockContext.response.write.mock.calls[0][0];
             expect(html).toContain('<!DOCTYPE html>');
+        });
+
+        it('uses string codec preferences instead of Twilio.Device.Codec enum', () => {
+            suitelet.onRequest(mockContext);
+
+            const html = mockContext.response.write.mock.calls[0][0];
+            expect(html).toContain("codecPreferences: ['opus', 'pcmu']");
+            expect(html).not.toContain('Twilio.Device.Codec');
         });
 
         it('includes call control buttons', () => {

@@ -7,9 +7,7 @@
  * Receives phone, entityId, entityName as URL parameters.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
-
-    const TWILIO_SDK_URL = 'https://sdk.twilio.com/js/client/releases/2.7.3/twilio.min.js';
+define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
 
     /**
      * GET handler — renders the softphone HTML page.
@@ -24,17 +22,25 @@ define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
         const entityName = params.entityName || '';
 
         let tokenEndpoint = '';
+        let sdkUrl = '';
         try {
             tokenEndpoint = url.resolveScript({
                 scriptId: 'customscript_ctc_rl_token',
                 deploymentId: 'customdeploy_ctc_rl_token',
-                returnExternalUrl: true
+                returnExternalUrl: false
             });
         } catch (e) {
             log.error({ title: 'CTC Softphone — Failed to resolve RESTlet URL', details: e.message || e });
         }
 
-        const html = buildHtml({ phone, entityId, entityName, tokenEndpoint });
+        try {
+            const sdkFile = file.load({ id: '/SuiteApps/com.netsuite.clicktocall/click_to_call/lib/twilio.min.js' });
+            sdkUrl = sdkFile.url;
+        } catch (e) {
+            log.error({ title: 'CTC Softphone — Failed to load Twilio SDK file', details: e.message || e });
+        }
+
+        const html = buildHtml({ phone, entityId, entityName, tokenEndpoint, sdkUrl });
         context.response.write(html);
     };
 
@@ -45,6 +51,7 @@ define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
      * @param {string} opts.entityId
      * @param {string} opts.entityName
      * @param {string} opts.tokenEndpoint
+     * @param {string} opts.sdkUrl
      * @returns {string} Full HTML document
      */
     const buildHtml = (opts) => {
@@ -157,7 +164,7 @@ define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
     </div>
     <div class="error-box" id="errorBox"></div>
 
-    <script src="${TWILIO_SDK_URL}"></script>
+    <script src="${escapeHtml(opts.sdkUrl)}"></script>
     <script>
     (function () {
         'use strict';
@@ -239,7 +246,7 @@ define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
         // --- Twilio Device setup ---
         function initDevice(token) {
             device = new Twilio.Device(token, {
-                codecPreferences: [Twilio.Device.Codec.Opus, Twilio.Device.Codec.PCMU],
+                codecPreferences: ['opus', 'pcmu'],
                 logLevel: 1
             });
 

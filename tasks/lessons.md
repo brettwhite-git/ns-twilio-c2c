@@ -28,3 +28,18 @@ Capture corrections and patterns here after each user correction or bug discover
 - JS context: use `escapeJs()` — escape `\`, `'`, and use `\x3c`/`\x3e` for `<`/`>` to prevent script tag breakout
 - Do NOT use `escapeHtml()` for JS string values — `&amp;` in a fetch URL will break the HTTP request
 - `N/url.resolveScript({ returnExternalUrl: true })` returns full `https://...restlets.api.netsuite.com/...` URL — required for same-origin fetch from popup
+
+## SDF Deployment (First Deploy)
+- SuiteApp manifests REQUIRE `<projectversion>1.0.0</projectversion>` — ACP projects don't need this
+- M2M auth: `.env` files aren't auto-loaded — must `export SUITECLOUD_CI=1` and `export SUITECLOUD_CI_PASSKEY=...` before CLI commands
+- If `credentials_ci.p12` is encrypted with a stale passkey, delete it and re-run `account:setup:ci`
+- The `--privatekeypath` flag expects PEM format, not PKCS12 (.p12)
+- SuiteApp `deploy.xml` needs BOTH `<files>` and `<objects>` sections — without `<objects>`, scripts upload but no custom objects are created
+- `FREEFORMTEXT` is NOT a valid SDF field type — use `CLOBTEXT` instead
+- `<includename>` on custom records must be `T` or `F`, not a display string
+- Scheduled Script deployment status: use `SCHEDULED` (not `RELEASED`)
+- `<title>` is required on scheduledscript deployments but "not supported" (ignored) on clientscript deployments — SDF inconsistency
+
+## Post-Deploy Runtime Issues
+- `returnExternalUrl: true` on `url.resolveScript()` returns a cross-origin URL (`restlets.api.netsuite.com`) — causes CORS failure when fetched from Suitelet popup at `app.netsuite.com`. Use `returnExternalUrl: false` for same-origin requests.
+- NetSuite field label DOM IDs differ between view and edit mode — use multiple selector strategies (`_fs_lbl_uir_label`, `_val`, `querySelector('label[for=...]')`) to support both

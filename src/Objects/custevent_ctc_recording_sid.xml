@@ -1,6 +1,6 @@
 <crmcustomfield scriptid="custevent_ctc_recording_sid">
     <label>Recording SID</label>
-    <fieldtype>FREEFORMTEXT</fieldtype>
+    <fieldtype>CLOBTEXT</fieldtype>
     <appliestophonecall>T</appliestophonecall>
     <displaytype>NORMAL</displaytype>
     <ismandatory>F</ismandatory>

@@ -69,17 +69,23 @@ define(['N/url', 'N/currentRecord'], (url, currentRecord) => {
      * @param {string} entityName
      */
     const injectCallButton = (fieldId, phoneNumber, entityId, entityName) => {
-        // Try known NetSuite label selectors
+        // Try known NetSuite label selectors (edit mode, then view mode)
         const selectors = [
             fieldId + '_fs_lbl_uir_label',
             fieldId + '_fs_lbl',
-            fieldId + '_fs'
+            fieldId + '_fs',
+            fieldId + '_val'
         ];
 
         let target = null;
         for (let i = 0; i < selectors.length; i++) {
             target = document.getElementById(selectors[i]);
             if (target) break;
+        }
+        // Fallback: querySelector for label elements referencing the field
+        if (!target) {
+            target = document.querySelector('label[for="' + fieldId + '"]')
+                || document.querySelector('[data-field="' + fieldId + '"]');
         }
         if (!target) return;
 
