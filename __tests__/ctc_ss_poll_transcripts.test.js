@@ -290,7 +290,7 @@ describe('ctc_ss_poll_transcripts', () => {
     });
 
     describe('Phone Call record creation', () => {
-        it('creates record with correct type', () => {
+        it('creates record with correct type when no existing record', () => {
             scheduledScript.execute();
 
             expect(record.create).toHaveBeenCalledWith({
@@ -341,6 +341,55 @@ describe('ctc_ss_poll_transcripts', () => {
             scheduledScript.execute();
 
             expect(mockPhoneCall.save).toHaveBeenCalled();
+        });
+    });
+
+    describe('update existing record by call_sid', () => {
+        it('loads existing record when call_sid match found', () => {
+            const mockExistingRecord = {
+                setValue: jest.fn(),
+                save: jest.fn().mockReturnValue(77777)
+            };
+            record.load = jest.fn().mockReturnValue(mockExistingRecord);
+
+            // The call_sid search returns a match
+            search.create.mockImplementation((opts) => {
+                if (opts.type === 'customrecord_ctc_config') {
+                    return { run: jest.fn().mockReturnValue(mockSearchRun) };
+                }
+                if (opts.filters && opts.filters[0] && opts.filters[0][0] === 'custevent_ctc_call_sid') {
+                    return { run: jest.fn().mockReturnValue({ getRange: jest.fn().mockReturnValue([{ id: '77777' }]) }) };
+                }
+                // duplicate check by recording_sid
+                return { run: jest.fn().mockReturnValue(mockDuplicateSearchRun) };
+            });
+
+            scheduledScript.execute();
+
+            expect(record.load).toHaveBeenCalledWith({
+                type: 'phonecall',
+                id: '77777',
+                isDynamic: true
+            });
+            expect(record.create).not.toHaveBeenCalled();
+            expect(mockExistingRecord.save).toHaveBeenCalled();
+        });
+
+        it('creates new record when no call_sid match found', () => {
+            search.create.mockImplementation((opts) => {
+                if (opts.type === 'customrecord_ctc_config') {
+                    return { run: jest.fn().mockReturnValue(mockSearchRun) };
+                }
+                // All other searches return empty
+                return { run: jest.fn().mockReturnValue({ getRange: jest.fn().mockReturnValue([]) }) };
+            });
+
+            scheduledScript.execute();
+
+            expect(record.create).toHaveBeenCalledWith({
+                type: 'phonecall',
+                isDynamic: true
+            });
         });
     });
 

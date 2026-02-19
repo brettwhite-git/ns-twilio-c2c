@@ -2,10 +2,12 @@ import restlet from 'SuiteScripts/click_to_call/ctc_rl_token';
 import search from 'N/search';
 import runtime from 'N/runtime';
 import log from 'N/log';
+import record from 'N/record';
 
 jest.mock('N/search');
 jest.mock('N/runtime');
 jest.mock('N/log');
+jest.mock('N/record');
 jest.mock('SuiteScripts/click_to_call/lib/ctc_twilio_jwt');
 
 const twilioJwt = require('SuiteScripts/click_to_call/lib/ctc_twilio_jwt');
@@ -41,6 +43,12 @@ describe('ctc_rl_token', () => {
 
         runtime.getCurrentUser.mockReturnValue({ id: 42 });
         twilioJwt.generateAccessToken.mockReturnValue('mock.jwt.token');
+
+        record.Type = { PHONE_CALL: 'phonecall' };
+        record.create = jest.fn().mockReturnValue({
+            setValue: jest.fn(),
+            save: jest.fn().mockReturnValue(99999)
+        });
     });
 
     describe('post', () => {
@@ -141,6 +149,83 @@ describe('ctc_rl_token', () => {
 
             expect(twilioJwt.generateAccessToken).toHaveBeenCalledWith(
                 expect.objectContaining({ identity: '123' })
+            );
+        });
+    });
+
+    describe('logCall action', () => {
+        it('creates a Phone Call record with correct fields', () => {
+            const mockPhoneCall = {
+                setValue: jest.fn(),
+                save: jest.fn().mockReturnValue(12345)
+            };
+            record.create.mockReturnValue(mockPhoneCall);
+
+            const result = restlet.post({
+                action: 'logCall',
+                callSid: 'CA_test_123',
+                entityId: '100',
+                entityType: 'customer',
+                contactId: '200',
+                phone: '+15551234567',
+                duration: 120
+            });
+
+            expect(record.create).toHaveBeenCalledWith({ type: 'phonecall', isDynamic: true });
+            expect(result).toEqual({ success: true, recordId: 12345 });
+
+            const fields = {};
+            mockPhoneCall.setValue.mock.calls.forEach((call) => {
+                fields[call[0].fieldId] = call[0].value;
+            });
+            expect(fields.title).toBe('Call to +15551234567');
+            expect(fields.status).toBe('COMPLETE');
+            expect(fields.phone).toBe('+15551234567');
+            expect(fields.custevent_ctc_call_sid).toBe('CA_test_123');
+            expect(fields.custevent_ctc_duration).toBe(120);
+            expect(fields.custevent_ctc_processed).toBe(false);
+            expect(fields.company).toBe('100');
+            expect(fields.contact).toBe('200');
+        });
+
+        it('does not set company for contact entityType', () => {
+            const mockPhoneCall = {
+                setValue: jest.fn(),
+                save: jest.fn().mockReturnValue(12345)
+            };
+            record.create.mockReturnValue(mockPhoneCall);
+
+            restlet.post({
+                action: 'logCall',
+                callSid: 'CA_test_456',
+                entityId: '300',
+                entityType: 'contact',
+                phone: '+15559876543',
+                duration: 60
+            });
+
+            const fieldIds = mockPhoneCall.setValue.mock.calls.map((c) => c[0].fieldId);
+            expect(fieldIds).not.toContain('company');
+        });
+
+        it('still generates token when no action specified', () => {
+            const result = restlet.post({});
+            expect(result).toHaveProperty('token', 'mock.jwt.token');
+        });
+
+        it('returns error when Phone Call creation fails', () => {
+            record.create.mockImplementation(() => { throw new Error('Record error'); });
+
+            const result = restlet.post({
+                action: 'logCall',
+                callSid: 'CA_test_fail',
+                phone: '+15551234567',
+                duration: 30
+            });
+
+            expect(result).toHaveProperty('error', 'Failed to log call');
+            expect(log.error).toHaveBeenCalledWith(
+                expect.objectContaining({ title: 'CTC Log Call Failed' })
             );
         });
     });

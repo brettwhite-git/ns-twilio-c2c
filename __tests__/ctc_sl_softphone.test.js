@@ -3,11 +3,13 @@ import url from 'N/url';
 import runtime from 'N/runtime';
 import log from 'N/log';
 import file from 'N/file';
+import search from 'N/search';
 
 jest.mock('N/url');
 jest.mock('N/runtime');
 jest.mock('N/log');
 jest.mock('N/file');
+jest.mock('N/search');
 
 describe('ctc_sl_softphone', () => {
     let mockContext;
@@ -22,12 +24,19 @@ describe('ctc_sl_softphone', () => {
         runtime.getCurrentUser.mockReturnValue({ id: 42, name: 'Test User' });
         file.load.mockReturnValue({ url: MOCK_SDK_URL });
 
+        search.create = jest.fn().mockReturnValue({
+            run: jest.fn().mockReturnValue({
+                getRange: jest.fn().mockReturnValue([])
+            })
+        });
+
         mockContext = {
             request: {
                 parameters: {
                     phone: '+15551234567',
                     entityId: '100',
-                    entityName: 'Acme Corp'
+                    entityName: 'Acme Corp',
+                    entityType: 'customer'
                 }
             },
             response: {
@@ -187,6 +196,80 @@ describe('ctc_sl_softphone', () => {
 
             const html = mockContext.response.write.mock.calls[0][0];
             expect(html).toContain('<title>Click-to-Call — Acme Corp</title>');
+        });
+
+        it('embeds entityType in JS variable', () => {
+            suitelet.onRequest(mockContext);
+
+            const html = mockContext.response.write.mock.calls[0][0];
+            expect(html).toContain("ENTITY_TYPE = 'customer'");
+        });
+
+        it('queries contacts when entityType is customer', () => {
+            suitelet.onRequest(mockContext);
+
+            expect(search.create).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    type: 'contact',
+                    filters: [
+                        ['company', 'anyof', '100'],
+                        'AND',
+                        ['isinactive', 'is', 'F']
+                    ]
+                })
+            );
+        });
+
+        it('does not query contacts for non-customer entityType', () => {
+            mockContext.request.parameters.entityType = 'lead';
+            suitelet.onRequest(mockContext);
+
+            expect(search.create).not.toHaveBeenCalled();
+        });
+
+        it('embeds contacts JSON in HTML when contacts exist', () => {
+            search.create.mockReturnValue({
+                run: jest.fn().mockReturnValue({
+                    getRange: jest.fn().mockReturnValue([
+                        {
+                            id: '200',
+                            getValue: jest.fn((col) => {
+                                const vals = { firstname: 'Maria', lastname: 'Rogers', phone: '650-458-1122', mobilephone: '' };
+                                return vals[col] || '';
+                            })
+                        }
+                    ])
+                })
+            });
+
+            suitelet.onRequest(mockContext);
+
+            const html = mockContext.response.write.mock.calls[0][0];
+            expect(html).toContain('Maria Rogers');
+            expect(html).toContain('650-458-1122');
+        });
+
+        it('includes contact dropdown HTML', () => {
+            suitelet.onRequest(mockContext);
+
+            const html = mockContext.response.write.mock.calls[0][0];
+            expect(html).toContain('contactSelect');
+            expect(html).toContain('contactRow');
+        });
+
+        it('includes call logging function', () => {
+            suitelet.onRequest(mockContext);
+
+            const html = mockContext.response.write.mock.calls[0][0];
+            expect(html).toContain('logCallToNetSuite');
+            expect(html).toContain("action: 'logCall'");
+        });
+
+        it('includes logStatus element', () => {
+            suitelet.onRequest(mockContext);
+
+            const html = mockContext.response.write.mock.calls[0][0];
+            expect(html).toContain('logStatus');
         });
     });
 });

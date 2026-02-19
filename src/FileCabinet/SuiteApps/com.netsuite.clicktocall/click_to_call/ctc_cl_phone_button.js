@@ -33,7 +33,7 @@ define(['N/url', 'N/currentRecord'], (url, currentRecord) => {
             const phoneValue = rec.getValue({ fieldId });
             if (!phoneValue) return;
 
-            injectCallButton(fieldId, String(phoneValue), recId, entityName);
+            injectCallButton(fieldId, String(phoneValue), recId, entityName, recType);
         });
     };
 
@@ -68,7 +68,7 @@ define(['N/url', 'N/currentRecord'], (url, currentRecord) => {
      * @param {string} entityId
      * @param {string} entityName
      */
-    const injectCallButton = (fieldId, phoneNumber, entityId, entityName) => {
+    const injectCallButton = (fieldId, phoneNumber, entityId, entityName, entityType) => {
         // Try known NetSuite label selectors (edit mode, then view mode)
         const selectors = [
             fieldId + '_fs_lbl_uir_label',
@@ -99,7 +99,7 @@ define(['N/url', 'N/currentRecord'], (url, currentRecord) => {
         btn.style.cssText = 'cursor:pointer;margin-left:6px;font-size:14px;vertical-align:middle;';
 
         btn.addEventListener('click', () => {
-            openSoftphone(phoneNumber, entityId, entityName);
+            openSoftphone(phoneNumber, entityId, entityName, entityType);
         });
 
         target.appendChild(btn);
@@ -111,21 +111,22 @@ define(['N/url', 'N/currentRecord'], (url, currentRecord) => {
      * @param {string} entityId
      * @param {string} entityName
      */
-    const openSoftphone = (phoneNumber, entityId, entityName) => {
+    const openSoftphone = (phoneNumber, entityId, entityName, entityType) => {
         const softphoneUrl = url.resolveScript({
             scriptId: 'customscript_ctc_sl_softphone',
             deploymentId: 'customdeploy_ctc_sl_softphone',
             params: {
                 phone: phoneNumber,
                 entityId: entityId,
-                entityName: entityName
+                entityName: entityName,
+                entityType: entityType
             }
         });
 
         window.open(
             softphoneUrl,
             'ctc_softphone',
-            'width=380,height=500,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no'
+            'width=380,height=560,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no'
         );
     };
 

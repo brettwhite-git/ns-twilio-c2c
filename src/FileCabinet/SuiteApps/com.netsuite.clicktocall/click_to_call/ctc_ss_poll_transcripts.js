@@ -177,8 +177,22 @@ TRANSCRIPT:
         }
     };
 
-    const createPhoneCallRecord = (recording, config, transcriptText, analysis) => {
-        const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
+    const findExistingRecord = (callSid) => {
+        if (!callSid) return null;
+        const results = search.create({
+            type: search.Type.PHONE_CALL,
+            filters: [['custevent_ctc_call_sid', 'is', callSid]],
+            columns: ['internalid']
+        }).run().getRange({ start: 0, end: 1 });
+
+        return results.length > 0 ? results[0].id : null;
+    };
+
+    const savePhoneCallRecord = (recording, config, transcriptText, analysis) => {
+        const existingId = findExistingRecord(recording.call_sid);
+        const phoneCall = existingId
+            ? record.load({ type: record.Type.PHONE_CALL, id: existingId, isDynamic: true })
+            : record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
 
         const title = (analysis.summary || '').substring(0, 80) || `Call — ${recording.sid}`;
         phoneCall.setValue({ fieldId: 'title', value: title });
@@ -254,7 +268,7 @@ TRANSCRIPT:
                         analysis = analyzeTranscript(transcriptText);
                     }
 
-                    createPhoneCallRecord(recording, config, transcriptText, analysis);
+                    savePhoneCallRecord(recording, config, transcriptText, analysis);
                     deleteRecording(config, recording.sid, authHeader);
                     processed++;
                 } catch (e) {

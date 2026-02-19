@@ -79,7 +79,7 @@ describe('ctc_ue_phone_button', () => {
             expect(mockForm.addButton).not.toHaveBeenCalled();
         });
 
-        it('resolves Suitelet URL with correct params', () => {
+        it('resolves Suitelet URL with correct params including entityType', () => {
             setFieldValues({ phone: '+15551234567', companyname: 'Acme Corp' });
 
             ueScript.beforeLoad(mockContext);
@@ -90,7 +90,8 @@ describe('ctc_ue_phone_button', () => {
                 params: {
                     phone: '+15551234567',
                     entityId: '100',
-                    entityName: 'Acme Corp'
+                    entityName: 'Acme Corp',
+                    entityType: 'customer'
                 }
             });
         });

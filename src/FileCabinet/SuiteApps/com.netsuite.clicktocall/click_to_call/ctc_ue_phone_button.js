@@ -37,7 +37,8 @@ define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
                 params: {
                     phone: phone,
                     entityId: recId,
-                    entityName: entityName
+                    entityName: entityName,
+                    entityType: recType
                 }
             });
         } catch (e) {
@@ -49,11 +50,11 @@ define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
         context.form.addButton({
             id: 'custpage_ctc_call',
             label: '\u{1F4DE} Call',
-            functionName: "window.open('" + escapedUrl + "','ctc_softphone','width=380,height=500,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no')"
+            functionName: "window.open('" + escapedUrl + "','ctc_softphone','width=380,height=560,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no')"
         });
 
         // Inject inline script to add clickable phone icons next to phone field values
-        const popupOpts = 'width=380,height=500,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no';
+        const popupOpts = 'width=380,height=560,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no';
         const inlineField = context.form.addField({
             id: 'custpage_ctc_inline',
             type: 'INLINEHTML',

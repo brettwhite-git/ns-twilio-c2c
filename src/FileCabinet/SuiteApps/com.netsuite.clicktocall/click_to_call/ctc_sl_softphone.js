@@ -7,7 +7,7 @@
  * Receives phone, entityId, entityName as URL parameters.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
+define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search'], (url, runtime, log, file, search) => {
 
     /**
      * GET handler — renders the softphone HTML page.
@@ -20,6 +20,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
         const phone = params.phone || '';
         const entityId = params.entityId || '';
         const entityName = params.entityName || '';
+        const entityType = params.entityType || '';
 
         let tokenEndpoint = '';
         let sdkUrl = '';
@@ -40,8 +41,42 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
             log.error({ title: 'CTC Softphone — Failed to load Twilio SDK file', details: e.message || e });
         }
 
-        const html = buildHtml({ phone, entityId, entityName, tokenEndpoint, sdkUrl });
+        let contacts = [];
+        if (entityType === 'customer' && entityId) {
+            contacts = queryContacts(entityId);
+        }
+
+        const html = buildHtml({ phone, entityId, entityName, entityType, tokenEndpoint, sdkUrl, contacts });
         context.response.write(html);
+    };
+
+    /**
+     * Query contacts related to a customer entity.
+     * @param {string} entityId - Customer internal ID
+     * @returns {Array<Object>} Array of {id, name, phone, mobile}
+     */
+    const queryContacts = (entityId) => {
+        try {
+            const results = search.create({
+                type: 'contact',
+                filters: [
+                    ['company', 'anyof', entityId],
+                    'AND',
+                    ['isinactive', 'is', 'F']
+                ],
+                columns: ['firstname', 'lastname', 'phone', 'mobilephone']
+            }).run().getRange({ start: 0, end: 50 });
+
+            return results.map((r) => ({
+                id: r.id,
+                name: ((r.getValue('firstname') || '') + ' ' + (r.getValue('lastname') || '')).trim(),
+                phone: r.getValue('phone') || '',
+                mobile: r.getValue('mobilephone') || ''
+            })).filter((c) => c.phone || c.mobile);
+        } catch (e) {
+            log.error({ title: 'CTC Softphone — Failed to query contacts', details: e.message || e });
+            return [];
+        }
     };
 
     /**
@@ -61,7 +96,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
         // JS context values — safe for embedding in JS string literals inside <script>
         const jsPhone = escapeJs(opts.phone);
         const jsEntityId = escapeJs(opts.entityId);
+        const jsEntityType = escapeJs(opts.entityType || '');
         const jsTokenEndpoint = escapeJs(opts.tokenEndpoint);
+        const contactsJson = JSON.stringify(opts.contacts || []);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -76,7 +113,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
             background: #1a1a2e;
             color: #e0e0e0;
             width: 380px;
-            height: 500px;
+            height: 560px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -136,6 +173,67 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
         .btn-mute { background: #e67e22; }
         .btn-mute.active { background: #d35400; }
         .btn-hangup { background: #e74c3c; }
+        .device-selectors {
+            width: 100%;
+            max-width: 340px;
+            margin-bottom: 16px;
+        }
+        .device-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .device-row label {
+            font-size: 11px;
+            color: #8888aa;
+            min-width: 32px;
+            text-align: right;
+        }
+        .device-row select {
+            flex: 1;
+            background: #2a2a40;
+            color: #e0e0e0;
+            border: 1px solid #3a3a55;
+            border-radius: 6px;
+            padding: 5px 8px;
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
+            cursor: pointer;
+            appearance: auto;
+        }
+        .device-row select:focus {
+            border-color: #5a5a80;
+        }
+        .contact-select-row {
+            width: 100%;
+            max-width: 340px;
+            margin-bottom: 12px;
+            display: none;
+        }
+        .contact-select-row select {
+            width: 100%;
+            background: #2a2a40;
+            color: #e0e0e0;
+            border: 1px solid #3a3a55;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            cursor: pointer;
+            appearance: auto;
+        }
+        .contact-select-row select:focus { border-color: #5a5a80; }
+        .log-status {
+            font-size: 12px;
+            color: #2ecc71;
+            margin-top: 8px;
+            text-align: center;
+            min-height: 16px;
+        }
+        .log-status.error { color: #ff6b6b; }
         .error-box {
             font-size: 12px;
             color: #ff6b6b;
@@ -155,14 +253,28 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
         <div class="entity-name" id="entityName">${safeEntityName}</div>
         <div class="phone-number" id="phoneNumber">${safePhone}</div>
     </div>
+    <div class="contact-select-row" id="contactRow">
+        <select id="contactSelect"></select>
+    </div>
     <div class="status" id="status">Initializing&hellip;</div>
     <div class="timer" id="timer">00:00</div>
+    <div class="device-selectors" id="deviceSelectors" style="display:none">
+        <div class="device-row">
+            <label for="inputDevice">Mic</label>
+            <select id="inputDevice"><option value="">Loading…</option></select>
+        </div>
+        <div class="device-row" id="outputRow">
+            <label for="outputDevice">Out</label>
+            <select id="outputDevice"><option value="">Loading…</option></select>
+        </div>
+    </div>
     <div class="controls">
         <button class="btn btn-call" id="btnCall" disabled>Call</button>
         <button class="btn btn-mute" id="btnMute" disabled>Mute</button>
         <button class="btn btn-hangup" id="btnHangup" disabled>End</button>
     </div>
     <div class="error-box" id="errorBox"></div>
+    <div class="log-status" id="logStatus"></div>
 
     <script src="${escapeHtml(opts.sdkUrl)}"></script>
     <script>
@@ -172,6 +284,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
         var TOKEN_URL = '${jsTokenEndpoint}';
         var PHONE = '${jsPhone}';
         var ENTITY_ID = '${jsEntityId}';
+        var ENTITY_TYPE = '${jsEntityType}';
+        var CONTACTS = ${contactsJson};
+        var SELECTED_CONTACT_ID = '';
 
         var statusEl = document.getElementById('status');
         var timerEl = document.getElementById('timer');
@@ -179,6 +294,14 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
         var btnMute = document.getElementById('btnMute');
         var btnHangup = document.getElementById('btnHangup');
         var errorBox = document.getElementById('errorBox');
+        var logStatusEl = document.getElementById('logStatus');
+        var contactRow = document.getElementById('contactRow');
+        var contactSelect = document.getElementById('contactSelect');
+        var phoneNumberEl = document.getElementById('phoneNumber');
+        var deviceSelectors = document.getElementById('deviceSelectors');
+        var inputSelect = document.getElementById('inputDevice');
+        var outputSelect = document.getElementById('outputDevice');
+        var outputRow = document.getElementById('outputRow');
 
         var device = null;
         var activeCall = null;
@@ -245,6 +368,109 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
 
         var callerId = '';
 
+        // --- Contact dropdown ---
+        function initContactDropdown() {
+            if (!CONTACTS.length) return;
+            var mainOpt = document.createElement('option');
+            mainOpt.value = '';
+            mainOpt.textContent = 'Company main: ' + PHONE;
+            contactSelect.appendChild(mainOpt);
+            CONTACTS.forEach(function (c) {
+                if (c.phone) {
+                    var opt = document.createElement('option');
+                    opt.value = c.id + '|' + c.phone;
+                    opt.textContent = c.name + ' \\u2014 ' + c.phone;
+                    contactSelect.appendChild(opt);
+                }
+                if (c.mobile) {
+                    var mopt = document.createElement('option');
+                    mopt.value = c.id + '|' + c.mobile;
+                    mopt.textContent = c.name + ' (mobile) \\u2014 ' + c.mobile;
+                    contactSelect.appendChild(mopt);
+                }
+            });
+            contactRow.style.display = '';
+            contactSelect.addEventListener('change', function () {
+                var val = this.value;
+                if (!val) {
+                    PHONE = '${jsPhone}';
+                    SELECTED_CONTACT_ID = '';
+                } else {
+                    var parts = val.split('|');
+                    SELECTED_CONTACT_ID = parts[0];
+                    PHONE = parts[1];
+                }
+                phoneNumberEl.textContent = PHONE;
+            });
+        }
+        initContactDropdown();
+
+        // --- Call logging ---
+        function logCallToNetSuite(callSid, duration) {
+            logStatusEl.textContent = 'Logging call\\u2026';
+            logStatusEl.className = 'log-status';
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'logCall',
+                    callSid: callSid,
+                    entityId: ENTITY_ID,
+                    entityType: ENTITY_TYPE,
+                    contactId: SELECTED_CONTACT_ID,
+                    phone: PHONE,
+                    duration: duration
+                })
+            })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (data.error) {
+                    logStatusEl.textContent = 'Failed to log call';
+                    logStatusEl.className = 'log-status error';
+                } else {
+                    logStatusEl.textContent = 'Call logged \\u2714';
+                    logStatusEl.className = 'log-status';
+                }
+            })
+            .catch(function () {
+                logStatusEl.textContent = 'Failed to log call';
+                logStatusEl.className = 'log-status error';
+            });
+        }
+
+        // --- Audio device helpers ---
+        function clearSelect(sel) {
+            while (sel.firstChild) sel.removeChild(sel.firstChild);
+        }
+
+        function populateDevices() {
+            if (!device || !device.audio) return;
+
+            // Input devices
+            clearSelect(inputSelect);
+            device.audio.availableInputDevices.forEach(function (info, id) {
+                var opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = info.label || 'Microphone ' + (inputSelect.options.length + 1);
+                inputSelect.appendChild(opt);
+            });
+
+            // Output devices (only if browser supports setSinkId)
+            var supportsOutput = device.audio.availableOutputDevices.size > 0;
+            outputRow.style.display = supportsOutput ? '' : 'none';
+            if (supportsOutput) {
+                clearSelect(outputSelect);
+                device.audio.availableOutputDevices.forEach(function (info, id) {
+                    var opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = info.label || 'Speaker ' + (outputSelect.options.length + 1);
+                    outputSelect.appendChild(opt);
+                });
+            }
+
+            deviceSelectors.style.display = '';
+        }
+
         // --- Twilio Device setup ---
         function initDevice(token) {
             device = new Twilio.Device(token, {
@@ -256,6 +482,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
                 console.log('[CTC] Device registered');
                 setStatus('Ready to call');
                 setButtons(true, false, false);
+                populateDevices();
             });
 
             device.on('error', function (err) {
@@ -265,8 +492,27 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
                 setButtons(true, false, false);
             });
 
+            device.audio.on('deviceChange', function () {
+                populateDevices();
+            });
+
             device.register();
         }
+
+        // --- Audio device change handlers ---
+        inputSelect.addEventListener('change', function () {
+            if (!device) return;
+            device.audio.setInputDevice(this.value)
+                .then(function () { console.log('[CTC] Input device set'); })
+                .catch(function (err) { showError('Mic error: ' + err.message); });
+        });
+
+        outputSelect.addEventListener('change', function () {
+            if (!device) return;
+            device.audio.speakerDevices.set(this.value)
+                .then(function () { console.log('[CTC] Output device set'); })
+                .catch(function (err) { showError('Speaker error: ' + err.message); });
+        });
 
         // --- Call management ---
         function makeCall() {
@@ -293,12 +539,18 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
 
                 call.on('disconnect', function () {
                     console.log('[CTC] Call disconnected');
+                    var callSid = call.parameters ? call.parameters.CallSid : '';
+                    var duration = callStartTime ? Math.floor((Date.now() - callStartTime) / 1000) : 0;
                     activeCall = null;
                     resetTimer();
                     setStatus('Call ended \\u2014 ready to redial');
                     setButtons(true, false, false);
                     btnMute.classList.remove('active');
                     btnMute.textContent = 'Mute';
+                    if (device && device.audio) device.audio.unsetInputDevice();
+                    if (callSid && duration > 0) {
+                        logCallToNetSuite(callSid, duration);
+                    }
                 });
 
                 call.on('error', function (err) {

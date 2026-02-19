@@ -264,7 +264,8 @@ describe('ctc_cl_phone_button', () => {
                 params: {
                     phone: '+15551234567',
                     entityId: '100',
-                    entityName: 'Acme Corp'
+                    entityName: 'Acme Corp',
+                    entityType: 'customer'
                 }
             });
         });
@@ -277,7 +278,7 @@ describe('ctc_cl_phone_button', () => {
             expect(window.open).toHaveBeenCalledWith(
                 'https://example.com/suitelet',
                 'ctc_softphone',
-                'width=380,height=500,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no'
+                'width=380,height=560,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no'
             );
         });
 
