@@ -66,7 +66,7 @@ define(['N/search', 'N/runtime', 'N/log', './lib/ctc_twilio_jwt'], (search, runt
                 identity:    identity
             });
 
-            return { token: token };
+            return { token: token, phoneNumber: config.phoneNumber };
         } catch (e) {
             log.error({ title: 'CTC Token Generation Failed', details: e.message || e });
             return { error: 'Token generation failed' };

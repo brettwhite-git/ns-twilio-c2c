@@ -239,9 +239,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
             })
             .then(function (data) {
                 if (data.error) throw new Error(data.error);
-                return data.token;
+                return { token: data.token, phoneNumber: data.phoneNumber };
             });
         }
+
+        var callerId = '';
 
         // --- Twilio Device setup ---
         function initDevice(token) {
@@ -273,7 +275,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
             setStatus('Connecting\\u2026');
             setButtons(false, false, false);
 
-            device.connect({ params: { To: PHONE } }).then(function (call) {
+            device.connect({ params: { To: PHONE, CallerId: callerId } }).then(function (call) {
                 activeCall = call;
 
                 call.on('ringing', function () {
@@ -355,7 +357,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file'], (url, runtime, log, file) => {
         }
 
         fetchToken()
-            .then(initDevice)
+            .then(function (result) {
+                callerId = result.phoneNumber || '';
+                initDevice(result.token);
+            })
             .catch(function (err) {
                 setStatus('Failed to initialize', true);
                 showError('Token fetch failed: ' + (err.message || err));

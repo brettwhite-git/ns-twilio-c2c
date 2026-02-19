@@ -175,6 +175,13 @@ describe('ctc_sl_softphone', () => {
             expect(html).toContain('btnHangup');
         });
 
+        it('passes CallerId parameter in device.connect call', () => {
+            suitelet.onRequest(mockContext);
+
+            const html = mockContext.response.write.mock.calls[0][0];
+            expect(html).toContain('CallerId: callerId');
+        });
+
         it('includes page title with entity name', () => {
             suitelet.onRequest(mockContext);
 

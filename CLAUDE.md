@@ -174,17 +174,14 @@ src/
 ### Deploy Command (copy-paste ready)
 ```bash
 # From the repo root (not src/) — suitecloud auto-detects src/
-SUITECLOUD_CI=1 \
-SUITECLOUD_CI_PASSKEY=$(security find-generic-password -s "suitecloud-ci-passkey" -w) \
-suitecloud project:deploy
+# Credentials sourced from .env (SUITECLOUD_CI and SUITECLOUD_CI_PASSKEY)
+source .env && suitecloud project:deploy
 ```
 
 ### First-Time Setup Per Context (auth ID must be linked to project)
 If deploy fails with "No account has been set up for this project", run:
 ```bash
-SUITECLOUD_CI=1 \
-SUITECLOUD_CI_PASSKEY=$(security find-generic-password -s "suitecloud-ci-passkey" -w) \
-suitecloud account:setup:ci \
+source .env && suitecloud account:setup:ci \
   --account td3061543 \
   --authid ctc-m2m-deploy \
   --certificateid ibNoJEIe0oFFvNSjmLYndlWzmUXA8kLoOqWAbYB0vu0 \

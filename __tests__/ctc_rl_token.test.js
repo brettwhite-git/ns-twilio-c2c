@@ -131,6 +131,11 @@ describe('ctc_rl_token', () => {
             expect(result.error).toBe('Token generation failed');
         });
 
+        it('includes phoneNumber from config in response', () => {
+            const result = restlet.post({});
+            expect(result).toHaveProperty('phoneNumber', '+15551234567');
+        });
+
         it('coerces numeric employeeId to string', () => {
             restlet.post({ employeeId: 123 });
 
