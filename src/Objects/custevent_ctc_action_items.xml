@@ -1,0 +1,8 @@
+<crmcustomfield scriptid="custevent_ctc_action_items">
+    <label>Action Items</label>
+    <fieldtype>TEXTAREA</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>1</searchlevel>
+</crmcustomfield>

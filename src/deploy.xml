@@ -1,0 +1,5 @@
+<deploy>
+    <files>
+        <path>~/FileCabinet/SuiteApps/com.netsuite.clicktocall/*</path>
+    </files>
+</deploy>

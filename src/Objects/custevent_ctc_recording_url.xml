@@ -1,0 +1,8 @@
+<crmcustomfield scriptid="custevent_ctc_recording_url">
+    <label>Recording URL</label>
+    <fieldtype>URL</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>2</searchlevel>
+</crmcustomfield>

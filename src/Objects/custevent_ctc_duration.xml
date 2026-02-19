@@ -1,0 +1,8 @@
+<crmcustomfield scriptid="custevent_ctc_duration">
+    <label>Duration (seconds)</label>
+    <fieldtype>INTEGER</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>2</searchlevel>
+</crmcustomfield>

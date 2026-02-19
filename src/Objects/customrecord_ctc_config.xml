@@ -1,0 +1,67 @@
+<customrecordtype scriptid="customrecord_ctc_config">
+    <recordname>CTC Configuration</recordname>
+    <includename>CTC Configuration</includename>
+    <accesstype>USEPERMISSIONLIST</accesstype>
+    <allowattachments>F</allowattachments>
+    <allowinlinedeleting>F</allowinlinedeleting>
+    <allowinlineinsert>F</allowinlineinsert>
+    <allowquickadd>F</allowquickadd>
+    <allowquicksearch>F</allowquicksearch>
+    <enablemailmerge>F</enablemailmerge>
+    <enablenumbering>F</enablenumbering>
+    <enablesystemnotes>T</enablesystemnotes>
+    <isinactive>F</isinactive>
+    <numberingprefix></numberingprefix>
+    <permissions>
+        <permission>
+            <permittedrole>ADMINISTRATOR</permittedrole>
+            <permittedlevel>FULL</permittedlevel>
+            <restriction>EDIT</restriction>
+        </permission>
+    </permissions>
+    <customrecordcustomfields>
+        <customrecordcustomfield scriptid="custrecord_ctc_account_sid">
+            <label>Account SID</label>
+            <fieldtype>FREEFORMTEXT</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_auth_token">
+            <label>Auth Token</label>
+            <fieldtype>FREEFORMTEXT</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_api_key_sid">
+            <label>API Key SID</label>
+            <fieldtype>FREEFORMTEXT</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_api_secret_id">
+            <label>API Key Secret ID</label>
+            <description>Script ID from Setup &gt; Company &gt; API Secrets (e.g., custsecret_ctc_api_key_secret)</description>
+            <fieldtype>FREEFORMTEXT</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_twiml_app_sid">
+            <label>TwiML App SID</label>
+            <fieldtype>FREEFORMTEXT</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_phone_number">
+            <label>Caller ID Number</label>
+            <fieldtype>PHONE</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_intel_service_sid">
+            <label>Intelligence Service SID</label>
+            <fieldtype>FREEFORMTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+    </customrecordcustomfields>
+</customrecordtype>

@@ -1,0 +1,20 @@
+<restlet scriptid="customscript_ctc_rl_token">
+    <name>CTC Token Generator</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_rl_token.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <status>RELEASED</status>
+    <isinactive>F</isinactive>
+    <loglevel>DEBUG</loglevel>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_rl_token">
+            <title>CTC Token Generator</title>
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <loglevel>DEBUG</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</restlet>

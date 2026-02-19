@@ -1,0 +1,9 @@
+<crmcustomfield scriptid="custevent_ctc_processed">
+    <label>AI Processed</label>
+    <fieldtype>CHECKBOX</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <defaultchecked>F</defaultchecked>
+    <searchlevel>2</searchlevel>
+</crmcustomfield>

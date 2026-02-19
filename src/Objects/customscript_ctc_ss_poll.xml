@@ -1,0 +1,27 @@
+<scheduledscript scriptid="customscript_ctc_ss_poll">
+    <name>CTC Poll Transcripts</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_ss_poll_transcripts.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <status>RELEASED</status>
+    <isinactive>F</isinactive>
+    <loglevel>DEBUG</loglevel>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_ss_poll">
+            <title>CTC Poll Transcripts</title>
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <loglevel>DEBUG</loglevel>
+            <recurrence>
+                <everyweekday>
+                    <startdate>2024-01-01</startdate>
+                    <starttime>00:00:00Z</starttime>
+                    <repeat>PT15M</repeat>
+                    <enddate>2099-12-31</enddate>
+                </everyweekday>
+            </recurrence>
+        </scriptdeployment>
+    </scriptdeployments>
+</scheduledscript>

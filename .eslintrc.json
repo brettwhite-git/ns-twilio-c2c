@@ -1,0 +1,12 @@
+{
+  "extends": ["plugin:suitescript/recommended"],
+  "plugins": ["suitescript"],
+  "parserOptions": {
+    "ecmaVersion": 2020,
+    "sourceType": "module"
+  },
+  "env": {
+    "amd": true,
+    "es6": true
+  }
+}

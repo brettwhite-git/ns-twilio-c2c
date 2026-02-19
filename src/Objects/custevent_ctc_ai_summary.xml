@@ -1,0 +1,8 @@
+<crmcustomfield scriptid="custevent_ctc_ai_summary">
+    <label>AI Summary</label>
+    <fieldtype>TEXTAREA</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>2</searchlevel>
+</crmcustomfield>
