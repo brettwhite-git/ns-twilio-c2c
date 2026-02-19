@@ -59,13 +59,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search'], (url, runtime, log
         try {
             const results = search.create({
                 type: 'contact',
-                filters: [
-                    ['company', 'anyof', entityId],
-                    'AND',
-                    ['isinactive', 'is', 'F']
-                ],
+                filters: [['company', 'anyof', entityId]],
                 columns: ['firstname', 'lastname', 'phone', 'mobilephone']
             }).run().getRange({ start: 0, end: 50 });
+
+            log.debug({ title: 'CTC queryContacts', details: `entityId=${entityId}, found=${results.length}` });
 
             return results.map((r) => ({
                 id: r.id,
@@ -288,6 +286,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search'], (url, runtime, log
         var CONTACTS = ${contactsJson};
         var SELECTED_CONTACT_ID = '';
 
+
         var statusEl = document.getElementById('status');
         var timerEl = document.getElementById('timer');
         var btnCall = document.getElementById('btnCall');
@@ -389,7 +388,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search'], (url, runtime, log
                     contactSelect.appendChild(mopt);
                 }
             });
-            contactRow.style.display = '';
+            contactRow.style.display = 'block';
             contactSelect.addEventListener('change', function () {
                 var val = this.value;
                 if (!val) {

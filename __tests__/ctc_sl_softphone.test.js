@@ -211,11 +211,7 @@ describe('ctc_sl_softphone', () => {
             expect(search.create).toHaveBeenCalledWith(
                 expect.objectContaining({
                     type: 'contact',
-                    filters: [
-                        ['company', 'anyof', '100'],
-                        'AND',
-                        ['isinactive', 'is', 'F']
-                    ]
+                    filters: [['company', 'anyof', '100']]
                 })
             );
         });

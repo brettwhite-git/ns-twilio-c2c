@@ -43,3 +43,8 @@ Capture corrections and patterns here after each user correction or bug discover
 ## Post-Deploy Runtime Issues
 - `returnExternalUrl: true` on `url.resolveScript()` returns a cross-origin URL (`restlets.api.netsuite.com`) — causes CORS failure when fetched from Suitelet popup at `app.netsuite.com`. Use `returnExternalUrl: false` for same-origin requests.
 - NetSuite field label DOM IDs differ between view and edit mode — use multiple selector strategies (`_fs_lbl_uir_label`, `_val`, `querySelector('label[for=...]')`) to support both
+
+## CSS Override Patterns
+- `element.style.display = ''` does NOT override a CSS class `display: none` — it only removes the inline style, so the class rule still applies
+- Use `element.style.display = 'block'` (or appropriate value) to explicitly override class-level `display: none`
+- General rule: setting inline style to empty string reverts to stylesheet rules; setting to a value overrides them

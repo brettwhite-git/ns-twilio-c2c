@@ -137,6 +137,7 @@ src/
 - **Twilio Voice SDK version**: Use 2.x. SDK is bundled in File Cabinet (`lib/twilio.min.js`) — loaded via `N/file.load()` at runtime. CDN blocked by NetSuite CSP.
 - **Twilio codec preferences**: Use string literals `'opus'`, `'pcmu'` — NOT `Twilio.Device.Codec.Opus` (enum doesn't exist in SDK 2.7.3).
 - **RESTlet URL in Suitelet**: Use `returnExternalUrl: false` — internal URL stays same-origin with Suitelet popup. `returnExternalUrl: true` resolves to `restlets.api.netsuite.com` which causes CORS failure.
+- **CSS display override**: `element.style.display = ''` does NOT override a CSS class `display: none`. Use `element.style.display = 'block'` to explicitly override class-level hiding.
 
 ## SDF Gotchas
 

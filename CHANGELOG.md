@@ -153,3 +153,21 @@ Track corrections, debugging insights, and validated patterns across sessions.
 ### What Did NOT Work
 - Client Script DOM selectors for view mode — still can't find field labels
 - `Twilio.Device.Codec.Opus` enum reference — doesn't exist in bundled SDK 2.7.3
+
+---
+
+## 2026-02-19 — Contact Dropdown Not Visible (CSS Override Bug)
+
+### Error Found
+
+1. **Contact dropdown hidden despite correct data**
+   - Server-side contact search returned correct results (verified via console.log)
+   - `contactRow.style.display = ''` did NOT override CSS class `.contact-select-row { display: none; }`
+   - Setting inline style to empty string only removes the inline style — it doesn't override a class-level `display: none`
+   - Fix: `contactRow.style.display = 'block'` — explicitly overrides the CSS class rule
+   - File: `ctc_sl_softphone.js` line 392
+
+### What Worked
+- Diagnostic console.log confirmed server-side data was correct, narrowing the bug to pure CSS/JS display logic
+- Call logging confirmed working end-to-end: call placed, Phone Call record created with correct duration (18s)
+- Full call lifecycle verified: Device registered → Ringing → Call accepted → Call disconnected → Call logged ✅
