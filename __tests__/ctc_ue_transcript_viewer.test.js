@@ -10,6 +10,7 @@ describe('ctc_ue_transcript_viewer', () => {
     let mockForm;
     let mockField;
     let mockTab;
+    let mockHiddenFields;
 
     const FIELD_VALUES = {
         custevent_ctc_processed: true,
@@ -31,9 +32,15 @@ describe('ctc_ue_transcript_viewer', () => {
             updateBreakType: jest.fn()
         };
         mockTab = { label: 'Custom' };
+        mockHiddenFields = {};
         mockForm = {
             addField: jest.fn().mockReturnValue(mockField),
-            getTab: jest.fn().mockReturnValue(mockTab)
+            getTab: jest.fn().mockReturnValue(mockTab),
+            getField: jest.fn((opts) => {
+                const f = { updateDisplayType: jest.fn() };
+                mockHiddenFields[opts.id] = f;
+                return f;
+            })
         };
         mockRecord = {
             getValue: jest.fn((opts) => FIELD_VALUES[opts.fieldId])
@@ -47,6 +54,7 @@ describe('ctc_ue_transcript_viewer', () => {
 
         serverWidget.FieldLayoutType = { OUTSIDEABOVE: 'OUTSIDEABOVE' };
         serverWidget.FieldBreakType = { STARTROW: 'STARTROW' };
+        serverWidget.FieldDisplayType = { HIDDEN: 'HIDDEN' };
     });
 
     describe('beforeLoad guards', () => {
@@ -153,8 +161,10 @@ describe('ctc_ue_transcript_viewer', () => {
             expect(mockField.defaultValue).toContain('engaged');
         });
 
-        it('renders action items as list', () => {
+        it('renders action items in orange quote block', () => {
             viewer.beforeLoad(mockContext);
+            expect(mockField.defaultValue).toContain('ctc-action-block');
+            expect(mockField.defaultValue).toContain('ctc-action-line');
             expect(mockField.defaultValue).toContain('Send enterprise pricing sheet');
             expect(mockField.defaultValue).toContain('Schedule follow-up demo');
         });
@@ -173,15 +183,11 @@ describe('ctc_ue_transcript_viewer', () => {
             expect(mockField.defaultValue).toContain('RE456.mp3');
         });
 
-        it('uses 3-column metrics row', () => {
+        it('uses 4-column metrics row with recording link', () => {
             viewer.beforeLoad(mockContext);
             expect(mockField.defaultValue).toContain('ctc-metrics-row');
-            expect(mockField.defaultValue).toContain('grid-template-columns: 1fr 1fr 1fr');
-        });
-
-        it('renders bottom row with action items and recording', () => {
-            viewer.beforeLoad(mockContext);
-            expect(mockField.defaultValue).toContain('ctc-bottom-row');
+            expect(mockField.defaultValue).toContain('grid-template-columns: 1fr 1fr 1fr 1fr');
+            expect(mockField.defaultValue).toContain('Download recording');
         });
     });
 
@@ -191,6 +197,37 @@ describe('ctc_ue_transcript_viewer', () => {
             viewer.beforeLoad(mockContext);
             expect(mockForm.addField).toHaveBeenCalled();
             expect(mockField.defaultValue).toContain('ctc-viewer');
+        });
+
+        it('does not hide CRM fields in EDIT mode', () => {
+            mockContext.type = 'edit';
+            viewer.beforeLoad(mockContext);
+            Object.values(mockHiddenFields).forEach((f) => {
+                expect(f.updateDisplayType).not.toHaveBeenCalled();
+            });
+        });
+    });
+
+    describe('field hiding in VIEW mode', () => {
+        it('hides redundant CRM fields', () => {
+            viewer.beforeLoad(mockContext);
+            const expectedHidden = [
+                'custevent_ctc_ai_summary', 'custevent_ctc_satisfaction',
+                'custevent_ctc_tone_keywords', 'custevent_ctc_action_items',
+                'custevent_ctc_duration', 'custevent_ctc_recording_url',
+                'custevent_ctc_transcript'
+            ];
+            expectedHidden.forEach((fid) => {
+                expect(mockForm.getField).toHaveBeenCalledWith({ id: fid });
+                expect(mockHiddenFields[fid].updateDisplayType).toHaveBeenCalledWith({
+                    displayType: 'HIDDEN'
+                });
+            });
+        });
+
+        it('handles missing fields gracefully', () => {
+            mockForm.getField.mockReturnValue(null);
+            expect(() => viewer.beforeLoad(mockContext)).not.toThrow();
         });
     });
 
@@ -316,16 +353,18 @@ describe('ctc_ue_transcript_viewer', () => {
 
             viewer.beforeLoad(mockContext);
             expect(mockField.defaultValue).not.toContain('Download recording');
+            expect(mockField.defaultValue).toContain('No recording');
         });
 
-        it('handles no action items', () => {
+        it('omits action items section when empty', () => {
             mockRecord.getValue.mockImplementation((opts) => {
                 if (opts.fieldId === 'custevent_ctc_action_items') return '';
                 return FIELD_VALUES[opts.fieldId];
             });
 
             viewer.beforeLoad(mockContext);
-            expect(mockField.defaultValue).toContain('No action items');
+            expect(mockField.defaultValue).not.toContain('Send enterprise pricing sheet');
+            expect(mockField.defaultValue).not.toMatch(/<div class="ctc-action-block">/);
         });
 
         it('handles no tone keywords', () => {

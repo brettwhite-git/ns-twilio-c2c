@@ -66,7 +66,11 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
     const updatePhoneCallRecord = (recordId, recording, config, transcriptText, analysis) => {
         const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: recordId, isDynamic: true });
 
-        const title = (analysis.title || analysis.summary || '').substring(0, 80) || `Call — ${recording.sid}`;
+        let title = (analysis.title || '').substring(0, 80);
+        if (!title) {
+            const firstClause = (analysis.summary || '').split(/[.!?]/)[0] || '';
+            title = firstClause.substring(0, 60) || `Call — ${recording.sid}`;
+        }
         phoneCall.setValue({ fieldId: 'title', value: title });
         phoneCall.setValue({ fieldId: 'custevent_ctc_recording_sid', value: recording.sid });
         phoneCall.setValue({ fieldId: 'custevent_ctc_recording_url',
@@ -77,6 +81,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
         phoneCall.setValue({ fieldId: 'custevent_ctc_satisfaction', value: analysis.satisfaction_score || 5 });
         phoneCall.setValue({ fieldId: 'custevent_ctc_tone_keywords', value: (analysis.tone_keywords || []).join(', ') });
         phoneCall.setValue({ fieldId: 'custevent_ctc_action_items', value: (analysis.action_items || []).join('\n') });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_ai_brief', value: (analysis.brief || analysis.summary || '').substring(0, 120) });
         phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: true });
 
         return phoneCall.save();
@@ -117,6 +122,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
 
                     let analysis = {
                         summary: '',
+                        brief: '',
                         satisfaction_score: 5,
                         tone_keywords: [],
                         action_items: []

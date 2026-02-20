@@ -40,6 +40,19 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 
         field.updateLayoutType({ layoutType: serverWidget.FieldLayoutType.OUTSIDEABOVE });
         field.updateBreakType({ breakType: serverWidget.FieldBreakType.STARTROW });
+
+        if (type === context.UserEventType.VIEW) {
+            const fieldsToHide = [
+                'custevent_ctc_ai_summary', 'custevent_ctc_satisfaction',
+                'custevent_ctc_tone_keywords', 'custevent_ctc_action_items',
+                'custevent_ctc_duration', 'custevent_ctc_recording_url',
+                'custevent_ctc_transcript'
+            ];
+            fieldsToHide.forEach((fid) => {
+                const f = context.form.getField({ id: fid });
+                if (f) f.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
+            });
+        }
     };
 
     const escapeHtml = (str) => {
@@ -72,11 +85,11 @@ define(['N/ui/serverWidget'], (serverWidget) => {
             ).join(' ')
             : '<span class="ctc-muted">None</span>';
 
-        const actionItems = data.actionItems
+        const actionItemsHtml = data.actionItems
             ? splitLines(data.actionItems).map((item) =>
-                '<li>' + escapeHtml(item) + '</li>'
+                '<div class="ctc-action-line">' + escapeHtml(item) + '</div>'
             ).join('')
-            : '<li class="ctc-muted">No action items</li>';
+            : '<span class="ctc-muted">No action items</span>';
 
         const transcriptLines = data.transcript ? splitLines(data.transcript) : [];
 
@@ -98,13 +111,10 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 
         const recordingHtml = safeRecordingUrl
             ? '<a href="' + safeRecordingUrl + '" target="_blank" class="ctc-link">Download recording (MP3)</a>'
-            : '';
+            : '<span class="ctc-muted">No recording</span>';
 
-        const bottomRow = (data.actionItems || safeRecordingUrl)
-            ? '<div class="ctc-bottom-row">'
-                + '<div class="ctc-section"><div class="ctc-section-title">Action Items</div><ul class="ctc-actions">' + actionItems + '</ul></div>'
-                + (safeRecordingUrl ? '<div class="ctc-section"><div class="ctc-section-title">Recording</div>' + recordingHtml + '</div>' : '')
-                + '</div>'
+        const actionBlock = data.actionItems
+            ? '<hr class="ctc-divider"><div class="ctc-section"><div class="ctc-section-title">Action Items</div><div class="ctc-action-block">' + actionItemsHtml + '</div></div>'
             : '';
 
         return `<div id="ctc-viewer">
@@ -114,7 +124,9 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 #ctc-viewer .ctc-section { margin-bottom: 14px; }
 #ctc-viewer .ctc-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
 #ctc-viewer .ctc-summary { background: #f8f9fa; border-left: 3px solid #4a90d9; padding: 10px 14px; border-radius: 0 6px 6px 0; line-height: 1.5; }
-#ctc-viewer .ctc-metrics-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 14px; }
+#ctc-viewer .ctc-action-block { background: #fef9f0; border-left: 3px solid #f0ad4e; padding: 10px 14px; border-radius: 0 6px 6px 0; line-height: 1.5; }
+#ctc-viewer .ctc-action-block .ctc-action-line { padding: 2px 0; }
+#ctc-viewer .ctc-metrics-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 14px; }
 #ctc-viewer .ctc-metric { display: flex; align-items: center; gap: 6px; }
 #ctc-viewer .ctc-score { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; color: #fff; font-weight: 700; font-size: 14px; }
 #ctc-viewer .ctc-score-label { font-size: 12px; color: #666; }
@@ -123,28 +135,27 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 #ctc-viewer .ctc-line { padding: 3px 0; line-height: 1.4; font-size: 12px; }
 #ctc-viewer .ctc-rep { color: #2c5ea0; }
 #ctc-viewer .ctc-cust { color: #6b4c8a; }
-#ctc-viewer .ctc-bottom-row { display: flex; gap: 32px; align-items: flex-start; }
-#ctc-viewer .ctc-bottom-row > .ctc-section:first-child { flex: 1; }
-#ctc-viewer .ctc-actions { list-style: none; padding: 0; margin: 0; }
-#ctc-viewer .ctc-actions li { padding: 4px 0 4px 18px; position: relative; line-height: 1.4; }
-#ctc-viewer .ctc-actions li::before { content: "\\2022"; position: absolute; left: 4px; color: #4a90d9; font-weight: 700; }
-#ctc-viewer .ctc-actions li.ctc-muted::before { display: none; }
 #ctc-viewer .ctc-link { color: #4a90d9; text-decoration: none; font-size: 12px; }
 #ctc-viewer .ctc-link:hover { text-decoration: underline; }
 #ctc-viewer .ctc-muted { color: #aaa; font-style: italic; }
+#ctc-viewer hr.ctc-divider { border: none; border-top: 1px solid #e8e8e8; margin: 14px 0; }
+#ctc-viewer .ctc-metrics-row > div:not(:last-child) { border-right: 1px solid #e8e8e8; padding-right: 16px; }
 </style>
 <div class="ctc-header">Call Intelligence</div>
 <div class="ctc-section">
 <div class="ctc-section-title">AI Summary</div>
 <div class="ctc-summary">${safeSummary || '<span class="ctc-muted">No summary available</span>'}</div>
 </div>
+<hr class="ctc-divider">
 <div class="ctc-metrics-row">
 <div class="ctc-metric"><span class="ctc-score" style="background:${scoreColor}">${score || '—'}</span><span class="ctc-score-label">${score ? scoreLabel + ' satisfaction' : 'Not scored'}</span></div>
 <div class="ctc-metric"><strong>${durationStr}</strong>&nbsp;<span class="ctc-score-label">duration</span></div>
 <div>${keywords}</div>
+<div class="ctc-metric">${recordingHtml}</div>
 </div>
+<hr class="ctc-divider">
 ${transcriptSection}
-${bottomRow}
+${actionBlock}
 <script>(function(){var el=document.getElementById('ctc-viewer');if(!el)return;var tr=el.closest('tr');if(!tr)return;var tbody=tr.parentElement;if(tbody)tbody.insertBefore(tr,tbody.firstChild);})()</script>
 </div>`;
     };

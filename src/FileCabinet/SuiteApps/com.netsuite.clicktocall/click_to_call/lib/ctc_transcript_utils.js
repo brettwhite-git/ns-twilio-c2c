@@ -14,7 +14,8 @@ define(['N/https', 'N/llm', 'N/log'], (https, llm, log) => {
     const ANALYSIS_PROMPT_PREFIX = `You are a sales call analyst. Analyze this call transcript and return ONLY valid JSON — no markdown, no explanation, no code fences.
 
 {
-  "title": "Short headline for this call, max 60 chars (e.g. 'Product demo — strong buying signals')",
+  "title": "Brief headline (NOT a full sentence), max 60 chars (e.g. 'Product demo — strong buying signals', 'Pricing objection — needs manager approval')",
+  "brief": "One-sentence summary, max 120 chars, suitable for a list view column",
   "summary": "2-3 sentence summary of call purpose, key points, and outcome",
   "satisfaction_score": <integer 1-10>,
   "tone_keywords": ["keyword1", "keyword2", "keyword3"],

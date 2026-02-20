@@ -43,6 +43,7 @@ describe('ctc_ss_poll_transcripts', () => {
 
     const MOCK_ANALYSIS = {
         title: 'Product feature inquiry — engaged prospect',
+        brief: 'Customer asked about features, rep provided overview and will follow up',
         summary: 'Customer inquired about product features. Rep provided overview.',
         satisfaction_score: 7,
         tone_keywords: ['interested', 'helpful', 'engaged'],
@@ -208,6 +209,7 @@ describe('ctc_ss_poll_transcripts', () => {
             expect(fields.custevent_ctc_satisfaction).toBe(7);
             expect(fields.custevent_ctc_tone_keywords).toBe('interested, helpful, engaged');
             expect(fields.custevent_ctc_action_items).toBe('Send product brochure\nSchedule follow-up call');
+            expect(fields.custevent_ctc_ai_brief).toBe(MOCK_ANALYSIS.brief);
             expect(fields.custevent_ctc_processed).toBe(true);
         });
 
@@ -215,6 +217,54 @@ describe('ctc_ss_poll_transcripts', () => {
             scheduledScript.execute();
 
             expect(mockPhoneCall.save).toHaveBeenCalled();
+        });
+
+        it('uses first clause of summary as title fallback when title is empty', () => {
+            utils.analyzeTranscript.mockReturnValue({
+                ...MOCK_ANALYSIS,
+                title: '',
+                summary: 'The customer discussed pricing options. They seemed interested.'
+            });
+
+            scheduledScript.execute();
+
+            const fields = {};
+            mockPhoneCall.setValue.mock.calls.forEach((call) => {
+                fields[call[0].fieldId] = call[0].value;
+            });
+            expect(fields.title).toBe('The customer discussed pricing options');
+        });
+
+        it('falls back to recording SID when both title and summary are empty', () => {
+            utils.analyzeTranscript.mockReturnValue({
+                ...MOCK_ANALYSIS,
+                title: '',
+                summary: ''
+            });
+
+            scheduledScript.execute();
+
+            const fields = {};
+            mockPhoneCall.setValue.mock.calls.forEach((call) => {
+                fields[call[0].fieldId] = call[0].value;
+            });
+            expect(fields.title).toContain('Call —');
+            expect(fields.title).toContain('RE_test_recording_001');
+        });
+
+        it('falls back to truncated summary for brief when brief is empty', () => {
+            utils.analyzeTranscript.mockReturnValue({
+                ...MOCK_ANALYSIS,
+                brief: ''
+            });
+
+            scheduledScript.execute();
+
+            const fields = {};
+            mockPhoneCall.setValue.mock.calls.forEach((call) => {
+                fields[call[0].fieldId] = call[0].value;
+            });
+            expect(fields.custevent_ctc_ai_brief).toBe(MOCK_ANALYSIS.summary);
         });
     });
 

@@ -205,3 +205,30 @@ Track corrections, debugging insights, and validated patterns across sessions.
 - `splitLines()` regex handles `\n`, `<br>`, `<br/>`, `<br />` — all NetSuite storage variants
 - 167 tests passing after all changes
 - Deploy only uploaded changed file (5 seconds)
+
+---
+
+## 2026-02-19 — Call Intelligence Panel UI Overhaul
+
+### Changes
+
+1. **Metrics row expanded to 4-column grid** — moved recording link from bottom row into 4th column alongside score, duration, and tone pills. Shows "No recording" muted text when URL is empty.
+
+2. **Action items restyled as orange quote block** — replaced blue bullet list with left-bordered orange block (`#f0ad4e` border, `#fef9f0` background), matching the AI Summary quote block pattern. Section omitted entirely when no action items.
+
+3. **Redundant CRM fields hidden in VIEW mode** — 7 fields (summary, satisfaction, tone, actions, duration, recording URL, transcript) hidden via `updateDisplayType(HIDDEN)` since the panel already renders them. Fields remain visible in EDIT mode for manual editing.
+
+4. **Subject/title generation improved** — LLM prompt clarified ("NOT a full sentence" + 2 examples). Fallback logic changed: instead of truncating full summary at 80 chars (producing cut-off sentences), now extracts first clause (split on `.!?`) limited to 60 chars.
+
+5. **New `custevent_ctc_ai_brief` CRM field** — CLOBTEXT field for short 1-sentence summaries (~120 chars) suitable for sublist views. Populated by scheduled script with fallback to truncated summary.
+
+6. **Visual separators added** — horizontal rules (`<hr>`) between panel sections (summary → metrics → transcript → action items) and vertical `border-right` dividers between metrics grid columns.
+
+### Errors Found
+
+1. **`FREEFORMTEXT` not valid for CRM event fields** — `custevent_ctc_ai_brief` initially used `FREEFORMTEXT`, SDF rejected it. CRM event fields only accept `CLOBTEXT`, `TEXTAREA`, `INTEGER`, `CHECKBOX`, `URL`, etc. Fixed to `CLOBTEXT`.
+
+### What Worked
+- 172 tests passing (8 new tests for field hiding, title fallback, brief fallback)
+- All lint clean
+- Deploy successful — 3 scripts uploaded, 1 new field created
