@@ -3,16 +3,12 @@
  * @NScriptType ScheduledScript
  * @NModuleScope SameAccount
  *
- * Polls Twilio for completed call recordings, fetches transcripts
- * via Conversational Intelligence, runs AI analysis with N/llm,
- * creates Phone Call activity records, and deletes processed recordings.
+ * Polls NetSuite for unprocessed Phone Call records (processed=false, call_sid not empty),
+ * fetches transcripts via Twilio Conversational Intelligence, runs AI analysis with N/llm,
+ * updates Phone Call activity records, and deletes processed recordings.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log'], (https, record, search, llm, encode, log) => {
-
-    const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
-    const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
-    const POLL_WINDOW_MINUTES = 30;
+define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/ctc_transcript_utils'], (https, record, search, llm, encode, log, utils) => {
 
     const loadConfig = () => {
         const results = search.create({
@@ -50,157 +46,31 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log'], (https
         return 'Basic ' + encoded;
     };
 
-    const getDateFilter = () => {
-        const now = new Date();
-        now.setMinutes(now.getMinutes() - POLL_WINDOW_MINUTES);
-        return now.toISOString().replace(/\.\d{3}Z$/, 'Z');
-    };
-
-    const fetchRecentRecordings = (config, authHeader) => {
-        const dateFilter = getDateFilter();
-        const url = `${TWILIO_API_BASE}/${config.accountSid}/Recordings.json?DateCreated%3E=${encodeURIComponent(dateFilter)}&PageSize=50`;
-
-        const response = https.get({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
-
-        if (response.code !== 200) {
-            log.error({ title: 'CTC Fetch Recordings Failed', details: `HTTP ${response.code}: ${response.body}` });
-            return [];
-        }
-
-        const body = JSON.parse(response.body);
-        return body.recordings || [];
-    };
-
-    const isDuplicate = (recordingSid) => {
+    const findUnprocessedCalls = () => {
         const results = search.create({
             type: search.Type.PHONE_CALL,
-            filters: [['custevent_ctc_recording_sid', 'is', recordingSid]],
-            columns: ['internalid']
-        }).run().getRange({ start: 0, end: 1 });
+            filters: [
+                ['custevent_ctc_processed', 'is', 'F'],
+                'AND',
+                ['custevent_ctc_call_sid', 'isnotempty', '']
+            ],
+            columns: ['internalid', 'custevent_ctc_call_sid']
+        }).run().getRange({ start: 0, end: 50 });
 
-        return results.length > 0;
+        return results.map((r) => ({
+            recordId: r.id,
+            callSid: r.getValue('custevent_ctc_call_sid')
+        }));
     };
 
-    const fetchTranscript = (recordingSid, authHeader) => {
-        const url = `${TWILIO_INTEL_BASE}/Transcripts?SourceSid=${recordingSid}`;
+    const updatePhoneCallRecord = (recordId, recording, config, transcriptText, analysis) => {
+        const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: recordId, isDynamic: true });
 
-        const response = https.get({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
-
-        if (response.code !== 200) {
-            log.error({ title: 'CTC Fetch Transcript Failed', details: `HTTP ${response.code}: ${response.body}` });
-            return null;
-        }
-
-        const body = JSON.parse(response.body);
-        const transcripts = body.transcripts || [];
-
-        if (!transcripts.length || transcripts[0].status !== 'completed') {
-            return null;
-        }
-
-        return transcripts[0];
-    };
-
-    const fetchSentences = (transcriptSid, authHeader) => {
-        const url = `${TWILIO_INTEL_BASE}/Transcripts/${transcriptSid}/Sentences`;
-
-        const response = https.get({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
-
-        if (response.code !== 200) {
-            log.error({ title: 'CTC Fetch Sentences Failed', details: `HTTP ${response.code}: ${response.body}` });
-            return [];
-        }
-
-        const body = JSON.parse(response.body);
-        return body.sentences || [];
-    };
-
-    const formatTranscript = (sentences) => {
-        return sentences.map((s) => {
-            const speaker = s.media_channel === 1 ? '[REP]' : '[CUSTOMER]';
-            return `${speaker} ${s.transcript}`;
-        }).join('\n');
-    };
-
-    const ANALYSIS_PROMPT_PREFIX = `You are a sales call analyst. Analyze this call transcript and return ONLY valid JSON — no markdown, no explanation, no code fences.
-
-{
-  "summary": "2-3 sentence summary of call purpose, key points, and outcome",
-  "satisfaction_score": <integer 1-10>,
-  "tone_keywords": ["keyword1", "keyword2", "keyword3"],
-  "action_items": ["item1", "item2"]
-}
-
-SCORING GUIDE:
-- 1-3: Hostile, complaint, churn risk, unresolved issues
-- 4-5: Neutral, informational, no clear engagement
-- 6-7: Positive, engaged, follow-up likely
-- 8-10: Highly positive, strong buying signals, deal progression
-
-TRANSCRIPT:
-`;
-
-    const analyzeTranscript = (transcriptText) => {
-        const response = llm.generateText({
-            prompt: ANALYSIS_PROMPT_PREFIX + transcriptText,
-            modelFamily: llm.ModelFamily.COHERE_COMMAND,
-            modelParameters: {
-                temperature: 0.2,
-                maxTokens: 800
-            }
-        });
-
-        let text = response.text
-            .replace(/```json\n?/g, '')
-            .replace(/```\n?/g, '')
-            .trim();
-
-        try {
-            return JSON.parse(text);
-        } catch (e) {
-            log.audit({ title: 'CTC LLM JSON Parse Failed', details: text });
-            return {
-                summary: response.text.substring(0, 500),
-                satisfaction_score: 5,
-                tone_keywords: [],
-                action_items: []
-            };
-        }
-    };
-
-    const findExistingRecord = (callSid) => {
-        if (!callSid) return null;
-        const results = search.create({
-            type: search.Type.PHONE_CALL,
-            filters: [['custevent_ctc_call_sid', 'is', callSid]],
-            columns: ['internalid']
-        }).run().getRange({ start: 0, end: 1 });
-
-        return results.length > 0 ? results[0].id : null;
-    };
-
-    const savePhoneCallRecord = (recording, config, transcriptText, analysis) => {
-        const existingId = findExistingRecord(recording.call_sid);
-        const phoneCall = existingId
-            ? record.load({ type: record.Type.PHONE_CALL, id: existingId, isDynamic: true })
-            : record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
-
-        const title = (analysis.summary || '').substring(0, 80) || `Call — ${recording.sid}`;
+        const title = (analysis.title || analysis.summary || '').substring(0, 80) || `Call — ${recording.sid}`;
         phoneCall.setValue({ fieldId: 'title', value: title });
-        phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
-        phoneCall.setValue({ fieldId: 'message', value: transcriptText });
         phoneCall.setValue({ fieldId: 'custevent_ctc_recording_sid', value: recording.sid });
         phoneCall.setValue({ fieldId: 'custevent_ctc_recording_url',
-            value: `${TWILIO_API_BASE}/${config.accountSid}/Recordings/${recording.sid}.mp3` });
+            value: `${utils.TWILIO_API_BASE}/${config.accountSid}/Recordings/${recording.sid}.mp3` });
         phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: parseInt(recording.duration, 10) });
         phoneCall.setValue({ fieldId: 'custevent_ctc_transcript', value: transcriptText });
         phoneCall.setValue({ fieldId: 'custevent_ctc_ai_summary', value: analysis.summary || '' });
@@ -210,19 +80,6 @@ TRANSCRIPT:
         phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: true });
 
         return phoneCall.save();
-    };
-
-    const deleteRecording = (config, recordingSid, authHeader) => {
-        const url = `${TWILIO_API_BASE}/${config.accountSid}/Recordings/${recordingSid}.json`;
-
-        const response = https.delete({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
-
-        if (response.code !== 204 && response.code !== 200) {
-            log.error({ title: 'CTC Delete Recording Failed', details: `HTTP ${response.code}: ${response.body}` });
-        }
     };
 
     const execute = () => {
@@ -239,23 +96,24 @@ TRANSCRIPT:
                 log.audit({ title: 'CTC LLM Quota Low', details: 'AI analysis will be skipped this cycle' });
             }
 
-            const recordings = fetchRecentRecordings(config, authHeader);
+            const unprocessedCalls = findUnprocessedCalls();
 
-            for (const recording of recordings) {
+            for (const call of unprocessedCalls) {
                 try {
-                    if (isDuplicate(recording.sid)) {
+                    const recording = utils.fetchRecordingForCall(config.accountSid, call.callSid, authHeader);
+                    if (!recording) {
                         skipped++;
                         continue;
                     }
 
-                    const transcript = fetchTranscript(recording.sid, authHeader);
+                    const transcript = utils.fetchTranscript(recording.sid, authHeader);
                     if (!transcript) {
                         skipped++;
                         continue;
                     }
 
-                    const sentences = fetchSentences(transcript.sid, authHeader);
-                    const transcriptText = formatTranscript(sentences);
+                    const sentences = utils.fetchSentences(transcript.sid, authHeader);
+                    const transcriptText = utils.formatTranscript(sentences);
 
                     let analysis = {
                         summary: '',
@@ -265,14 +123,14 @@ TRANSCRIPT:
                     };
 
                     if (hasLlmQuota && transcriptText) {
-                        analysis = analyzeTranscript(transcriptText);
+                        analysis = utils.analyzeTranscript(transcriptText);
                     }
 
-                    savePhoneCallRecord(recording, config, transcriptText, analysis);
-                    deleteRecording(config, recording.sid, authHeader);
+                    updatePhoneCallRecord(call.recordId, recording, config, transcriptText, analysis);
+                    utils.deleteRecording(config.accountSid, recording.sid, authHeader);
                     processed++;
                 } catch (e) {
-                    log.error({ title: 'CTC Recording Processing Error', details: `${recording.sid}: ${e.message || e}` });
+                    log.error({ title: 'CTC Call Processing Error', details: `${call.callSid}: ${e.message || e}` });
                     errors++;
                 }
             }

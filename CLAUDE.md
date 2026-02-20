@@ -102,13 +102,16 @@ src/
 │               ├── ctc_sl_softphone.js          # Suitelet (softphone popup HTML)
 │               ├── ctc_rl_token.js              # RESTlet (JWT token endpoint)
 │               ├── ctc_ss_poll_transcripts.js   # Scheduled Script (poll Twilio)
+│               ├── ctc_ue_transcript_viewer.js # UserEvent Script (Call Intelligence panel)
 │               └── lib/
 │                   ├── ctc_twilio_jwt.js        # JWT module
+│                   ├── ctc_transcript_utils.js  # Shared transcript/Twilio API utilities
 │                   └── twilio.min.js            # Twilio Voice SDK 2.7.3 (bundled)
 ├── Objects/
 │   ├── customrecord_ctc_config.xml
 │   ├── customscript_ctc_cl_phone_button.xml
 │   ├── customscript_ctc_ue_phone_button.xml
+│   ├── customscript_ctc_ue_transcript_viewer.xml
 │   ├── customscript_ctc_sl_softphone.xml
 │   ├── customscript_ctc_rl_token.xml
 │   ├── customscript_ctc_ss_poll.xml
@@ -124,7 +127,8 @@ src/
 3. `ctc_sl_softphone.js` — depends on #2 (resolves RESTlet URL)
 4. `ctc_ue_phone_button.js` — depends on #3 (resolves Suitelet URL, adds toolbar button + view-mode icon)
 5. `ctc_cl_phone_button.js` — depends on #3 (resolves Suitelet URL, adds edit-mode field icon)
-6. `ctc_ss_poll_transcripts.js` — independent of #1-5, depends on config record + Phone Call fields
+6. `ctc_ss_poll_transcripts.js` — independent of #1-5, depends on config record + Phone Call fields + `lib/ctc_transcript_utils.js`
+7. `ctc_ue_transcript_viewer.js` — independent, depends on N/ui/serverWidget + Phone Call CRM event fields
 
 ## Critical Gotchas
 
@@ -138,6 +142,8 @@ src/
 - **Twilio codec preferences**: Use string literals `'opus'`, `'pcmu'` — NOT `Twilio.Device.Codec.Opus` (enum doesn't exist in SDK 2.7.3).
 - **RESTlet URL in Suitelet**: Use `returnExternalUrl: false` — internal URL stays same-origin with Suitelet popup. `returnExternalUrl: true` resolves to `restlets.api.netsuite.com` which causes CORS failure.
 - **CSS display override**: `element.style.display = ''` does NOT override a CSS class `display: none`. Use `element.style.display = 'block'` to explicitly override class-level hiding.
+- **NetSuite TEXTAREA storage**: Converts `\n` → `<br>` on save. Always split on `/\n|<br\s*\/?>/` when reading back stored text.
+- **INLINEHTML positioning**: `form.addField()` appends to end. Use `field.updateLayoutType({ layoutType: serverWidget.FieldLayoutType.OUTSIDEABOVE })` + DOM script fallback to position above Primary Information.
 
 ## SDF Gotchas
 

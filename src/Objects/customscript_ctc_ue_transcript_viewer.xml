@@ -1,0 +1,16 @@
+<usereventscript scriptid="customscript_ctc_ue_transcript_viewer">
+    <name>CTC Transcript Viewer</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_ue_transcript_viewer.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <isinactive>F</isinactive>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_ue_transcript_viewer">
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <recordtype>PHONECALL</recordtype>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</usereventscript>

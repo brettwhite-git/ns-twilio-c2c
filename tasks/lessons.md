@@ -48,3 +48,19 @@ Capture corrections and patterns here after each user correction or bug discover
 - `element.style.display = ''` does NOT override a CSS class `display: none` — it only removes the inline style, so the class rule still applies
 - Use `element.style.display = 'block'` (or appropriate value) to explicitly override class-level `display: none`
 - General rule: setting inline style to empty string reverts to stylesheet rules; setting to a value overrides them
+
+## NetSuite TEXTAREA Storage
+- NetSuite converts `\n` → `<br>` when storing TEXTAREA/CLOBTEXT values
+- `getValue()` returns `<br>`-separated text, not `\n`-separated
+- Always split on both: `text.split(/\n|<br\s*\/?>/).filter(Boolean)` to handle fresh and stored data
+
+## INLINEHTML Scroll vs Collapse
+- Don't combine `display: none` collapse with `max-height` scroll containers — they fight each other
+- If container has `max-height + overflow-y: auto` but children are hidden, container never overflows → no scroll
+- Pick one: either collapse/expand toggle OR always-render with scrollable container
+
+## INLINEHTML Field Positioning
+- `form.addField()` always appends to the end of the main body tab
+- `field.updateLayoutType({ layoutType: 'OUTSIDEABOVE' })` is the official API to position above field groups — works on some UE-decorated forms
+- DOM fallback: inject `<script>` that moves `el.closest('tr')` to `tbody.firstChild` for reliable positioning
+- `N/ui/serverWidget` must be in `define()` dependencies to access `FieldLayoutType` and `FieldBreakType` enums

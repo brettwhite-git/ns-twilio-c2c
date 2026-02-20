@@ -427,14 +427,62 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search'], (url, runtime, log
                     logStatusEl.textContent = 'Failed to log call';
                     logStatusEl.className = 'log-status error';
                 } else {
-                    logStatusEl.textContent = 'Call logged \\u2714';
+                    logStatusEl.textContent = 'Call logged \\u2714 \\u2014 Fetching transcript\\u2026';
                     logStatusEl.className = 'log-status';
+                    pollForTranscript(callSid, data.recordId);
                 }
             })
             .catch(function () {
                 logStatusEl.textContent = 'Failed to log call';
                 logStatusEl.className = 'log-status error';
             });
+        }
+
+        // --- Transcript polling ---
+        var POLL_INTERVAL_MS = 15000;
+        var POLL_MAX_ATTEMPTS = 12;
+
+        function pollForTranscript(callSid, recordId) {
+            var attempts = 0;
+
+            function poll() {
+                attempts++;
+                console.log('[CTC] Checking transcript (' + attempts + '/' + POLL_MAX_ATTEMPTS + ')');
+
+                fetch(TOKEN_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'checkTranscript',
+                        callSid: callSid,
+                        recordId: recordId
+                    })
+                })
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    if (data.status === 'completed') {
+                        logStatusEl.textContent = 'Transcript saved \\u2714';
+                        logStatusEl.className = 'log-status';
+                        return;
+                    }
+                    if (attempts >= POLL_MAX_ATTEMPTS) {
+                        logStatusEl.textContent = 'Transcript will be processed shortly';
+                        logStatusEl.className = 'log-status';
+                        return;
+                    }
+                    setTimeout(poll, POLL_INTERVAL_MS);
+                })
+                .catch(function () {
+                    if (attempts >= POLL_MAX_ATTEMPTS) {
+                        logStatusEl.textContent = 'Transcript will be processed shortly';
+                        logStatusEl.className = 'log-status';
+                        return;
+                    }
+                    setTimeout(poll, POLL_INTERVAL_MS);
+                });
+            }
+
+            setTimeout(poll, POLL_INTERVAL_MS);
         }
 
         // --- Audio device helpers ---

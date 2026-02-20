@@ -171,3 +171,37 @@ Track corrections, debugging insights, and validated patterns across sessions.
 - Diagnostic console.log confirmed server-side data was correct, narrowing the bug to pure CSS/JS display logic
 - Call logging confirmed working end-to-end: call placed, Phone Call record created with correct duration (18s)
 - Full call lifecycle verified: Device registered → Ringing → Call accepted → Call disconnected → Call logged ✅
+
+---
+
+## 2026-02-19 — Call Intelligence Viewer: Layout & Transcript Fixes
+
+### Errors Found
+
+1. **Transcript displayed as one blob — `<br>` not handled**
+   - NetSuite TEXTAREA fields convert `\n` → `<br>` on storage
+   - `getValue()` returns `<br>`-separated text, but viewer split on `\n` only → zero splits
+   - Fix: `text.split(/\n|<br\s*\/?>/).filter(Boolean)` — handles both fresh and stored data
+
+2. **Transcript not scrollable in VIEW mode**
+   - Lines 9+ hidden via `display: none` with "Show all N lines" toggle button
+   - `max-height: 300px; overflow-y: auto` never triggered because only 8 visible lines fit under the max-height
+   - The collapse toggle and scroll container were mutually exclusive — couldn't both work
+   - Fix: Removed collapse/toggle entirely. All lines always render, container scrolls naturally
+
+3. **`message` field redundantly duplicated transcript**
+   - Transcript written to both `custevent_ctc_transcript` and `message` (Message subtab)
+   - Plus the viewer panel rendered it a third time
+   - Fix: Removed `message` setValue from both `ctc_ss_poll_transcripts.js` and `ctc_rl_token.js`
+
+### Layout Changes
+
+- **v1**: Single-column stacked → **v2**: 2-column grid (transcript left, metrics right) → **v3**: 3-column metrics row + full-width scrollable transcript
+- Added `field.updateLayoutType({ layoutType: 'OUTSIDEABOVE' })` + DOM fallback script to position panel above "Primary Information"
+- Renamed "Custom" tab → "Call Intel" via `form.getTab({ id: 'custom' }).label`
+- Added `N/ui/serverWidget` dependency for field layout API
+
+### What Worked
+- `splitLines()` regex handles `\n`, `<br>`, `<br/>`, `<br />` — all NetSuite storage variants
+- 167 tests passing after all changes
+- Deploy only uploaded changed file (5 seconds)

@@ -3,14 +3,22 @@ import search from 'N/search';
 import runtime from 'N/runtime';
 import log from 'N/log';
 import record from 'N/record';
+import https from 'N/https';
+import encode from 'N/encode';
+import llm from 'N/llm';
 
 jest.mock('N/search');
 jest.mock('N/runtime');
 jest.mock('N/log');
 jest.mock('N/record');
+jest.mock('N/https');
+jest.mock('N/encode');
+jest.mock('N/llm');
 jest.mock('SuiteScripts/click_to_call/lib/ctc_twilio_jwt');
+jest.mock('SuiteScripts/click_to_call/lib/ctc_transcript_utils');
 
 const twilioJwt = require('SuiteScripts/click_to_call/lib/ctc_twilio_jwt');
+const utils = require('SuiteScripts/click_to_call/lib/ctc_transcript_utils');
 
 describe('ctc_rl_token', () => {
     const mockConfigResult = {
@@ -49,9 +57,24 @@ describe('ctc_rl_token', () => {
             setValue: jest.fn(),
             save: jest.fn().mockReturnValue(99999)
         });
+
+        encode.convert.mockReturnValue('QUNX0dGVzdF9hY2NvdW50OmF1dGhfdG9rZW5fMTIz');
+        encode.Encoding = { UTF_8: 'UTF_8', BASE_64: 'BASE_64' };
+
+        llm.getRemainingFreeUsage = jest.fn().mockReturnValue(100);
+        llm.ModelFamily = { COHERE_COMMAND: 'COHERE_COMMAND' };
+
+        // Utils mocks
+        utils.TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
+        utils.fetchRecordingForCall = jest.fn();
+        utils.fetchTranscript = jest.fn();
+        utils.fetchSentences = jest.fn();
+        utils.formatTranscript = jest.fn();
+        utils.analyzeTranscript = jest.fn();
+        utils.deleteRecording = jest.fn();
     });
 
-    describe('post', () => {
+    describe('post — token generation', () => {
         it('returns a token object', () => {
             const result = restlet.post({});
             expect(result).toHaveProperty('token');
@@ -227,6 +250,157 @@ describe('ctc_rl_token', () => {
             expect(log.error).toHaveBeenCalledWith(
                 expect.objectContaining({ title: 'CTC Log Call Failed' })
             );
+        });
+    });
+
+    describe('checkTranscript action', () => {
+        const MOCK_RECORDING = {
+            sid: 'RE_test_001',
+            duration: '90'
+        };
+
+        const MOCK_TRANSCRIPT = {
+            sid: 'GT_test_001',
+            status: 'completed'
+        };
+
+        const MOCK_ANALYSIS = {
+            title: 'Product discussion — positive outcome',
+            summary: 'Good call about product.',
+            satisfaction_score: 8,
+            tone_keywords: ['positive', 'engaged'],
+            action_items: ['Follow up next week']
+        };
+
+        let mockPhoneCall;
+
+        beforeEach(() => {
+            mockPhoneCall = {
+                setValue: jest.fn(),
+                save: jest.fn().mockReturnValue(55555)
+            };
+            record.load = jest.fn().mockReturnValue(mockPhoneCall);
+
+            utils.fetchRecordingForCall.mockReturnValue(MOCK_RECORDING);
+            utils.fetchTranscript.mockReturnValue(MOCK_TRANSCRIPT);
+            utils.fetchSentences.mockReturnValue([
+                { media_channel: 1, transcript: 'Hello' }
+            ]);
+            utils.formatTranscript.mockReturnValue('[REP] Hello');
+            utils.analyzeTranscript.mockReturnValue(MOCK_ANALYSIS);
+        });
+
+        it('returns no_recording when no recording found', () => {
+            utils.fetchRecordingForCall.mockReturnValue(null);
+
+            const result = restlet.post({
+                action: 'checkTranscript',
+                callSid: 'CA_none',
+                recordId: '100'
+            });
+
+            expect(result).toEqual({ status: 'no_recording' });
+        });
+
+        it('returns pending when transcript not ready', () => {
+            utils.fetchTranscript.mockReturnValue(null);
+
+            const result = restlet.post({
+                action: 'checkTranscript',
+                callSid: 'CA_test',
+                recordId: '100'
+            });
+
+            expect(result).toEqual({ status: 'pending' });
+        });
+
+        it('returns completed and enriches Phone Call record', () => {
+            const result = restlet.post({
+                action: 'checkTranscript',
+                callSid: 'CA_test',
+                recordId: '100'
+            });
+
+            expect(result).toEqual({ status: 'completed' });
+
+            expect(record.load).toHaveBeenCalledWith({
+                type: 'phonecall',
+                id: '100',
+                isDynamic: true
+            });
+
+            const fields = {};
+            mockPhoneCall.setValue.mock.calls.forEach((call) => {
+                fields[call[0].fieldId] = call[0].value;
+            });
+
+            expect(fields.title).toBe('Product discussion — positive outcome');
+            expect(fields.custevent_ctc_recording_sid).toBe('RE_test_001');
+            expect(fields.custevent_ctc_transcript).toBe('[REP] Hello');
+            expect(fields.custevent_ctc_ai_summary).toBe('Good call about product.');
+            expect(fields.custevent_ctc_satisfaction).toBe(8);
+            expect(fields.custevent_ctc_tone_keywords).toBe('positive, engaged');
+            expect(fields.custevent_ctc_action_items).toBe('Follow up next week');
+            expect(fields.custevent_ctc_processed).toBe(true);
+            expect(mockPhoneCall.save).toHaveBeenCalled();
+        });
+
+        it('deletes recording after enrichment', () => {
+            restlet.post({
+                action: 'checkTranscript',
+                callSid: 'CA_test',
+                recordId: '100'
+            });
+
+            expect(utils.deleteRecording).toHaveBeenCalledWith(
+                'AC_test_account', 'RE_test_001', expect.any(String)
+            );
+        });
+
+        it('skips AI analysis when quota is low', () => {
+            llm.getRemainingFreeUsage.mockReturnValue(5);
+
+            const result = restlet.post({
+                action: 'checkTranscript',
+                callSid: 'CA_test',
+                recordId: '100'
+            });
+
+            expect(result).toEqual({ status: 'completed' });
+            expect(utils.analyzeTranscript).not.toHaveBeenCalled();
+            // Should still enrich with transcript
+            expect(mockPhoneCall.setValue).toHaveBeenCalledWith(
+                expect.objectContaining({ fieldId: 'custevent_ctc_transcript', value: '[REP] Hello' })
+            );
+        });
+
+        it('returns error on exception', () => {
+            mockSearchRun.getRange.mockReturnValue([]);
+
+            const result = restlet.post({
+                action: 'checkTranscript',
+                callSid: 'CA_test',
+                recordId: '100'
+            });
+
+            expect(result).toHaveProperty('error', 'Transcript check failed');
+            expect(log.error).toHaveBeenCalledWith(
+                expect.objectContaining({ title: 'CTC Check Transcript Failed' })
+            );
+        });
+
+        it('builds auth header from config', () => {
+            restlet.post({
+                action: 'checkTranscript',
+                callSid: 'CA_test',
+                recordId: '100'
+            });
+
+            expect(encode.convert).toHaveBeenCalledWith({
+                string: 'AC_test_account:auth_token_123',
+                inputEncoding: 'UTF_8',
+                outputEncoding: 'BASE_64'
+            });
         });
     });
 });
