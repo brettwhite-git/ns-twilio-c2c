@@ -144,14 +144,25 @@ src/
 - **CSS display override**: `element.style.display = ''` does NOT override a CSS class `display: none`. Use `element.style.display = 'block'` to explicitly override class-level hiding.
 - **NetSuite TEXTAREA storage**: Converts `\n` → `<br>` on save. Always split on `/\n|<br\s*\/?>/` when reading back stored text.
 - **INLINEHTML positioning**: `form.addField()` appends to end. Use `field.updateLayoutType({ layoutType: serverWidget.FieldLayoutType.OUTSIDEABOVE })` + DOM script fallback to position above Primary Information.
+- **Call Intelligence panel patterns**: Blue quote block (`.ctc-summary`) for AI text, orange quote block (`.ctc-action-block`) for action items, 4-column metrics grid with `border-right` dividers, `<hr class="ctc-divider">` between sections. Hide redundant CRM fields in VIEW mode via `updateDisplayType(HIDDEN)`.
 
 ## SDF Gotchas
 
+- **CRM event field types**: `custevent_*` fields reject `FREEFORMTEXT` — use `CLOBTEXT` for all text fields, `TEXTAREA` for multiline
 - **XML element names**: Use `<restlet>`, `<suitelet>`, `<scheduledscript>`, `<clientscript>` — NOT `<restletscripttype>` etc.
 - **`isinactive` filter**: Not valid on all record types — test before assuming it works on a given type
 - **deploy.xml differences**: SuiteApp projects don't support `<configuration>` or `<translationcollections>` sections. This project is a SuiteApp — deploy.xml has only `<files>`.
 - **SuiteApp scriptfile paths**: XML `<scriptfile>` refs must use `/SuiteApps/com.netsuite.clicktocall/click_to_call/...` (not `/SuiteScripts/...`). Physical files live at `src/FileCabinet/SuiteApps/<appId>/`
 - **SuiteApp manifest requirements**: `projecttype="SUITEAPP"` requires `<publisherid>` and `<projectid>` — Jest's `ProjectInfoService` reads these from manifest.xml at test time
+- **Custom role permissions in SuiteApp XML**: SuiteApps can only reference standard roles (e.g., `ADMINISTRATOR`, `SALES_PERSON`) in `<permittedrole>`. Custom roles (e.g., `customrole1126_0`) are rejected because they're account-specific. For custom roles, use `NONENEEDED` access type or add permissions manually in the UI after deploy.
+- **`<restriction>` valid values**: Only `EDIT` and `CREATE` are valid for the `<restriction>` element in custom record permissions. `VIEW` and `NONE` are invalid and fail validation. Omit `<restriction>` entirely for VIEW-level permissions.
+- **Config record access type**: Currently `NONENEEDED` to support custom roles (MFG Sales = `customrole1126_0`). Admin retains FULL permission via the permissions list for edit access.
+
+## Multi-Role Support
+
+- **Config record** (`customrecord_ctc_config`): Access type `NONENEEDED` — any role can read config. Required because SuiteApp XML can't reference custom roles, and the sandbox uses custom roles (MFG Sales).
+- **All script deployments**: `<allroles>T</allroles>` — executes for all internal roles. Note: this only covers internal roles; external roles (Customer Center, Vendor Center) need `<audslctrole>` if ever required.
+- **Activities sublist view**: The CTC custom fields (AI Processed, AI Summary, Duration, Tone Keywords, Satisfaction Score) only appear if the role's Activities sublist uses a custom view that includes them. This is a per-role UI configuration in NetSuite (Customize View), not controlled by SDF. After deploy, each role needs the custom view configured once.
 
 ## Unit Testing
 
