@@ -15,12 +15,18 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 
         const rec = context.newRecord;
         const processed = rec.getValue({ fieldId: 'custevent_ctc_processed' });
-        if (!processed) return;
+        const status = rec.getValue({ fieldId: 'custevent_ctc_call_status' }) || '';
+        const callSid = rec.getValue({ fieldId: 'custevent_ctc_call_sid' }) || '';
+
+        // Render the panel whenever this is a CTC-tracked call (status set OR processed flag),
+        // so reps see an honest pill even for "No transcript" / "Failed" states.
+        if (!processed && !status && !callSid) return;
 
         const customTab = context.form.getTab({ id: 'custom' });
         if (customTab) customTab.label = 'Call Intel';
 
         const data = {
+            status:       status,
             summary:      rec.getValue({ fieldId: 'custevent_ctc_ai_summary' }) || '',
             satisfaction: rec.getValue({ fieldId: 'custevent_ctc_satisfaction' }),
             duration:     rec.getValue({ fieldId: 'custevent_ctc_duration' }),
@@ -65,6 +71,21 @@ define(['N/ui/serverWidget'], (serverWidget) => {
     };
 
     const splitLines = (text) => text.split(/\n|<br\s*\/?>/).filter(Boolean);
+
+    // Map a status string to a (bg, fg) color pair for the pill.
+    const STATUS_STYLES = {
+        'Logged':        { bg: '#e8edf3', fg: '#4a5568', label: 'Logged' },
+        'Processing':    { bg: '#fef9f0', fg: '#b47200', label: 'Processing — transcript pending' },
+        'Transcribed':   { bg: '#e6f7ee', fg: '#0e7a4f', label: 'Transcribed' },
+        'No transcript': { bg: '#fef9f0', fg: '#b47200', label: 'No transcript — call too brief or recording absent' },
+        'Failed':        { bg: '#fce8e6', fg: '#b83a33', label: 'Failed — needs admin review' }
+    };
+
+    const buildStatusPill = (status) => {
+        const style = STATUS_STYLES[status];
+        if (!style) return '';
+        return `<span class="ctc-status-pill" style="background:${style.bg};color:${style.fg}">${escapeHtml(style.label)}</span>`;
+    };
 
     const buildViewerHtml = (data) => {
         const safeSummary = escapeHtml(data.summary);
@@ -120,7 +141,9 @@ define(['N/ui/serverWidget'], (serverWidget) => {
         return `<div id="ctc-viewer">
 <style>
 #ctc-viewer { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; color: #333; margin: 16px 0; }
-#ctc-viewer .ctc-header { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8e8e8; }
+#ctc-viewer .ctc-header { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8e8e8; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+#ctc-viewer .ctc-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; }
+#ctc-viewer .ctc-status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 #ctc-viewer .ctc-section { margin-bottom: 14px; }
 #ctc-viewer .ctc-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
 #ctc-viewer .ctc-summary { background: #f8f9fa; border-left: 3px solid #4a90d9; padding: 10px 14px; border-radius: 0 6px 6px 0; line-height: 1.5; }
@@ -141,7 +164,7 @@ define(['N/ui/serverWidget'], (serverWidget) => {
 #ctc-viewer hr.ctc-divider { border: none; border-top: 1px solid #e8e8e8; margin: 14px 0; }
 #ctc-viewer .ctc-metrics-row > div:not(:last-child) { border-right: 1px solid #e8e8e8; padding-right: 16px; }
 </style>
-<div class="ctc-header">Call Intelligence</div>
+<div class="ctc-header"><span>Call Intelligence</span>${buildStatusPill(data.status)}</div>
 <div class="ctc-section">
 <div class="ctc-section-title">AI Summary</div>
 <div class="ctc-summary">${safeSummary || '<span class="ctc-muted">No summary available</span>'}</div>

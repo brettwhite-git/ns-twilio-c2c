@@ -232,3 +232,61 @@ Track corrections, debugging insights, and validated patterns across sessions.
 - 172 tests passing (8 new tests for field hiding, title fallback, brief fallback)
 - All lint clean
 - Deploy successful — 3 scripts uploaded, 1 new field created
+
+---
+
+## 2026-05-12 — BUILD_PLAN + Architecture Review Discoveries
+
+### Errors / Drift Found
+
+1. **`BUILD_PLAN.md` is no longer a safe implementation source of truth**
+   - What went wrong: The plan still describes Account Customization scaffolding, `/SuiteScripts` paths, plaintext API key secret storage, CDN SDK loading, `returnExternalUrl: true`, Twilio codec enums, and an old scheduled-script-created Phone Call lifecycle.
+   - Fix: Treat `BUILD_PLAN.md` as historical planning until rewritten; use a new current architecture/product spec for next-stage work.
+   - Why: Following the old plan would reintroduce previously fixed deployment, CORS, credential, and runtime issues.
+
+2. **Contact-origin calls may not link the created Phone Call to the Contact**
+   - What went wrong: Contact records pass `entityId` and `entityType: contact`, but the Suitelet only sends `contactId` when a customer dropdown contact is selected. The RESTlet skips `company` for contacts and only sets `contact` when `body.contactId` exists.
+   - Fix: Next implementation should add a call-target resolution seam and set the Phone Call `contact` field from the originating Contact record, while still supporting selected customer contacts.
+   - Why: Calls launched from a Contact record should remain attached to that Contact for activity history and reporting.
+
+3. **RESTlet and Scheduled Script enrichment paths have drifted**
+   - What went wrong: RESTlet `checkTranscript` and Scheduled Script polling both enrich Phone Calls, but Scheduled writes fields the RESTlet path does not, including `custevent_ctc_ai_brief` and recording duration.
+   - Fix: Move the shared enrichment write contract into one module used by both trigger adapters.
+   - Why: Once the RESTlet marks a call processed, the Scheduled Script will not repair fields omitted by the RESTlet path.
+
+4. **Recording URL storage conflicts with immediate recording deletion**
+   - What went wrong: Both enrichment paths store a Twilio MP3 URL and then delete the Twilio recording. The viewer renders a download link when the URL exists.
+   - Fix: Decide whether recordings are retained or deleted. If deleted, store deletion/audit metadata instead of a durable download URL.
+   - Why: A dead download link misleads users and weakens recording-retention semantics.
+
+5. **RESTlet trust boundary needs explicit authorization and validation**
+   - What went wrong: One all-roles RESTlet accepts browser-supplied action, entity, contact, phone, duration, call SID, and record ID values for token, logging, and enrichment operations.
+   - Fix: Add runtime user, role/permission, entity/contact relationship, Phone Call ownership, and call SID/record ID binding checks before mutation or recording deletion.
+   - Why: Same-origin session auth proves the user is logged in, but it does not prove the requested mutation is authorized or internally consistent.
+
+6. **Credential and transcript privacy controls need a current spec**
+   - What went wrong: The API key secret moved to NetSuite API Secrets, but the Twilio Account Auth Token remains a normal `CLOBTEXT` field on a `NONENEEDED` config record. Transcript, AI output, and logging policies are also under-specified.
+   - Fix: Specify secret storage, role visibility, transcript redaction/retention, search/reporting exposure, sanitized logging, and cleanup retry behavior before the next implementation phase.
+   - Why: Call transcripts and Twilio credentials are sensitive enough that "works in sandbox" is not a sufficient production posture.
+
+### What Worked
+
+- CE-style document review plus architecture exploration produced consistent findings across coherence, feasibility, product/design, security, and integration perspectives.
+- `npm test -- --runInBand` passed: 172 tests across 8 suites.
+- `npm run lint` passed.
+
+---
+
+## 2026-05-12 — Future-State Flow Scope Correction
+
+### Correction
+
+1. **Diagram carried too much future scope**
+   - What went wrong: The first future-state flow visual included inbound calling, inbound SMS, two-way inbox, NetSuite endpoint-first webhook scope, and Chrome extension risk framing while the current roadmap discussion had narrowed to outbound calling and outbound SMS.
+   - Fix: Reworked `docs/architecture/future-state-communications-flow.html` around outbound-only Kami-style workflow nodes: outbound calling, outbound update SMS, and future outbound marketing SMS.
+   - Why: The roadmap visual should clarify the next product direction, not preserve every explored option. Inbound/webhook/extension work can return as separate spikes when it is the active decision.
+
+2. **Outbound SMS needed two distinct lanes**
+   - What went wrong: Treating SMS as one generic flow hides the difference between rep-authored updates and marketing/campaign messages.
+   - Fix: Split SMS into "Updates" and "Marketing Messages" tracks with consent, suppression, sender-readiness, and template gates shown explicitly.
+   - Why: Update messaging and marketing messaging have different operational risk, compliance posture, and likely implementation sequence.

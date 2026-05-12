@@ -83,8 +83,26 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
         phoneCall.setValue({ fieldId: 'custevent_ctc_action_items', value: (analysis.action_items || []).join('\n') });
         phoneCall.setValue({ fieldId: 'custevent_ctc_ai_brief', value: (analysis.brief || analysis.summary || '').substring(0, 120) });
         phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: true });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.TRANSCRIBED });
 
         return phoneCall.save();
+    };
+
+    const markCallStatus = (recordId, status, processed) => {
+        try {
+            const updates = { custevent_ctc_call_status: status };
+            if (typeof processed === 'boolean') {
+                updates.custevent_ctc_processed = processed;
+            }
+            record.submitFields({
+                type: record.Type.PHONE_CALL,
+                id: recordId,
+                values: updates,
+                options: { enableSourcing: false, ignoreMandatoryFields: true }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Mark Status Failed', details: `${recordId}: ${e.message || e}` });
+        }
     };
 
     const execute = () => {
@@ -107,12 +125,32 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
                 try {
                     const recording = utils.fetchRecordingForCall(config.accountSid, call.callSid, authHeader);
                     if (!recording) {
+                        markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
+                        skipped++;
+                        continue;
+                    }
+
+                    if (utils.isRecordingTerminal(recording)) {
+                        markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
                         skipped++;
                         continue;
                     }
 
                     const transcript = utils.fetchTranscript(recording.sid, authHeader);
                     if (!transcript) {
+                        markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
+                        skipped++;
+                        continue;
+                    }
+
+                    if (utils.isTranscriptTerminal(transcript)) {
+                        markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                        skipped++;
+                        continue;
+                    }
+
+                    if (!utils.isTranscriptComplete(transcript)) {
+                        markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;
                         continue;
                     }
@@ -137,6 +175,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
                     processed++;
                 } catch (e) {
                     log.error({ title: 'CTC Call Processing Error', details: `${call.callSid}: ${e.message || e}` });
+                    markCallStatus(call.recordId, utils.CALL_STATUS.FAILED, false);
                     errors++;
                 }
             }

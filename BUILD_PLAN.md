@@ -1,6 +1,11 @@
-# BUILD PLAN — NetSuite Click-to-Call MVP
+> **ARCHIVED — historical MVP planning.** This document describes the original ACP-based scaffold and is no longer source of truth for implementation. Many specifics (project type, file paths, secret storage, codec preferences, RESTlet URL resolution, call lifecycle) have since diverged from the shipped SuiteApp.
+> - Current architecture and roadmap: see [`ARCHITECTURE.md`](./ARCHITECTURE.md)
+> - Current task tracker: see [`tasks/todo.md`](./tasks/todo.md)
+> - Up-to-date conventions and gotchas: see [`AGENTS.md`](./AGENTS.md) and [`CLAUDE.md`](./CLAUDE.md)
 
-This document is the single source of truth for implementation. Build in the order specified. Each section is a complete spec for one component.
+# BUILD PLAN — NetSuite Click-to-Call MVP (HISTORICAL)
+
+This document was the single source of truth for the original MVP build. It is preserved for historical context only. Do not use it as a build reference.
 
 ---
 

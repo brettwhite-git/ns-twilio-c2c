@@ -47,20 +47,59 @@ define(['N/url', 'N/runtime', 'N/log'], (url, runtime, log) => {
         }
 
         const escapedUrl = softphoneUrl.replace(/'/g, "\\'");
+        const buttonLabel = '☎ Call ' + capitalize(recType);
         context.form.addButton({
             id: 'custpage_ctc_call',
-            label: '\u{1F4DE} Call',
-            functionName: "window.open('" + escapedUrl + "','ctc_softphone','width=380,height=560,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no')"
+            label: buttonLabel,
+            functionName: "window.open('" + escapedUrl + "','ctc_softphone','width=400,height=720,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no')"
         });
 
-        // Inject inline script to add clickable phone icons next to phone field values
-        const popupOpts = 'width=380,height=560,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no';
+        // Inject inline script to add clickable phone icons next to phone field values,
+        // plus CSS that promotes the Call button to NetSuite's primary blue style.
+        const popupOpts = 'width=400,height=720,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
         const inlineField = context.form.addField({
             id: 'custpage_ctc_inline',
             type: 'INLINEHTML',
             label: ' '
         });
-        inlineField.defaultValue = buildPhoneIconScript(softphoneUrl, popupOpts);
+        inlineField.defaultValue = buildPhoneIconScript(softphoneUrl, popupOpts) + buildCallButtonStyle();
+    };
+
+    /**
+     * Capitalize first letter of an entity type for button labels.
+     */
+    const capitalize = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '';
+
+    /**
+     * Inline CSS that promotes the Call button to NetSuite's primary blue style with
+     * white text + white phone glyph. Selectors are deliberately broad because NetSuite
+     * renders form buttons with multiple wrappers depending on theme.
+     */
+    const buildCallButtonStyle = () => {
+        return `<style>
+input#custpage_ctc_call,
+button#custpage_ctc_call,
+a#custpage_ctc_call,
+#tbl_custpage_ctc_call input,
+#tbl_custpage_ctc_call button,
+#tbl_custpage_ctc_call a {
+    background-color: #345D7E !important;
+    background-image: none !important;
+    color: #FFFFFF !important;
+    border-color: #345D7E !important;
+    font-weight: 600 !important;
+}
+input#custpage_ctc_call:hover,
+button#custpage_ctc_call:hover,
+a#custpage_ctc_call:hover,
+#tbl_custpage_ctc_call input:hover,
+#tbl_custpage_ctc_call button:hover,
+#tbl_custpage_ctc_call a:hover {
+    background-color: #2B4D69 !important;
+    border-color: #2B4D69 !important;
+    color: #FFFFFF !important;
+}
+</style>`;
     };
 
     /**

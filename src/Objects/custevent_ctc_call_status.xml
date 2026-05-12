@@ -1,0 +1,9 @@
+<crmcustomfield scriptid="custevent_ctc_call_status">
+    <label>Call Status</label>
+    <fieldtype>CLOBTEXT</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>2</searchlevel>
+    <description>Processing state for Twilio-driven enrichment. Values: Logged, Processing, Transcribed, No transcript, Failed. Written by ctc_rl_token.js and ctc_ss_poll_transcripts.js.</description>
+</crmcustomfield>

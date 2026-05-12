@@ -11,6 +11,33 @@ define(['N/https', 'N/llm', 'N/log'], (https, llm, log) => {
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
 
+    // Status values written to custevent_ctc_call_status
+    const CALL_STATUS = {
+        LOGGED:        'Logged',
+        PROCESSING:    'Processing',
+        TRANSCRIBED:   'Transcribed',
+        NO_TRANSCRIPT: 'No transcript',
+        FAILED:        'Failed'
+    };
+
+    // Twilio Recording.status values that mean "no transcript will ever exist"
+    const RECORDING_TERMINAL_STATUSES = ['absent'];
+
+    // Twilio Transcript.status values that mean "no transcript will ever be ready"
+    const TRANSCRIPT_TERMINAL_STATUSES = ['failed', 'canceled', 'error'];
+
+    const isRecordingTerminal = (recording) => {
+        return !!(recording && RECORDING_TERMINAL_STATUSES.indexOf(recording.status) !== -1);
+    };
+
+    const isTranscriptTerminal = (transcript) => {
+        return !!(transcript && TRANSCRIPT_TERMINAL_STATUSES.indexOf(transcript.status) !== -1);
+    };
+
+    const isTranscriptComplete = (transcript) => {
+        return !!(transcript && transcript.status === 'completed');
+    };
+
     const ANALYSIS_PROMPT_PREFIX = `You are a sales call analyst. Analyze this call transcript and return ONLY valid JSON — no markdown, no explanation, no code fences.
 
 {
@@ -49,6 +76,14 @@ TRANSCRIPT:
         return recordings.length > 0 ? recordings[0] : null;
     };
 
+    /**
+     * Fetch the first Transcript resource for a given Recording SID.
+     * Returns the transcript object (including .status) so callers can distinguish:
+     *   - completed       → ready, enrich the Phone Call
+     *   - queued/new/in-progress → still working, poll again later
+     *   - failed/canceled/error  → terminal, no transcript will ever be ready
+     *   - null            → no transcript exists yet OR transient HTTP error (retry)
+     */
     const fetchTranscript = (recordingSid, authHeader) => {
         const url = `${TWILIO_INTEL_BASE}/Transcripts?SourceSid=${recordingSid}`;
 
@@ -64,12 +99,7 @@ TRANSCRIPT:
 
         const body = JSON.parse(response.body);
         const transcripts = body.transcripts || [];
-
-        if (!transcripts.length || transcripts[0].status !== 'completed') {
-            return null;
-        }
-
-        return transcripts[0];
+        return transcripts.length ? transcripts[0] : null;
     };
 
     const fetchSentences = (transcriptSid, authHeader) => {
@@ -141,6 +171,12 @@ TRANSCRIPT:
         TWILIO_API_BASE,
         TWILIO_INTEL_BASE,
         ANALYSIS_PROMPT_PREFIX,
+        CALL_STATUS,
+        RECORDING_TERMINAL_STATUSES,
+        TRANSCRIPT_TERMINAL_STATUSES,
+        isRecordingTerminal,
+        isTranscriptTerminal,
+        isTranscriptComplete,
         fetchRecordingForCall,
         fetchTranscript,
         fetchSentences,

@@ -126,7 +126,7 @@ define(['N/url', 'N/currentRecord'], (url, currentRecord) => {
         window.open(
             softphoneUrl,
             'ctc_softphone',
-            'width=380,height=560,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no'
+            'width=400,height=720,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no'
         );
     };
 

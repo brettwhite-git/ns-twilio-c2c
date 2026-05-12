@@ -46,6 +46,24 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         };
     };
 
+    const lookupContactCompany = (contactId) => {
+        try {
+            const result = search.lookupFields({
+                type: search.Type.CONTACT,
+                id: contactId,
+                columns: ['company']
+            });
+            const company = result && result.company;
+            if (Array.isArray(company) && company.length && company[0].value) {
+                return company[0].value;
+            }
+            return '';
+        } catch (e) {
+            log.error({ title: 'CTC Contact Parent Lookup Failed', details: e.message || e });
+            return '';
+        }
+    };
+
     const buildAuthHeader = (accountSid, authToken) => {
         const encoded = encode.convert({
             string: accountSid + ':' + authToken,
@@ -101,27 +119,67 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         }
     };
 
+    // Minimum call duration (seconds) before we create a Phone Call record.
+    // Twilio Voice Intelligence won't transcribe recordings under 2 seconds, so logging
+    // sub-2s calls produces empty activity records. Server-side defense-in-depth — the
+    // softphone client enforces a higher 3s threshold for UX.
+    const MIN_LOG_DURATION_SECONDS = 2;
+
+    /**
+     * Look up an existing Phone Call by Twilio Call SID to support idempotent logCall.
+     * sendBeacon on popup unload can race with the in-flight fetch; this prevents duplicates.
+     */
+    const findCallByCallSid = (callSid) => {
+        const results = search.create({
+            type: search.Type.PHONE_CALL,
+            filters: [['custevent_ctc_call_sid', 'is', callSid]],
+            columns: ['internalid']
+        }).run().getRange({ start: 0, end: 1 });
+        return results.length ? results[0].id : null;
+    };
+
     /**
      * Create a Phone Call record immediately after call ends.
      * @param {Object} body
-     * @returns {Object} { success, recordId } or { error }
+     * @returns {Object} { success, recordId, duplicate? } or { error }
      */
     const logCall = (body) => {
         try {
+            const duration = parseInt(body.duration, 10) || 0;
+            if (duration < MIN_LOG_DURATION_SECONDS) {
+                return { error: 'duration_below_threshold', duration: duration };
+            }
+
+            if (body.callSid) {
+                const existingId = findCallByCallSid(body.callSid);
+                if (existingId) {
+                    return { success: true, recordId: existingId, duplicate: true };
+                }
+            }
+
             const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
 
             phoneCall.setValue({ fieldId: 'title', value: 'Call to ' + (body.phone || 'unknown') });
             phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
             phoneCall.setValue({ fieldId: 'phone', value: body.phone || '' });
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_sid', value: body.callSid || '' });
-            phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: parseInt(body.duration, 10) || 0 });
+            phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: duration });
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
+            phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
 
-            if (body.entityId && body.entityType !== 'contact') {
-                phoneCall.setValue({ fieldId: 'company', value: body.entityId });
-            }
-            if (body.contactId) {
-                phoneCall.setValue({ fieldId: 'contact', value: body.contactId });
+            if (body.entityType === 'contact' && body.entityId) {
+                phoneCall.setValue({ fieldId: 'contact', value: body.entityId });
+                const parentCompany = lookupContactCompany(body.entityId);
+                if (parentCompany) {
+                    phoneCall.setValue({ fieldId: 'company', value: parentCompany });
+                }
+            } else {
+                if (body.entityId) {
+                    phoneCall.setValue({ fieldId: 'company', value: body.entityId });
+                }
+                if (body.contactId) {
+                    phoneCall.setValue({ fieldId: 'contact', value: body.contactId });
+                }
             }
 
             const recordId = phoneCall.save();
@@ -129,6 +187,27 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         } catch (e) {
             log.error({ title: 'CTC Log Call Failed', details: e.message || e });
             return { error: 'Failed to log call' };
+        }
+    };
+
+    /**
+     * Update only the status fields on a Phone Call record. Used to mark Processing
+     * mid-flight or terminal states without overwriting the rest of the record.
+     */
+    const markCallStatus = (recordId, status, processed) => {
+        try {
+            const updates = { custevent_ctc_call_status: status };
+            if (typeof processed === 'boolean') {
+                updates.custevent_ctc_processed = processed;
+            }
+            record.submitFields({
+                type: record.Type.PHONE_CALL,
+                id: recordId,
+                values: updates,
+                options: { enableSourcing: false, ignoreMandatoryFields: true }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Mark Status Failed', details: `${recordId}: ${e.message || e}` });
         }
     };
 
@@ -149,8 +228,24 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 return { status: 'no_recording' };
             }
 
+            if (utils.isRecordingTerminal(recording)) {
+                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                return { status: 'terminal', reason: 'recording_' + recording.status };
+            }
+
             const transcript = utils.fetchTranscript(recording.sid, authHeader);
             if (!transcript) {
+                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
+                return { status: 'pending' };
+            }
+
+            if (utils.isTranscriptTerminal(transcript)) {
+                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                return { status: 'terminal', reason: 'transcript_' + transcript.status };
+            }
+
+            if (!utils.isTranscriptComplete(transcript)) {
+                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
                 return { status: 'pending' };
             }
 
@@ -181,6 +276,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             phoneCall.setValue({ fieldId: 'custevent_ctc_tone_keywords', value: (analysis.tone_keywords || []).join(', ') });
             phoneCall.setValue({ fieldId: 'custevent_ctc_action_items', value: (analysis.action_items || []).join('\n') });
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: true });
+            phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.TRANSCRIBED });
             phoneCall.save();
 
             utils.deleteRecording(config.accountSid, recording.sid, authHeader);

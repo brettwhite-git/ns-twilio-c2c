@@ -38,8 +38,22 @@ Thumbs.db
 
 # Project config
 project.json
+.compound-engineering/*.local.yaml
 
 # Secrets
 .env
 private-key.pem
 certificate.pem
+
+# Local agent workflow + internal docs (not for public GitHub view)
+.claude/
+.compound-engineering/
+AGENTS.md
+CLAUDE.md
+docs/
+tasks/
+
+# Unit tests + mocks (internal verification only)
+__tests__/
+__mocks__/
+jest.config.js
