@@ -154,6 +154,52 @@ TRANSCRIPT:
         }
     };
 
+    /**
+     * Write enrichment fields onto a Phone Call record. Single source of truth so
+     * the RESTlet checkTranscript action and the Scheduled Script retry both end
+     * up with identical field sets. Caller is responsible for record.load() and .save().
+     *
+     * @param {Object} phoneCallRec - record object already loaded via record.load()
+     * @param {Object} opts
+     * @param {Object} opts.recording - Twilio Recording resource ({ sid, duration })
+     * @param {string} opts.accountSid - Twilio Account SID (used to build recording URL)
+     * @param {string} opts.transcriptText - formatted "[REP] ..." conversation text
+     * @param {Object} opts.analysis - LLM output ({ title, brief, summary,
+     *                                  satisfaction_score, tone_keywords, action_items })
+     * @param {boolean} [opts.includeBrief=false] - whether to set custevent_ctc_ai_brief
+     *                                              (Scheduled Script path does, RESTlet path historically didn't)
+     * @param {boolean} [opts.includeDuration=false] - whether to set custevent_ctc_duration
+     *                                                 from recording.duration (Scheduled Script path does)
+     */
+    const writePhoneCallEnrichmentFields = (phoneCallRec, opts) => {
+        const recording = opts.recording || {};
+        const analysis = opts.analysis || {};
+
+        let title = (analysis.title || '').substring(0, 80);
+        if (!title) {
+            const firstClause = (analysis.summary || '').split(/[.!?]/)[0] || '';
+            title = firstClause.substring(0, 60) || `Call — ${recording.sid}`;
+        }
+
+        phoneCallRec.setValue({ fieldId: 'title', value: title });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_recording_sid', value: recording.sid });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_recording_url',
+            value: `${TWILIO_API_BASE}/${opts.accountSid}/Recordings/${recording.sid}.mp3` });
+        if (opts.includeDuration && recording.duration != null) {
+            phoneCallRec.setValue({ fieldId: 'custevent_ctc_duration', value: parseInt(recording.duration, 10) });
+        }
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_transcript', value: opts.transcriptText || '' });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_summary', value: analysis.summary || '' });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_satisfaction', value: analysis.satisfaction_score || 5 });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_tone_keywords', value: (analysis.tone_keywords || []).join(', ') });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_action_items', value: (analysis.action_items || []).join('\n') });
+        if (opts.includeBrief) {
+            phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_brief', value: (analysis.brief || analysis.summary || '').substring(0, 120) });
+        }
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_processed', value: true });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_call_status', value: CALL_STATUS.TRANSCRIBED });
+    };
+
     const deleteRecording = (accountSid, recordingSid, authHeader) => {
         const url = `${TWILIO_API_BASE}/${accountSid}/Recordings/${recordingSid}.json`;
 
@@ -182,6 +228,7 @@ TRANSCRIPT:
         fetchSentences,
         formatTranscript,
         analyzeTranscript,
+        writePhoneCallEnrichmentFields,
         deleteRecording
     };
 });

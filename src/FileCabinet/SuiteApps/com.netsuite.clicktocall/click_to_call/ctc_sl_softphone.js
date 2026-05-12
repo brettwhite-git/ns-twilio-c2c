@@ -7,7 +7,10 @@
  * Receives phone, entityId, entityName as URL parameters.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search'], (url, runtime, log, file, search) => {
+define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], (url, runtime, log, file, search, ctcHtml) => {
+
+    const escapeHtml = ctcHtml.escapeHtml;
+    const escapeJs = ctcHtml.escapeJs;
 
     /**
      * GET handler — renders the softphone HTML page.
@@ -1404,36 +1407,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search'], (url, runtime, log
         push('Parent', info.parent);
         if (!rows.length) return '';
         return `<dl class="contact-rows">${rows.join('')}</dl>`;
-    };
-
-    /**
-     * Escape HTML special characters to prevent XSS from URL params.
-     * @param {string} str
-     * @returns {string}
-     */
-    const escapeHtml = (str) => {
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    };
-
-    /**
-     * Escape a value for safe embedding in a JS single-quoted string literal inside a script tag.
-     * Prevents breaking out of the string or closing the script tag.
-     * @param {string} str
-     * @returns {string}
-     */
-    const escapeJs = (str) => {
-        return String(str)
-            .replace(/\\/g, '\\\\')
-            .replace(/'/g, "\\'")
-            .replace(/</g, '\\x3c')
-            .replace(/>/g, '\\x3e')
-            .replace(/\n/g, '\\n')
-            .replace(/\r/g, '\\r');
     };
 
     return { onRequest };

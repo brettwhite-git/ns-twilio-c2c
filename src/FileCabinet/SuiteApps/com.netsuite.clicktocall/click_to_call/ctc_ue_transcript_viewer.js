@@ -7,7 +7,9 @@
  * when transcript data has been processed (custevent_ctc_processed = true).
  * Read-only presentation layer — data stays in existing CRM event fields.
  */
-define(['N/ui/serverWidget'], (serverWidget) => {
+define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
+
+    const escapeHtml = ctcHtml.escapeHtml;
 
     const beforeLoad = (context) => {
         const type = context.type;
@@ -59,15 +61,6 @@ define(['N/ui/serverWidget'], (serverWidget) => {
                 if (f) f.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
             });
         }
-    };
-
-    const escapeHtml = (str) => {
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
     };
 
     const splitLines = (text) => text.split(/\n|<br\s*\/?>/).filter(Boolean);
