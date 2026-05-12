@@ -49,6 +49,9 @@ certificate.pem
 .claude/
 .compound-engineering/
 AGENTS.md
+ARCHITECTURE.md
+BUILD_PLAN.md
+CHANGELOG.md
 CLAUDE.md
 docs/
 tasks/
