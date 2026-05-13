@@ -9,7 +9,7 @@
 define([], () => {
 
     const SOFTPHONE_POPUP_OPTIONS =
-        'width=400,height=720,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+        'width=400,height=820,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
 
     const SOFTPHONE_POPUP_NAME = 'ctc_softphone';
 

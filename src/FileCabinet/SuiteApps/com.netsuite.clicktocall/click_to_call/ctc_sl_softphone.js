@@ -249,10 +249,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         .status-pill.connected { color: #14B981; }
         .status-pill.ended { color: var(--phone-text-faint); }
         .status-pill.error { color: #FCA5A5; }
-        /* Contact picker — lives in the bottom contact-info panel on light bg */
+        /* Contact picker — lives on the dark phone surface below the device selectors */
         .picker-row {
             width: 100%;
-            margin-bottom: 14px;
+            margin-bottom: 10px;
             display: none;
             position: relative;
         }
@@ -260,30 +260,46 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         .picker-row select {
             appearance: none;
             -webkit-appearance: none;
-            background: var(--panel-bg);
-            color: var(--panel-text);
-            border: 1px solid var(--panel-border);
+            background: var(--phone-card);
+            color: var(--phone-text);
+            border: 1px solid var(--phone-card-border);
             border-radius: 8px;
             font-family: inherit;
-            font-size: 13px;
+            font-size: 12.5px;
             font-weight: 500;
             width: 100%;
             cursor: pointer;
             outline: none;
-            padding: 9px 32px 9px 12px;
+            padding: 8px 30px 8px 12px;
             transition: border-color 0.15s ease, box-shadow 0.15s ease;
         }
-        .picker-row select:focus { border-color: var(--info); box-shadow: 0 0 0 3px var(--info-soft); }
+        .picker-row select:focus {
+            border-color: rgba(255, 255, 255, 0.32);
+            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+        }
+        .picker-row select option {
+            background: var(--phone-bg-2);
+            color: var(--phone-text);
+        }
         .picker-row::after {
             content: "";
             position: absolute;
             top: 50%;
-            right: 14px;
-            width: 8px; height: 8px;
-            border-right: 2px solid var(--panel-text-muted);
-            border-bottom: 2px solid var(--panel-text-muted);
+            right: 12px;
+            width: 7px; height: 7px;
+            border-right: 2px solid var(--phone-text-muted);
+            border-bottom: 2px solid var(--phone-text-muted);
             transform: translateY(-75%) rotate(45deg);
             pointer-events: none;
+        }
+
+        /* Subtle blue divider between audio selectors and the contact picker — barely visible */
+        .phone-divider {
+            width: 100%;
+            height: 1px;
+            background: rgba(56, 80, 122, 0.45);
+            border: 0;
+            margin: 6px 0 12px;
         }
         .avatar {
             width: 68px;
@@ -464,19 +480,21 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             width: 100%;
             margin-bottom: 12px;
             display: none;
-            flex-direction: column;
-            gap: 5px;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
         }
-        .device-selectors.visible { display: flex; }
+        .device-selectors.visible { display: grid; }
         .device-row {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
+            min-width: 0;
         }
         .device-row label {
-            font-size: 10px;
+            font-size: 9.5px;
             color: var(--phone-text-faint);
-            min-width: 30px;
+            min-width: 24px;
+            flex-shrink: 0;
             text-align: right;
             font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
             letter-spacing: 0.08em;
@@ -484,18 +502,19 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         }
         .device-row select {
             flex: 1;
+            min-width: 0;
             background: var(--phone-card);
             color: var(--phone-text);
             border: 1px solid var(--phone-card-border);
             border-radius: 7px;
             padding: 7px 9px;
-            font-size: 11.5px;
+            font-size: 11px;
             font-family: inherit;
             outline: none;
             cursor: pointer;
-            max-width: 100%;
             overflow: hidden;
             text-overflow: ellipsis;
+            white-space: nowrap;
             min-height: 30px;
         }
         .device-row select option {
@@ -629,6 +648,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             </div>
         </div>
 
+        <hr class="phone-divider" id="phoneDivider">
+
+        <div class="picker-row" id="contactRow">
+            <select id="contactSelect"></select>
+        </div>
+
         <div class="dialpad" id="dialpad">
             <button class="dial-key" data-digit="1" type="button"><span class="digit">1</span><span class="letters">&nbsp;</span></button>
             <button class="dial-key" data-digit="2" type="button"><span class="digit">2</span><span class="letters">ABC</span></button>
@@ -682,18 +707,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
     <div class="contact-panel">
         <h3>Contact information</h3>
 
-        <div class="picker-row" id="contactRow">
-            <select id="contactSelect"></select>
-        </div>
-
         <dl class="contact-rows" id="contactInfoRows">
             <div class="contact-row" data-row="email"><dt>Email</dt><dd id="info-email">&mdash;</dd></div>
             <div class="contact-row" data-row="title"><dt>Title</dt><dd id="info-title">&mdash;</dd></div>
             <div class="contact-row" data-row="owner"><dt>Owner</dt><dd id="info-owner">&mdash;</dd></div>
             <div class="contact-row" data-row="parent"><dt>Parent</dt><dd id="info-parent">&mdash;</dd></div>
         </dl>
-
-        ${safeRecordUrl ? `<div class="panel-link-row"><a class="contact-link" id="contactLink" href="${safeRecordUrl}" target="_blank" rel="noopener"><span class="ns-icon">NS</span><span id="contactLinkLabel">See ${escapeHtml(opts.entityType || 'record')} in NetSuite</span><span class="arrow">→</span></a></div>` : ''}
     </div>
 </div>
 <!-- ENTITY_INFO and CONTACTS_INFO are consumed by inline JS to swap panel rows when picker changes -->

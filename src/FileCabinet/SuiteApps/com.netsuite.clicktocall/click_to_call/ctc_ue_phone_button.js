@@ -49,10 +49,9 @@ define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity'], (url, runtime, log, 
         }
 
         const escapedUrl = softphoneUrl.replace(/'/g, "\\'");
-        const buttonLabel = '☎ Call ' + capitalize(recType);
         context.form.addButton({
             id: 'custpage_ctc_call',
-            label: buttonLabel,
+            label: '☎ Call ' + capitalize(recType),
             functionName: "window.open('" + escapedUrl + "','" + ctcEntity.SOFTPHONE_POPUP_NAME + "','" + ctcEntity.SOFTPHONE_POPUP_OPTIONS + "')"
         });
 
