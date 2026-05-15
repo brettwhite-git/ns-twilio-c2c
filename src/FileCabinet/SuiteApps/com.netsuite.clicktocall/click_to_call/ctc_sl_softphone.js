@@ -11,6 +11,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs = ctcHtml.escapeJs;
+    const safeJsonEmbed = ctcHtml.safeJsonEmbed;
 
     /**
      * GET handler — renders the softphone HTML page.
@@ -45,7 +46,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         }
 
         let contacts = [];
-        if (entityType === 'customer' && entityId) {
+        if ((entityType === 'customer' || entityType === 'prospect') && entityId) {
             contacts = queryContacts(entityId);
         }
 
@@ -87,6 +88,14 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             if (entityType === 'lead') {
                 const r = search.lookupFields({
                     type: search.Type.LEAD,
+                    id: entityId,
+                    columns: ['email', 'salesrep']
+                });
+                return { email: r.email || '', owner: extractText(r.salesrep), parent: '', title: '' };
+            }
+            if (entityType === 'prospect') {
+                const r = search.lookupFields({
+                    type: search.Type.PROSPECT,
                     id: entityId,
                     columns: ['email', 'salesrep']
                 });
@@ -158,7 +167,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         const jsEntityId = escapeJs(opts.entityId);
         const jsEntityType = escapeJs(opts.entityType || '');
         const jsTokenEndpoint = escapeJs(opts.tokenEndpoint);
-        const contactsJson = JSON.stringify(opts.contacts || []);
+        const contactsJson = safeJsonEmbed(opts.contacts || []);
 
         const info = opts.entityInfo || {};
         const safeRecordUrl = escapeHtml(opts.entityRecordUrl || '');
@@ -716,7 +725,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
     </div>
 </div>
 <!-- ENTITY_INFO and CONTACTS_INFO are consumed by inline JS to swap panel rows when picker changes -->
-<script>window.__CTC_ENTITY_INFO__ = ${JSON.stringify(info || {})}; window.__CTC_ENTITY_RECORD_URL__ = ${JSON.stringify(opts.entityRecordUrl || '')}; window.__CTC_ENTITY_NAME__ = ${JSON.stringify(opts.entityName || '')}; window.__CTC_ENTITY_TYPE__ = ${JSON.stringify(opts.entityType || '')};</script>
+<script>window.__CTC_ENTITY_INFO__ = ${safeJsonEmbed(info || {})}; window.__CTC_ENTITY_RECORD_URL__ = ${safeJsonEmbed(opts.entityRecordUrl || '')}; window.__CTC_ENTITY_NAME__ = ${safeJsonEmbed(opts.entityName || '')}; window.__CTC_ENTITY_TYPE__ = ${safeJsonEmbed(opts.entityType || '')};</script>
 
     <script src="${escapeHtml(opts.sdkUrl)}"></script>
     <script>

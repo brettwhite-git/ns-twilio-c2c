@@ -24,5 +24,11 @@
             <recordtype>LEAD</recordtype>
             <allroles>T</allroles>
         </scriptdeployment>
+        <scriptdeployment scriptid="customdeploy_ctc_ue_phone_button_prsp">
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <recordtype>PROSPECT</recordtype>
+            <allroles>T</allroles>
+        </scriptdeployment>
     </scriptdeployments>
 </usereventscript>

@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_workspace_queries'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, workspaceQueries) => {
 
     const loadConfig = ctcConfig.loadConfig;
     const buildAuthHeader = ctcConfig.buildAuthHeader;
@@ -32,20 +32,22 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     };
 
     /**
-     * POST handler — routes to token generation, call logging, or transcript check.
+     * POST handler — routes to token generation, call logging, transcript check,
+     * entity search, workspace data fetches, or proposed-task review actions.
      * @param {Object} requestBody
      * @returns {Object}
      */
     const post = (requestBody) => {
         const body = requestBody || {};
 
-        if (body.action === 'logCall') {
-            return logCall(body);
-        }
-
-        if (body.action === 'checkTranscript') {
-            return checkTranscript(body);
-        }
+        if (body.action === 'logCall')              return logCall(body);
+        if (body.action === 'checkTranscript')      return checkTranscript(body);
+        if (body.action === 'searchEntities')       return searchEntities(body);
+        if (body.action === 'getWorkspaceHistory')  return getWorkspaceHistory(body);
+        if (body.action === 'getWorkspaceTasks')    return getWorkspaceTasks(body);
+        if (body.action === 'approveProposedTask')  return approveProposedTask(body);
+        if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
+        if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
 
         return generateToken(body);
     };
@@ -228,7 +230,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 accountSid: config.accountSid,
                 transcriptText: transcriptText,
                 analysis: analysis,
-                includeBrief: false,
+                includeBrief: true,
                 includeDuration: false
             });
             phoneCall.save();
@@ -239,6 +241,421 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         } catch (e) {
             log.error({ title: 'CTC Check Transcript Failed', details: e.message || e });
             return { error: 'Transcript check failed' };
+        }
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Phase 2 — Workspace data + entity search + proposed-task review actions
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    const ENTITY_SEARCH_MAX_PER_TYPE = 8;
+
+    /**
+     * searchEntities — typeahead lookup across Customer / Contact / Lead / Prospect.
+     * Used by the dashboard-mode softphone (no preset entityId) to let the rep
+     * type a name and pick a target before dialing.
+     * @param {Object} body
+     * @param {string} body.q - search term (min 2 chars)
+     * @returns {Object} { results: [{ id, name, type, phone }] } or { error }
+     */
+    const searchEntities = (body) => {
+        try {
+            const q = String(body.q || '').trim();
+            if (q.length < 2) return { results: [] };
+
+            const out = [];
+
+            // Customer + Prospect — companyname or entityid or phone
+            ['customer', 'prospect'].forEach((type) => {
+                try {
+                    const res = search.create({
+                        type: type,
+                        filters: [[
+                            ['companyname', 'contains', q], 'OR',
+                            ['entityid',    'contains', q], 'OR',
+                            ['phone',       'contains', q]
+                        ]],
+                        columns: ['entityid', 'companyname', 'phone']
+                    }).run().getRange({ start: 0, end: ENTITY_SEARCH_MAX_PER_TYPE });
+
+                    res.forEach((r) => {
+                        out.push({
+                            id: r.id,
+                            name: r.getValue('companyname') || r.getValue('entityid') || '',
+                            type: type,
+                            phone: r.getValue('phone') || ''
+                        });
+                    });
+                } catch (e) {
+                    log.error({ title: `CTC searchEntities ${type} failed`, details: e.message || e });
+                }
+            });
+
+            // Contact — firstname/lastname or entityid or phone
+            try {
+                const res = search.create({
+                    type: search.Type.CONTACT,
+                    filters: [[
+                        ['firstname', 'contains', q], 'OR',
+                        ['lastname',  'contains', q], 'OR',
+                        ['entityid',  'contains', q], 'OR',
+                        ['phone',     'contains', q]
+                    ]],
+                    columns: ['firstname', 'lastname', 'entityid', 'phone', 'company']
+                }).run().getRange({ start: 0, end: ENTITY_SEARCH_MAX_PER_TYPE });
+
+                res.forEach((r) => {
+                    const fn = r.getValue('firstname') || '';
+                    const ln = r.getValue('lastname') || '';
+                    const fullName = (fn + ' ' + ln).trim() || r.getValue('entityid') || '';
+                    out.push({
+                        id: r.id,
+                        name: fullName,
+                        type: 'contact',
+                        phone: r.getValue('phone') || ''
+                    });
+                });
+            } catch (e) {
+                log.error({ title: 'CTC searchEntities contact failed', details: e.message || e });
+            }
+
+            // Lead — companyname or entityid or phone
+            try {
+                const res = search.create({
+                    type: search.Type.LEAD,
+                    filters: [[
+                        ['companyname', 'contains', q], 'OR',
+                        ['entityid',    'contains', q], 'OR',
+                        ['phone',       'contains', q]
+                    ]],
+                    columns: ['entityid', 'companyname', 'phone']
+                }).run().getRange({ start: 0, end: ENTITY_SEARCH_MAX_PER_TYPE });
+
+                res.forEach((r) => {
+                    out.push({
+                        id: r.id,
+                        name: r.getValue('companyname') || r.getValue('entityid') || '',
+                        type: 'lead',
+                        phone: r.getValue('phone') || ''
+                    });
+                });
+            } catch (e) {
+                log.error({ title: 'CTC searchEntities lead failed', details: e.message || e });
+            }
+
+            // Entries with no phone aren't dialable — filter them
+            return { results: out.filter((row) => row.phone) };
+        } catch (e) {
+            log.error({ title: 'CTC searchEntities Failed', details: e.message || e });
+            return { error: 'Entity search failed' };
+        }
+    };
+
+    /**
+     * getWorkspaceHistory — fetch the current user's recent CTC-tracked Phone Calls.
+     * Used by the Workspace Call History tab AND the Portlet Today's Calls tab
+     * (with limit=10 + same-day filter applied client-side or via params).
+     *
+     * @param {Object} body
+     * @param {Object} [body.filters]
+     * @param {string} [body.filters.dateFrom]    - YYYY-MM-DD inclusive
+     * @param {string} [body.filters.dateTo]      - YYYY-MM-DD inclusive
+     * @param {number} [body.filters.satMin]      - min satisfaction score
+     * @param {string} [body.filters.status]      - call status filter (e.g. 'Transcribed')
+     * @param {boolean} [body.todayOnly]          - shortcut: filter to today only
+     * @param {number} [body.limit=30]            - max rows to return
+     * @returns {Object} { rows: [...], total } or { error }
+     */
+    const getWorkspaceHistory = (body) => {
+        return workspaceQueries.loadHistoryRows({
+            userId: runtime.getCurrentUser().id,
+            filters: body.filters,
+            todayOnly: !!body.todayOnly,
+            dateRange: body.dateRange,
+            limit: body.limit
+        });
+    };
+
+    /**
+     * getWorkspaceTasks — fetch proposed_task rows for the current user, grouped by source call.
+     * Used by the Workspace AI Tasks tab AND the Portlet Pending Tasks tab.
+     *
+     * @param {Object} body
+     * @param {string} [body.tab='pending']   - 'pending' | 'awaiting' | 'completed' | 'rejected' | 'all'
+     * @param {string} [body.phoneCallId]     - optional scope to a single source call
+     * @param {number} [body.limit=50]
+     * @returns {Object} { groups: [{ call, tasks: [...] }], totalTasks } or { error }
+     */
+    const getWorkspaceTasks = (body) => {
+        return workspaceQueries.loadTaskGroups({
+            userId: runtime.getCurrentUser().id,
+            tab: body.tab,
+            phoneCallId: body.phoneCallId,
+            limit: body.limit
+        });
+    };
+
+    /**
+     * approveProposedTask — materialize a proposed_task as a native NetSuite Task,
+     * then mark the proposed_task as Approved with audit trail.
+     *
+     * @param {Object} body
+     * @param {string} body.taskId           - proposed_task internal ID
+     * @param {Object} [body.edits]          - optional rep edits before approval
+     * @param {string} [body.edits.text]
+     * @param {string} [body.edits.due]      - YYYY-MM-DD
+     * @param {string} [body.edits.assignee] - employee internal ID
+     * @returns {Object} { ok: true, nativeTaskId } or { error }
+     */
+    /**
+     * Parse YYYY-MM-DD into a local-tz Date (avoids `new Date('2026-05-16')` parsing as UTC
+     * midnight, which shifts the date back one day in negative-offset timezones).
+     */
+    const parseDateLocal = (str) => {
+        if (!str) return null;
+        const s = String(str).trim();
+        if (!s) return null;
+        const m = s.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})/);
+        if (m) return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+        const d = new Date(s);
+        return isNaN(d.getTime()) ? null : d;
+    };
+
+    /**
+     * Verify the current user is the salesrep on the customer of the source phone call,
+     * or is an admin. Returns true when authorized, false otherwise.
+     *
+     * Uses the customer.salesrep ownership model to MATCH the filter semantics in
+     * lib/ctc_workspace_queries.js (rep sees calls/tasks where customer.salesrep = me).
+     * Previously checked phonecall.assigned, which was inconsistent with the filter —
+     * the rep could see a task but not approve it.
+     */
+    /**
+     * Look up the salesrep on the customer of the source phone call.
+     * Returns the salesrep's internal ID (string) or '' if not resolvable.
+     * Shared by isAuthorizedForProposedTask + approveProposedTask so the
+     * "my calls = me" filter semantics match the assignee on the materialized Task.
+     */
+    const getCustomerSalesRepForCall = (sourceCallId) => {
+        if (!sourceCallId) return '';
+        try {
+            const callLookup = search.lookupFields({
+                type: search.Type.PHONE_CALL,
+                id: sourceCallId,
+                columns: ['company']
+            });
+            const companyArr = callLookup && callLookup.company;
+            if (!Array.isArray(companyArr) || !companyArr.length || !companyArr[0].value) {
+                return '';
+            }
+            const companyLookup = search.lookupFields({
+                type: search.Type.CUSTOMER,
+                id: companyArr[0].value,
+                columns: ['salesrep']
+            });
+            const srepArr = companyLookup && companyLookup.salesrep;
+            if (Array.isArray(srepArr) && srepArr.length && srepArr[0].value) {
+                return String(srepArr[0].value);
+            }
+        } catch (e) {
+            log.error({ title: 'CTC salesrep lookup failed', details: e.message || e });
+        }
+        return '';
+    };
+
+    const isAuthorizedForProposedTask = (sourceCallId, userId) => {
+        // Admin role ID in NetSuite is 3
+        try {
+            const roleId = String(runtime.getCurrentUser().role);
+            if (roleId === '3') return true;
+        } catch (e) {
+            // continue with salesrep check
+        }
+        const srepId = getCustomerSalesRepForCall(sourceCallId);
+        return srepId !== '' && srepId === String(userId);
+    };
+
+    const approveProposedTask = (body) => {
+        try {
+            if (!body.taskId) return { error: 'taskId required' };
+            const userId = runtime.getCurrentUser().id;
+
+            const pt = record.load({
+                type: 'customrecord_ctc_proposed_task',
+                id: body.taskId,
+                isDynamic: false
+            });
+
+            // Idempotency: only Pending tasks can be approved. Re-clicks (stale UI,
+            // double-submit) must not create duplicate native Tasks.
+            const currentStatusText = pt.getText
+                ? pt.getText({ fieldId: 'custrecord_ctc_pt_status' })
+                : '';
+            if (currentStatusText && currentStatusText !== 'Pending') {
+                return { error: 'already_actioned', currentStatus: currentStatusText };
+            }
+
+            // Belt-and-suspenders idempotency: if a native Task was already linked
+            // (e.g., status save failed previously leaving created_task populated),
+            // return the existing Task ID without creating another. Prevents the
+            // duplicate-Task explosion that motivated this fix.
+            const existingTaskId = pt.getValue({ fieldId: 'custrecord_ctc_pt_created_task' });
+            if (existingTaskId) {
+                return { ok: true, nativeTaskId: existingTaskId, idempotent: true };
+            }
+
+            const sourceCallId = pt.getValue({ fieldId: 'custrecord_ctc_pt_phone_call' });
+
+            // Authorization: only the rep assigned to the source call (or admin) can approve.
+            if (!isAuthorizedForProposedTask(sourceCallId, userId)) {
+                return { error: 'forbidden' };
+            }
+
+            // Apply edits if any (mutate proposed_task so audit trail captures the text the rep approved)
+            const edits = body.edits || {};
+            const editsText = (edits.text != null && String(edits.text).trim()) || '';
+            const editsDue = parseDateLocal(edits.due);
+            const editsAssignee = (edits.assignee != null && String(edits.assignee).trim()) || '';
+
+            const finalText = editsText || pt.getValue({ fieldId: 'custrecord_ctc_pt_text' });
+            const finalDueValue = editsDue || pt.getValue({ fieldId: 'custrecord_ctc_pt_proposed_due' });
+            // Assignee priority:
+            //   1. Explicit edit from the rep (future inline-edit UI)
+            //   2. The customer's salesrep — same source of truth as the "my tasks = me" filter
+            //   3. The current user (fallback for orphan calls with no company / no salesrep)
+            // We intentionally ignore the LLM-suggested `custrecord_ctc_pt_proposed_assignee`:
+            // it's a free-text name guess and was producing wrong assignments (e.g. Kathryn Glass
+            // instead of the customer's actual salesrep).
+            const customerSalesRepId = getCustomerSalesRepForCall(sourceCallId);
+            const finalAssignee = editsAssignee || customerSalesRepId || userId;
+
+            if (editsText)     pt.setValue({ fieldId: 'custrecord_ctc_pt_text', value: finalText });
+            if (editsDue)      pt.setValue({ fieldId: 'custrecord_ctc_pt_proposed_due', value: finalDueValue });
+            if (editsAssignee) pt.setValue({ fieldId: 'custrecord_ctc_pt_proposed_assignee', value: finalAssignee });
+
+            // Look up source call's company + contact for the Task's entity links
+            let sourceCompany = '';
+            let sourceContact = '';
+            if (sourceCallId) {
+                try {
+                    const callLookup = search.lookupFields({
+                        type: search.Type.PHONE_CALL,
+                        id: sourceCallId,
+                        columns: ['company', 'contact']
+                    });
+                    if (Array.isArray(callLookup.company) && callLookup.company.length) {
+                        sourceCompany = callLookup.company[0].value || '';
+                    }
+                    if (Array.isArray(callLookup.contact) && callLookup.contact.length) {
+                        sourceContact = callLookup.contact[0].value || '';
+                    }
+                } catch (e) {
+                    log.error({ title: 'CTC approveProposedTask call lookup failed', details: e.message || e });
+                }
+            }
+
+            // Materialize native Task
+            const task = record.create({ type: record.Type.TASK, isDynamic: true });
+            task.setValue({ fieldId: 'title', value: 'AI: ' + String(finalText).substring(0, 80) });
+            task.setValue({ fieldId: 'message', value: finalText });
+            if (sourceCompany) task.setValue({ fieldId: 'company', value: sourceCompany });
+            if (sourceContact) task.setValue({ fieldId: 'contact', value: sourceContact });
+            if (finalAssignee) task.setValue({ fieldId: 'assigned', value: finalAssignee });
+            if (finalDueValue) task.setValue({ fieldId: 'duedate', value: finalDueValue });
+            const nativeTaskId = task.save({ ignoreMandatoryFields: true });
+
+            // Mark proposed_task approved + link to materialized Task
+            pt.setText({ fieldId: 'custrecord_ctc_pt_status', text: 'Approved' });
+            pt.setValue({ fieldId: 'custrecord_ctc_pt_created_task', value: nativeTaskId });
+            pt.setValue({ fieldId: 'custrecord_ctc_pt_reviewer', value: userId });
+            pt.setValue({ fieldId: 'custrecord_ctc_pt_reviewed_date', value: new Date() });
+            pt.save({ ignoreMandatoryFields: true });
+
+            return { ok: true, nativeTaskId: nativeTaskId };
+        } catch (e) {
+            log.error({ title: 'CTC approveProposedTask Failed', details: (e && e.message) || String(e) });
+            // Return generic error to client — internal NetSuite messages can leak field IDs.
+            // Real details live in the Script Execution Log.
+            return { error: 'Approval failed' };
+        }
+    };
+
+    /**
+     * bulkApproveProposedTasks — approve multiple proposed_tasks in one round-trip.
+     * Reuses approveProposedTask per-task so ownership + idempotency + SDF-correct
+     * field writes all apply uniformly. Per-task failures don't abort the batch.
+     *
+     * @param {Object} body
+     * @param {Array<string>} body.taskIds — proposed_task IDs to approve (max 25 per batch)
+     * @returns {Object} { ok, approved, failed, results } or { error }
+     */
+    const bulkApproveProposedTasks = (body) => {
+        try {
+            const taskIds = Array.isArray(body.taskIds) ? body.taskIds : [];
+            if (!taskIds.length) return { error: 'taskIds required' };
+            // Cap to stay well under RESTlet governance — each approve costs roughly
+            // 30 units (load + Task create + save).
+            if (taskIds.length > 25) return { error: 'batch_too_large', limit: 25 };
+
+            const results = taskIds.map((id) => {
+                try {
+                    const r = approveProposedTask({ taskId: id });
+                    return Object.assign({ taskId: id }, r);
+                } catch (e) {
+                    return { taskId: id, error: (e && e.message) || String(e) };
+                }
+            });
+            const approved = results.filter((r) => r.ok).length;
+            const failed = results.filter((r) => r.error).length;
+            return { ok: failed === 0, approved: approved, failed: failed, results: results };
+        } catch (e) {
+            log.error({ title: 'CTC bulkApproveProposedTasks Failed', details: (e && e.message) || String(e) });
+            return { error: 'Bulk approval failed' };
+        }
+    };
+
+    /**
+     * rejectProposedTask — mark a proposed_task as Rejected. No Task record created.
+     * Kept in the system (not deleted) for AI-quality auditing.
+     *
+     * @param {Object} body
+     * @param {string} body.taskId
+     * @returns {Object} { ok: true } or { error }
+     */
+    const rejectProposedTask = (body) => {
+        try {
+            if (!body.taskId) return { error: 'taskId required' };
+            const userId = runtime.getCurrentUser().id;
+
+            // Load the record (instead of submitFields) so we can use setText to coerce
+            // the SELECT list value text→ID, plus enforce ownership + idempotency.
+            const pt = record.load({
+                type: 'customrecord_ctc_proposed_task',
+                id: body.taskId,
+                isDynamic: false
+            });
+
+            const currentStatusText = pt.getText
+                ? pt.getText({ fieldId: 'custrecord_ctc_pt_status' })
+                : '';
+            if (currentStatusText && currentStatusText !== 'Pending') {
+                return { error: 'already_actioned', currentStatus: currentStatusText };
+            }
+
+            const sourceCallId = pt.getValue({ fieldId: 'custrecord_ctc_pt_phone_call' });
+            if (!isAuthorizedForProposedTask(sourceCallId, userId)) {
+                return { error: 'forbidden' };
+            }
+
+            pt.setText({ fieldId: 'custrecord_ctc_pt_status', text: 'Rejected' });
+            pt.setValue({ fieldId: 'custrecord_ctc_pt_reviewer', value: userId });
+            pt.setValue({ fieldId: 'custrecord_ctc_pt_reviewed_date', value: new Date() });
+            pt.save({ ignoreMandatoryFields: true });
+
+            return { ok: true };
+        } catch (e) {
+            log.error({ title: 'CTC rejectProposedTask Failed', details: (e && e.message) || String(e) });
+            return { error: 'Rejection failed' };
         }
     };
 

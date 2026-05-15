@@ -1,0 +1,20 @@
+<customlist scriptid="customlist_ctc_pt_status">
+    <name>CTC Proposed Task Status</name>
+    <description>Workflow state for AI-extracted proposed tasks: Pending (default), Approved (materialized into Task), Rejected (declined by rep).</description>
+    <isinactive>F</isinactive>
+    <isordered>T</isordered>
+    <customvalues>
+        <customvalue scriptid="val_ctc_pt_pending">
+            <value>Pending</value>
+            <isinactive>F</isinactive>
+        </customvalue>
+        <customvalue scriptid="val_ctc_pt_approved">
+            <value>Approved</value>
+            <isinactive>F</isinactive>
+        </customvalue>
+        <customvalue scriptid="val_ctc_pt_rejected">
+            <value>Rejected</value>
+            <isinactive>F</isinactive>
+        </customvalue>
+    </customvalues>
+</customlist>

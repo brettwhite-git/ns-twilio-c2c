@@ -38,5 +38,14 @@ define([], () => {
             .replace(/\r/g, '\\r');
     };
 
-    return { escapeHtml, escapeJs };
+    /**
+     * JSON.stringify wrapped to be safe inside <script> blocks — escapes `<` to its
+     * unicode escape so an entity-name string containing `</script>` cannot terminate
+     * the inline script tag and inject executable code.
+     * @param {*} val
+     * @returns {string} JSON string safe to inline inside a <script> ... </script> block
+     */
+    const safeJsonEmbed = (val) => JSON.stringify(val).replace(/</g, '\\u003c');
+
+    return { escapeHtml, escapeJs, safeJsonEmbed };
 });

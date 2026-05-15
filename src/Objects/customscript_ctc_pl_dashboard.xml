@@ -1,0 +1,21 @@
+<portlet scriptid="customscript_ctc_pl_dashboard">
+    <name>CTC Sales Dashboard</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_pl_dashboard.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <isinactive>F</isinactive>
+    <portlettype>HTML</portlettype>
+    <description>Home-dashboard launcher for Click-to-Call. Headline call button + today's call stats, tabs for Today's Calls and Pending AI Tasks, inline approve/reject, and drill-in to Workspace.</description>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_pl_dashboard">
+            <title>CTC Sales Dashboard</title>
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <allroles>T</allroles>
+            <!-- No runasrole — least-privilege. Portlet runs as the viewing user.
+                 customrecord_ctc_proposed_task is accesstype=NONENEEDED so any role
+                 can read it. The iframe-discard fix made <runasrole> unnecessary. -->
+        </scriptdeployment>
+    </scriptdeployments>
+</portlet>

@@ -6,7 +6,7 @@
  * and the RESTlet checkTranscript action.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/llm', 'N/log'], (https, llm, log) => {
+define(['N/https', 'N/llm', 'N/log', 'N/record'], (https, llm, log, record) => {
 
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
@@ -42,7 +42,7 @@ define(['N/https', 'N/llm', 'N/log'], (https, llm, log) => {
 
 {
   "title": "Brief headline (NOT a full sentence), max 60 chars (e.g. 'Product demo — strong buying signals', 'Pricing objection — needs manager approval')",
-  "brief": "One-sentence summary, max 120 chars, suitable for a list view column",
+  "brief": "Action-oriented one-liner under 100 chars — what happened and what's next. Examples: 'Demo went well, sending pricing Tuesday', 'Quote rejected on price, no follow-up', 'Tech issue — escalated to support'. Avoid generic phrasing like 'Discussed product'.",
   "summary": "2-3 sentence summary of call purpose, key points, and outcome",
   "satisfaction_score": <integer 1-10>,
   "tone_keywords": ["keyword1", "keyword2", "keyword3"],
@@ -155,9 +155,40 @@ TRANSCRIPT:
     };
 
     /**
+     * Spawn one customrecord_ctc_proposed_task per non-empty action item.
+     * Called from inside writePhoneCallEnrichmentFields so both LLM-callers
+     * (RESTlet checkTranscript + Scheduled Script poll) get this for free.
+     * Failures here never block enrichment — wrapped in try/catch at the call site.
+     *
+     * @param {string|number} phoneCallId - the source Phone Call internal ID
+     * @param {Object} analysis - LLM output (expects analysis.action_items[] array)
+     * @returns {Array<number>} IDs of created proposed_task records
+     */
+    const createProposedTasksFromAnalysis = (phoneCallId, analysis) => {
+        const items = (analysis && analysis.action_items) || [];
+        if (!Array.isArray(items) || !items.length) return [];
+        const due = new Date();
+        due.setDate(due.getDate() + 3);
+        // Filter for non-empty STRING entries — guards against LLM returning
+        // object-shaped items like {task:'x', due:'y'} which String()'d become '[object Object]'.
+        return items.filter((t) => typeof t === 'string' && t.trim()).map((text) => {
+            const rec = record.create({ type: 'customrecord_ctc_proposed_task' });
+            rec.setValue({ fieldId: 'custrecord_ctc_pt_phone_call', value: phoneCallId });
+            rec.setValue({ fieldId: 'custrecord_ctc_pt_text', value: String(text).trim() });
+            rec.setText({ fieldId: 'custrecord_ctc_pt_status', text: 'Pending' });
+            rec.setValue({ fieldId: 'custrecord_ctc_pt_proposed_due', value: due });
+            return rec.save({ ignoreMandatoryFields: true });
+        });
+    };
+
+    /**
      * Write enrichment fields onto a Phone Call record. Single source of truth so
      * the RESTlet checkTranscript action and the Scheduled Script retry both end
      * up with identical field sets. Caller is responsible for record.load() and .save().
+     *
+     * Also spawns customrecord_ctc_proposed_task rows from analysis.action_items
+     * (unless opts.createProposedTasks === false). Failures in task creation never
+     * block the core enrichment write.
      *
      * @param {Object} phoneCallRec - record object already loaded via record.load()
      * @param {Object} opts
@@ -170,6 +201,9 @@ TRANSCRIPT:
      *                                              (Scheduled Script path does, RESTlet path historically didn't)
      * @param {boolean} [opts.includeDuration=false] - whether to set custevent_ctc_duration
      *                                                 from recording.duration (Scheduled Script path does)
+     * @param {boolean} [opts.createProposedTasks=true] - whether to spawn proposed_task rows
+     *                                                   from analysis.action_items
+     * @param {string|number} [opts.phoneCallId] - fallback if phoneCallRec.id is not available
      */
     const writePhoneCallEnrichmentFields = (phoneCallRec, opts) => {
         const recording = opts.recording || {};
@@ -198,6 +232,17 @@ TRANSCRIPT:
         }
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_processed', value: true });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_call_status', value: CALL_STATUS.TRANSCRIBED });
+
+        if (opts.createProposedTasks !== false) {
+            try {
+                const callId = phoneCallRec.id || opts.phoneCallId;
+                if (callId) {
+                    createProposedTasksFromAnalysis(callId, analysis);
+                }
+            } catch (e) {
+                log.error({ title: 'CTC Proposed Task Creation Failed', details: e.toString() });
+            }
+        }
     };
 
     const deleteRecording = (accountSid, recordingSid, authHeader) => {
@@ -228,6 +273,7 @@ TRANSCRIPT:
         fetchSentences,
         formatTranscript,
         analyzeTranscript,
+        createProposedTasksFromAnalysis,
         writePhoneCallEnrichmentFields,
         deleteRecording
     };
