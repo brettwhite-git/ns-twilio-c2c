@@ -8,8 +8,12 @@
  */
 define([], () => {
 
+    // Phase 1 (Iteration B): popup is locked to 380 × 640 to match the
+    // mobile-emulator wireframe. Resize disabled so the popup never grows
+    // between tab states (Dial / Search / Recents) — internal scroll absorbs
+    // overflow inside the .phone-scroll zone.
     const SOFTPHONE_POPUP_OPTIONS =
-        'width=400,height=820,resizable=yes,scrollbars=yes,toolbar=no,menubar=no,location=no';
+        'width=380,height=640,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no';
 
     const SOFTPHONE_POPUP_NAME = 'ctc_softphone';
 

@@ -25,11 +25,16 @@
  * Reference: /Users/brettwhite/Projects/opportunity-kanban (proven pattern).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_queries'],
-       (url, log, runtime, ctcHtml, workspaceQueries) => {
+define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_entity'],
+       (url, log, runtime, ctcHtml, workspaceQueries, ctcEntity) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
+    // Iteration B Phase 1: popup dimensions live in ctc_entity.js so the
+    // portlet, the UE phone button, and any future launcher all open the
+    // softphone at the same 380 × 640 emulator size.
+    const POPUP_OPTS = ctcEntity.SOFTPHONE_POPUP_OPTIONS;
+    const POPUP_NAME = ctcEntity.SOFTPHONE_POPUP_NAME;
 
     /**
      * Portlet entry point.
@@ -97,7 +102,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
 
     const buildPlaceCallOnclick = (softphoneUrl) => {
         if (!softphoneUrl) return '';
-        return "window.open('" + escapeJs(softphoneUrl) + "','ctc_softphone','width=400,height=820')";
+        return "window.open('" + escapeJs(softphoneUrl) + "','" + POPUP_NAME + "','" + POPUP_OPTS + "')";
     };
 
     const buildRedialOnclick = (softphoneUrl, phone, entityId) => {
@@ -113,7 +118,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
         }
         const sep = softphoneUrl.indexOf('?') >= 0 ? '&' : '?';
         const u = parts.length ? softphoneUrl + sep + parts.join('&') : softphoneUrl;
-        return "window.open('" + escapeJs(u) + "','ctc_softphone','width=400,height=820')";
+        return "window.open('" + escapeJs(u) + "','" + POPUP_NAME + "','" + POPUP_OPTS + "')";
     };
 
     const buildTabOnclick = (tabName) => {
@@ -304,7 +309,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
                         "if(r.companyId){parts.push('entityId='+encodeURIComponent(r.companyId));parts.push('entityType=customer')}" +
                         "var sfu='" + escapeJs(softphoneUrl || '') + "';" +
                         "var u=parts.length?(sfu+(sfu.indexOf('?')>=0?'&':'?')+parts.join('&')):sfu;" +
-                        "rd.onclick=function(){window.open(u,'ctc_softphone','width=400,height=820')};" +
+                        "rd.onclick=function(){window.open(u,'" + POPUP_NAME + "','" + POPUP_OPTS + "')};" +
                     "}else{" +
                         "rd.disabled=true;rd.title='Softphone unavailable';" +
                     "}" +

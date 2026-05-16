@@ -206,9 +206,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         }
         html, body {
             width: 100%;
-            min-height: 100vh;
+            height: 100vh;
             margin: 0;
             padding: 0;
+            overflow: hidden;
         }
         body {
             font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -218,21 +219,115 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             display: flex;
             flex-direction: column;
         }
+        /* Phase 1 (Iteration B): popup locked to 380 × 640 emulator dimensions.
+           Window-open sets the outer chrome; this caps internal layout. */
         .phone {
             width: 100%;
+            height: 100%;
             display: flex;
             flex-direction: column;
-            flex: 1;
+            overflow: hidden;
         }
         .phone-display {
             background: linear-gradient(180deg, var(--phone-bg-1) 0%, var(--phone-bg-2) 100%);
             color: var(--phone-text);
-            padding: 16px 22px 18px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
+        /* Three-zone flex shell — phase 1 of iteration B.
+           - phone-top:    status pill + tabs + gear (never scrolls)
+           - phone-scroll: all per-state content (overflow-y auto absorbs growth)
+           - phone-footer: primary action buttons (always anchored to bottom) */
+        .phone-top {
+            flex-shrink: 0;
+            padding: 14px 22px 0;
+            position: relative;
             display: flex;
             flex-direction: column;
             align-items: center;
             text-align: center;
         }
+        .phone-scroll {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            padding: 12px 22px 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.10) transparent;
+        }
+        .phone-scroll::-webkit-scrollbar { width: 5px; }
+        .phone-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 3px; }
+        .phone-footer {
+            flex-shrink: 0;
+            padding: 10px 22px 14px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            background: rgba(0, 0, 0, 0.12);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        /* Tab strip — Dial active by default; Search & Recents inert in phase 1. */
+        .mode-tabs {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            background: var(--phone-card);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 999px;
+            padding: 2px;
+            gap: 2px;
+            width: 100%;
+            margin-top: 8px;
+        }
+        .mode-tab {
+            padding: 6px 6px;
+            text-align: center;
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--phone-text-muted);
+            border: none;
+            background: transparent;
+            border-radius: 999px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            letter-spacing: 0.02em;
+            font-family: inherit;
+        }
+        .mode-tab .tab-icon { width: 12px; height: 12px; }
+        .mode-tab.active {
+            background: rgba(255, 255, 255, 0.16);
+            color: var(--phone-text);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+        }
+        .mode-tab:disabled { cursor: not-allowed; opacity: 0.55; }
+        /* Audio-settings gear — inert in phase 1, wired in phase 4. */
+        .audio-gear {
+            position: absolute;
+            top: 12px;
+            right: 14px;
+            width: 24px;
+            height: 24px;
+            background: var(--phone-card);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 50%;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--phone-text-muted);
+            padding: 0;
+        }
+        .audio-gear:hover { background: rgba(255, 255, 255, 0.10); color: var(--phone-text); }
+        .audio-gear svg { width: 13px; height: 13px; }
         .status-pill {
             font-size: 12px;
             color: var(--phone-text-muted);
@@ -552,11 +647,17 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             word-break: break-word;
             display: none;
         }
+        /* Phase 1: contact-panel is now a fixed-shrink strip beneath the
+           dark phone-display (the popup is locked to 640 px so flex:1 here
+           would fight phone-display for remaining space). Phases 2+ may
+           absorb this panel into the dark surface entirely. */
         .contact-panel {
             background: var(--panel-bg);
             color: var(--panel-text);
             padding: 14px 18px 16px;
-            flex: 1;
+            flex-shrink: 0;
+            max-height: 160px;
+            overflow-y: auto;
             display: flex;
             flex-direction: column;
         }
@@ -629,7 +730,30 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
 <body>
 <div class="phone">
     <div class="phone-display">
-        <div class="status-pill" id="status">Initializing&hellip;</div>
+        <!-- ─── phone-top: status pill + tabs + audio gear (fixed) ─── -->
+        <div class="phone-top">
+            <button class="audio-gear" id="audioGear" type="button" title="Audio settings (coming soon)" aria-label="Audio settings" disabled>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </button>
+            <div class="status-pill" id="status">Initializing&hellip;</div>
+            <div class="mode-tabs" role="tablist" aria-label="Softphone modes">
+                <button class="mode-tab active" id="tabDial" type="button" role="tab" aria-selected="true">
+                    <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="19" cy="6" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="19" cy="18" r="1.6"/></svg>
+                    Dial
+                </button>
+                <button class="mode-tab" id="tabSearch" type="button" role="tab" aria-selected="false" disabled title="Search (coming soon)">
+                    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
+                    Search
+                </button>
+                <button class="mode-tab" id="tabRecents" type="button" role="tab" aria-selected="false" disabled title="Recents (coming soon)">
+                    <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg>
+                    Recents
+                </button>
+            </div>
+        </div>
+
+        <!-- ─── phone-scroll: per-state content (overflow absorbs growth) ─── -->
+        <div class="phone-scroll">
 
         <div class="avatar" aria-hidden="true">
             <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -677,7 +801,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             <button class="dial-key" data-digit="0" type="button"><span class="digit">0</span><span class="letters">+</span></button>
             <button class="dial-key" data-digit="#" type="button"><span class="digit">#</span><span class="letters">&nbsp;</span></button>
         </div>
+        </div><!-- /phone-scroll -->
 
+        <!-- ─── phone-footer: primary action row (fixed to bottom) ─── -->
+        <div class="phone-footer">
         <div class="actions" id="idleActions">
             <div aria-hidden="true"></div>
             <div class="action-group">
@@ -711,6 +838,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
 
         <div class="error-box" id="errorBox"></div>
         <div class="log-status" id="logStatus"></div>
+        </div><!-- /phone-footer -->
     </div>
 
     <div class="contact-panel">
