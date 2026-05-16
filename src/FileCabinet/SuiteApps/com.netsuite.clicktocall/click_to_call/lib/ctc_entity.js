@@ -15,7 +15,12 @@ define([], () => {
     const SOFTPHONE_POPUP_OPTIONS =
         'width=380,height=640,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no';
 
-    const SOFTPHONE_POPUP_NAME = 'ctc_softphone';
+    // Versioned popup name. window.open(url, name, features) silently
+    // ignores the features string when a window with `name` already exists
+    // and just loads the new URL into the stale chrome. Bump the suffix
+    // every time SOFTPHONE_POPUP_OPTIONS dimensions change so reps don't
+    // see a stale-sized popup after a deploy.
+    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v2';
 
     /**
      * Resolve a display name from a NetSuite record by type.

@@ -259,11 +259,16 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             flex-direction: column;
             align-items: center;
             text-align: center;
-            scrollbar-width: thin;
-            scrollbar-color: rgba(255,255,255,0.10) transparent;
+            /* Phase 1.5: prominent scrollbar so reps discover the scroll
+               affordance. Previous rgba(255,255,255,0.10) on dark navy was
+               effectively invisible — users assumed clipped content was
+               broken rather than scrollable. */
+            scrollbar-width: auto;
+            scrollbar-color: rgba(255,255,255,0.32) transparent;
         }
-        .phone-scroll::-webkit-scrollbar { width: 5px; }
-        .phone-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.10); border-radius: 3px; }
+        .phone-scroll::-webkit-scrollbar { width: 8px; }
+        .phone-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.32); border-radius: 4px; }
+        .phone-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.48); }
         .phone-footer {
             flex-shrink: 0;
             padding: 10px 22px 14px;
@@ -462,7 +467,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         }
         .timer.visible { display: block; }
         .origin-line {
-            display: inline-flex;
+            /* Phase 1.5: hidden by default. The "from caller-ID" affordance
+               will be re-surfaced inside the audio-settings overlay in
+               Phase 4. Existing JS still updates textContent on token
+               fetch — that's harmless while the element is display:none. */
+            display: none;
             align-items: center;
             gap: 6px;
             font-size: 11px;
@@ -750,6 +759,21 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
                     Recents
                 </button>
             </div>
+
+            <!-- Phase 1.5: device-selectors moved into phone-top so the
+                 dialpad has the scroll viewport mostly to itself. Phase 4
+                 will replace this row with the audio-settings overlay
+                 launched from the gear icon above. -->
+            <div class="device-selectors" id="deviceSelectors">
+                <div class="device-row">
+                    <label for="inputDevice">Mic</label>
+                    <select id="inputDevice"><option value="">Loading…</option></select>
+                </div>
+                <div class="device-row" id="outputRow">
+                    <label for="outputDevice">Out</label>
+                    <select id="outputDevice"><option value="">Loading…</option></select>
+                </div>
+            </div>
         </div>
 
         <!-- ─── phone-scroll: per-state content (overflow absorbs growth) ─── -->
@@ -769,17 +793,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         <div class="timer" id="timer">00:00</div>
 
         <div class="origin-line" id="originLine">Outbound · from main line</div>
-
-        <div class="device-selectors" id="deviceSelectors">
-            <div class="device-row">
-                <label for="inputDevice">Mic</label>
-                <select id="inputDevice"><option value="">Loading…</option></select>
-            </div>
-            <div class="device-row" id="outputRow">
-                <label for="outputDevice">Out</label>
-                <select id="outputDevice"><option value="">Loading…</option></select>
-            </div>
-        </div>
 
         <hr class="phone-divider" id="phoneDivider">
 
