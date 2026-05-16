@@ -203,19 +203,26 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
     const buildCallRowHtml = (r, softphoneUrl) => {
         const time = escapeHtml(fmtTime(r.date) || '—');
         const companyId = encodeURIComponent(r.companyId || '');
+        const callId = encodeURIComponent(r.id || '');
         const companyName = escapeHtml(r.companyName || 'Unknown');
+        const entityType = escapeHtml(r.entityType || '—');
         const brief = escapeHtml(r.brief || '—');
         const briefAttr = escapeHtml(r.brief || '');
         const sat = r.satisfaction ? String(r.satisfaction) : '—';
         const dur = escapeHtml(fmtDuration(r.duration));
         const redialOnclick = buildRedialOnclick(softphoneUrl, r.phone, r.companyId);
+        // Standard NetSuite Phone Call record URL — the ctc_ue_transcript_viewer
+        // UE script adds the Call Intelligence (transcript + AI summary) panel.
+        const callRecordUrl = '/app/crm/calendar/call.nl?id=' + callId;
 
         return '<div class="ctc-pl-row">' +
             '<span class="ctc-pl-time">' + time + '</span>' +
+            '<span class="ctc-pl-type">' + entityType + '</span>' +
             '<a class="ctc-pl-company" href="/app/common/entity/custjob.nl?id=' + companyId + '">' + companyName + '</a>' +
             '<span class="ctc-pl-brief" title="' + briefAttr + '">' + brief + '</span>' +
             '<span class="' + satPillClass(r.satisfaction) + '">' + escapeHtml(sat) + '</span>' +
             '<span class="ctc-pl-dur">' + dur + '</span>' +
+            '<a class="ctc-pl-view-call" href="' + callRecordUrl + '" target="_blank" rel="noopener" title="Open Phone Call record (transcript + AI summary)">📋</a>' +
             (redialOnclick
                 ? '<button class="ctc-pl-redial" type="button" title="Call this contact" onclick="' + escapeHtml(redialOnclick) + '">☎</button>'
                 : '<span class="ctc-pl-redial-disabled" title="Softphone unavailable">☎</span>'
@@ -270,7 +277,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
                 "}" +
                 // Re-render column header + rows. Keep header parallel to initial render.
                 "var head=document.createElement('div');head.className='ctc-pl-colhead ctc-pl-colhead-calls';" +
-                "head.innerHTML='<span>Time</span><span>Company</span><span>AI Brief</span><span style=\\\"text-align:center\\\">Sat</span><span style=\\\"text-align:right\\\">Duration</span><span></span>';" +
+                "head.innerHTML='<span>Time</span><span>Type</span><span>Company</span><span>AI Brief</span><span style=\\\"text-align:center\\\">Sat</span><span style=\\\"text-align:right\\\">Duration</span><span></span><span></span>';" +
                 "container.appendChild(head);" +
                 "rows.forEach(function(r){" +
                     "var row=document.createElement('div');row.className='ctc-pl-row';" +
@@ -278,6 +285,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
                     "var d2=r.date?new Date(r.date):null;" +
                     "t.textContent=d2&&!isNaN(d2.getTime())?(d2.getHours()<10?'0':'')+d2.getHours()+':'+(d2.getMinutes()<10?'0':'')+d2.getMinutes():'';" +
                     "row.appendChild(t);" +
+                    "var ty=document.createElement('span');ty.className='ctc-pl-type';ty.textContent=r.entityType||'—';row.appendChild(ty);" +
                     "var a=document.createElement('a');a.className='ctc-pl-company';a.href='/app/common/entity/custjob.nl?id='+encodeURIComponent(r.companyId||'');a.textContent=r.companyName||'Unknown';row.appendChild(a);" +
                     "var b2=document.createElement('span');b2.className='ctc-pl-brief';b2.title=r.brief||'';b2.textContent=r.brief||'—';row.appendChild(b2);" +
                     "var sat=r.satisfaction;var pillCls='ctc-pl-pill ctc-pl-pill-none';if(sat>=7)pillCls='ctc-pl-pill ctc-pl-pill-high';else if(sat>=4)pillCls='ctc-pl-pill ctc-pl-pill-mid';else if(sat)pillCls='ctc-pl-pill ctc-pl-pill-low';" +
@@ -285,6 +293,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
                     "var du=document.createElement('span');du.className='ctc-pl-dur';" +
                     "var s=r.duration||0;du.textContent=s<60?(s+'s'):(Math.floor(s/60)+'m '+(s%60<10?'0':'')+(s%60)+'s');" +
                     "row.appendChild(du);" +
+                    "var vw=document.createElement('a');vw.className='ctc-pl-view-call';vw.href='/app/crm/calendar/call.nl?id='+encodeURIComponent(r.id||'');vw.target='_blank';vw.rel='noopener';vw.title='Open Phone Call record (transcript + AI summary)';vw.textContent='📋';row.appendChild(vw);" +
                     "var rd=document.createElement('button');rd.className='ctc-pl-redial';rd.type='button';rd.title='Call this contact';rd.textContent='☎';" +
                     // Closure-based onclick (NOT setAttribute string) so `r.phone` / `r.companyId`
                     // are captured by the function's scope at row-build time. Mirrors the
@@ -329,10 +338,12 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
     const buildCallsColumnHeaderHtml = () => {
         return '<div class="ctc-pl-colhead ctc-pl-colhead-calls">' +
             '<span>Time</span>' +
+            '<span>Type</span>' +
             '<span>Company</span>' +
             '<span>AI Brief</span>' +
             '<span style="text-align:center">Sat</span>' +
             '<span style="text-align:right">Duration</span>' +
+            '<span></span>' +
             '<span></span>' +
         '</div>';
     };
@@ -385,6 +396,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
             : '<span class="ctc-pl-colhead-check"></span>';
         return '<div class="ctc-pl-colhead ctc-pl-colhead-tasks">' +
             checkCell +
+            '<span>Type</span>' +
             '<span>Company</span>' +
             '<span>AI Action Item</span>' +
             '<span>Due</span>' +
@@ -457,8 +469,11 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
         const rejectOnclick  = buildTaskActionOnclick('rejectProposedTask',  task.id, restletUrl);
         const rowCheckOnclick = buildRowCheckOnclick();
 
+        const entityType = escapeHtml(call.entityType || '—');
+
         return '<div class="ctc-pl-task-row" data-row-id="' + escapeHtml(String(task.id)) + '" title="' + briefAttr + '">' +
             '<input type="checkbox" class="ctc-pl-task-check" title="Select this task" onclick="' + escapeHtml(rowCheckOnclick) + '">' +
+            '<span class="ctc-pl-task-type">' + entityType + '</span>' +
             '<a class="ctc-pl-task-company" href="/app/common/entity/custjob.nl?id=' + companyId + '">' + companyName + '</a>' +
             '<span class="ctc-pl-task-text" title="' + taskTextAttr + '">' + taskText + '</span>' +
             '<span class="ctc-pl-task-due">' + dueDate + '</span>' +
@@ -707,10 +722,10 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
     letter-spacing: 0.08em;
 }
 .ctc-pl-colhead-calls {
-    grid-template-columns: 60px 1.4fr 2.2fr 46px 70px 36px;
+    grid-template-columns: 60px 70px 1.4fr 2.2fr 46px 70px 36px 36px;
 }
 .ctc-pl-colhead-tasks {
-    grid-template-columns: 28px 1.4fr 2.5fr 70px 64px;
+    grid-template-columns: 28px 70px 1.4fr 2.5fr 70px 64px;
 }
 .ctc-pl-colhead-tasks .ctc-pl-colhead-check {
     display: inline-flex; align-items: center; justify-content: center;
@@ -771,7 +786,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
 /* ── TODAY'S CALLS ROWS ───────────────────────────────────────────────── */
 .ctc-pl-row {
     display: grid;
-    grid-template-columns: 60px 1.4fr 2.2fr 46px 70px 36px;
+    grid-template-columns: 60px 70px 1.4fr 2.2fr 46px 70px 36px 36px;
     gap: 10px; align-items: center;
     padding: 8px 6px;
     border-bottom: 1px solid #F1EFEA;
@@ -780,6 +795,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
 .ctc-pl-row:last-child { border-bottom: none; }
 .ctc-pl-row:hover { background: #FAFAF8; }
 .ctc-pl-time { color: #5C5955; font-size: 12px; }
+.ctc-pl-type, .ctc-pl-task-type { color: #5C5955; font-size: 12px; }
 .ctc-pl-company { color: #345D7E; font-weight: 600; text-decoration: none; }
 .ctc-pl-company:hover { text-decoration: underline; }
 .ctc-pl-brief { color: #5C5955; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -793,6 +809,14 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
 }
 .ctc-pl-redial-disabled { opacity: 0.4; cursor: not-allowed; }
 .ctc-pl-redial:hover { background: rgba(52, 93, 126, 0.08); border-color: #345D7E; }
+.ctc-pl-view-call {
+    background: transparent; border: 1px solid #C9C5BE; color: #345D7E;
+    border-radius: 4px; width: 28px; height: 24px;
+    font-size: 13px; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    text-decoration: none;
+}
+.ctc-pl-view-call:hover { background: rgba(52, 93, 126, 0.08); border-color: #345D7E; text-decoration: none; }
 
 .ctc-pl-pill {
     display: inline-flex; align-items: center; gap: 4px;
@@ -810,7 +834,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
 /* ── PENDING TASKS — flat table parallel to Today's Calls ────────────── */
 .ctc-pl-task-row {
     display: grid;
-    grid-template-columns: 28px 1.4fr 2.5fr 70px 64px;
+    grid-template-columns: 28px 70px 1.4fr 2.5fr 70px 64px;
     gap: 10px; align-items: center;
     padding: 8px 6px;
     border-bottom: 1px solid #F1EFEA;

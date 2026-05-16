@@ -27,6 +27,52 @@ define(['N/search', 'N/log'], (search, log) => {
         return val ? String(val) : '';
     };
 
+    // Map NetSuite customer.stage codes (LEAD / PROSPECT / CUSTOMER / OTHER) to
+    // the display labels we show in the portlet's Type column. Anything else
+    // (no stage, e.g. orphan phone calls without a company) renders as '—'.
+    const formatEntityType = (stage) => {
+        const s = String(stage || '').toUpperCase();
+        if (s === 'LEAD') return 'Lead';
+        if (s === 'PROSPECT') return 'Prospect';
+        if (s === 'CUSTOMER') return 'Customer';
+        return '';
+    };
+
+    /**
+     * Batched stage lookup. Given an array of objects with `companyId`,
+     * mutates each object's `entityType` field with the Lead / Prospect /
+     * Customer label from the customer record. One round-trip regardless
+     * of how many rows.
+     */
+    const fetchStageMap = (companyIds) => {
+        const map = {};
+        if (!companyIds.length) return map;
+        try {
+            const stageResults = search.create({
+                type: search.Type.CUSTOMER,
+                filters: [['internalid', 'anyof', companyIds]],
+                columns: ['stage']
+            }).run().getRange({ start: 0, end: 1000 });
+            stageResults.forEach((sr) => { map[sr.id] = sr.getValue('stage'); });
+        } catch (e) {
+            log.error({ title: 'CTC stage lookup failed', details: e.message || e });
+        }
+        return map;
+    };
+
+    const enrichRowsWithEntityType = (rows) => {
+        const uniqueIds = [];
+        const seen = {};
+        rows.forEach((r) => {
+            if (r.companyId && !seen[r.companyId]) {
+                seen[r.companyId] = true;
+                uniqueIds.push(r.companyId);
+            }
+        });
+        const stageMap = fetchStageMap(uniqueIds);
+        rows.forEach((r) => { r.entityType = formatEntityType(stageMap[r.companyId]); });
+    };
+
     /**
      * Load recent Phone Call rows assigned to a user, with optional filters.
      *
@@ -104,8 +150,15 @@ define(['N/search', 'N/log'], (search, log) => {
                 brief: r.getValue('custevent_ctc_ai_brief') || '',
                 satisfaction: parseInt(r.getValue('custevent_ctc_satisfaction'), 10) || null,
                 duration: parseInt(r.getValue('custevent_ctc_duration'), 10) || 0,
-                callStatus: r.getValue('custevent_ctc_call_status') || ''
+                callStatus: r.getValue('custevent_ctc_call_status') || '',
+                entityType: ''
             }));
+
+            // Stage isn't joinable from phonecall.company (NetSuite rejects
+            // {name:'stage', join:'company'} with "An nlobjSearchColumn contains
+            // an invalid column"). Do a second-pass batched lookup against
+            // customer for unique companyIds. Same pattern loadTaskGroups uses.
+            enrichRowsWithEntityType(rows);
 
             return { rows: rows, total: rows.length };
         } catch (e) {
@@ -250,6 +303,12 @@ define(['N/search', 'N/log'], (search, log) => {
             });
 
             const groups = Object.keys(groupsByCallId).map((k) => groupsByCallId[k]);
+
+            // Second-pass batched stage lookup so each group.call gets a Lead /
+            // Prospect / Customer label. NetSuite doesn't support the 3-hop join
+            // proposed_task → phone_call → company → stage in a single search.
+            enrichRowsWithEntityType(groups.map((g) => g.call));
+
             return { groups: groups, totalTasks: results.length };
         } catch (e) {
             log.error({ title: 'CTC loadTaskGroups Failed', details: e.message || e });
