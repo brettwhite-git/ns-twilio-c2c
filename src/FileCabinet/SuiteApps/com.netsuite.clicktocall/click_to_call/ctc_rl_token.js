@@ -49,6 +49,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         if (body.action === 'softphoneSearch')      return softphoneSearch(body);
         if (body.action === 'softphoneContacts')    return softphoneContacts(body);
         if (body.action === 'softphoneRecents')     return softphoneRecents(body);
+        if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body);
         if (body.action === 'approveProposedTask')  return approveProposedTask(body);
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
@@ -472,6 +473,21 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             dateRange: body.dateRange || 'last7days',
             limit: body.limit || 50
         });
+    };
+
+    /**
+     * softphoneAccountSnapshot — Iteration B Phase 6.
+     * Returns the 4-tile rollup (outstanding / open opps / last invoice /
+     * last activity) for an entity. Fetched once when a call connects in
+     * the softphone popup; cached in popup scope for the call lifetime.
+     *
+     * @param {Object} body
+     * @param {string|number} body.entityId
+     * @returns {Object} {outstanding, openOpps, lastInvoice, lastActivity} or {error}
+     */
+    const softphoneAccountSnapshot = (body) => {
+        if (!body.entityId) return { error: 'entityId required' };
+        return workspaceQueries.getAccountSnapshot({ entityId: body.entityId });
     };
 
     /**

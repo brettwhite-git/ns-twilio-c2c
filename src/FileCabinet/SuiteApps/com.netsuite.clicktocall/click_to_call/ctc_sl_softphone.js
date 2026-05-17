@@ -1247,6 +1247,75 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             letter-spacing: 0;
             text-transform: none;
         }
+        /* ─── Iteration B Phase 6: in-call account snapshot ───────────────── */
+        /* 4-tile 2×2 grid; appears inside view-dial during active call when
+           an entityId is in scope. Hidden in idle / no-context states. */
+        .account-snapshot {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 10px;
+            padding: 10px 11px;
+            margin: 10px 0 4px;
+            text-align: left;
+        }
+        .account-snapshot.hidden { display: none; }
+        .account-snapshot .head {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--phone-text-faint);
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        .account-snapshot .head .meta {
+            font-family: inherit;
+            font-size: 10.5px;
+            letter-spacing: 0;
+            text-transform: none;
+            color: var(--phone-text-muted);
+            font-weight: 500;
+        }
+        .account-snapshot .tiles {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+        .account-snapshot .tile {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 8px;
+            padding: 7px 9px;
+        }
+        .account-snapshot .tile .lbl {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 8.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            color: var(--phone-text-faint);
+            display: block;
+        }
+        .account-snapshot .tile .val {
+            font-size: 14px;
+            color: var(--phone-text);
+            margin-top: 2px;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        .account-snapshot .tile .val.balance { color: #F4C76A; }
+        .account-snapshot .tile .val.opps    { color: #B5EFD0; }
+        .account-snapshot .tile .delta {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9.5px;
+            color: var(--phone-text-muted);
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
     </style>
 </head>
 <body>
@@ -1349,6 +1418,40 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 <button class="dial-key" data-digit="*" type="button"><span class="digit">∗</span><span class="letters">&nbsp;</span></button>
                 <button class="dial-key" data-digit="0" type="button"><span class="digit">0</span><span class="letters">+</span></button>
                 <button class="dial-key" data-digit="#" type="button"><span class="digit">#</span><span class="letters">&nbsp;</span></button>
+            </div>
+
+            <!-- Phase 6: in-call account snapshot. Hidden by default; populated
+                 + shown when setCallView('active') fires AND an entityId is in
+                 scope. Empty rollups render as an em-dash placeholder so the
+                 4-tile grid stays stable for thin records (Leads with no
+                 transactions yet). -->
+            <div class="account-snapshot hidden" id="accountSnapshot">
+                <div class="head">
+                    <span>Account snapshot</span>
+                    <span class="meta" id="snapshotEntityLabel">&mdash;</span>
+                </div>
+                <div class="tiles">
+                    <div class="tile">
+                        <span class="lbl">Outstanding</span>
+                        <div class="val balance" id="snapOutstanding">&mdash;</div>
+                        <div class="delta" id="snapOutstandingDelta">&mdash;</div>
+                    </div>
+                    <div class="tile">
+                        <span class="lbl">Open opps</span>
+                        <div class="val opps" id="snapOpenOpps">&mdash;</div>
+                        <div class="delta" id="snapOpenOppsDelta">&mdash;</div>
+                    </div>
+                    <div class="tile">
+                        <span class="lbl">Last invoice</span>
+                        <div class="val" id="snapLastInvoice">&mdash;</div>
+                        <div class="delta" id="snapLastInvoiceDelta">&mdash;</div>
+                    </div>
+                    <div class="tile">
+                        <span class="lbl">Last activity</span>
+                        <div class="val" id="snapLastActivity">&mdash;</div>
+                        <div class="delta" id="snapLastActivityDelta">&mdash;</div>
+                    </div>
+                </div>
             </div>
         </div><!-- /view-dial -->
 
@@ -1630,6 +1733,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 // If the audio overlay was open when the call started, close it
                 // so the rep sees the in-call surface, not the settings panel.
                 if (typeof closeAudioOverlay === 'function') closeAudioOverlay();
+                // Phase 6: pull the account snapshot rollup for the entity we
+                // just connected to. Fetched once per call; cached for the
+                // call lifetime. Skipped when ENTITY_ID is empty (manual dial).
+                if (typeof loadAccountSnapshot === 'function' && ENTITY_ID) {
+                    loadAccountSnapshot(ENTITY_ID);
+                }
             } else {
                 idleActions.classList.remove('hidden');
                 activeActions.classList.add('hidden');
@@ -1637,6 +1746,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 dialpadEl.classList.remove('hidden');
                 var gearEl2 = document.getElementById('audioGear');
                 if (gearEl2) gearEl2.classList.remove('hidden');
+                // Phase 6: hide the snapshot card when not in-call.
+                if (typeof hideAccountSnapshot === 'function') hideAccountSnapshot();
             }
         }
 
@@ -2903,6 +3014,123 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 var chip = e.target.closest('.filter-chip');
                 if (chip) onRecentsChipClick(chip);
             });
+        }
+
+        // ─── Iteration B Phase 6: in-call account snapshot ──────────────────
+        var snapshotCard           = document.getElementById('accountSnapshot');
+        var snapshotEntityLabel    = document.getElementById('snapshotEntityLabel');
+        var snapOutstanding        = document.getElementById('snapOutstanding');
+        var snapOutstandingDelta   = document.getElementById('snapOutstandingDelta');
+        var snapOpenOpps           = document.getElementById('snapOpenOpps');
+        var snapOpenOppsDelta      = document.getElementById('snapOpenOppsDelta');
+        var snapLastInvoice        = document.getElementById('snapLastInvoice');
+        var snapLastInvoiceDelta   = document.getElementById('snapLastInvoiceDelta');
+        var snapLastActivity       = document.getElementById('snapLastActivity');
+        var snapLastActivityDelta  = document.getElementById('snapLastActivityDelta');
+        // Cache the last successful snapshot per entity so the second call to
+        // the same record (e.g. redial) doesn't hit the RESTlet again.
+        var snapshotCache = {};
+        var snapshotEntityInFlight = '';
+
+        function fmtMoney(n) {
+            if (!n && n !== 0) return '—';
+            var abs = Math.abs(Number(n) || 0);
+            if (abs >= 1000) {
+                return '$' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+            }
+            return '$' + Math.round(n).toLocaleString();
+        }
+        function fmtAge(days) {
+            if (days === null || days === undefined) return '';
+            if (days === 0) return 'today';
+            if (days === 1) return '1d ago';
+            if (days < 7) return days + 'd ago';
+            if (days < 30) return Math.round(days / 7) + 'w ago';
+            if (days < 365) return Math.round(days / 30) + 'mo ago';
+            return Math.round(days / 365) + 'y ago';
+        }
+
+        function paintSnapshot(snap) {
+            // Outstanding
+            if (snap.outstanding && snap.outstanding.sum > 0) {
+                snapOutstanding.textContent = fmtMoney(snap.outstanding.sum);
+                var bits = [];
+                if (snap.outstanding.count) bits.push(snap.outstanding.count + ' inv');
+                if (snap.outstanding.avgAgeDays !== null && snap.outstanding.avgAgeDays !== undefined) bits.push(snap.outstanding.avgAgeDays + 'd avg');
+                snapOutstandingDelta.textContent = bits.join(' · ') || '—';
+            } else {
+                snapOutstanding.textContent = '$0';
+                snapOutstandingDelta.textContent = 'no open invoices';
+            }
+            // Open opps
+            if (snap.openOpps && snap.openOpps.count > 0) {
+                snapOpenOpps.textContent = snap.openOpps.count + ' · ' + fmtMoney(snap.openOpps.sum);
+                snapOpenOppsDelta.textContent = snap.openOpps.count === 1 ? 'open opp' : 'open opps';
+            } else {
+                snapOpenOpps.textContent = '0';
+                snapOpenOppsDelta.textContent = 'no open opps';
+            }
+            // Last invoice
+            if (snap.lastInvoice) {
+                snapLastInvoice.textContent = fmtAge(snap.lastInvoice.ageDays) || '—';
+                var inv = [];
+                if (snap.lastInvoice.docNumber) inv.push(snap.lastInvoice.docNumber);
+                if (snap.lastInvoice.amount)    inv.push(fmtMoney(snap.lastInvoice.amount));
+                snapLastInvoiceDelta.textContent = inv.join(' · ') || '—';
+            } else {
+                snapLastInvoice.textContent = '—';
+                snapLastInvoiceDelta.textContent = 'no invoices on file';
+            }
+            // Last activity
+            if (snap.lastActivity) {
+                snapLastActivity.textContent = fmtAge(snap.lastActivity.ageDays) || '—';
+                snapLastActivityDelta.textContent = String(snap.lastActivity.type || '').toLowerCase();
+            } else {
+                snapLastActivity.textContent = '—';
+                snapLastActivityDelta.textContent = 'no activity logged';
+            }
+        }
+
+        function loadAccountSnapshot(entityId) {
+            if (!snapshotCard || !entityId) return;
+            var label = ENTITY_NAME || ('Entity ' + entityId);
+            if (snapshotEntityLabel) snapshotEntityLabel.textContent = label;
+            // Show the card immediately with — placeholders so the layout
+            // doesn't jump when the RESTlet returns.
+            paintSnapshot({});
+            snapshotCard.classList.remove('hidden');
+
+            // Cache hit
+            if (snapshotCache[entityId]) {
+                paintSnapshot(snapshotCache[entityId]);
+                return;
+            }
+            // In-flight guard — don't fire a duplicate fetch while one is
+            // already going for this entity.
+            if (snapshotEntityInFlight === entityId) return;
+            snapshotEntityInFlight = entityId;
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'softphoneAccountSnapshot', entityId: entityId })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                snapshotEntityInFlight = '';
+                if (data && !data.error) {
+                    snapshotCache[entityId] = data;
+                    paintSnapshot(data);
+                }
+            })
+            .catch(function (err) {
+                snapshotEntityInFlight = '';
+                console.error('[CTC] Snapshot fetch failed:', err);
+                // Leave the — placeholders; non-fatal.
+            });
+        }
+
+        function hideAccountSnapshot() {
+            if (snapshotCard) snapshotCard.classList.add('hidden');
         }
 
         // Hook up tabs (Recents now functional)

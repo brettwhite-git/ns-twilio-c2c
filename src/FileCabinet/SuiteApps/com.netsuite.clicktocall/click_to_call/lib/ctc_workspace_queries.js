@@ -490,12 +490,179 @@ define(['N/search', 'N/log'], (search, log) => {
         }
     };
 
+    // ─── Iteration B · Phase 6 — in-call account snapshot ──────────────────
+
+    const daysSince = (iso) => {
+        if (!iso) return null;
+        const t = Date.parse(iso);
+        if (isNaN(t)) return null;
+        return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+    };
+
+    const sumColumn = (results, col) => {
+        let s = 0;
+        results.forEach((r) => { s += parseFloat(r.getValue(col)) || 0; });
+        return s;
+    };
+
+    /**
+     * Iteration B Phase 6 — single rollup powering the in-call account
+     * snapshot card. Four mini-queries against the entity's transactions,
+     * opportunities, and activity history; combined into the wire shape
+     * the softphone client renders into the 4-tile grid.
+     *
+     * @param {Object} params
+     * @param {string|number} params.entityId
+     * @returns {{
+     *   outstanding: { sum, count, avgAgeDays },
+     *   openOpps:    { count, sum },
+     *   lastInvoice: { docNumber, amount, ageDays } | null,
+     *   lastActivity:{ type, ageDays, date } | null,
+     *   error?: string
+     * }}
+     */
+    const getAccountSnapshot = (params) => {
+        params = params || {};
+        const entityId = params.entityId;
+        if (!entityId) return { error: 'entityId required' };
+
+        const empty = {
+            outstanding:  { sum: 0, count: 0, avgAgeDays: null },
+            openOpps:     { count: 0, sum: 0 },
+            lastInvoice:  null,
+            lastActivity: null
+        };
+
+        try {
+            // ── Outstanding invoices: open + partially-paid balances ──
+            try {
+                const invResults = search.create({
+                    type: search.Type.INVOICE,
+                    filters: [
+                        ['entity', 'anyof', entityId], 'AND',
+                        ['mainline', 'is', 'T'], 'AND',
+                        ['status', 'anyof', ['CustInvc:A', 'CustInvc:B']] // Open / Partially paid
+                    ],
+                    columns: [
+                        'amountremaining',
+                        'trandate'
+                    ]
+                }).run().getRange({ start: 0, end: 200 });
+
+                empty.outstanding.count = invResults.length;
+                empty.outstanding.sum   = sumColumn(invResults, 'amountremaining');
+                if (invResults.length) {
+                    let ageTotal = 0, ageCount = 0;
+                    invResults.forEach((r) => {
+                        const d = daysSince(r.getValue('trandate'));
+                        if (d !== null) { ageTotal += d; ageCount++; }
+                    });
+                    empty.outstanding.avgAgeDays = ageCount ? Math.round(ageTotal / ageCount) : null;
+                }
+            } catch (e) {
+                log.error({ title: 'CTC snapshot outstanding failed', details: e.message || e });
+            }
+
+            // ── Open opportunities: count + sum projectedtotal ──
+            try {
+                const oppResults = search.create({
+                    type: search.Type.OPPORTUNITY,
+                    filters: [
+                        ['entity', 'anyof', entityId], 'AND',
+                        ['status', 'noneof', ['Opprtnty:D', 'Opprtnty:G']] // exclude Closed Won / Lost
+                    ],
+                    columns: ['projectedtotal']
+                }).run().getRange({ start: 0, end: 200 });
+
+                empty.openOpps.count = oppResults.length;
+                empty.openOpps.sum   = sumColumn(oppResults, 'projectedtotal');
+            } catch (e) {
+                log.error({ title: 'CTC snapshot opps failed', details: e.message || e });
+            }
+
+            // ── Last invoice: most-recent by trandate desc ──
+            try {
+                const lastInvResults = search.create({
+                    type: search.Type.INVOICE,
+                    filters: [
+                        ['entity', 'anyof', entityId], 'AND',
+                        ['mainline', 'is', 'T']
+                    ],
+                    columns: [
+                        { name: 'trandate', sort: search.Sort.DESC },
+                        'tranid',
+                        'total'
+                    ]
+                }).run().getRange({ start: 0, end: 1 });
+
+                if (lastInvResults.length) {
+                    const r = lastInvResults[0];
+                    empty.lastInvoice = {
+                        docNumber: r.getValue('tranid') || '',
+                        amount:    parseFloat(r.getValue('total')) || 0,
+                        ageDays:   daysSince(r.getValue('trandate'))
+                    };
+                }
+            } catch (e) {
+                log.error({ title: 'CTC snapshot lastInvoice failed', details: e.message || e });
+            }
+
+            // ── Last activity: most-recent Phone Call / Task / Event ──
+            // Phone Call records reference the customer via `company`. Tasks and
+            // CalendarEvents use `company` too. Search all three types in parallel
+            // and pick the latest.
+            try {
+                const phoneCalls = search.create({
+                    type: search.Type.PHONE_CALL,
+                    filters: [['company', 'anyof', entityId]],
+                    columns: [{ name: 'startdate', sort: search.Sort.DESC }]
+                }).run().getRange({ start: 0, end: 1 });
+
+                const tasks = search.create({
+                    type: search.Type.TASK,
+                    filters: [['company', 'anyof', entityId]],
+                    columns: [{ name: 'createddate', sort: search.Sort.DESC }]
+                }).run().getRange({ start: 0, end: 1 });
+
+                const events = search.create({
+                    type: search.Type.CALENDAR_EVENT,
+                    filters: [['company', 'anyof', entityId]],
+                    columns: [{ name: 'startdate', sort: search.Sort.DESC }]
+                }).run().getRange({ start: 0, end: 1 });
+
+                const candidates = [];
+                if (phoneCalls.length) candidates.push({ type: 'Phone call', date: phoneCalls[0].getValue('startdate') });
+                if (tasks.length)      candidates.push({ type: 'Task',       date: tasks[0].getValue('createddate') });
+                if (events.length)     candidates.push({ type: 'Event',      date: events[0].getValue('startdate') });
+
+                if (candidates.length) {
+                    candidates.sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0));
+                    const winner = candidates[0];
+                    empty.lastActivity = {
+                        type:    winner.type,
+                        date:    winner.date,
+                        ageDays: daysSince(winner.date)
+                    };
+                }
+            } catch (e) {
+                log.error({ title: 'CTC snapshot lastActivity failed', details: e.message || e });
+            }
+
+            return empty;
+        } catch (e) {
+            log.error({ title: 'CTC getAccountSnapshot failed', details: e.message || e });
+            return Object.assign({ error: 'Snapshot fetch failed' }, empty);
+        }
+    };
+
     return {
         loadHistoryRows,
         loadTaskGroups,
         computeStats,
         // Phase 2 — softphone Search tab
         getSuggestedContacts,
-        searchOwnedEntities
+        searchOwnedEntities,
+        // Phase 6 — in-call account snapshot
+        getAccountSnapshot
     };
 });
