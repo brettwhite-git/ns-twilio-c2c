@@ -335,9 +335,152 @@ define(['N/search', 'N/log'], (search, log) => {
         };
     };
 
+    // ─── Iteration B · Phase 2 — softphone Search tab ───────────────────────
+
+    // Map stage codes to lowercase wire names used by the softphone client.
+    // search.Type.CUSTOMER covers all three stages; filter by `stage` field.
+    const STAGE_TO_WIRE = { LEAD: 'lead', PROSPECT: 'prospect', CUSTOMER: 'customer' };
+    const WIRE_TO_STAGE = { lead: 'LEAD', prospect: 'PROSPECT', customer: 'CUSTOMER' };
+
+    /**
+     * Pack a Customer search result row into the wire shape the softphone
+     * client renders. Phase 2 keeps this minimal — just enough to render a
+     * search-result row and arm the Call button.
+     */
+    const packEntityRow = (r) => {
+        const stage = String(r.getValue('stage') || '').toUpperCase();
+        const company = r.getValue('companyname') || '';
+        const first   = r.getValue('firstname') || '';
+        const last    = r.getValue('lastname') || '';
+        const contactName = (first || last) ? (first + ' ' + last).trim() : '';
+        return {
+            id: String(r.id),
+            type: STAGE_TO_WIRE[stage] || 'customer',
+            companyName: company || contactName || ('Entity ' + r.id),
+            contactName: contactName,
+            phone: r.getValue('phone') || '',
+            email: r.getValue('email') || '',
+            lastModified: r.getValue('lastmodifieddate') || ''
+        };
+    };
+
+    /**
+     * Returns the rep's top N owned Customer / Prospect / Lead entities,
+     * sorted by lastmodifieddate descending. Populates the empty-state
+     * "Suggested · your book" list in the softphone Search tab.
+     *
+     * @param {Object} params
+     * @param {string|number} params.userId
+     * @param {number} [params.limit=20]
+     * @returns {{ rows: Array<Object>, total: number }} — `{ error }` on failure
+     */
+    const getSuggestedContacts = (params) => {
+        try {
+            params = params || {};
+            const userId = params.userId;
+            const limit = Math.min(parseInt(params.limit, 10) || 20, 50);
+            if (!userId) {
+                return { error: 'userId required', rows: [], total: 0 };
+            }
+            const results = search.create({
+                type: search.Type.CUSTOMER,
+                filters: [
+                    ['salesrep', 'anyof', userId], 'AND',
+                    ['stage', 'anyof', ['LEAD', 'PROSPECT', 'CUSTOMER']], 'AND',
+                    ['isinactive', 'is', 'F']
+                ],
+                columns: [
+                    { name: 'lastmodifieddate', sort: search.Sort.DESC },
+                    'stage',
+                    'companyname',
+                    'firstname',
+                    'lastname',
+                    'phone',
+                    'email'
+                ]
+            }).run().getRange({ start: 0, end: limit });
+
+            const rows = results.map(packEntityRow);
+            return { rows: rows, total: rows.length };
+        } catch (e) {
+            log.error({ title: 'CTC getSuggestedContacts Failed', details: e.message || e });
+            return { error: 'Suggested fetch failed', rows: [], total: 0 };
+        }
+    };
+
+    /**
+     * Fuzzy search across the rep's owned book — matches against company
+     * name, first name, last name, primary phone, and email. Optional
+     * `typeFilter` narrows to a single stage. Returns at most `limit` rows.
+     *
+     * @param {Object} params
+     * @param {string|number} params.userId
+     * @param {string} params.query — non-empty user-typed query
+     * @param {'customer'|'prospect'|'lead'|''} [params.typeFilter]
+     * @param {number} [params.limit=20]
+     * @returns {{ rows: Array<Object>, total: number }} — `{ error }` on failure
+     */
+    const searchOwnedEntities = (params) => {
+        try {
+            params = params || {};
+            const userId = params.userId;
+            const query = String(params.query || '').trim();
+            const limit = Math.min(parseInt(params.limit, 10) || 20, 50);
+            const typeFilter = String(params.typeFilter || '').toLowerCase();
+            if (!userId) {
+                return { error: 'userId required', rows: [], total: 0 };
+            }
+            if (!query) {
+                return { rows: [], total: 0 };
+            }
+            // Stage filter: all three by default, narrowed if typeFilter matches.
+            const stages = WIRE_TO_STAGE[typeFilter]
+                ? [WIRE_TO_STAGE[typeFilter]]
+                : ['LEAD', 'PROSPECT', 'CUSTOMER'];
+
+            // OR-group of contains-matches across the five searchable fields.
+            // NetSuite filter syntax: nested array becomes its own AND/OR scope.
+            const matchGroup = [
+                ['companyname', 'contains', query], 'OR',
+                ['firstname',   'contains', query], 'OR',
+                ['lastname',    'contains', query], 'OR',
+                ['phone',       'contains', query], 'OR',
+                ['email',       'contains', query]
+            ];
+
+            const results = search.create({
+                type: search.Type.CUSTOMER,
+                filters: [
+                    ['salesrep', 'anyof', userId], 'AND',
+                    ['stage', 'anyof', stages], 'AND',
+                    ['isinactive', 'is', 'F'], 'AND',
+                    matchGroup
+                ],
+                columns: [
+                    { name: 'lastmodifieddate', sort: search.Sort.DESC },
+                    'stage',
+                    'companyname',
+                    'firstname',
+                    'lastname',
+                    'phone',
+                    'email'
+                ]
+            }).run().getRange({ start: 0, end: limit });
+
+            const rows = results.map(packEntityRow);
+            return { rows: rows, total: rows.length };
+        } catch (e) {
+            log.error({ title: 'CTC searchOwnedEntities Failed', details: e.message || e });
+            return { error: 'Search failed', rows: [], total: 0 };
+        }
+    };
+
     return {
         loadHistoryRows,
         loadTaskGroups,
-        computeStats
+        computeStats,
+        // Phase 2 — softphone Search tab
+        getSuggestedContacts,
+        searchOwnedEntities
     };
 });

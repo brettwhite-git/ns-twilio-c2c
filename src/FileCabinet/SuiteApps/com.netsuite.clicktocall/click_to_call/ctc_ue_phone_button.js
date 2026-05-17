@@ -40,7 +40,11 @@ define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity'], (url, runtime, log, 
                     phone: phone,
                     entityId: recId,
                     entityName: entityName,
-                    entityType: recType
+                    entityType: recType,
+                    // Iteration B Phase 2: tells the Suitelet which default tab to open.
+                    // 'record' → Dial tab pre-filled (this path). 'dashboard' → Search tab
+                    // default (passed by the portlet's softphone launchers).
+                    entryPoint: 'record'
                 }
             });
         } catch (e) {

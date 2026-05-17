@@ -50,9 +50,14 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
         let workspaceUrl = '';
 
         try {
+            // Iteration B Phase 2: every portlet softphone launch passes
+            // entryPoint=dashboard so the Suitelet defaults to the Search
+            // tab (no record context → can't pre-fill Dial). The redial
+            // launcher overrides entryPoint=record when it has phone+entity.
             softphoneUrl = url.resolveScript({
                 scriptId: 'customscript_ctc_sl_softphone',
-                deploymentId: 'customdeploy_ctc_sl_softphone'
+                deploymentId: 'customdeploy_ctc_sl_softphone',
+                params: { entryPoint: 'dashboard' }
             });
         } catch (e) {
             log.error({ title: 'CTC Portlet — softphone URL resolve failed', details: e.message || e });

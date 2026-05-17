@@ -45,6 +45,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         if (body.action === 'searchEntities')       return searchEntities(body);
         if (body.action === 'getWorkspaceHistory')  return getWorkspaceHistory(body);
         if (body.action === 'getWorkspaceTasks')    return getWorkspaceTasks(body);
+        if (body.action === 'softphoneSuggested')   return softphoneSuggested(body);
+        if (body.action === 'softphoneSearch')      return softphoneSearch(body);
         if (body.action === 'approveProposedTask')  return approveProposedTask(body);
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
@@ -391,6 +393,44 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             userId: runtime.getCurrentUser().id,
             tab: body.tab,
             phoneCallId: body.phoneCallId,
+            limit: body.limit
+        });
+    };
+
+    /**
+     * softphoneSuggested — Iteration B Phase 2.
+     * Returns the current user's top owned Customer / Prospect / Lead
+     * entities for the softphone Search tab's empty "Suggested · your book"
+     * state. Capped at 20 by default to keep the local prefix-match fast.
+     *
+     * @param {Object} body
+     * @param {number} [body.limit=20]
+     * @returns {Object} { rows: [...], total } or { error }
+     */
+    const softphoneSuggested = (body) => {
+        return workspaceQueries.getSuggestedContacts({
+            userId: runtime.getCurrentUser().id,
+            limit: body.limit
+        });
+    };
+
+    /**
+     * softphoneSearch — Iteration B Phase 2.
+     * Fuzzy match across the rep's owned book — name / company / phone /
+     * email. Called as a debounced fallback when the client-side prefix
+     * match on the suggested list returns fewer than ~3 results.
+     *
+     * @param {Object} body
+     * @param {string} body.query
+     * @param {'customer'|'prospect'|'lead'|''} [body.typeFilter]
+     * @param {number} [body.limit=20]
+     * @returns {Object} { rows: [...], total } or { error }
+     */
+    const softphoneSearch = (body) => {
+        return workspaceQueries.searchOwnedEntities({
+            userId: runtime.getCurrentUser().id,
+            query: body.query,
+            typeFilter: body.typeFilter,
             limit: body.limit
         });
     };

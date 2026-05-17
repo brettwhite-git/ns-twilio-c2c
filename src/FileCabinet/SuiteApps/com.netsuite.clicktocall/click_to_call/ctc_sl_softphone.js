@@ -25,6 +25,17 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         const entityId = params.entityId || '';
         const entityName = params.entityName || '';
         const entityType = params.entityType || '';
+        // Iteration B Phase 2: entryPoint disambiguates record launches
+        // (Dial tab, contact pre-loaded) from dashboard launches (Search
+        // tab default, rep finds a contact). Treat any launch that has a
+        // phone OR entityId as record-like regardless of entryPoint, so
+        // the dashboard's redial path still lands on Dial. Default tab:
+        //   - dashboard entryPoint AND no phone/entityId → 'search'
+        //   - everything else → 'dial'
+        const entryPoint = params.entryPoint || (phone || entityId ? 'record' : 'dashboard');
+        const initialTab = (entryPoint === 'dashboard' && !phone && !entityId)
+            ? 'search'
+            : 'dial';
 
         let tokenEndpoint = '';
         let sdkUrl = '';
@@ -55,7 +66,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
 
         const html = buildHtml({
             phone, entityId, entityName, entityType, tokenEndpoint, sdkUrl,
-            contacts, entityInfo, entityRecordUrl
+            contacts, entityInfo, entityRecordUrl,
+            entryPoint, initialTab
         });
         context.response.write(html);
     };
@@ -168,6 +180,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         const jsEntityType = escapeJs(opts.entityType || '');
         const jsTokenEndpoint = escapeJs(opts.tokenEndpoint);
         const contactsJson = safeJsonEmbed(opts.contacts || []);
+        // Phase 2: initialTab is 'dial' or 'search'. Defaults to 'dial' if not provided
+        // so legacy callers (and existing tests) keep their current behavior.
+        const jsInitialTab = escapeJs(opts.initialTab || 'dial');
 
         const info = opts.entityInfo || {};
         const safeRecordUrl = escapeHtml(opts.entityRecordUrl || '');
@@ -734,6 +749,194 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             font-style: italic;
             padding: 8px 0 0;
         }
+        /* ─── Iteration B Phase 2: Search tab ────────────────────────────── */
+        /* view-dial / view-search are siblings inside .phone-scroll.
+           Tab switching toggles .hidden on each. Recents stays inert. */
+        .view-dial, .view-search {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        .view-search.hidden, .view-dial.hidden { display: none; }
+        .search-bar {
+            background: var(--phone-card);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 10px;
+            padding: 7px 10px;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            color: var(--phone-text);
+            margin-bottom: 8px;
+            width: 100%;
+        }
+        .search-bar .icon { width: 15px; height: 15px; color: var(--phone-text-muted); flex-shrink: 0; }
+        .search-bar input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: var(--phone-text);
+            font: inherit;
+            font-size: 13px;
+            outline: none;
+        }
+        .search-bar input::placeholder { color: var(--phone-text-faint); }
+        .search-bar .clear-x {
+            cursor: pointer;
+            color: var(--phone-text-faint);
+            border: none;
+            background: transparent;
+            font-size: 16px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            line-height: 1;
+        }
+        .search-bar .clear-x:hover { background: rgba(255, 255, 255, 0.10); color: var(--phone-text); }
+        .search-bar .clear-x.hidden { display: none; }
+        .filter-chips {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 8px;
+            overflow-x: auto;
+            padding-bottom: 2px;
+            scrollbar-width: none;
+            width: 100%;
+        }
+        .filter-chips::-webkit-scrollbar { display: none; }
+        .filter-chip {
+            font-size: 10.5px;
+            color: var(--phone-text-muted);
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 999px;
+            padding: 3px 9px;
+            cursor: pointer;
+            white-space: nowrap;
+            font-family: inherit;
+        }
+        .filter-chip.active {
+            background: rgba(116, 192, 252, 0.14);
+            border-color: rgba(116, 192, 252, 0.45);
+            color: #B6DCFA;
+            font-weight: 600;
+        }
+        .filter-chip .count {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9px;
+            margin-left: 4px;
+            opacity: 0.7;
+        }
+        .surface-sect-head {
+            text-align: left;
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--phone-text-faint);
+            margin: 4px 0 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            width: 100%;
+        }
+        .surface-sect-head .meta {
+            color: var(--phone-text-muted);
+            font-family: inherit;
+            font-size: 10px;
+            letter-spacing: 0;
+            text-transform: none;
+        }
+        .result-list {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 10px;
+            overflow: hidden;
+            text-align: left;
+            margin-bottom: 8px;
+            width: 100%;
+        }
+        .result-list .row {
+            padding: 7px 10px;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            cursor: pointer;
+        }
+        .result-list .row:last-child { border-bottom: none; }
+        .result-list .row:hover, .result-list .row.is-active { background: rgba(255, 255, 255, 0.07); }
+        .result-list .swatch {
+            width: 26px;
+            height: 26px;
+            border-radius: 7px;
+            background: linear-gradient(135deg, #38507A 0%, #1F2F4D 100%);
+            color: #FFFFFF;
+            font-size: 10px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .result-list .swatch.lead     { background: linear-gradient(135deg, #A07E3F 0%, #6B5226 100%); }
+        .result-list .swatch.prospect { background: linear-gradient(135deg, #4F7A86 0%, #2F4A56 100%); }
+        .result-list .meta { flex: 1; min-width: 0; }
+        .result-list .name {
+            color: var(--phone-text);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .result-list .sub {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            color: var(--phone-text-muted);
+            font-size: 9.5px;
+            line-height: 1.2;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .result-list .badge {
+            font-size: 8.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            color: var(--phone-text-faint);
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 999px;
+            padding: 1px 6px;
+            flex-shrink: 0;
+        }
+        .result-list .badge.customer { color: #93C7AA; border-color: rgba(20,185,129,0.30); background: rgba(20,185,129,0.08); }
+        .result-list .badge.lead     { color: #E8C77A; border-color: rgba(232,199,122,0.30); background: rgba(232,199,122,0.06); }
+        .result-list .badge.prospect { color: #94BFD6; border-color: rgba(148,191,214,0.30); background: rgba(148,191,214,0.06); }
+        .search-empty {
+            text-align: center;
+            color: var(--phone-text-faint);
+            font-size: 11px;
+            font-style: italic;
+            padding: 12px 8px 6px;
+            width: 100%;
+        }
+        .search-empty.hidden { display: none; }
+        .search-loading {
+            text-align: center;
+            color: var(--phone-text-muted);
+            font-size: 11px;
+            padding: 10px 8px;
+            width: 100%;
+        }
+        .search-loading.hidden { display: none; }
     </style>
 </head>
 <body>
@@ -750,7 +953,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
                     <svg class="tab-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="6" r="1.6"/><circle cx="12" cy="6" r="1.6"/><circle cx="19" cy="6" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="18" r="1.6"/><circle cx="12" cy="18" r="1.6"/><circle cx="19" cy="18" r="1.6"/></svg>
                     Dial
                 </button>
-                <button class="mode-tab" id="tabSearch" type="button" role="tab" aria-selected="false" disabled title="Search (coming soon)">
+                <button class="mode-tab" id="tabSearch" type="button" role="tab" aria-selected="false" title="Search your owned customers, prospects, and leads">
                     <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
                     Search
                 </button>
@@ -779,41 +982,67 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         <!-- ─── phone-scroll: per-state content (overflow absorbs growth) ─── -->
         <div class="phone-scroll">
 
-        <div class="avatar" aria-hidden="true">
-            <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="8" r="4"/>
-                <path d="M4 21c0-4 4-7 8-7s8 3 8 7"/>
-            </svg>
-        </div>
+        <!-- view-dial: existing Dial tab content (avatar / contact-fields / dialpad) -->
+        <div class="view-dial" id="viewDial">
+            <div class="avatar" aria-hidden="true">
+                <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M4 21c0-4 4-7 8-7s8 3 8 7"/>
+                </svg>
+            </div>
 
-        <div class="contact-name" id="entityName">${safeEntityName}</div>
-        <div class="contact-phone" id="phoneNumber">${safePhone}</div>
-        <div class="contact-company" id="entityCompany"></div>
+            <div class="contact-name" id="entityName">${safeEntityName}</div>
+            <div class="contact-phone" id="phoneNumber">${safePhone}</div>
+            <div class="contact-company" id="entityCompany"></div>
 
-        <div class="timer" id="timer">00:00</div>
+            <div class="timer" id="timer">00:00</div>
 
-        <div class="origin-line" id="originLine">Outbound · from main line</div>
+            <div class="origin-line" id="originLine">Outbound · from main line</div>
 
-        <hr class="phone-divider" id="phoneDivider">
+            <hr class="phone-divider" id="phoneDivider">
 
-        <div class="picker-row" id="contactRow">
-            <select id="contactSelect"></select>
-        </div>
+            <div class="picker-row" id="contactRow">
+                <select id="contactSelect"></select>
+            </div>
 
-        <div class="dialpad" id="dialpad">
-            <button class="dial-key" data-digit="1" type="button"><span class="digit">1</span><span class="letters">&nbsp;</span></button>
-            <button class="dial-key" data-digit="2" type="button"><span class="digit">2</span><span class="letters">ABC</span></button>
-            <button class="dial-key" data-digit="3" type="button"><span class="digit">3</span><span class="letters">DEF</span></button>
-            <button class="dial-key" data-digit="4" type="button"><span class="digit">4</span><span class="letters">GHI</span></button>
-            <button class="dial-key" data-digit="5" type="button"><span class="digit">5</span><span class="letters">JKL</span></button>
-            <button class="dial-key" data-digit="6" type="button"><span class="digit">6</span><span class="letters">MNO</span></button>
-            <button class="dial-key" data-digit="7" type="button"><span class="digit">7</span><span class="letters">PQRS</span></button>
-            <button class="dial-key" data-digit="8" type="button"><span class="digit">8</span><span class="letters">TUV</span></button>
-            <button class="dial-key" data-digit="9" type="button"><span class="digit">9</span><span class="letters">WXYZ</span></button>
-            <button class="dial-key" data-digit="*" type="button"><span class="digit">∗</span><span class="letters">&nbsp;</span></button>
-            <button class="dial-key" data-digit="0" type="button"><span class="digit">0</span><span class="letters">+</span></button>
-            <button class="dial-key" data-digit="#" type="button"><span class="digit">#</span><span class="letters">&nbsp;</span></button>
-        </div>
+            <div class="dialpad" id="dialpad">
+                <button class="dial-key" data-digit="1" type="button"><span class="digit">1</span><span class="letters">&nbsp;</span></button>
+                <button class="dial-key" data-digit="2" type="button"><span class="digit">2</span><span class="letters">ABC</span></button>
+                <button class="dial-key" data-digit="3" type="button"><span class="digit">3</span><span class="letters">DEF</span></button>
+                <button class="dial-key" data-digit="4" type="button"><span class="digit">4</span><span class="letters">GHI</span></button>
+                <button class="dial-key" data-digit="5" type="button"><span class="digit">5</span><span class="letters">JKL</span></button>
+                <button class="dial-key" data-digit="6" type="button"><span class="digit">6</span><span class="letters">MNO</span></button>
+                <button class="dial-key" data-digit="7" type="button"><span class="digit">7</span><span class="letters">PQRS</span></button>
+                <button class="dial-key" data-digit="8" type="button"><span class="digit">8</span><span class="letters">TUV</span></button>
+                <button class="dial-key" data-digit="9" type="button"><span class="digit">9</span><span class="letters">WXYZ</span></button>
+                <button class="dial-key" data-digit="*" type="button"><span class="digit">∗</span><span class="letters">&nbsp;</span></button>
+                <button class="dial-key" data-digit="0" type="button"><span class="digit">0</span><span class="letters">+</span></button>
+                <button class="dial-key" data-digit="#" type="button"><span class="digit">#</span><span class="letters">&nbsp;</span></button>
+            </div>
+        </div><!-- /view-dial -->
+
+        <!-- view-search: Phase 2 Search tab (hidden by default; shown when Search tab is active) -->
+        <div class="view-search hidden" id="viewSearch">
+            <div class="search-bar">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
+                <input id="searchInput" type="search" autocomplete="off" placeholder="Customers, contacts, leads&hellip;" aria-label="Search owned entities">
+                <button class="clear-x hidden" id="searchClearX" type="button" title="Clear search" aria-label="Clear">×</button>
+            </div>
+            <div class="filter-chips" id="searchChips" role="group" aria-label="Filter by entity type">
+                <button class="filter-chip active" type="button" data-filter="">All <span class="count" id="cnt-all">0</span></button>
+                <button class="filter-chip" type="button" data-filter="customer">Customer <span class="count" id="cnt-customer">0</span></button>
+                <button class="filter-chip" type="button" data-filter="prospect">Prospect <span class="count" id="cnt-prospect">0</span></button>
+                <button class="filter-chip" type="button" data-filter="lead">Lead <span class="count" id="cnt-lead">0</span></button>
+            </div>
+            <div class="surface-sect-head">
+                <span id="searchSectLabel">Suggested · your book</span>
+                <span class="meta" id="searchSectMeta">by recency</span>
+            </div>
+            <div class="result-list" id="searchResults"></div>
+            <div class="search-loading hidden" id="searchLoading">Loading&hellip;</div>
+            <div class="search-empty hidden" id="searchEmpty">No matches &mdash; try a different name or number.</div>
+        </div><!-- /view-search -->
+
         </div><!-- /phone-scroll -->
 
         <!-- ─── phone-footer: primary action row (fixed to bottom) ─── -->
@@ -879,6 +1108,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         var ENTITY_TYPE = '${jsEntityType}';
         var CONTACTS = ${contactsJson};
         var SELECTED_CONTACT_ID = '';
+        // Iteration B Phase 2: server-decided default tab — 'dial' or 'search'.
+        var INITIAL_TAB = '${jsInitialTab}';
 
 
         var statusEl = document.getElementById('status');
@@ -1528,6 +1759,275 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             } else if (device) {
                 device.disconnectAll();
             }
+        }
+
+        // --- Iteration B Phase 2: Tab switching + Search tab ---
+        // The popup renders two sibling views inside .phone-scroll: #viewDial
+        // (existing Dial UI) and #viewSearch (Phase 2 Search). The tab strip
+        // in .phone-top toggles .hidden on each. Recents stays inert until
+        // Phase 5.
+        var tabDial    = document.getElementById('tabDial');
+        var tabSearch  = document.getElementById('tabSearch');
+        var tabRecents = document.getElementById('tabRecents');
+        var viewDial   = document.getElementById('viewDial');
+        var viewSearch = document.getElementById('viewSearch');
+        var searchInput   = document.getElementById('searchInput');
+        var searchClearX  = document.getElementById('searchClearX');
+        var searchChips   = document.getElementById('searchChips');
+        var searchResults = document.getElementById('searchResults');
+        var searchEmpty   = document.getElementById('searchEmpty');
+        var searchLoading = document.getElementById('searchLoading');
+        var searchSectLabel = document.getElementById('searchSectLabel');
+        var searchSectMeta  = document.getElementById('searchSectMeta');
+        var cntAll      = document.getElementById('cnt-all');
+        var cntCustomer = document.getElementById('cnt-customer');
+        var cntProspect = document.getElementById('cnt-prospect');
+        var cntLead     = document.getElementById('cnt-lead');
+
+        // Local cache so we don't re-fetch the suggested book every time
+        // the rep flips back to Search. Refreshed by typing a query.
+        var suggestedRows = null;
+        var activeFilter = '';
+        var lastQuery = '';
+        var debounceTimer = null;
+
+        function setActiveTab(which) {
+            var dialActive = which === 'dial';
+            tabDial.classList.toggle('active', dialActive);
+            tabDial.setAttribute('aria-selected', dialActive ? 'true' : 'false');
+            tabSearch.classList.toggle('active', which === 'search');
+            tabSearch.setAttribute('aria-selected', which === 'search' ? 'true' : 'false');
+            tabRecents.classList.toggle('active', which === 'recents');
+            tabRecents.setAttribute('aria-selected', which === 'recents' ? 'true' : 'false');
+            viewDial.classList.toggle('hidden', !dialActive);
+            viewSearch.classList.toggle('hidden', which !== 'search');
+            if (which === 'search') {
+                if (suggestedRows === null) loadSuggested();
+                setTimeout(function () { if (searchInput) searchInput.focus(); }, 0);
+            }
+        }
+
+        function badgeClassFor(type) {
+            if (type === 'lead') return 'badge lead';
+            if (type === 'prospect') return 'badge prospect';
+            return 'badge customer';
+        }
+        function badgeLabelFor(type) {
+            if (type === 'lead') return 'Lead';
+            if (type === 'prospect') return 'Prospect';
+            return 'Customer';
+        }
+        function swatchClassFor(type) {
+            if (type === 'lead') return 'swatch lead';
+            if (type === 'prospect') return 'swatch prospect';
+            return 'swatch';
+        }
+        function initialsOf(name) {
+            var parts = String(name || '').trim().split(/[^A-Za-z0-9]+/).slice(0, 2);
+            return parts.map(function (p) { return p.charAt(0).toUpperCase(); }).join('') || '·';
+        }
+
+        function clearChildren(el) {
+            // Safer than innerHTML='' — and matches the codebase's no-untrusted-HTML stance.
+            while (el && el.firstChild) el.removeChild(el.firstChild);
+        }
+
+        function renderRows(rows) {
+            clearChildren(searchResults);
+            if (!rows || !rows.length) {
+                searchEmpty.classList.remove('hidden');
+                return;
+            }
+            searchEmpty.classList.add('hidden');
+            rows.forEach(function (row) {
+                var rowEl = document.createElement('div');
+                rowEl.className = 'row';
+                rowEl.setAttribute('role', 'button');
+                rowEl.tabIndex = 0;
+
+                var sw = document.createElement('div');
+                sw.className = swatchClassFor(row.type);
+                sw.textContent = initialsOf(row.companyName);
+                rowEl.appendChild(sw);
+
+                var meta = document.createElement('div');
+                meta.className = 'meta';
+                var name = document.createElement('div');
+                name.className = 'name';
+                name.textContent = row.companyName;
+                var sub = document.createElement('div');
+                sub.className = 'sub';
+                sub.textContent = (row.contactName ? row.contactName + ' · ' : '') + (row.phone || 'no phone on file');
+                meta.appendChild(name);
+                meta.appendChild(sub);
+                rowEl.appendChild(meta);
+
+                var badge = document.createElement('span');
+                badge.className = badgeClassFor(row.type);
+                badge.textContent = badgeLabelFor(row.type);
+                rowEl.appendChild(badge);
+
+                rowEl.addEventListener('click', function () { selectSearchRow(row); });
+                rowEl.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        selectSearchRow(row);
+                    }
+                });
+                searchResults.appendChild(rowEl);
+            });
+        }
+
+        function updateCounts(rows) {
+            var c = 0, p = 0, l = 0;
+            (rows || []).forEach(function (r) {
+                if (r.type === 'customer') c++;
+                else if (r.type === 'prospect') p++;
+                else if (r.type === 'lead') l++;
+            });
+            cntAll.textContent = (c + p + l).toString();
+            cntCustomer.textContent = c.toString();
+            cntProspect.textContent = p.toString();
+            cntLead.textContent = l.toString();
+        }
+
+        function filterRows(rows, type) {
+            if (!type) return rows;
+            return (rows || []).filter(function (r) { return r.type === type; });
+        }
+
+        function applyVisible() {
+            var source = suggestedRows || [];
+            updateCounts(source);
+            renderRows(filterRows(source, activeFilter));
+        }
+
+        function loadSuggested() {
+            searchLoading.classList.remove('hidden');
+            searchSectLabel.textContent = 'Suggested · your book';
+            searchSectMeta.textContent  = 'by recency';
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'softphoneSuggested', limit: 20 })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                searchLoading.classList.add('hidden');
+                suggestedRows = (data && data.rows) || [];
+                applyVisible();
+            })
+            .catch(function (err) {
+                searchLoading.classList.add('hidden');
+                showError('Suggested fetch failed: ' + (err.message || err));
+            });
+        }
+
+        function runSearch(query) {
+            searchLoading.classList.remove('hidden');
+            searchSectLabel.textContent = (query ? '"' + query + '" — your book' : 'Suggested · your book');
+            searchSectMeta.textContent  = (query ? 'across your book' : 'by recency');
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'softphoneSearch',
+                    query: query,
+                    typeFilter: activeFilter,
+                    limit: 20
+                })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                searchLoading.classList.add('hidden');
+                var rows = (data && data.rows) || [];
+                updateCounts(rows);
+                renderRows(rows);
+            })
+            .catch(function (err) {
+                searchLoading.classList.add('hidden');
+                showError('Search failed: ' + (err.message || err));
+            });
+        }
+
+        function onSearchInput() {
+            var q = (searchInput.value || '').trim();
+            searchClearX.classList.toggle('hidden', !q);
+            if (debounceTimer) clearTimeout(debounceTimer);
+            if (!q) {
+                lastQuery = '';
+                applyVisible();
+                searchSectLabel.textContent = 'Suggested · your book';
+                searchSectMeta.textContent  = 'by recency';
+                return;
+            }
+            // Local prefix-match against the cached suggested book first.
+            if (suggestedRows && suggestedRows.length) {
+                var qLower = q.toLowerCase();
+                var localHits = suggestedRows.filter(function (r) {
+                    return (r.companyName || '').toLowerCase().indexOf(qLower) !== -1
+                        || (r.contactName || '').toLowerCase().indexOf(qLower) !== -1
+                        || (r.phone || '').indexOf(q) !== -1
+                        || (r.email || '').toLowerCase().indexOf(qLower) !== -1;
+                });
+                if (localHits.length >= 3) {
+                    updateCounts(localHits);
+                    renderRows(filterRows(localHits, activeFilter));
+                    return;
+                }
+            }
+            // Fall back to remote search after 200ms idle.
+            lastQuery = q;
+            debounceTimer = setTimeout(function () {
+                if (lastQuery === q) runSearch(q);
+            }, 200);
+        }
+
+        function onChipClick(chipEl) {
+            activeFilter = chipEl.getAttribute('data-filter') || '';
+            Array.prototype.forEach.call(searchChips.querySelectorAll('.filter-chip'), function (el) {
+                el.classList.toggle('active', el === chipEl);
+            });
+            if (lastQuery) runSearch(lastQuery);
+            else applyVisible();
+        }
+
+        function selectSearchRow(row) {
+            if (row.phone) {
+                setDialedNumber(row.phone, { resetFresh: true });
+            }
+            if (entityName)    entityName.textContent = row.companyName || '';
+            if (entityCompany) entityCompany.textContent = row.contactName || '';
+            // Hide the inline contact dropdown — Phase 3 multi-contact picker
+            // replaces it; for now a single-row Search selection has nothing
+            // to pick.
+            if (contactRow) contactRow.classList.remove('visible');
+            renderContactInfoFor({ email: row.email, contactName: row.contactName }, row.companyName);
+            setActiveTab('dial');
+            setButtons(!!row.phone, false, false);
+        }
+
+        // Hook up tabs (Recents stays inert)
+        tabDial.addEventListener('click', function () { setActiveTab('dial'); });
+        tabSearch.addEventListener('click', function () { setActiveTab('search'); });
+
+        // Apply server-decided initial tab. Dashboard launches without a phone
+        // open straight to Search; record launches stay on Dial.
+        if (INITIAL_TAB === 'search') setActiveTab('search');
+
+        if (searchInput)  searchInput.addEventListener('input', onSearchInput);
+        if (searchClearX) {
+            searchClearX.addEventListener('click', function () {
+                searchInput.value = '';
+                onSearchInput();
+                searchInput.focus();
+            });
+        }
+        if (searchChips) {
+            searchChips.addEventListener('click', function (e) {
+                var chip = e.target.closest('.filter-chip');
+                if (chip) onChipClick(chip);
+            });
         }
 
         // --- Event bindings ---
