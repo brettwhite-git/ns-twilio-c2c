@@ -534,37 +534,42 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             text-overflow: ellipsis;
         }
         /* Dialpad visible on idle/ready screen; hidden during active call */
+        /* Iteration A/C/D alignment: compressed dialpad — keys are smaller
+           so the new Selected Card header + compact meta strip + (during call)
+           account snapshot all fit comfortably in the 640px frame. Still
+           meets accessibility floor (≥ 28 px target). */
         .dialpad {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 5px;
             width: 100%;
-            margin: 4px 0 10px;
+            margin: 2px 0 6px;
         }
         .dialpad.hidden { display: none; }
         .dial-key {
             background: var(--phone-card);
             border: 1px solid var(--phone-card-border);
-            border-radius: 11px;
-            padding: 10px 8px 9px;
+            border-radius: 10px;
+            padding: 6px 6px 5px;
             cursor: pointer;
             color: var(--phone-text);
             transition: background 0.12s ease;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 2px;
+            gap: 1px;
             font-family: inherit;
+            min-height: 32px;
         }
         .dial-key:hover { background: rgba(255, 255, 255, 0.10); }
-        .dial-key .digit { font-size: 19px; font-weight: 500; line-height: 1; }
+        .dial-key .digit { font-size: 15px; font-weight: 500; line-height: 1.05; }
         .dial-key .letters {
-            font-size: 8.5px;
+            font-size: 7.5px;
             color: var(--phone-text-faint);
-            letter-spacing: 0.18em;
+            letter-spacing: 0.14em;
             font-weight: 600;
             text-transform: uppercase;
-            min-height: 9px;
+            min-height: 8px;
             line-height: 1;
         }
         .actions {
@@ -984,6 +989,105 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             text-align: left;
         }
         .picker-card.hidden { display: none; }
+        /* Iteration A/C/D Selected Card header inside picker-card */
+        .sc-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+        }
+        .sc-swatch {
+            width: 32px;
+            height: 32px;
+            border-radius: 9px;
+            background: linear-gradient(135deg, #38507A 0%, #1F2F4D 100%);
+            color: #FFFFFF;
+            font-weight: 600;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            letter-spacing: 0.04em;
+        }
+        .sc-swatch.lead     { background: linear-gradient(135deg, #A07E3F 0%, #6B5226 100%); }
+        .sc-swatch.prospect { background: linear-gradient(135deg, #4F7A86 0%, #2F4A56 100%); }
+        .sc-name {
+            flex: 1;
+            min-width: 0;
+            color: var(--phone-text);
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .sc-badge {
+            font-size: 9.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            color: #93C7AA;
+            background: rgba(20,185,129,0.08);
+            border: 1px solid rgba(20,185,129,0.30);
+            border-radius: 999px;
+            padding: 2px 8px;
+            flex-shrink: 0;
+        }
+        .sc-badge.lead     { color: #E8C77A; background: rgba(232,199,122,0.06); border-color: rgba(232,199,122,0.30); }
+        .sc-badge.prospect { color: #94BFD6; background: rgba(148,191,214,0.06); border-color: rgba(148,191,214,0.30); }
+        .sc-badge.hidden   { display: none; }
+        /* Iteration A/C/D compact meta strip (NS / Owner / Last call) */
+        .compact-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 6px;
+            margin: 8px 0 10px;
+            width: 100%;
+            max-width: 320px;
+        }
+        .compact-meta.hidden { display: none; }
+        .meta-cell {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 7px;
+            padding: 5px 8px;
+            text-align: left;
+            overflow: hidden;
+            color: var(--phone-text);
+            text-decoration: none;
+        }
+        .meta-cell.link { cursor: pointer; }
+        .meta-cell.link:hover { background: rgba(255, 255, 255, 0.06); }
+        .meta-cell .lbl {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 8.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            color: var(--phone-text-faint);
+            display: block;
+        }
+        .meta-cell .val {
+            font-size: 11px;
+            color: var(--phone-text);
+            margin-top: 2px;
+            line-height: 1.2;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .meta-cell .val.link-blue { color: #74A8E0; font-weight: 500; }
+        /* Iteration I empty-Dial hint (top of view-dial when no context) */
+        .dial-empty-hint {
+            text-align: center;
+            color: var(--phone-text-faint);
+            font-size: 11.5px;
+            font-style: italic;
+            padding: 4px 8px 10px;
+            width: 100%;
+        }
+        .dial-empty-hint.hidden { display: none; }
         .picker-btn {
             display: flex;
             align-items: center;
@@ -1190,6 +1294,16 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             color: #B6DCFA;
         }
         .audio-gear.hidden { display: none; }
+        /* ─── Iteration A/C/D alignment: hide legacy Dial-view vestiges ─────
+           These elements survive in the DOM as invisible state stores so
+           existing JS hooks (entityName.textContent, phoneNumberEl.textContent,
+           etc.) keep working unchanged. The new Selected Card + compact meta
+           components below display the same data with the wireframe layout. */
+        .view-dial .avatar,
+        .view-dial .contact-name,
+        .view-dial .contact-phone,
+        .view-dial .contact-company,
+        .view-dial .phone-divider { display: none; }
         /* ─── Iteration B Phase 5: Recents tab + last-3-dialed shortcut ───── */
         .view-recents {
             display: flex;
@@ -1410,6 +1524,16 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                  and client-side after a Search-tab selection (softphoneContacts
                  RESTlet route). -->
             <div class="picker-card hidden" id="pickerCard">
+                <!-- Iteration A/C/D Selected Card header: company swatch +
+                     name + type badge. Populated client-side from ENTITY_NAME
+                     and ENTITY_TYPE on init, and re-populated when a Search/
+                     Recents row is selected (loadRecentIntoDial /
+                     selectSearchRow). -->
+                <div class="sc-header">
+                    <div class="sc-swatch" id="scSwatch">&middot;&middot;</div>
+                    <div class="sc-name" id="scName">&mdash;</div>
+                    <span class="sc-badge" id="scBadge"></span>
+                </div>
                 <button class="picker-btn" id="pickerContactBtn" type="button" aria-expanded="false" aria-controls="pickerDropdown">
                     <span class="picker-label">Contact</span>
                     <span class="picker-value" id="pickerContactName">&mdash;</span>
@@ -1421,6 +1545,31 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 <div class="picker-dropdown hidden" id="pickerDropdown" role="region" aria-label="Pick a contact and phone"></div>
+            </div>
+
+            <!-- Iteration A/C/D compact meta strip: NS / Owner / Last call.
+                 Hidden when no entity context. Populated client-side from
+                 ENTITY_INFO + ENTITY_RECORD_URL + the recents fetch. -->
+            <div class="compact-meta hidden" id="compactMeta">
+                <a class="meta-cell link" id="metaOpenRecord" target="_blank" rel="noopener" href="#">
+                    <span class="lbl">NS</span>
+                    <span class="val link-blue">Open record &rarr;</span>
+                </a>
+                <div class="meta-cell">
+                    <span class="lbl">Owner</span>
+                    <span class="val" id="metaOwner">&mdash;</span>
+                </div>
+                <div class="meta-cell">
+                    <span class="lbl">Last call</span>
+                    <span class="val" id="metaLastCall">&mdash;</span>
+                </div>
+            </div>
+
+            <!-- Iteration I empty-Dial hint at top of view-dial (shown when
+                 no entity context is loaded — dashboard launch with no phone
+                 + no entityId). -->
+            <div class="dial-empty-hint hidden" id="dialEmptyHint">
+                Type a number, or switch to Search to find a contact
             </div>
 
             <!-- Phase 5: last-3-dialed shortcut on the empty Dial home (no
@@ -2562,6 +2711,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             if (entityName)    entityName.textContent = row.companyName || '';
             if (entityCompany) entityCompany.textContent = row.contactName || '';
             renderContactInfoFor({ email: row.email, contactName: row.contactName }, row.companyName);
+            // Update ENTITY_ID + ENTITY_NAME so subsequent renders (header,
+            // meta, snapshot) target the right entity. ENTITY_TYPE comes
+            // from the row's type field (customer/prospect/lead).
+            ENTITY_ID = String(row.id || '');
+            ENTITY_NAME = row.companyName || '';
+            window.__CTC_ENTITY_TYPE__ = row.type || '';
             setActiveTab('dial');
             setButtons(!!row.phone, false, false);
 
@@ -2569,6 +2724,19 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             // Fall back to a single-phone view when the entity has zero contacts
             // (the row's phone stays in the Selected Card; picker stays hidden).
             hydratePickerForEntity(row.id);
+
+            // Iteration A/C/D alignment: refresh the Selected Card header
+            // (swatch + name + badge) and compact meta strip for the new
+            // entity. Recents fetch is already in-memory so last-call age
+            // updates without a new RESTlet call.
+            if (typeof renderSelectedCardHeader === 'function') {
+                renderSelectedCardHeader({
+                    name: row.companyName,
+                    type: row.type,
+                    entityId: row.id,
+                    recordUrl: '' // Phase 6+: synthesize record URL from type+id
+                });
+            }
         }
 
         // ─── Iteration B Phase 3: multi-contact picker ──────────────────────
@@ -2748,6 +2916,103 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         // Initial render from server-supplied CONTACTS_V2 (record-launch path).
         renderPicker(CONTACTS_V2);
+
+        // ─── Iteration A/C/D alignment: Selected Card header + meta strip ──
+        var scSwatch        = document.getElementById('scSwatch');
+        var scName          = document.getElementById('scName');
+        var scBadge         = document.getElementById('scBadge');
+        var compactMeta     = document.getElementById('compactMeta');
+        var metaOpenRecord  = document.getElementById('metaOpenRecord');
+        var metaOwner       = document.getElementById('metaOwner');
+        var metaLastCall    = document.getElementById('metaLastCall');
+        var dialEmptyHint   = document.getElementById('dialEmptyHint');
+
+        function entityInitials(name) {
+            var parts = String(name || '').trim().split(/[^A-Za-z0-9]+/).filter(Boolean).slice(0, 2);
+            return parts.map(function (p) { return p.charAt(0).toUpperCase(); }).join('') || '·';
+        }
+        function badgeLabelForType(type) {
+            var t = String(type || '').toLowerCase();
+            if (t === 'lead') return 'Lead';
+            if (t === 'prospect') return 'Prospect';
+            if (t === 'customer') return 'Customer';
+            return '';
+        }
+        function ageLabelFromDate(iso) {
+            if (!iso) return '';
+            var t = Date.parse(iso);
+            if (isNaN(t)) return '';
+            var days = Math.floor((Date.now() - t) / 86400000);
+            if (days <= 0) return 'today';
+            if (days === 1) return 'yesterday';
+            if (days < 7) return days + 'd ago';
+            if (days < 30) return Math.round(days / 7) + 'w ago';
+            if (days < 365) return Math.round(days / 30) + 'mo ago';
+            return Math.round(days / 365) + 'y ago';
+        }
+
+        // Find the most-recent recents row matching this entityId. Called by
+        // renderSelectedCardHeader to populate the "Last call" meta cell.
+        function lastCallForEntity(entityId) {
+            if (!recentRows || !entityId) return null;
+            for (var i = 0; i < recentRows.length; i++) {
+                if (String(recentRows[i].companyId) === String(entityId)) return recentRows[i];
+            }
+            return null;
+        }
+
+        function renderSelectedCardHeader(opts) {
+            opts = opts || {};
+            var name = opts.name || ENTITY_NAME || '';
+            var type = (opts.type || ENTITY_TYPE || '').toLowerCase();
+            var hasContext = !!(name || opts.entityId || ENTITY_ID);
+            if (scSwatch) {
+                scSwatch.textContent = entityInitials(name) || '··';
+                scSwatch.className = 'sc-swatch ' + (type === 'lead' || type === 'prospect' ? type : '');
+            }
+            if (scName) scName.textContent = name || '—';
+            if (scBadge) {
+                var label = badgeLabelForType(type);
+                scBadge.textContent = label;
+                scBadge.className = 'sc-badge ' + (type === 'lead' || type === 'prospect' ? type : '');
+                scBadge.classList.toggle('hidden', !label);
+            }
+            // Compact meta strip — populated from ENTITY_INFO + record URL +
+            // most-recent matching recent. Hidden when no entity context.
+            if (compactMeta) {
+                compactMeta.classList.toggle('hidden', !hasContext);
+                if (hasContext) {
+                    if (metaOpenRecord) {
+                        metaOpenRecord.href = opts.recordUrl || ENTITY_RECORD_URL || '#';
+                    }
+                    if (metaOwner) {
+                        metaOwner.textContent = opts.owner || (ENTITY_INFO && ENTITY_INFO.owner) || '—';
+                    }
+                    if (metaLastCall) {
+                        var lc = lastCallForEntity(opts.entityId || ENTITY_ID);
+                        metaLastCall.textContent = lc ? ageLabelFromDate(lc.date) : '—';
+                    }
+                }
+            }
+            // Iteration I empty-hint: only show when there's NO context.
+            if (dialEmptyHint) dialEmptyHint.classList.toggle('hidden', hasContext);
+        }
+
+        // Re-render the Selected Card header whenever recents finishes loading
+        // (the "Last call" cell depends on recentRows). Wrap loadRecents to
+        // call renderSelectedCardHeader after it completes.
+        var _origLoadRecents = loadRecents;
+        loadRecents = function () {
+            _origLoadRecents();
+            // The wrapped loadRecents resolves asynchronously; the .then in
+            // the original sets recentRows. Re-render after a microtask so
+            // metaLastCall picks up the freshly loaded data.
+            setTimeout(function () { renderSelectedCardHeader({}); }, 50);
+        };
+
+        // Initial render on popup load (record path has ENTITY_NAME from
+        // URL params; dashboard path has neither and shows the empty hint).
+        renderSelectedCardHeader({});
 
         // ─── Iteration B Phase 4: audio-settings overlay ─────────────────────
         // The gear icon in phone-top toggles a settings overlay sibling of
@@ -2960,19 +3225,30 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function loadRecentIntoDial(row) {
             // Mimic selectSearchRow's contract — load contact + phone into
             // the Dial state without auto-dialing. Rep confirms with the
-            // green Call button. Doesn't fetch contacts for the picker
-            // (Phase 5 keeps this minimal; Phase 6+ can call hydratePicker
-            // ForEntity here too).
+            // green Call button.
             if (row.phone) setDialedNumber(row.phone, { resetFresh: true });
             if (entityName)    entityName.textContent = row.companyName || '';
             if (entityCompany) entityCompany.textContent = row.contactName || '';
             renderContactInfoFor({ email: '', contactName: row.contactName }, row.companyName);
+            // Update ENTITY_ID so the snapshot/meta strip target the right one
+            ENTITY_ID = String(row.companyId || '');
+            ENTITY_NAME = row.companyName || '';
+            if (row.entityType) window.__CTC_ENTITY_TYPE__ = row.entityType;
             setActiveTab('dial');
             setButtons(!!row.phone, false, false);
             // Phase 3 picker hydration: if entity has multiple contacts, the
             // picker fills in for the rep to refine. Errors are swallowed
             // (already handled inside hydratePickerForEntity).
             if (row.companyId) hydratePickerForEntity(row.companyId);
+            // Iteration A/C/D alignment: refresh the Selected Card header
+            // and compact meta strip for the redialed entity.
+            if (typeof renderSelectedCardHeader === 'function') {
+                renderSelectedCardHeader({
+                    name: row.companyName,
+                    type: row.entityType,
+                    entityId: row.companyId
+                });
+            }
         }
 
         function updateRecentCounts(rows) {
