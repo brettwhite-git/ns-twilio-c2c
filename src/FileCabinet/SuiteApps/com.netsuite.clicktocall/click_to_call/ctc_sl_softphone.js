@@ -66,6 +66,25 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             contactsV2 = ctcEntity.getContactsAtEntity(entityId);
             contacts = queryContacts(entityId);
         }
+        // Phase 6 fix: when the record carries its own primary phone (the
+        // company switchboard / customer's record-level phone), prepend a
+        // synthetic "Company main" entry so reps can reach the switchboard
+        // straight from the picker — not just per-contact lines.
+        if (phone && entityName) {
+            const mainEntry = {
+                contactId: '__company_main__',
+                name: entityName + ' (main line)',
+                title: 'Company switchboard',
+                email: '',
+                phones: [{ number: phone, type: 'Main', isPrimary: true }]
+            };
+            // Strip the isPrimary flag from any other contact's first phone
+            // so the picker preselects the company main as the default.
+            contactsV2.forEach((c) => {
+                (c.phones || []).forEach((p) => { p.isPrimary = false; });
+            });
+            contactsV2 = [mainEntry].concat(contactsV2);
+        }
 
         const entityInfo = lookupEntityInfo(entityType, entityId);
         const entityRecordUrl = resolveEntityRecordUrl(entityType, entityId);
@@ -290,6 +309,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                broken rather than scrollable. */
             scrollbar-width: auto;
             scrollbar-color: rgba(255,255,255,0.32) transparent;
+            /* Phase 6 fix: position context for the audio overlay so it can
+               absolutely-position itself over the scroll zone. */
+            position: relative;
         }
         .phone-scroll::-webkit-scrollbar { width: 8px; }
         .phone-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.32); border-radius: 4px; }
@@ -1021,8 +1043,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             padding: 7px 10px 8px;
             border-top: 1px solid rgba(255, 255, 255, 0.08);
             text-align: left;
+            cursor: pointer;
         }
+        .picker-contact-row:hover { background: rgba(255, 255, 255, 0.04); }
         .picker-contact-row.selected { background: rgba(20, 185, 129, 0.07); }
+        .picker-contact-row.selected:hover { background: rgba(20, 185, 129, 0.10); }
         .picker-contact-row .name {
             font-size: 12.5px;
             color: var(--phone-text);
@@ -1071,17 +1096,22 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
         .phone-pill.selected .tag { color: #88D9B0; }
         /* ─── Iteration B Phase 4: audio-settings overlay ──────────────────── */
-        /* Sibling of view-dial and view-search inside .phone-scroll. Shown when
-           the gear icon in phone-top is tapped; hides the dial/search views
-           until "Done" is clicked. Reuses #inputDevice / #outputDevice IDs so
-           the existing populateDevices() + Twilio device.audio.setInputDevice
-           wiring keeps working unchanged. */
+        /* Phase 6 fix: was a sibling of view-dial / view-search inside the
+           flex column — but on some browser/runtime combos the .hidden class
+           on view-dial wasn't taking effect, so both stacked vertically. Now
+           absolutely positioned to cover the scroll zone, layered with
+           z-index. Backdrop matches the phone gradient so the cover feels
+           seamless. */
         .audio-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 10;
+            background: linear-gradient(180deg, var(--phone-bg-1) 0%, var(--phone-bg-2) 100%);
+            padding: 12px 22px 18px;
+            overflow-y: auto;
             display: flex;
             flex-direction: column;
-            width: 100%;
             text-align: left;
-            padding-top: 4px;
         }
         .audio-overlay.hidden { display: none; }
         .audio-overlay .ovl-title {
@@ -2613,6 +2643,28 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 var rowEl = document.createElement('div');
                 rowEl.className = 'picker-contact-row';
                 rowEl.setAttribute('data-contact-id', c.contactId);
+                rowEl.setAttribute('role', 'button');
+                rowEl.tabIndex = 0;
+                // Phase 6 fix: clicking anywhere on the row picks this
+                // contact's primary phone (their first phone in the list).
+                // Per-line pills still work for selecting a specific number.
+                rowEl.addEventListener('click', function (e) {
+                    // Pill clicks bubble — guard so we don't double-fire.
+                    if (e.target.closest('.phone-pill')) return;
+                    if (c.phones && c.phones.length) {
+                        var primary = c.phones.find(function (p) { return p.isPrimary; }) || c.phones[0];
+                        selectPickerPhone(c.contactId, primary.number, primary.type, c.name);
+                    }
+                });
+                rowEl.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        if (c.phones && c.phones.length) {
+                            var primary = c.phones.find(function (p) { return p.isPrimary; }) || c.phones[0];
+                            selectPickerPhone(c.contactId, primary.number, primary.type, c.name);
+                        }
+                    }
+                });
 
                 var nameEl = document.createElement('div');
                 nameEl.className = 'name';
@@ -2642,7 +2694,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     tag.className = 'tag';
                     tag.textContent = p.type || '';
                     pill.appendChild(tag);
-                    pill.addEventListener('click', function () {
+                    pill.addEventListener('click', function (e) {
+                        e.stopPropagation();
                         selectPickerPhone(c.contactId, p.number, p.type, c.name);
                     });
                     phonesEl.appendChild(pill);
@@ -2760,12 +2813,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             }
         }
 
+        // Phase 6 fix: the overlay now position-absolute covers the entire
+        // scroll zone with its own backdrop, so we only need to toggle the
+        // overlay's own .hidden class. View-dial / view-search / view-recents
+        // stay in their natural state underneath — invisible because the
+        // overlay sits on z-index 10 with the phone-gradient background.
         function openAudioOverlay() {
             if (!audioOverlay) return;
-            // Remember which content view was active so Done restores it.
-            previousView = viewSearch.classList.contains('hidden') ? 'dial' : 'search';
-            viewDial.classList.add('hidden');
-            viewSearch.classList.add('hidden');
             audioOverlay.classList.remove('hidden');
             if (audioGear) {
                 audioGear.classList.add('active');
@@ -2775,11 +2829,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function closeAudioOverlay() {
             if (!audioOverlay) return;
             audioOverlay.classList.add('hidden');
-            if (previousView === 'search') {
-                viewSearch.classList.remove('hidden');
-            } else {
-                viewDial.classList.remove('hidden');
-            }
             if (audioGear) {
                 audioGear.classList.remove('active');
                 audioGear.setAttribute('aria-expanded', 'false');
@@ -3134,9 +3183,20 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         // Hook up tabs (Recents now functional)
-        tabDial.addEventListener('click', function () { setActiveTab('dial'); });
-        tabSearch.addEventListener('click', function () { setActiveTab('search'); });
-        tabRecents.addEventListener('click', function () { setActiveTab('recents'); });
+        // Tab clicks also close any open audio overlay so the rep sees the
+        // newly-active view, not a stale settings panel.
+        tabDial.addEventListener('click', function () {
+            closeAudioOverlay();
+            setActiveTab('dial');
+        });
+        tabSearch.addEventListener('click', function () {
+            closeAudioOverlay();
+            setActiveTab('search');
+        });
+        tabRecents.addEventListener('click', function () {
+            closeAudioOverlay();
+            setActiveTab('recents');
+        });
 
         // Apply server-decided initial tab. Dashboard launches without a phone
         // open straight to Search; record launches stay on Dial.
