@@ -19,9 +19,14 @@ define(['N/search', 'N/log'], (search, log) => {
     // Versioned popup name. window.open(url, name, features) silently
     // ignores the features string when a window with `name` already exists
     // and just loads the new URL into the stale chrome. Bump the suffix
-    // every time SOFTPHONE_POPUP_OPTIONS dimensions change so reps don't
-    // see a stale-sized popup after a deploy.
-    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v2';
+    // every time SOFTPHONE_POPUP_OPTIONS dimensions change OR the inline
+    // JS gets a load-bearing fix that reps must pick up immediately so
+    // they don't keep using a stale-state popup after a deploy.
+    //
+    // v3 (Phase 4 fix): forces fresh popup so the deviceSelectors-crash
+    // + mic-permission warm-up fixes take effect without reps needing
+    // to manually close their existing popup window.
+    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v3';
 
     /**
      * Resolve a display name from a NetSuite record by type.

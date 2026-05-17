@@ -1389,7 +1389,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var contactRow = document.getElementById('contactRow');
         var contactSelect = document.getElementById('contactSelect');
         var phoneNumberEl = document.getElementById('phoneNumber');
-        var deviceSelectors = document.getElementById('deviceSelectors');
+        // Phase 4: the legacy device-selectors wrapper was removed when the
+        // mic/speaker selects moved into the audio-overlay. Variable kept as
+        // a no-op (null) so any straggling references don't throw.
+        var deviceSelectors = null;
         var inputSelect = document.getElementById('inputDevice');
         var outputSelect = document.getElementById('outputDevice');
         var outputRow = document.getElementById('outputRow');
@@ -1889,8 +1892,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 });
             }
 
-            // class-based show — style.display='' won't override .device-selectors{display:none}
-            deviceSelectors.classList.add('visible');
+            // Phase 4: device selects now live inside the audio-overlay (no
+            // separate device-selectors wrapper to flip visible). The overlay
+            // itself controls visibility — see openAudioOverlay/closeAudioOverlay.
         }
 
         // --- Twilio Device setup ---
@@ -1905,11 +1909,23 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 setStatus('Ready to call', '');
                 setButtons(true, false, false);
                 setCallView('idle');
-                populateDevices();
-                // Phase 4: apply localStorage-remembered audio defaults after
-                // populateDevices fills the selects so the dropdowns reflect
-                // whatever mic/speaker the rep picked last session.
-                if (typeof applyAudioDefaults === 'function') applyAudioDefaults();
+                // Phase 4: explicitly request mic permission BEFORE populating
+                // the device list. macOS browsers (Chrome / Brave / Safari)
+                // return empty label strings for input devices until the user
+                // has granted microphone access via getUserMedia. Twilio's
+                // internal permission flow runs later in the call lifecycle,
+                // so without this nudge the Mic dropdown shows blank options
+                // even when the hardware is available.
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(function (stream) {
+                        // Discard the stream — we only needed the permission grant.
+                        stream.getTracks().forEach(function (t) { t.stop(); });
+                    })
+                    .catch(function () { /* permission denied — labels will be blank */ })
+                    .finally(function () {
+                        populateDevices();
+                        if (typeof applyAudioDefaults === 'function') applyAudioDefaults();
+                    });
             });
 
             device.on('error', function (err) {
