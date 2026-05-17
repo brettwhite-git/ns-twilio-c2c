@@ -1160,6 +1160,93 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             color: #B6DCFA;
         }
         .audio-gear.hidden { display: none; }
+        /* ─── Iteration B Phase 5: Recents tab + last-3-dialed shortcut ───── */
+        .view-recents {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        .view-recents.hidden { display: none; }
+        .recents-list {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 10px;
+            overflow: hidden;
+            text-align: left;
+            margin-bottom: 8px;
+        }
+        .recents-row {
+            display: grid;
+            grid-template-columns: 24px 1fr auto;
+            gap: 9px;
+            padding: 7px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            align-items: center;
+            cursor: pointer;
+        }
+        .recents-row:last-child { border-bottom: none; }
+        .recents-row:hover { background: rgba(255, 255, 255, 0.06); }
+        .recents-row .dir {
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .recents-row .dir.outbound { color: #94C7AC; background: rgba(20,185,129,0.10); }
+        .recents-row .dir.inbound  { color: #94BFD6; background: rgba(148,191,214,0.10); }
+        .recents-row .dir.missed   { color: #E69A8E; background: rgba(232,110,92,0.10); }
+        .recents-row .dir svg { width: 12px; height: 12px; }
+        .recents-row .meta { min-width: 0; }
+        .recents-row .name {
+            color: var(--phone-text);
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .recents-row .when {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            color: var(--phone-text-faint);
+            font-size: 9.5px;
+            line-height: 1.2;
+            margin-top: 2px;
+        }
+        .recents-row .redial {
+            background: transparent;
+            border: 1px solid var(--phone-card-border);
+            color: #93C7AA;
+            border-radius: 6px;
+            padding: 3px 6px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .recents-row .redial svg { width: 12px; height: 12px; }
+        .recents-row .redial:hover { background: rgba(20, 185, 129, 0.10); }
+        /* Last-3 shortcut on empty Dial home — same row style, tighter padding */
+        .last-dialed {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+        .last-dialed.hidden { display: none; }
+        .last-dialed .last-dialed-head {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--phone-text-faint);
+            margin: 0 0 6px;
+            display: flex; justify-content: space-between; align-items: baseline;
+        }
+        .last-dialed .last-dialed-head .meta {
+            color: var(--phone-text-muted);
+            font-family: inherit;
+            font-size: 10px;
+            letter-spacing: 0;
+            text-transform: none;
+        }
     </style>
 </head>
 <body>
@@ -1180,7 +1267,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
                     Search
                 </button>
-                <button class="mode-tab" id="tabRecents" type="button" role="tab" aria-selected="false" disabled title="Recents (coming soon)">
+                <button class="mode-tab" id="tabRecents" type="button" role="tab" aria-selected="false" title="Recent calls — last 7 days">
                     <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 16 14"/></svg>
                     Recents
                 </button>
@@ -1235,6 +1322,18 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 <div class="picker-dropdown hidden" id="pickerDropdown" role="region" aria-label="Pick a contact and phone"></div>
+            </div>
+
+            <!-- Phase 5: last-3-dialed shortcut on the empty Dial home (no
+                 contact loaded). Hidden once a contact is loaded into the
+                 Selected Card. Populated by the same softphoneRecents fetch
+                 as the Recents tab — top 3 rows only. -->
+            <div class="last-dialed hidden" id="lastDialed">
+                <div class="last-dialed-head">
+                    <span>Last dialed</span>
+                    <span class="meta">tap to redial</span>
+                </div>
+                <div class="recents-list" id="lastDialedList"></div>
             </div>
 
             <div class="dialpad" id="dialpad">
@@ -1300,6 +1399,25 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
             <button class="done-btn" id="audioDone" type="button">Done &middot; save &amp; return</button>
         </div><!-- /audio-overlay -->
+
+        <!-- view-recents: Phase 5 Recents tab. Hidden by default; shown when
+             the Recents tab is active. Filter chips re-segment by direction
+             (All / Missed / Outbound / Inbound). Tap a row → load into Dial. -->
+        <div class="view-recents hidden" id="viewRecents">
+            <div class="filter-chips" id="recentsChips" role="group" aria-label="Filter recents by direction">
+                <button class="filter-chip active" type="button" data-direction="">All <span class="count" id="rcnt-all">0</span></button>
+                <button class="filter-chip" type="button" data-direction="missed">Missed <span class="count" id="rcnt-missed">0</span></button>
+                <button class="filter-chip" type="button" data-direction="outbound">Out <span class="count" id="rcnt-out">0</span></button>
+                <button class="filter-chip" type="button" data-direction="inbound">In <span class="count" id="rcnt-in">0</span></button>
+            </div>
+            <div class="surface-sect-head">
+                <span>Last 7 days</span>
+                <span class="meta" id="recentsCount">your calls only</span>
+            </div>
+            <div class="recents-list" id="recentsList"></div>
+            <div class="search-loading hidden" id="recentsLoading">Loading&hellip;</div>
+            <div class="search-empty hidden" id="recentsEmpty">No calls in the last 7 days.</div>
+        </div><!-- /view-recents -->
 
         </div><!-- /phone-scroll -->
 
@@ -1562,6 +1680,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             }
             syncBackspaceVisibility();
             if (btnCall) btnCall.disabled = !PHONE;
+            // Phase 5: re-evaluate the last-3-dialed shortcut. When PHONE
+            // is non-empty (a contact is loaded), the shortcut hides.
+            if (typeof renderLastDialed === 'function') renderLastDialed();
         }
 
         // Format the initial server-rendered phone number on load.
@@ -2085,18 +2206,26 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var debounceTimer = null;
 
         function setActiveTab(which) {
-            var dialActive = which === 'dial';
+            var dialActive    = which === 'dial';
+            var searchActive  = which === 'search';
+            var recentsActive = which === 'recents';
             tabDial.classList.toggle('active', dialActive);
             tabDial.setAttribute('aria-selected', dialActive ? 'true' : 'false');
-            tabSearch.classList.toggle('active', which === 'search');
-            tabSearch.setAttribute('aria-selected', which === 'search' ? 'true' : 'false');
-            tabRecents.classList.toggle('active', which === 'recents');
-            tabRecents.setAttribute('aria-selected', which === 'recents' ? 'true' : 'false');
+            tabSearch.classList.toggle('active', searchActive);
+            tabSearch.setAttribute('aria-selected', searchActive ? 'true' : 'false');
+            tabRecents.classList.toggle('active', recentsActive);
+            tabRecents.setAttribute('aria-selected', recentsActive ? 'true' : 'false');
             viewDial.classList.toggle('hidden', !dialActive);
-            viewSearch.classList.toggle('hidden', which !== 'search');
-            if (which === 'search') {
+            viewSearch.classList.toggle('hidden', !searchActive);
+            // Phase 5: Recents view sibling
+            var viewRecentsEl = document.getElementById('viewRecents');
+            if (viewRecentsEl) viewRecentsEl.classList.toggle('hidden', !recentsActive);
+            if (searchActive) {
                 if (suggestedRows === null) loadSuggested();
                 setTimeout(function () { if (searchInput) searchInput.focus(); }, 0);
+            }
+            if (recentsActive) {
+                if (typeof loadRecents === 'function' && recentRows === null) loadRecents();
             }
         }
 
@@ -2567,13 +2696,229 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             });
         }
 
-        // Hook up tabs (Recents stays inert)
+        // ─── Iteration B Phase 5: Recents tab + last-3-dialed shortcut ────
+        // recentRows = cached fetch from softphoneRecents. null = "not yet
+        // fetched"; [] = "fetched, empty". The cache survives tab switches
+        // so the popup doesn't re-hit the RESTlet just to flip back.
+        var recentRows           = null;
+        var recentsActiveFilter  = '';
+        var viewRecents          = document.getElementById('viewRecents');
+        var recentsList          = document.getElementById('recentsList');
+        var recentsEmpty         = document.getElementById('recentsEmpty');
+        var recentsLoading       = document.getElementById('recentsLoading');
+        var recentsChips         = document.getElementById('recentsChips');
+        var recentsCountEl       = document.getElementById('recentsCount');
+        var rcntAll              = document.getElementById('rcnt-all');
+        var rcntMissed           = document.getElementById('rcnt-missed');
+        var rcntOut              = document.getElementById('rcnt-out');
+        var rcntIn               = document.getElementById('rcnt-in');
+        var lastDialedCard       = document.getElementById('lastDialed');
+        var lastDialedList       = document.getElementById('lastDialedList');
+
+        // Direction icon SVGs — outbound (↗), inbound (↙), missed (×)
+        var DIR_SVG = {
+            outbound: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polyline points="7 17 17 7"/><polyline points="9 7 17 7 17 15"/></svg>',
+            inbound:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polyline points="17 7 7 17"/><polyline points="15 17 7 17 7 9"/></svg>',
+            missed:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><polyline points="7 7 17 17"/><polyline points="7 13 7 17 13 17"/></svg>'
+        };
+        var REDIAL_SVG = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.3 11.3 0 0 0 3.5.56 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.3 11.3 0 0 0 .56 3.5 1 1 0 0 1-.25 1z"/></svg>';
+
+        function formatWhen(iso) {
+            if (!iso) return '';
+            // Server returns NetSuite-formatted date strings; trust them as-is.
+            // Phase 7 polish can humanize ("Yesterday 4:12 PM") but for now
+            // the raw string is informative enough.
+            return String(iso);
+        }
+        function formatDur(seconds) {
+            var s = Number(seconds) || 0;
+            if (s < 60) return s + 's';
+            var m = Math.floor(s / 60);
+            var rem = s % 60;
+            return m + 'm ' + (rem < 10 ? '0' : '') + rem + 's';
+        }
+        function directionFor(row) {
+            // Phase 5: outbound-only data today; Phase 6+ derives missed from
+            // duration === 0 + direction === inbound once that exists.
+            if (row.isMissed) return 'missed';
+            return row.direction || 'outbound';
+        }
+
+        function buildRecentsRow(row, opts) {
+            var dir = directionFor(row);
+            var el = document.createElement('div');
+            el.className = 'recents-row';
+            el.setAttribute('role', 'button');
+            el.tabIndex = 0;
+
+            var dirEl = document.createElement('div');
+            dirEl.className = 'dir ' + dir;
+            // Direction icon — innerHTML is safe here because DIR_SVG is a
+            // server-controlled literal (not user input).
+            // eslint-disable-next-line no-unsanitized/property
+            dirEl.innerHTML = DIR_SVG[dir] || DIR_SVG.outbound;
+            el.appendChild(dirEl);
+
+            var meta = document.createElement('div');
+            meta.className = 'meta';
+            var name = document.createElement('div');
+            name.className = 'name';
+            name.textContent = row.companyName || row.contactName || 'Unknown';
+            var when = document.createElement('div');
+            when.className = 'when';
+            var whenText = formatWhen(row.date);
+            if (row.duration) whenText += ' · ' + formatDur(row.duration);
+            else if (dir === 'missed') whenText += ' · missed';
+            when.textContent = whenText;
+            meta.appendChild(name);
+            meta.appendChild(when);
+            el.appendChild(meta);
+
+            var redial = document.createElement('button');
+            redial.type = 'button';
+            redial.className = 'redial';
+            redial.title = 'Redial this contact';
+            // eslint-disable-next-line no-unsanitized/property
+            redial.innerHTML = REDIAL_SVG;
+            // Stop click bubbling so the row's own click handler doesn't fire twice
+            redial.addEventListener('click', function (e) {
+                e.stopPropagation();
+                loadRecentIntoDial(row);
+            });
+            el.appendChild(redial);
+
+            el.addEventListener('click', function () { loadRecentIntoDial(row); });
+            el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    loadRecentIntoDial(row);
+                }
+            });
+            return el;
+        }
+
+        function loadRecentIntoDial(row) {
+            // Mimic selectSearchRow's contract — load contact + phone into
+            // the Dial state without auto-dialing. Rep confirms with the
+            // green Call button. Doesn't fetch contacts for the picker
+            // (Phase 5 keeps this minimal; Phase 6+ can call hydratePicker
+            // ForEntity here too).
+            if (row.phone) setDialedNumber(row.phone, { resetFresh: true });
+            if (entityName)    entityName.textContent = row.companyName || '';
+            if (entityCompany) entityCompany.textContent = row.contactName || '';
+            renderContactInfoFor({ email: '', contactName: row.contactName }, row.companyName);
+            setActiveTab('dial');
+            setButtons(!!row.phone, false, false);
+            // Phase 3 picker hydration: if entity has multiple contacts, the
+            // picker fills in for the rep to refine. Errors are swallowed
+            // (already handled inside hydratePickerForEntity).
+            if (row.companyId) hydratePickerForEntity(row.companyId);
+        }
+
+        function updateRecentCounts(rows) {
+            var all = 0, missed = 0, out = 0, inb = 0;
+            (rows || []).forEach(function (r) {
+                all++;
+                var d = directionFor(r);
+                if (d === 'missed')   missed++;
+                else if (d === 'inbound')  inb++;
+                else /* outbound */        out++;
+            });
+            rcntAll.textContent    = all.toString();
+            rcntMissed.textContent = missed.toString();
+            rcntOut.textContent    = out.toString();
+            rcntIn.textContent     = inb.toString();
+        }
+
+        function filterRecents(rows, direction) {
+            if (!direction) return rows;
+            return (rows || []).filter(function (r) { return directionFor(r) === direction; });
+        }
+
+        function renderRecents(rows) {
+            clearChildren(recentsList);
+            if (!rows || !rows.length) {
+                recentsEmpty.classList.remove('hidden');
+                return;
+            }
+            recentsEmpty.classList.add('hidden');
+            rows.forEach(function (row) {
+                recentsList.appendChild(buildRecentsRow(row));
+            });
+        }
+
+        function applyRecentsVisible() {
+            updateRecentCounts(recentRows || []);
+            renderRecents(filterRecents(recentRows || [], recentsActiveFilter));
+        }
+
+        function loadRecents() {
+            recentsLoading.classList.remove('hidden');
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'softphoneRecents', dateRange: 'last7days', limit: 50 })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                recentsLoading.classList.add('hidden');
+                recentRows = (data && data.rows) || [];
+                applyRecentsVisible();
+                renderLastDialed();
+            })
+            .catch(function (err) {
+                recentsLoading.classList.add('hidden');
+                showError('Recents fetch failed: ' + (err.message || err));
+            });
+        }
+
+        function onRecentsChipClick(chipEl) {
+            recentsActiveFilter = chipEl.getAttribute('data-direction') || '';
+            Array.prototype.forEach.call(recentsChips.querySelectorAll('.filter-chip'), function (el) {
+                el.classList.toggle('active', el === chipEl);
+            });
+            applyRecentsVisible();
+        }
+
+        // ── Last-3-dialed shortcut on Dial home ──
+        // Shows when (a) we have recent rows AND (b) the Dial tab has no
+        // contact context (PHONE empty, no Selected Card armed).
+        function renderLastDialed() {
+            if (!lastDialedCard || !lastDialedList) return;
+            var hasContext = !!(PHONE || ENTITY_ID);
+            var rows = (recentRows || []).slice(0, 3);
+            if (hasContext || !rows.length) {
+                lastDialedCard.classList.add('hidden');
+                return;
+            }
+            clearChildren(lastDialedList);
+            rows.forEach(function (row) {
+                lastDialedList.appendChild(buildRecentsRow(row));
+            });
+            lastDialedCard.classList.remove('hidden');
+        }
+
+        if (recentsChips) {
+            recentsChips.addEventListener('click', function (e) {
+                var chip = e.target.closest('.filter-chip');
+                if (chip) onRecentsChipClick(chip);
+            });
+        }
+
+        // Hook up tabs (Recents now functional)
         tabDial.addEventListener('click', function () { setActiveTab('dial'); });
         tabSearch.addEventListener('click', function () { setActiveTab('search'); });
+        tabRecents.addEventListener('click', function () { setActiveTab('recents'); });
 
         // Apply server-decided initial tab. Dashboard launches without a phone
         // open straight to Search; record launches stay on Dial.
         if (INITIAL_TAB === 'search') setActiveTab('search');
+
+        // Phase 5: kick off the Recents fetch on init so the last-3-dialed
+        // shortcut on the Dial tab home renders without waiting for the user
+        // to flip to Recents. Fetch is a single small RESTlet roundtrip;
+        // result is cached for the popup lifetime.
+        if (typeof loadRecents === 'function') loadRecents();
 
         if (searchInput)  searchInput.addEventListener('input', onSearchInput);
         if (searchClearX) {

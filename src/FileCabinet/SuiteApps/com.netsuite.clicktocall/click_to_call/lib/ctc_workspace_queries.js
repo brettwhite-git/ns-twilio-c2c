@@ -105,8 +105,10 @@ define(['N/search', 'N/log'], (search, log) => {
             ];
 
             // Date filter: supports a `dateRange` shortcut for the portlet chips
-            // (today, yesterday, thisweek, lastweek, last30days), or explicit
-            // dateFrom/dateTo. `todayOnly` is the legacy shortcut kept for back-compat.
+            // (today, yesterday, thisweek, lastweek, last7days, last30days), or
+            // explicit dateFrom/dateTo. `todayOnly` is the legacy shortcut kept
+            // for back-compat. `last7days` was added for the softphone Recents
+            // tab (Iteration B Phase 5).
             const dateRange = params.dateRange;
             if (dateRange === 'yesterday') {
                 searchFilters.push('AND', ['startdate', 'on', 'yesterday']);
@@ -114,6 +116,8 @@ define(['N/search', 'N/log'], (search, log) => {
                 searchFilters.push('AND', ['startdate', 'within', 'thisweek']);
             } else if (dateRange === 'lastweek') {
                 searchFilters.push('AND', ['startdate', 'within', 'lastweek']);
+            } else if (dateRange === 'last7days') {
+                searchFilters.push('AND', ['startdate', 'within', 'lastweektodate']);
             } else if (dateRange === 'last30days') {
                 searchFilters.push('AND', ['startdate', 'within', 'lastthirtydays']);
             } else if (dateRange === 'today' || params.todayOnly) {
@@ -140,19 +144,30 @@ define(['N/search', 'N/log'], (search, log) => {
                 ]
             }).run().getRange({ start: 0, end: limit });
 
-            const rows = results.map((r) => ({
-                id: r.id,
-                date: r.getValue('startdate') || '',
-                companyId: extractId(r.getValue('company')),
-                companyName: extractText(r.getText ? r.getText('company') : r.getValue('company')),
-                contactName: extractText(r.getText ? r.getText('contact') : r.getValue('contact')),
-                phone: r.getValue('phone') || '',
-                brief: r.getValue('custevent_ctc_ai_brief') || '',
-                satisfaction: parseInt(r.getValue('custevent_ctc_satisfaction'), 10) || null,
-                duration: parseInt(r.getValue('custevent_ctc_duration'), 10) || 0,
-                callStatus: r.getValue('custevent_ctc_call_status') || '',
-                entityType: ''
-            }));
+            const rows = results.map((r) => {
+                const duration = parseInt(r.getValue('custevent_ctc_duration'), 10) || 0;
+                const callStatus = r.getValue('custevent_ctc_call_status') || '';
+                // Iteration B Phase 5: direction is always 'outbound' for now —
+                // CTC is outbound-only per CLAUDE.md / no-inbound-MVP scope. When
+                // inbound lands, derive from a Phone Call field (is_outgoing or
+                // a new custevent). 'missed' is a UI-only derived state for the
+                // Recents tab — inbound + duration === 0 once inbound exists.
+                return {
+                    id: r.id,
+                    date: r.getValue('startdate') || '',
+                    companyId: extractId(r.getValue('company')),
+                    companyName: extractText(r.getText ? r.getText('company') : r.getValue('company')),
+                    contactName: extractText(r.getText ? r.getText('contact') : r.getValue('contact')),
+                    phone: r.getValue('phone') || '',
+                    brief: r.getValue('custevent_ctc_ai_brief') || '',
+                    satisfaction: parseInt(r.getValue('custevent_ctc_satisfaction'), 10) || null,
+                    duration: duration,
+                    callStatus: callStatus,
+                    direction: 'outbound',
+                    isMissed: false, // duration === 0 once inbound calls exist
+                    entityType: ''
+                };
+            });
 
             // Stage isn't joinable from phonecall.company (NetSuite rejects
             // {name:'stage', join:'company'} with "An nlobjSearchColumn contains

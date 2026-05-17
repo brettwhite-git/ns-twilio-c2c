@@ -48,6 +48,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         if (body.action === 'softphoneSuggested')   return softphoneSuggested(body);
         if (body.action === 'softphoneSearch')      return softphoneSearch(body);
         if (body.action === 'softphoneContacts')    return softphoneContacts(body);
+        if (body.action === 'softphoneRecents')     return softphoneRecents(body);
         if (body.action === 'approveProposedTask')  return approveProposedTask(body);
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
@@ -450,6 +451,27 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         const entityId = body.entityId;
         if (!entityId) return { error: 'entityId required', rows: [] };
         return { rows: ctcEntity.getContactsAtEntity(entityId) };
+    };
+
+    /**
+     * softphoneRecents — Iteration B Phase 5.
+     * Returns the current rep's recent Phone Calls for the Recents tab AND
+     * the last-3-dialed shortcut on the empty Dial home. Reuses
+     * workspaceQueries.loadHistoryRows with a last-7-days default; client-side
+     * direction filter chips (All / Missed / Outbound / Inbound) filter the
+     * returned rows in the popup.
+     *
+     * @param {Object} body
+     * @param {string} [body.dateRange='last7days'] — last7days | today | last30days
+     * @param {number} [body.limit=50]
+     * @returns {Object} { rows: [...], total } or { error }
+     */
+    const softphoneRecents = (body) => {
+        return workspaceQueries.loadHistoryRows({
+            userId: runtime.getCurrentUser().id,
+            dateRange: body.dateRange || 'last7days',
+            limit: body.limit || 50
+        });
     };
 
     /**
