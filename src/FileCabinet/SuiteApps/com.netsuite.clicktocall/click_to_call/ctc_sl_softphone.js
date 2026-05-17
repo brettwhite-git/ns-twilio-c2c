@@ -708,19 +708,14 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             word-break: break-word;
             display: none;
         }
-        /* Phase 1: contact-panel is now a fixed-shrink strip beneath the
-           dark phone-display (the popup is locked to 640 px so flex:1 here
-           would fight phone-display for remaining space). Phases 2+ may
-           absorb this panel into the dark surface entirely. */
+        /* Iteration A/C/D/I alignment: the legacy white .contact-panel under
+           the dark phone-display is gone — the compact meta strip inside
+           view-dial absorbed Owner / Open-record / Last-call, and Email /
+           Title etc. were rarely surfaced anyway. The element stays in the
+           DOM as a no-op so existing JS hooks (renderContactInfoFor and the
+           info-* element refs) don't break. */
         .contact-panel {
-            background: var(--panel-bg);
-            color: var(--panel-text);
-            padding: 14px 18px 16px;
-            flex-shrink: 0;
-            max-height: 160px;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
+            display: none;
         }
         .contact-panel h3 {
             margin: 0 0 10px;
