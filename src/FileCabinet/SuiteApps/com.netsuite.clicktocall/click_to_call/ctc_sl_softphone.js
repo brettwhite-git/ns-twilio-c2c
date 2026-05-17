@@ -1070,6 +1070,96 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             color: #B5EFD0;
         }
         .phone-pill.selected .tag { color: #88D9B0; }
+        /* ─── Iteration B Phase 4: audio-settings overlay ──────────────────── */
+        /* Sibling of view-dial and view-search inside .phone-scroll. Shown when
+           the gear icon in phone-top is tapped; hides the dial/search views
+           until "Done" is clicked. Reuses #inputDevice / #outputDevice IDs so
+           the existing populateDevices() + Twilio device.audio.setInputDevice
+           wiring keeps working unchanged. */
+        .audio-overlay {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            text-align: left;
+            padding-top: 4px;
+        }
+        .audio-overlay.hidden { display: none; }
+        .audio-overlay .ovl-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--phone-text);
+            margin: 0 0 4px;
+        }
+        .audio-overlay .ovl-sub {
+            font-size: 10.5px;
+            color: var(--phone-text-muted);
+            margin: 0 0 14px;
+        }
+        .audio-overlay .field { margin-bottom: 12px; }
+        .audio-overlay .field-label {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            color: var(--phone-text-faint);
+            display: block;
+            margin-bottom: 5px;
+        }
+        .audio-overlay select {
+            width: 100%;
+            appearance: none;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 9px;
+            padding: 9px 11px;
+            color: var(--phone-text);
+            font: inherit;
+            font-size: 12.5px;
+            font-family: inherit;
+            cursor: pointer;
+            outline: none;
+        }
+        .audio-overlay select:focus { border-color: rgba(116, 192, 252, 0.45); }
+        .audio-overlay .save-default {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--phone-text-muted);
+            margin: 4px 0 14px;
+            cursor: pointer;
+        }
+        .audio-overlay .save-default input[type=checkbox] {
+            margin: 0;
+            cursor: pointer;
+            accent-color: #14B981;
+        }
+        .audio-overlay .done-btn {
+            background: rgba(116, 192, 252, 0.20);
+            color: #B6DCFA;
+            border: 1px solid rgba(116, 192, 252, 0.50);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            letter-spacing: 0.02em;
+            margin-top: 6px;
+        }
+        .audio-overlay .done-btn:hover {
+            background: rgba(116, 192, 252, 0.30);
+            color: #FFFFFF;
+        }
+        /* Gear icon: active state when overlay open + disabled state during call. */
+        .audio-gear:not([disabled]) { cursor: pointer; }
+        .audio-gear.active {
+            background: rgba(116, 192, 252, 0.18);
+            border-color: rgba(116, 192, 252, 0.45);
+            color: #B6DCFA;
+        }
+        .audio-gear.hidden { display: none; }
     </style>
 </head>
 <body>
@@ -1077,7 +1167,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
     <div class="phone-display">
         <!-- ─── phone-top: status pill + tabs + audio gear (fixed) ─── -->
         <div class="phone-top">
-            <button class="audio-gear" id="audioGear" type="button" title="Audio settings (coming soon)" aria-label="Audio settings" disabled>
+            <button class="audio-gear" id="audioGear" type="button" title="Audio settings — pick mic and speaker" aria-label="Audio settings" aria-haspopup="dialog" aria-expanded="false">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
             </button>
             <div class="status-pill" id="status">Initializing&hellip;</div>
@@ -1096,20 +1186,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 </button>
             </div>
 
-            <!-- Phase 1.5: device-selectors moved into phone-top so the
-                 dialpad has the scroll viewport mostly to itself. Phase 4
-                 will replace this row with the audio-settings overlay
-                 launched from the gear icon above. -->
-            <div class="device-selectors" id="deviceSelectors">
-                <div class="device-row">
-                    <label for="inputDevice">Mic</label>
-                    <select id="inputDevice"><option value="">Loading…</option></select>
-                </div>
-                <div class="device-row" id="outputRow">
-                    <label for="outputDevice">Out</label>
-                    <select id="outputDevice"><option value="">Loading…</option></select>
-                </div>
-            </div>
         </div>
 
         <!-- ─── phone-scroll: per-state content (overflow absorbs growth) ─── -->
@@ -1198,6 +1274,32 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             <div class="search-loading hidden" id="searchLoading">Loading&hellip;</div>
             <div class="search-empty hidden" id="searchEmpty">No matches &mdash; try a different name or number.</div>
         </div><!-- /view-search -->
+
+        <!-- audio-overlay: Phase 4 audio-settings panel. Hidden by default;
+             gear in phone-top toggles. Reuses #inputDevice / #outputDevice IDs
+             so the existing populateDevices + Twilio device wiring is unchanged
+             — Phase 1.5's inline device-selectors row in phone-top is gone now
+             that these live behind the gear instead. -->
+        <div class="audio-overlay hidden" id="audioOverlay" role="dialog" aria-label="Audio settings">
+            <div class="ovl-title">Audio settings</div>
+            <div class="ovl-sub">Pick the mic and speaker before you call. Defaults are remembered per browser.</div>
+
+            <div class="field">
+                <span class="field-label">Input &middot; microphone</span>
+                <select id="inputDevice"><option value="">Loading&hellip;</option></select>
+            </div>
+            <div class="field" id="outputRow">
+                <span class="field-label">Output &middot; speaker</span>
+                <select id="outputDevice"><option value="">Loading&hellip;</option></select>
+            </div>
+
+            <label class="save-default">
+                <input type="checkbox" id="audioSaveDefault" checked>
+                <span>Remember these as my defaults</span>
+            </label>
+
+            <button class="done-btn" id="audioDone" type="button">Done &middot; save &amp; return</button>
+        </div><!-- /audio-overlay -->
 
         </div><!-- /phone-scroll -->
 
@@ -1398,11 +1500,22 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 activeActions.classList.remove('hidden');
                 timerEl.classList.add('visible');
                 dialpadEl.classList.add('hidden');
+                // Phase 4: hide the audio-settings gear during the call. Mid-call
+                // device swap isn't reliably supported across browsers and the
+                // overlay would obscure the in-call surface anyway. Re-enabled
+                // when the call ends.
+                var gearEl = document.getElementById('audioGear');
+                if (gearEl) gearEl.classList.add('hidden');
+                // If the audio overlay was open when the call started, close it
+                // so the rep sees the in-call surface, not the settings panel.
+                if (typeof closeAudioOverlay === 'function') closeAudioOverlay();
             } else {
                 idleActions.classList.remove('hidden');
                 activeActions.classList.add('hidden');
                 timerEl.classList.remove('visible');
                 dialpadEl.classList.remove('hidden');
+                var gearEl2 = document.getElementById('audioGear');
+                if (gearEl2) gearEl2.classList.remove('hidden');
             }
         }
 
@@ -1793,6 +1906,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 setButtons(true, false, false);
                 setCallView('idle');
                 populateDevices();
+                // Phase 4: apply localStorage-remembered audio defaults after
+                // populateDevices fills the selects so the dropdowns reflect
+                // whatever mic/speaker the rep picked last session.
+                if (typeof applyAudioDefaults === 'function') applyAudioDefaults();
             });
 
             device.on('error', function (err) {
@@ -1804,6 +1921,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
             device.audio.on('deviceChange', function () {
                 populateDevices();
+                if (typeof applyAudioDefaults === 'function') applyAudioDefaults();
             });
 
             device.register();
@@ -2321,6 +2439,117 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         // Initial render from server-supplied CONTACTS_V2 (record-launch path).
         renderPicker(CONTACTS_V2);
+
+        // ─── Iteration B Phase 4: audio-settings overlay ─────────────────────
+        // The gear icon in phone-top toggles a settings overlay sibling of
+        // view-dial / view-search. Reuses the existing #inputDevice /
+        // #outputDevice <select>s + populateDevices() — only the chrome moved.
+        // Defaults persist per-browser in localStorage so reps don't re-pick
+        // their headset every popup open.
+        var AUDIO_LS_KEY = 'ctc-audio-defaults';
+        var audioGear     = document.getElementById('audioGear');
+        var audioOverlay  = document.getElementById('audioOverlay');
+        var audioDoneBtn  = document.getElementById('audioDone');
+        var audioSaveBox  = document.getElementById('audioSaveDefault');
+        var previousView  = 'dial'; // remember which view to restore on Done
+
+        function loadAudioDefaults() {
+            try {
+                var raw = localStorage.getItem(AUDIO_LS_KEY);
+                if (!raw) return {};
+                var parsed = JSON.parse(raw);
+                return (parsed && typeof parsed === 'object') ? parsed : {};
+            } catch (e) {
+                return {};
+            }
+        }
+        function saveAudioDefaults(prefs) {
+            try {
+                if (!audioSaveBox || audioSaveBox.checked) {
+                    localStorage.setItem(AUDIO_LS_KEY, JSON.stringify(prefs));
+                }
+            } catch (e) { /* localStorage unavailable — drop silently */ }
+        }
+        // Persist a single field on change. Called from the input/output
+        // select change handlers (existing handlers fire setInputDevice +
+        // speakerDevices.set against the Twilio device; this just side-saves).
+        function persistAudioPref(key, value) {
+            var prefs = loadAudioDefaults();
+            prefs[key] = value;
+            saveAudioDefaults(prefs);
+        }
+        // Apply remembered defaults to the selects after populateDevices()
+        // finished. If the device isn't in the list anymore (headset
+        // unplugged), the select stays on whatever default was rendered.
+        function applyAudioDefaults() {
+            var prefs = loadAudioDefaults();
+            if (prefs.inputDeviceId && inputSelect) {
+                for (var i = 0; i < inputSelect.options.length; i++) {
+                    if (inputSelect.options[i].value === prefs.inputDeviceId) {
+                        inputSelect.value = prefs.inputDeviceId;
+                        // Trigger existing change handler so Twilio picks it up
+                        inputSelect.dispatchEvent(new Event('change'));
+                        break;
+                    }
+                }
+            }
+            if (prefs.outputDeviceId && outputSelect) {
+                for (var j = 0; j < outputSelect.options.length; j++) {
+                    if (outputSelect.options[j].value === prefs.outputDeviceId) {
+                        outputSelect.value = prefs.outputDeviceId;
+                        outputSelect.dispatchEvent(new Event('change'));
+                        break;
+                    }
+                }
+            }
+        }
+
+        function openAudioOverlay() {
+            if (!audioOverlay) return;
+            // Remember which content view was active so Done restores it.
+            previousView = viewSearch.classList.contains('hidden') ? 'dial' : 'search';
+            viewDial.classList.add('hidden');
+            viewSearch.classList.add('hidden');
+            audioOverlay.classList.remove('hidden');
+            if (audioGear) {
+                audioGear.classList.add('active');
+                audioGear.setAttribute('aria-expanded', 'true');
+            }
+        }
+        function closeAudioOverlay() {
+            if (!audioOverlay) return;
+            audioOverlay.classList.add('hidden');
+            if (previousView === 'search') {
+                viewSearch.classList.remove('hidden');
+            } else {
+                viewDial.classList.remove('hidden');
+            }
+            if (audioGear) {
+                audioGear.classList.remove('active');
+                audioGear.setAttribute('aria-expanded', 'false');
+            }
+        }
+
+        if (audioGear) {
+            audioGear.addEventListener('click', function () {
+                if (audioOverlay.classList.contains('hidden')) openAudioOverlay();
+                else closeAudioOverlay();
+            });
+        }
+        if (audioDoneBtn) audioDoneBtn.addEventListener('click', closeAudioOverlay);
+
+        // Wire select changes to localStorage (in addition to whatever the
+        // existing change handlers do for Twilio device assignment).
+        if (inputSelect) {
+            inputSelect.addEventListener('change', function () {
+                persistAudioPref('inputDeviceId', inputSelect.value);
+            });
+        }
+        if (outputSelect) {
+            outputSelect.addEventListener('change', function () {
+                persistAudioPref('outputDeviceId', outputSelect.value);
+            });
+        }
 
         // Hook up tabs (Recents stays inert)
         tabDial.addEventListener('click', function () { setActiveTab('dial'); });
