@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_workspace_queries'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, workspaceQueries) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_workspace_queries', './lib/ctc_entity'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, workspaceQueries, ctcEntity) => {
 
     const loadConfig = ctcConfig.loadConfig;
     const buildAuthHeader = ctcConfig.buildAuthHeader;
@@ -47,6 +47,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         if (body.action === 'getWorkspaceTasks')    return getWorkspaceTasks(body);
         if (body.action === 'softphoneSuggested')   return softphoneSuggested(body);
         if (body.action === 'softphoneSearch')      return softphoneSearch(body);
+        if (body.action === 'softphoneContacts')    return softphoneContacts(body);
         if (body.action === 'approveProposedTask')  return approveProposedTask(body);
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
@@ -433,6 +434,22 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             typeFilter: body.typeFilter,
             limit: body.limit
         });
+    };
+
+    /**
+     * softphoneContacts — Iteration B Phase 3.
+     * Returns every contact at an entity with all phones each contact has on
+     * file. The softphone uses this to hydrate the multi-contact picker when
+     * the user selects an entity from the Search tab.
+     *
+     * @param {Object} body
+     * @param {string|number} body.entityId
+     * @returns {Object} { rows: [...] } or { error }
+     */
+    const softphoneContacts = (body) => {
+        const entityId = body.entityId;
+        if (!entityId) return { error: 'entityId required', rows: [] };
+        return { rows: ctcEntity.getContactsAtEntity(entityId) };
     };
 
     /**

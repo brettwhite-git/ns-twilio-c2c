@@ -7,7 +7,7 @@
  * Receives phone, entityId, entityName as URL parameters.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], (url, runtime, log, file, search, ctcHtml) => {
+define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_entity'], (url, runtime, log, file, search, ctcHtml, ctcEntity) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs = ctcHtml.escapeJs;
@@ -57,7 +57,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         }
 
         let contacts = [];
+        let contactsV2 = [];
         if ((entityType === 'customer' || entityType === 'prospect') && entityId) {
+            // Phase 3: rich contact shape with all phones per contact. Used by
+            // the new multi-contact picker UI. Kept alongside the legacy
+            // queryContacts() shape so the existing initContactDropdown event
+            // handlers keep working until the Phase 7 polish removes them.
+            contactsV2 = ctcEntity.getContactsAtEntity(entityId);
             contacts = queryContacts(entityId);
         }
 
@@ -66,7 +72,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
 
         const html = buildHtml({
             phone, entityId, entityName, entityType, tokenEndpoint, sdkUrl,
-            contacts, entityInfo, entityRecordUrl,
+            contacts, contactsV2, entityInfo, entityRecordUrl,
             entryPoint, initialTab
         });
         context.response.write(html);
@@ -180,6 +186,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         const jsEntityType = escapeJs(opts.entityType || '');
         const jsTokenEndpoint = escapeJs(opts.tokenEndpoint);
         const contactsJson = safeJsonEmbed(opts.contacts || []);
+        // Phase 3: richer contacts shape for the multi-contact picker. Each
+        // contact carries an array of phones [{number, type, isPrimary}]
+        // covering work / mobile / home / alt.
+        const contactsV2Json = safeJsonEmbed(opts.contactsV2 || []);
         // Phase 2: initialTab is 'dial' or 'search'. Defaults to 'dial' if not provided
         // so legacy callers (and existing tests) keep their current behavior.
         const jsInitialTab = escapeJs(opts.initialTab || 'dial');
@@ -937,6 +947,129 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             width: 100%;
         }
         .search-loading.hidden { display: none; }
+        /* ─── Iteration B Phase 3: multi-contact picker ────────────────────── */
+        /* Sits in the Dial view above the dialpad. Hidden when the entity has
+           zero contacts (Lead with no contact records, etc) — in that case the
+           single record-level phone shows in the existing phoneNumber line. */
+        .picker-card {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 10px 12px;
+            margin: 0 0 10px;
+            width: 100%;
+            max-width: 320px;
+            text-align: left;
+        }
+        .picker-card.hidden { display: none; }
+        .picker-btn {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            background: transparent;
+            border: 1px solid var(--phone-card-border);
+            border-radius: 8px;
+            padding: 6px 10px;
+            color: var(--phone-text);
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+            margin-top: 5px;
+        }
+        .picker-btn:first-child { margin-top: 0; }
+        .picker-btn:hover { background: rgba(255, 255, 255, 0.04); }
+        .picker-btn .picker-label {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9px;
+            color: var(--phone-text-faint);
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            margin-right: 8px;
+        }
+        .picker-btn .picker-value { flex: 1; text-align: left; font-size: 12px; }
+        .picker-btn .picker-value.mono {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            letter-spacing: 0.02em;
+        }
+        .picker-btn .chev {
+            width: 12px;
+            height: 12px;
+            color: var(--phone-text-muted);
+            flex-shrink: 0;
+            transition: transform 0.15s ease;
+        }
+        .picker-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+        .picker-dropdown {
+            margin-top: 6px;
+            background: rgba(0, 0, 0, 0.20);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .picker-dropdown.hidden { display: none; }
+        .picker-section-head {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+            color: var(--phone-text-faint);
+            padding: 6px 10px 4px;
+            text-align: left;
+        }
+        .picker-contact-row {
+            padding: 7px 10px 8px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: left;
+        }
+        .picker-contact-row.selected { background: rgba(20, 185, 129, 0.07); }
+        .picker-contact-row .name {
+            font-size: 12.5px;
+            color: var(--phone-text);
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        .picker-contact-row .title {
+            font-size: 10.5px;
+            color: var(--phone-text-muted);
+            margin-top: 1px;
+        }
+        .picker-contact-row .phones {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 6px;
+        }
+        .phone-pill {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            font-size: 10.5px;
+            color: var(--phone-text);
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--phone-card-border);
+            border-radius: 999px;
+            padding: 2px 8px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .phone-pill .pill-num {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+            letter-spacing: 0.02em;
+        }
+        .phone-pill .tag {
+            font-family: inherit;
+            font-size: 9px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--phone-text-faint);
+            margin-left: 5px;
+        }
+        .phone-pill:hover { background: rgba(255, 255, 255, 0.08); }
+        .phone-pill.selected {
+            background: rgba(20, 185, 129, 0.16);
+            border-color: rgba(20, 185, 129, 0.45);
+            color: #B5EFD0;
+        }
+        .phone-pill.selected .tag { color: #88D9B0; }
     </style>
 </head>
 <body>
@@ -1001,8 +1134,31 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
 
             <hr class="phone-divider" id="phoneDivider">
 
-            <div class="picker-row" id="contactRow">
+            <!-- Legacy single-select contact picker — Phase 3 hides this by
+                 default and keeps it as a vestigial data store so existing
+                 contactSelect.change handlers stay wired. The new picker-card
+                 below replaces it visually. Phase 7 polish removes both. -->
+            <div class="picker-row" id="contactRow" style="display:none">
                 <select id="contactSelect"></select>
+            </div>
+
+            <!-- Phase 3 multi-contact picker. Hidden when entity has 0 contacts
+                 (Lead with no contact records) — the existing phoneNumber line
+                 takes over in that case. Populated server-side on record launch
+                 and client-side after a Search-tab selection (softphoneContacts
+                 RESTlet route). -->
+            <div class="picker-card hidden" id="pickerCard">
+                <button class="picker-btn" id="pickerContactBtn" type="button" aria-expanded="false" aria-controls="pickerDropdown">
+                    <span class="picker-label">Contact</span>
+                    <span class="picker-value" id="pickerContactName">&mdash;</span>
+                    <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <button class="picker-btn" id="pickerNumberBtn" type="button" aria-expanded="false" aria-controls="pickerDropdown">
+                    <span class="picker-label">Number</span>
+                    <span class="picker-value mono" id="pickerNumberValue">&mdash;</span>
+                    <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="picker-dropdown hidden" id="pickerDropdown" role="region" aria-label="Pick a contact and phone"></div>
             </div>
 
             <div class="dialpad" id="dialpad">
@@ -1051,7 +1207,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             <div aria-hidden="true"></div>
             <div class="action-group">
                 <button class="btn btn-call" id="btnCall" type="button" title="Place call" disabled>
-                    <svg class="action-icon-lg" viewBox="0 0 24 24" fill="currentColor"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.3 11.3 0 0 0 3.5.56 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.3 11.3 0 0 0 .56 3.5 1 1 0 0 1-.25 1z"/></svg>
+                    <svg class="action-icon-lg" viewBox="0 0 24 24" fill="currentColor"><path d="M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5z"/></svg>
                 </button>
                 <span class="action-label">Call</span>
             </div>
@@ -1107,7 +1263,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
         var ENTITY_ID = '${jsEntityId}';
         var ENTITY_TYPE = '${jsEntityType}';
         var CONTACTS = ${contactsJson};
+        // Phase 3: richer per-entity contact shape for the multi-contact picker.
+        var CONTACTS_V2 = ${contactsV2Json};
         var SELECTED_CONTACT_ID = '';
+        var SELECTED_PHONE_TYPE = '';
         // Iteration B Phase 2: server-decided default tab — 'dial' or 'search'.
         var INITIAL_TAB = '${jsInitialTab}';
 
@@ -1998,14 +2157,170 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html'], 
             }
             if (entityName)    entityName.textContent = row.companyName || '';
             if (entityCompany) entityCompany.textContent = row.contactName || '';
-            // Hide the inline contact dropdown — Phase 3 multi-contact picker
-            // replaces it; for now a single-row Search selection has nothing
-            // to pick.
-            if (contactRow) contactRow.classList.remove('visible');
             renderContactInfoFor({ email: row.email, contactName: row.contactName }, row.companyName);
             setActiveTab('dial');
             setButtons(!!row.phone, false, false);
+
+            // Phase 3: hydrate the multi-contact picker for the selected entity.
+            // Fall back to a single-phone view when the entity has zero contacts
+            // (the row's phone stays in the Selected Card; picker stays hidden).
+            hydratePickerForEntity(row.id);
         }
+
+        // ─── Iteration B Phase 3: multi-contact picker ──────────────────────
+        var pickerCard        = document.getElementById('pickerCard');
+        var pickerContactBtn  = document.getElementById('pickerContactBtn');
+        var pickerNumberBtn   = document.getElementById('pickerNumberBtn');
+        var pickerContactName = document.getElementById('pickerContactName');
+        var pickerNumberValue = document.getElementById('pickerNumberValue');
+        var pickerDropdown    = document.getElementById('pickerDropdown');
+        var currentContacts   = CONTACTS_V2 || [];
+
+        function formatPhoneForPill(num) {
+            // Compact format for the dropdown pills — full E.164 for display.
+            return String(num || '').trim();
+        }
+
+        function showPicker() {
+            if (pickerCard) pickerCard.classList.remove('hidden');
+        }
+        function hidePicker() {
+            if (pickerCard) pickerCard.classList.add('hidden');
+        }
+        function setPickerExpanded(expanded) {
+            if (!pickerDropdown) return;
+            pickerDropdown.classList.toggle('hidden', !expanded);
+            pickerContactBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            pickerNumberBtn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        }
+
+        function updatePickerLabels(contactName, phoneNumber) {
+            if (pickerContactName) pickerContactName.textContent = contactName || '—';
+            if (pickerNumberValue) pickerNumberValue.textContent = formatPhone(phoneNumber) || phoneNumber || '—';
+        }
+
+        function selectPickerPhone(contactId, phoneNumber, phoneType, contactName) {
+            SELECTED_CONTACT_ID = String(contactId || '');
+            SELECTED_PHONE_TYPE = String(phoneType || '');
+            // PHONE state goes through the existing helpers so the rest of the
+            // popup (Call button arming, fresh-digit reset, etc) stays correct.
+            setDialedNumber(phoneNumber, { resetFresh: true, fromPicker: true });
+            updatePickerLabels(contactName, phoneNumber);
+            // Reflect the selection on the dropdown rows (visual highlight).
+            var pills = pickerDropdown.querySelectorAll('.phone-pill');
+            Array.prototype.forEach.call(pills, function (pill) {
+                var same = pill.getAttribute('data-contact-id') === String(contactId)
+                        && pill.getAttribute('data-number') === String(phoneNumber);
+                pill.classList.toggle('selected', same);
+            });
+            var rows = pickerDropdown.querySelectorAll('.picker-contact-row');
+            Array.prototype.forEach.call(rows, function (rowEl) {
+                rowEl.classList.toggle('selected', rowEl.getAttribute('data-contact-id') === String(contactId));
+            });
+            setPickerExpanded(false);
+        }
+
+        function renderPicker(contacts) {
+            currentContacts = Array.isArray(contacts) ? contacts : [];
+            clearChildren(pickerDropdown);
+            if (!currentContacts.length) {
+                hidePicker();
+                return;
+            }
+            showPicker();
+
+            // Section head: "N contacts at this account"
+            var head = document.createElement('div');
+            head.className = 'picker-section-head';
+            head.textContent = currentContacts.length + ' contact' + (currentContacts.length === 1 ? '' : 's') + ' at this account';
+            pickerDropdown.appendChild(head);
+
+            currentContacts.forEach(function (c) {
+                var rowEl = document.createElement('div');
+                rowEl.className = 'picker-contact-row';
+                rowEl.setAttribute('data-contact-id', c.contactId);
+
+                var nameEl = document.createElement('div');
+                nameEl.className = 'name';
+                nameEl.textContent = c.name || ('Contact ' + c.contactId);
+                rowEl.appendChild(nameEl);
+
+                if (c.title) {
+                    var titleEl = document.createElement('div');
+                    titleEl.className = 'title';
+                    titleEl.textContent = c.title;
+                    rowEl.appendChild(titleEl);
+                }
+
+                var phonesEl = document.createElement('div');
+                phonesEl.className = 'phones';
+                (c.phones || []).forEach(function (p) {
+                    var pill = document.createElement('button');
+                    pill.type = 'button';
+                    pill.className = 'phone-pill';
+                    pill.setAttribute('data-contact-id', c.contactId);
+                    pill.setAttribute('data-number', p.number);
+                    var numSpan = document.createElement('span');
+                    numSpan.className = 'pill-num';
+                    numSpan.textContent = formatPhoneForPill(p.number);
+                    pill.appendChild(numSpan);
+                    var tag = document.createElement('span');
+                    tag.className = 'tag';
+                    tag.textContent = p.type || '';
+                    pill.appendChild(tag);
+                    pill.addEventListener('click', function () {
+                        selectPickerPhone(c.contactId, p.number, p.type, c.name);
+                    });
+                    phonesEl.appendChild(pill);
+                });
+                rowEl.appendChild(phonesEl);
+                pickerDropdown.appendChild(rowEl);
+            });
+
+            // Preselect the primary phone of the first contact (if any).
+            var first = currentContacts[0];
+            if (first && first.phones && first.phones.length) {
+                var primary = first.phones.find(function (p) { return p.isPrimary; }) || first.phones[0];
+                selectPickerPhone(first.contactId, primary.number, primary.type, first.name);
+            }
+        }
+
+        function hydratePickerForEntity(entityId) {
+            if (!entityId) {
+                renderPicker([]);
+                return;
+            }
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'softphoneContacts', entityId: entityId })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                renderPicker((data && data.rows) || []);
+            })
+            .catch(function (err) {
+                showError('Contacts fetch failed: ' + (err.message || err));
+                renderPicker([]);
+            });
+        }
+
+        // Chevron clicks toggle the dropdown (either button opens the same panel).
+        if (pickerContactBtn) {
+            pickerContactBtn.addEventListener('click', function () {
+                var open = pickerDropdown.classList.contains('hidden');
+                setPickerExpanded(open);
+            });
+        }
+        if (pickerNumberBtn) {
+            pickerNumberBtn.addEventListener('click', function () {
+                var open = pickerDropdown.classList.contains('hidden');
+                setPickerExpanded(open);
+            });
+        }
+
+        // Initial render from server-supplied CONTACTS_V2 (record-launch path).
+        renderPicker(CONTACTS_V2);
 
         // Hook up tabs (Recents stays inert)
         tabDial.addEventListener('click', function () { setActiveTab('dial'); });
