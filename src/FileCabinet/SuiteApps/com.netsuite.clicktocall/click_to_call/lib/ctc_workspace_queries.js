@@ -400,7 +400,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      * @returns {Array<Object>} packed entity rows
      */
     const runBookEntityQuery = (opts) => {
-        const userId = opts.userId;
+        const userId = parseInt(opts.userId, 10);
         const stages = (opts.stages && opts.stages.length)
             ? opts.stages
             : ['LEAD', 'PROSPECT', 'CUSTOMER'];
@@ -413,19 +413,26 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         // parameters to N/query (the only place untrusted input could land).
         const stageLits = stages.map((s) => "'" + s + "'").join(',');
 
+        // GROUP BY c.id only — per-customer columns are constant across the
+        // LEFT JOIN rows, so MAX() is a no-op aggregator that satisfies the
+        // SQL aggregation rule without listing every column. Earlier attempts
+        // that listed every column in GROUP BY (including BUILTIN.DF()) blew
+        // up silently on the sandbox; this shape is what's known-good.
         let sql =
             'SELECT ' +
-            '    c.id           AS id, ' +
-            '    c.companyname  AS companyname, ' +
-            '    c.firstname    AS firstname, ' +
-            '    c.lastname     AS lastname, ' +
-            '    c.phone        AS phone, ' +
-            '    c.email        AS email, ' +
-            '    c.stage        AS stage, ' +
-            '    BUILTIN.DF(c.lastmodifieddate) AS lastmodifieddate, ' +
-            '    MAX(c.lastmodifieddate)        AS sortts ' +
+            '    c.id                    AS id, ' +
+            '    MAX(c.companyname)      AS companyname, ' +
+            '    MAX(c.firstname)        AS firstname, ' +
+            '    MAX(c.lastname)         AS lastname, ' +
+            '    MAX(c.phone)            AS phone, ' +
+            '    MAX(c.email)            AS email, ' +
+            '    MAX(c.stage)            AS stage, ' +
+            '    MAX(c.lastmodifieddate) AS lastmodifieddate ' +
             'FROM customer c ' +
-            'LEFT JOIN customerSalesTeam cst ON cst.entity = c.id ' +
+            // CustomerSalesTeam.customer is the parent-customer reference column
+            // (sandbox audit log: `Field 'entity' for record 'CustomerSalesTeam'
+            // was not found.` — the column is `customer`, not `entity`).
+            'LEFT JOIN customerSalesTeam cst ON cst.customer = c.id ' +
             'WHERE (c.salesrep = ? OR cst.employee = ?) ' +
             '  AND c.isInactive = \'F\' ' +
             '  AND c.stage IN (' + stageLits + ') ';
@@ -446,13 +453,23 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         }
 
         sql +=
-            'GROUP BY c.id, c.companyname, c.firstname, c.lastname, ' +
-            '         c.phone, c.email, c.stage, BUILTIN.DF(c.lastmodifieddate) ' +
-            'ORDER BY sortts DESC ' +
+            'GROUP BY c.id ' +
+            'ORDER BY MAX(c.lastmodifieddate) DESC ' +
             'FETCH FIRST ' + limit + ' ROWS ONLY';
+
+        // Audit-log the SQL + params so script-execution-log readers can see
+        // exactly what was sent if a query returns zero rows unexpectedly.
+        log.audit({
+            title: 'CTC runBookEntityQuery',
+            details: 'sql=' + sql + ' params=' + JSON.stringify(params)
+        });
 
         const rs = query.runSuiteQL({ query: sql, params: params });
         const mapped = rs.asMappedResults();
+        log.audit({
+            title: 'CTC runBookEntityQuery result',
+            details: 'rowCount=' + mapped.length
+        });
         return mapped.map(packEntityRowSql);
     };
 
@@ -481,8 +498,11 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             const rows = runBookEntityQuery({ userId: userId, limit: limit });
             return { rows: rows, total: rows.length };
         } catch (e) {
-            log.error({ title: 'CTC getSuggestedContacts Failed', details: e.message || e });
-            return { error: 'Suggested fetch failed', rows: [], total: 0 };
+            log.error({
+                title: 'CTC getSuggestedContacts Failed',
+                details: 'name=' + (e && e.name) + ' message=' + (e && e.message) + ' stack=' + (e && e.stack)
+            });
+            return { error: 'Suggested fetch failed: ' + (e && e.message), rows: [], total: 0 };
         }
     };
 
@@ -527,8 +547,11 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             });
             return { rows: rows, total: rows.length };
         } catch (e) {
-            log.error({ title: 'CTC searchOwnedEntities Failed', details: e.message || e });
-            return { error: 'Search failed', rows: [], total: 0 };
+            log.error({
+                title: 'CTC searchOwnedEntities Failed',
+                details: 'name=' + (e && e.name) + ' message=' + (e && e.message) + ' stack=' + (e && e.stack)
+            });
+            return { error: 'Search failed: ' + (e && e.message), rows: [], total: 0 };
         }
     };
 

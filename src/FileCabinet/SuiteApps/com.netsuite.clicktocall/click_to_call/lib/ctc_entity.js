@@ -26,7 +26,10 @@ define(['N/search', 'N/log'], (search, log) => {
     // v3 (Phase 4 fix): forces fresh popup so the deviceSelectors-crash
     // + mic-permission warm-up fixes take effect without reps needing
     // to manually close their existing popup window.
-    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v3';
+    // v4 (Phase 6 refinements): SuiteQL search refactor — force fresh
+    // window so reps can't accidentally hit cached softphone HTML that
+    // calls the old N/search-based search backend.
+    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v4';
 
     /**
      * Resolve a display name from a NetSuite record by type.
