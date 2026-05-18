@@ -94,13 +94,17 @@ define(['N/search', 'N/log'], (search, log) => {
             const limit = parseInt(params.limit, 10) || 30;
             const userId = params.userId;
 
-            // Scope to calls where the current user is on the customer's Sales
-            // Team (primary OR secondary). `assigned` on Phone Call is unreliable
-            // (not always set, can point at the logger rather than the account
-            // owner). `company.salesteam.employee` covers both the primary
-            // salesrep and any secondary team members.
+            // Scope to calls where the customer's salesrep is the current user.
+            // `assigned` on Phone Call is unreliable (not always set, can point
+            // at the logger rather than the account owner). `company.salesrep`
+            // is the source of truth for who owns the account.
+            // NOTE: widening to `company.salesteam.employee` to include
+            // secondary team members returned zero results on sandbox
+            // td3061543 — likely a join-name or Team-Selling-feature mismatch.
+            // Pending verification of the correct N/search join syntax; for
+            // now we stay on the proven primary-salesrep filter.
             const searchFilters = [
-                ['company.salesteam.employee', 'anyof', userId],
+                ['company.salesrep', 'anyof', userId],
                 'AND',
                 ['custevent_ctc_call_sid', 'isnotempty', '']
             ];
@@ -222,15 +226,14 @@ define(['N/search', 'N/log'], (search, log) => {
                 filterParts.push([['custrecord_ctc_pt_phone_call', 'anyof', params.phoneCallId]]);
             } else {
                 // Two-step query: NetSuite search doesn't support the 3-hop join
-                // (proposed_task → phone_call → company → salesteam). So first find
-                // all phone calls where the user is on company.salesteam (primary
-                // or secondary), then filter proposed_tasks where phone_call is in
-                // that set.
+                // (proposed_task → phone_call → company → salesrep). So first find
+                // all phone calls where company.salesrep = user, then filter
+                // proposed_tasks where phone_call is in that set.
                 const myCallIds = [];
                 try {
                     const callResults = search.create({
                         type: search.Type.PHONE_CALL,
-                        filters: [['company.salesteam.employee', 'anyof', userId]],
+                        filters: [['company.salesrep', 'anyof', userId]],
                         columns: ['internalid']
                     }).run().getRange({ start: 0, end: 1000 });
                     callResults.forEach((r) => myCallIds.push(r.id));
@@ -402,7 +405,7 @@ define(['N/search', 'N/log'], (search, log) => {
             const results = search.create({
                 type: search.Type.CUSTOMER,
                 filters: [
-                    ['salesteam.employee', 'anyof', userId], 'AND',
+                    ['salesrep', 'anyof', userId], 'AND',
                     ['stage', 'anyof', ['LEAD', 'PROSPECT', 'CUSTOMER']], 'AND',
                     ['isinactive', 'is', 'F']
                 ],
@@ -468,7 +471,7 @@ define(['N/search', 'N/log'], (search, log) => {
             const results = search.create({
                 type: search.Type.CUSTOMER,
                 filters: [
-                    ['salesteam.employee', 'anyof', userId], 'AND',
+                    ['salesrep', 'anyof', userId], 'AND',
                     ['stage', 'anyof', stages], 'AND',
                     ['isinactive', 'is', 'F'], 'AND',
                     matchGroup
