@@ -533,6 +533,19 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        /* No-phone-on-file CTA — shown when an entity is loaded but has no
+           phone number. Mirrors the Search-tab "no phone on file" vocabulary
+           and gives the rep a one-click jump to fix the record. */
+        .no-phone-cta {
+            display: none;
+            font-size: 12px;
+            color: #B6DCFA;
+            text-decoration: none;
+            margin: -4px 0 10px;
+            letter-spacing: 0.02em;
+        }
+        .no-phone-cta.visible { display: inline-block; }
+        .no-phone-cta:hover { color: #FFFFFF; text-decoration: underline; }
         /* Dialpad visible on idle/ready screen; hidden during active call */
         /* Iteration A/C/D alignment: compressed dialpad — keys are smaller
            so the new Selected Card header + compact meta strip + (during call)
@@ -1265,21 +1278,24 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             accent-color: #14B981;
         }
         .audio-overlay .done-btn {
-            background: rgba(116, 192, 252, 0.20);
-            color: #B6DCFA;
-            border: 1px solid rgba(116, 192, 252, 0.50);
-            border-radius: 10px;
-            padding: 10px 14px;
-            font-size: 12.5px;
+            align-self: center;
+            width: fit-content;
+            min-width: 160px;
+            background: #74C0FC;
+            color: #0B1426;
+            border: 1px solid #74C0FC;
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             font-family: inherit;
             letter-spacing: 0.02em;
-            margin-top: 6px;
+            margin-top: 8px;
         }
         .audio-overlay .done-btn:hover {
-            background: rgba(116, 192, 252, 0.30);
-            color: #FFFFFF;
+            background: #8FCEFD;
+            border-color: #8FCEFD;
         }
         /* Gear icon: active state when overlay open + disabled state during call. */
         .audio-gear:not([disabled]) { cursor: pointer; }
@@ -1497,6 +1513,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
             <div class="contact-name" id="entityName">${safeEntityName}</div>
             <div class="contact-phone" id="phoneNumber">${safePhone}</div>
+            <a class="no-phone-cta" id="noPhoneCta" target="_blank" rel="noopener" href="#">Add a phone in NetSuite &rarr;</a>
             <div class="contact-company" id="entityCompany"></div>
 
             <div class="timer" id="timer">00:00</div>
@@ -1636,8 +1653,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 <input id="searchInput" type="search" autocomplete="off" placeholder="Customers, contacts, leads&hellip;" aria-label="Search owned entities">
                 <button class="clear-x hidden" id="searchClearX" type="button" title="Clear search" aria-label="Clear">×</button>
             </div>
-            <div class="filter-chips" id="searchChips" role="group" aria-label="Filter by entity type">
-                <button class="filter-chip active" type="button" data-filter="">All <span class="count" id="cnt-all">0</span></button>
+            <div class="filter-chips" id="searchChips" role="group" aria-label="Filter by entity type within your book">
+                <button class="filter-chip active" type="button" data-filter="" title="All entities where you are on the Sales Team (primary or secondary)">My book <span class="count" id="cnt-all">0</span></button>
                 <button class="filter-chip" type="button" data-filter="customer">Customer <span class="count" id="cnt-customer">0</span></button>
                 <button class="filter-chip" type="button" data-filter="prospect">Prospect <span class="count" id="cnt-prospect">0</span></button>
                 <button class="filter-chip" type="button" data-filter="lead">Lead <span class="count" id="cnt-lead">0</span></button>
@@ -1674,7 +1691,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 <span>Remember these as my defaults</span>
             </label>
 
-            <button class="done-btn" id="audioDone" type="button">Done &middot; save &amp; return</button>
+            <button class="done-btn" id="audioDone" type="button">Save &amp; Return</button>
         </div><!-- /audio-overlay -->
 
         <!-- view-recents: Phase 5 Recents tab. Hidden by default; shown when
@@ -1784,6 +1801,49 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var contactRow = document.getElementById('contactRow');
         var contactSelect = document.getElementById('contactSelect');
         var phoneNumberEl = document.getElementById('phoneNumber');
+        var noPhoneCtaEl = document.getElementById('noPhoneCta');
+
+        // Fix 3b: client-side mirror of server's resolveEntityRecordUrl for
+        // Search/Recents rows. Customer/Lead/Prospect all live on the same
+        // entity record (custjob.nl), so a single path works for all three.
+        // Without this, opts.recordUrl was empty (selectSearchRow had a TODO,
+        // loadRecentIntoDial never set it), falling through to ENTITY_RECORD_URL
+        // (also empty on portlet launch) → href="#" + target="_blank" opened
+        // the Suitelet popup's own URL in a new tab.
+        function clientResolveEntityUrl(entityType, entityId) {
+            if (!entityId) return '';
+            var t = String(entityType || '').toLowerCase();
+            if (t === 'contact') {
+                return '/app/common/entity/contact.nl?id=' + encodeURIComponent(entityId);
+            }
+            return '/app/common/entity/custjob.nl?id=' + encodeURIComponent(entityId);
+        }
+
+        // Fix 3a: when an entity is loaded but has no phone on file, render
+        // "no phone on file" in place of the silent em-dash and surface the
+        // "Add a phone in NetSuite" CTA. When PHONE is non-empty, show the
+        // formatted digits and hide the CTA.
+        function renderPhoneFallback() {
+            if (PHONE) {
+                if (noPhoneCtaEl) noPhoneCtaEl.classList.remove('visible');
+                return formatPhone(PHONE);
+            }
+            if (ENTITY_ID) {
+                if (noPhoneCtaEl) {
+                    var ctaUrl = ENTITY_RECORD_URL
+                        || clientResolveEntityUrl(ENTITY_TYPE, ENTITY_ID);
+                    if (ctaUrl) {
+                        noPhoneCtaEl.href = ctaUrl;
+                        noPhoneCtaEl.classList.add('visible');
+                    } else {
+                        noPhoneCtaEl.classList.remove('visible');
+                    }
+                }
+                return 'no phone on file';
+            }
+            if (noPhoneCtaEl) noPhoneCtaEl.classList.remove('visible');
+            return '—';
+        }
         // Phase 4: the legacy device-selectors wrapper was removed when the
         // mic/speaker selects moved into the audio-overlay. Variable kept as
         // a no-op (null) so any straggling references don't throw.
@@ -1956,7 +2016,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function setDialedNumber(next, opts) {
             PHONE = normalizeDigits(next);
-            phoneNumberEl.textContent = formatPhone(PHONE) || '—';
+            phoneNumberEl.textContent = renderPhoneFallback();
             // Manual edits decouple from the dropdown's selected contact (unless
             // the caller is the dropdown itself, in which case it manages SELECTED_CONTACT_ID).
             if (contactSelect && !(opts && opts.fromPicker)) {
@@ -1970,10 +2030,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             if (typeof renderLastDialed === 'function') renderLastDialed();
         }
 
-        // Format the initial server-rendered phone number on load.
-        if (PHONE) {
-            phoneNumberEl.textContent = formatPhone(PHONE);
-        }
+        // Format the initial server-rendered phone number on load. Fix 3a: when
+        // an entity was loaded but has no phone on file, surface the explicit
+        // "no phone on file" copy + the Add-a-phone CTA via renderPhoneFallback.
+        phoneNumberEl.textContent = renderPhoneFallback();
 
         function appendDialDigit(d) {
             if (!d) return;
@@ -2143,7 +2203,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     }
                 }
                 PHONE = normalizeDigits(PHONE);
-                phoneNumberEl.textContent = formatPhone(PHONE) || '—';
+                phoneNumberEl.textContent = renderPhoneFallback();
                 if (btnCall) btnCall.disabled = !PHONE;
                 syncBackspaceVisibility();
                 // Picker selection resets fresh-start so the next typed digit replaces, not appends
@@ -2700,18 +2760,20 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         function selectSearchRow(row) {
-            if (row.phone) {
-                setDialedNumber(row.phone, { resetFresh: true });
-            }
+            // Update ENTITY_ID + ENTITY_NAME first so renderPhoneFallback's
+            // "no phone on file" branch sees the new entity and the CTA points
+            // at the right record. ENTITY_TYPE comes from row.type
+            // (customer/prospect/lead).
+            ENTITY_ID = String(row.id || '');
+            ENTITY_NAME = row.companyName || '';
+            ENTITY_TYPE = row.type || '';
+            window.__CTC_ENTITY_TYPE__ = row.type || '';
+            // Always reset the dialed number — passing '' triggers the
+            // "no phone on file" fallback when the row has no primary phone.
+            setDialedNumber(row.phone || '', { resetFresh: true });
             if (entityName)    entityName.textContent = row.companyName || '';
             if (entityCompany) entityCompany.textContent = row.contactName || '';
             renderContactInfoFor({ email: row.email, contactName: row.contactName }, row.companyName);
-            // Update ENTITY_ID + ENTITY_NAME so subsequent renders (header,
-            // meta, snapshot) target the right entity. ENTITY_TYPE comes
-            // from the row's type field (customer/prospect/lead).
-            ENTITY_ID = String(row.id || '');
-            ENTITY_NAME = row.companyName || '';
-            window.__CTC_ENTITY_TYPE__ = row.type || '';
             setActiveTab('dial');
             setButtons(!!row.phone, false, false);
 
@@ -2729,7 +2791,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     name: row.companyName,
                     type: row.type,
                     entityId: row.id,
-                    recordUrl: '' // Phase 6+: synthesize record URL from type+id
+                    recordUrl: clientResolveEntityUrl(row.type, row.id)
                 });
             }
         }
@@ -2977,8 +3039,21 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             if (compactMeta) {
                 compactMeta.classList.toggle('hidden', !hasContext);
                 if (hasContext) {
+                    // Fix 3b: only show the Open-record cell when we actually
+                    // have a real entity URL. Falling through to href="#" with
+                    // target="_blank" opens the Suitelet popup's own URL in a
+                    // new tab — looks like the link points back at the softphone.
                     if (metaOpenRecord) {
-                        metaOpenRecord.href = opts.recordUrl || ENTITY_RECORD_URL || '#';
+                        var resolvedUrl = opts.recordUrl
+                            || ENTITY_RECORD_URL
+                            || clientResolveEntityUrl(opts.type || ENTITY_TYPE, opts.entityId || ENTITY_ID);
+                        if (resolvedUrl) {
+                            metaOpenRecord.href = resolvedUrl;
+                            metaOpenRecord.classList.remove('hidden');
+                        } else {
+                            metaOpenRecord.removeAttribute('href');
+                            metaOpenRecord.classList.add('hidden');
+                        }
                     }
                     if (metaOwner) {
                         metaOwner.textContent = opts.owner || (ENTITY_INFO && ENTITY_INFO.owner) || '—';
@@ -3221,14 +3296,19 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             // Mimic selectSearchRow's contract — load contact + phone into
             // the Dial state without auto-dialing. Rep confirms with the
             // green Call button.
-            if (row.phone) setDialedNumber(row.phone, { resetFresh: true });
+            // Update ENTITY_ID/TYPE first so the no-phone fallback (and the
+            // Open-record link) targets the right entity.
+            ENTITY_ID = String(row.companyId || '');
+            ENTITY_NAME = row.companyName || '';
+            if (row.entityType) {
+                ENTITY_TYPE = row.entityType;
+                window.__CTC_ENTITY_TYPE__ = row.entityType;
+            }
+            // Always reset — passing '' triggers the no-phone-on-file fallback.
+            setDialedNumber(row.phone || '', { resetFresh: true });
             if (entityName)    entityName.textContent = row.companyName || '';
             if (entityCompany) entityCompany.textContent = row.contactName || '';
             renderContactInfoFor({ email: '', contactName: row.contactName }, row.companyName);
-            // Update ENTITY_ID so the snapshot/meta strip target the right one
-            ENTITY_ID = String(row.companyId || '');
-            ENTITY_NAME = row.companyName || '';
-            if (row.entityType) window.__CTC_ENTITY_TYPE__ = row.entityType;
             setActiveTab('dial');
             setButtons(!!row.phone, false, false);
             // Phase 3 picker hydration: if entity has multiple contacts, the
@@ -3241,7 +3321,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 renderSelectedCardHeader({
                     name: row.companyName,
                     type: row.entityType,
-                    entityId: row.companyId
+                    entityId: row.companyId,
+                    recordUrl: clientResolveEntityUrl(row.entityType, row.companyId)
                 });
             }
         }
