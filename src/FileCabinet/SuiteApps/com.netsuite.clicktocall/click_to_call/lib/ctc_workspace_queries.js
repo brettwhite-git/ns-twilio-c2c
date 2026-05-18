@@ -9,7 +9,7 @@
  * both surfaces.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/log'], (search, log) => {
+define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
 
     // NetSuite N/search returns SELECT field values inconsistently:
     //   - JOINED columns:    array `[{ value, text }]`
@@ -363,25 +363,97 @@ define(['N/search', 'N/log'], (search, log) => {
     const WIRE_TO_STAGE = { lead: 'LEAD', prospect: 'PROSPECT', customer: 'CUSTOMER' };
 
     /**
-     * Pack a Customer search result row into the wire shape the softphone
-     * client renders. Phase 2 keeps this minimal — just enough to render a
-     * search-result row and arm the Call button.
+     * Pack a SuiteQL row (asMappedResults shape — lowercase keys) into the
+     * wire shape the softphone client renders. Phase 2 kept this minimal —
+     * just enough to render a search-result row and arm the Call button.
      */
-    const packEntityRow = (r) => {
-        const stage = String(r.getValue('stage') || '').toUpperCase();
-        const company = r.getValue('companyname') || '';
-        const first   = r.getValue('firstname') || '';
-        const last    = r.getValue('lastname') || '';
+    const packEntityRowSql = (r) => {
+        const stage = String(r.stage || '').toUpperCase();
+        const company = r.companyname || '';
+        const first   = r.firstname || '';
+        const last    = r.lastname || '';
         const contactName = (first || last) ? (first + ' ' + last).trim() : '';
         return {
             id: String(r.id),
             type: STAGE_TO_WIRE[stage] || 'customer',
             companyName: company || contactName || ('Entity ' + r.id),
             contactName: contactName,
-            phone: r.getValue('phone') || '',
-            email: r.getValue('email') || '',
-            lastModified: r.getValue('lastmodifieddate') || ''
+            phone: r.phone || '',
+            email: r.email || '',
+            lastModified: r.lastmodifieddate || ''
         };
+    };
+
+    /**
+     * Shared SuiteQL helper that returns customers/prospects/leads in the
+     * current rep's "book" — defined as records where the rep is EITHER the
+     * primary `salesrep` OR a member of the entity's Sales Team sublist
+     * (`customerSalesTeam.employee`). Replaces a pair of N/search-based
+     * paths whose join name (`salesteam.employee`) silently returned zero.
+     *
+     * @param {Object} opts
+     * @param {string|number} opts.userId
+     * @param {Array<string>} opts.stages — e.g. ['LEAD','PROSPECT','CUSTOMER']
+     * @param {string} [opts.matchQuery] — case-insensitive contains filter
+     *                                     against companyname/first/last/phone/email
+     * @param {number} opts.limit — capped 1..50
+     * @returns {Array<Object>} packed entity rows
+     */
+    const runBookEntityQuery = (opts) => {
+        const userId = opts.userId;
+        const stages = (opts.stages && opts.stages.length)
+            ? opts.stages
+            : ['LEAD', 'PROSPECT', 'CUSTOMER'];
+        const limit  = Math.min(Math.max(parseInt(opts.limit, 10) || 20, 1), 50);
+        const matchQ = String(opts.matchQuery || '').trim();
+        const hasMatch = matchQ.length > 0;
+
+        // Inline the stage list — it's a small enum from a fixed map, so
+        // there's no injection vector. The two userId binds are kept as
+        // parameters to N/query (the only place untrusted input could land).
+        const stageLits = stages.map((s) => "'" + s + "'").join(',');
+
+        let sql =
+            'SELECT ' +
+            '    c.id           AS id, ' +
+            '    c.companyname  AS companyname, ' +
+            '    c.firstname    AS firstname, ' +
+            '    c.lastname     AS lastname, ' +
+            '    c.phone        AS phone, ' +
+            '    c.email        AS email, ' +
+            '    c.stage        AS stage, ' +
+            '    BUILTIN.DF(c.lastmodifieddate) AS lastmodifieddate, ' +
+            '    MAX(c.lastmodifieddate)        AS sortts ' +
+            'FROM customer c ' +
+            'LEFT JOIN customerSalesTeam cst ON cst.entity = c.id ' +
+            'WHERE (c.salesrep = ? OR cst.employee = ?) ' +
+            '  AND c.isInactive = \'F\' ' +
+            '  AND c.stage IN (' + stageLits + ') ';
+
+        const params = [userId, userId];
+
+        if (hasMatch) {
+            const like = '%' + matchQ.toLowerCase() + '%';
+            sql +=
+                '  AND ( ' +
+                '       LOWER(c.companyname) LIKE ? ' +
+                '    OR LOWER(c.firstname)   LIKE ? ' +
+                '    OR LOWER(c.lastname)    LIKE ? ' +
+                '    OR LOWER(c.phone)       LIKE ? ' +
+                '    OR LOWER(c.email)       LIKE ? ' +
+                '  ) ';
+            params.push(like, like, like, like, like);
+        }
+
+        sql +=
+            'GROUP BY c.id, c.companyname, c.firstname, c.lastname, ' +
+            '         c.phone, c.email, c.stage, BUILTIN.DF(c.lastmodifieddate) ' +
+            'ORDER BY sortts DESC ' +
+            'FETCH FIRST ' + limit + ' ROWS ONLY';
+
+        const rs = query.runSuiteQL({ query: sql, params: params });
+        const mapped = rs.asMappedResults();
+        return mapped.map(packEntityRowSql);
     };
 
     /**
@@ -402,25 +474,11 @@ define(['N/search', 'N/log'], (search, log) => {
             if (!userId) {
                 return { error: 'userId required', rows: [], total: 0 };
             }
-            const results = search.create({
-                type: search.Type.CUSTOMER,
-                filters: [
-                    ['salesrep', 'anyof', userId], 'AND',
-                    ['stage', 'anyof', ['LEAD', 'PROSPECT', 'CUSTOMER']], 'AND',
-                    ['isinactive', 'is', 'F']
-                ],
-                columns: [
-                    { name: 'lastmodifieddate', sort: search.Sort.DESC },
-                    'stage',
-                    'companyname',
-                    'firstname',
-                    'lastname',
-                    'phone',
-                    'email'
-                ]
-            }).run().getRange({ start: 0, end: limit });
-
-            const rows = results.map(packEntityRow);
+            // SuiteQL via runBookEntityQuery: rep's book = primary salesrep OR
+            // a salesteam member. The N/search join `salesteam.employee` would
+            // silently return zero — SuiteQL's `customerSalesTeam` table is
+            // deterministic and the LEFT JOIN expresses the OR natively.
+            const rows = runBookEntityQuery({ userId: userId, limit: limit });
             return { rows: rows, total: rows.length };
         } catch (e) {
             log.error({ title: 'CTC getSuggestedContacts Failed', details: e.message || e });
@@ -444,50 +502,29 @@ define(['N/search', 'N/log'], (search, log) => {
         try {
             params = params || {};
             const userId = params.userId;
-            const query = String(params.query || '').trim();
+            const userQuery = String(params.query || '').trim();
             const limit = Math.min(parseInt(params.limit, 10) || 20, 50);
             const typeFilter = String(params.typeFilter || '').toLowerCase();
             if (!userId) {
                 return { error: 'userId required', rows: [], total: 0 };
             }
-            if (!query) {
+            if (!userQuery) {
                 return { rows: [], total: 0 };
             }
-            // Stage filter: all three by default, narrowed if typeFilter matches.
             const stages = WIRE_TO_STAGE[typeFilter]
                 ? [WIRE_TO_STAGE[typeFilter]]
                 : ['LEAD', 'PROSPECT', 'CUSTOMER'];
-
-            // OR-group of contains-matches across the five searchable fields.
-            // NetSuite filter syntax: nested array becomes its own AND/OR scope.
-            const matchGroup = [
-                ['companyname', 'contains', query], 'OR',
-                ['firstname',   'contains', query], 'OR',
-                ['lastname',    'contains', query], 'OR',
-                ['phone',       'contains', query], 'OR',
-                ['email',       'contains', query]
-            ];
-
-            const results = search.create({
-                type: search.Type.CUSTOMER,
-                filters: [
-                    ['salesrep', 'anyof', userId], 'AND',
-                    ['stage', 'anyof', stages], 'AND',
-                    ['isinactive', 'is', 'F'], 'AND',
-                    matchGroup
-                ],
-                columns: [
-                    { name: 'lastmodifieddate', sort: search.Sort.DESC },
-                    'stage',
-                    'companyname',
-                    'firstname',
-                    'lastname',
-                    'phone',
-                    'email'
-                ]
-            }).run().getRange({ start: 0, end: limit });
-
-            const rows = results.map(packEntityRow);
+            // SuiteQL via runBookEntityQuery: rep's book + a case-insensitive
+            // contains match against the five searchable fields. The book
+            // includes both primary salesrep AND salesteam-member entities
+            // (the user's request: a rep who's secondary on Abbott still
+            // sees Abbott in Search).
+            const rows = runBookEntityQuery({
+                userId: userId,
+                stages: stages,
+                matchQuery: userQuery,
+                limit: limit
+            });
             return { rows: rows, total: rows.length };
         } catch (e) {
             log.error({ title: 'CTC searchOwnedEntities Failed', details: e.message || e });
