@@ -2645,17 +2645,53 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             });
         }
 
-        function updateCounts(rows) {
+        // Iter B Phase 6 refinements: decouple the chip counts from the
+        // displayed row list. Chip badges should reflect the TRUE book
+        // size (returned by softphoneBookCounts) when the search input is
+        // empty, and the filtered-match counts when the user is typing.
+        // Pre-refinements: empty-state chips read "My book 20" because they
+        // counted the Suggested top-20 slice — wildly underreporting reps
+        // with larger books (Burt has 112).
+        var bookCounts = null; // { total, customer, prospect, lead } | null until loaded
+
+        function writeChipCounts(c) {
+            cntAll.textContent      = String(c.total || 0);
+            cntCustomer.textContent = String(c.customer || 0);
+            cntProspect.textContent = String(c.prospect || 0);
+            cntLead.textContent     = String(c.lead || 0);
+        }
+
+        function updateCountsFromRows(rows) {
             var c = 0, p = 0, l = 0;
             (rows || []).forEach(function (r) {
                 if (r.type === 'customer') c++;
                 else if (r.type === 'prospect') p++;
                 else if (r.type === 'lead') l++;
             });
-            cntAll.textContent = (c + p + l).toString();
-            cntCustomer.textContent = c.toString();
-            cntProspect.textContent = p.toString();
-            cntLead.textContent = l.toString();
+            writeChipCounts({ total: c + p + l, customer: c, prospect: p, lead: l });
+        }
+
+        function applyBookCountsToChips() {
+            if (bookCounts && !bookCounts.error) writeChipCounts(bookCounts);
+            else writeChipCounts({ total: 0, customer: 0, prospect: 0, lead: 0 });
+        }
+
+        function loadBookCounts() {
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'softphoneBookCounts' })
+            })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                bookCounts = data || null;
+                // Only write the book counts when the user isn't typing —
+                // otherwise we'd clobber the active filtered-result counts.
+                if (!(searchInput && searchInput.value && searchInput.value.trim())) {
+                    applyBookCountsToChips();
+                }
+            })
+            .catch(function () { /* leave chips at last-known values */ });
         }
 
         function filterRows(rows, type) {
@@ -2665,7 +2701,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function applyVisible() {
             var source = suggestedRows || [];
-            updateCounts(source);
+            // Empty-search state: chips show the TRUE book breakdown (not
+            // the 30-row Suggested slice). Falls back to row-derived counts
+            // if the book-counts fetch hasn't returned yet.
+            if (bookCounts && !bookCounts.error) applyBookCountsToChips();
+            else updateCountsFromRows(source);
             renderRows(filterRows(source, activeFilter));
         }
 
@@ -2673,10 +2713,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             searchLoading.classList.remove('hidden');
             searchSectLabel.textContent = 'Suggested · your book';
             searchSectMeta.textContent  = 'by recency';
+            // Kick off the true-book-counts fetch in parallel — it powers the
+            // chip badges so they show 95/4/13 instead of the 30-row slice.
+            loadBookCounts();
             fetch(TOKEN_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'softphoneSuggested', limit: 20 })
+                body: JSON.stringify({ action: 'softphoneSuggested', limit: 30 })
             })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -2708,7 +2751,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             .then(function (data) {
                 searchLoading.classList.add('hidden');
                 var rows = (data && data.rows) || [];
-                updateCounts(rows);
+                // Typed-search: chips reflect filtered match counts (not the
+                // full book). When the user clears the input, applyVisible
+                // restores the chips to true book totals.
+                updateCountsFromRows(rows);
                 renderRows(rows);
             })
             .catch(function (err) {
@@ -2738,7 +2784,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         || (r.email || '').toLowerCase().indexOf(qLower) !== -1;
                 });
                 if (localHits.length >= 3) {
-                    updateCounts(localHits);
+                    updateCountsFromRows(localHits);
                     renderRows(filterRows(localHits, activeFilter));
                     return;
                 }

@@ -29,7 +29,10 @@ define(['N/search', 'N/log'], (search, log) => {
     // v4 (Phase 6 refinements): SuiteQL search refactor — force fresh
     // window so reps can't accidentally hit cached softphone HTML that
     // calls the old N/search-based search backend.
-    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v4';
+    // v5 (Phase 6 refinements): honest chip counts via softphoneBookCounts —
+    // force fresh window so reps see the true book size (95 / 4 / 13)
+    // instead of the cached "displayed slice" counts (16 / 3 / 1).
+    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v5';
 
     /**
      * Resolve a display name from a NetSuite record by type.

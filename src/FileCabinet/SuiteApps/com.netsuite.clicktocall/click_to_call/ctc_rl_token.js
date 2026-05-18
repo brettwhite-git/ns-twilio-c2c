@@ -50,6 +50,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         if (body.action === 'softphoneContacts')    return softphoneContacts(body);
         if (body.action === 'softphoneRecents')     return softphoneRecents(body);
         if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body);
+        if (body.action === 'softphoneBookCounts')  return softphoneBookCounts(body);
         if (body.action === 'approveProposedTask')  return approveProposedTask(body);
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
@@ -435,6 +436,22 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             query: body.query,
             typeFilter: body.typeFilter,
             limit: body.limit
+        });
+    };
+
+    /**
+     * softphoneBookCounts — Iter B Phase 6 refinements.
+     * Returns the rep's TRUE book size + per-stage breakdown so the Search
+     * tab's chip badges show real totals ("My book 112 · Customer 95 ·
+     * Prospect 4 · Lead 13") instead of the displayed-slice counts. Decouples
+     * the row-fetch (capped at 20 for the Suggested list) from the chip
+     * counts (the whole book).
+     *
+     * @returns {Object} { total, customer, prospect, lead } or { error, ... }
+     */
+    const softphoneBookCounts = () => {
+        return workspaceQueries.getBookCounts({
+            userId: runtime.getCurrentUser().id
         });
     };
 

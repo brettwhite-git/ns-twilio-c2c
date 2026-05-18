@@ -418,6 +418,12 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         // SQL aggregation rule without listing every column. Earlier attempts
         // that listed every column in GROUP BY (including BUILTIN.DF()) blew
         // up silently on the sandbox; this shape is what's known-good.
+        //
+        // The isprimary / isteammember CASE expressions inline userId (already
+        // parseInt-coerced above, so no injection vector) since SuiteQL `?`
+        // binds are strictly positional and adding more `?` parameters here
+        // would mean retro-fitting four extra params for what's purely a
+        // verification flag. Inline is simpler and equivalent.
         let sql =
             'SELECT ' +
             '    c.id                    AS id, ' +
@@ -427,7 +433,9 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             '    MAX(c.phone)            AS phone, ' +
             '    MAX(c.email)            AS email, ' +
             '    MAX(c.stage)            AS stage, ' +
-            '    MAX(c.lastmodifieddate) AS lastmodifieddate ' +
+            '    MAX(c.lastmodifieddate) AS lastmodifieddate, ' +
+            '    MAX(CASE WHEN c.salesrep   = ' + userId + ' THEN 1 ELSE 0 END) AS isprimary, ' +
+            '    MAX(CASE WHEN cst.employee = ' + userId + ' THEN 1 ELSE 0 END) AS isteammember ' +
             'FROM customer c ' +
             // CustomerSalesTeam.customer is the parent-customer reference column
             // (sandbox audit log: `Field 'entity' for record 'CustomerSalesTeam'
@@ -466,11 +474,45 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
 
         const rs = query.runSuiteQL({ query: sql, params: params });
         const mapped = rs.asMappedResults();
-        log.audit({
-            title: 'CTC runBookEntityQuery result',
-            details: 'rowCount=' + mapped.length
+
+        // Verification breakdown — bucket by stage and by role (primary /
+        // secondary-only / both) so the rep can sanity-check the book
+        // contents against their NetSuite Sales Team membership without
+        // running a separate query. Each line is short enough to read in
+        // the Script Execution log details column.
+        const stageCounts = { CUSTOMER: 0, PROSPECT: 0, LEAD: 0, OTHER: 0 };
+        const roleCounts  = { primaryOnly: 0, secondaryOnly: 0, both: 0, none: 0 };
+        const rows = mapped.map((r) => {
+            const stageKey = String(r.stage || 'OTHER').toUpperCase();
+            stageCounts[stageKey] = (stageCounts[stageKey] || 0) + 1;
+            const isPrimary  = String(r.isprimary)    === '1';
+            const isTeam     = String(r.isteammember) === '1';
+            if (isPrimary && isTeam)        roleCounts.both++;
+            else if (isPrimary)             roleCounts.primaryOnly++;
+            else if (isTeam)                roleCounts.secondaryOnly++;
+            else                            roleCounts.none++;
+            return r;
         });
-        return mapped.map(packEntityRowSql);
+
+        log.audit({
+            title: 'CTC runBookEntityQuery breakdown',
+            details:
+                'rowCount=' + mapped.length +
+                ' | stages=' + JSON.stringify(stageCounts) +
+                ' | roles=' + JSON.stringify(roleCounts)
+        });
+        // Per-row dump — id · companyname · stage · role tag. Trimmed to
+        // 50 names so the audit detail doesn't overflow NetSuite's column.
+        const rowDump = rows.slice(0, 50).map((r) => {
+            const role = (String(r.isprimary) === '1' && String(r.isteammember) === '1') ? 'P+S'
+                       : String(r.isprimary)    === '1' ? 'P'
+                       : String(r.isteammember) === '1' ? 'S'
+                       : '?';
+            return r.id + ':' + (r.companyname || '') + ':' + (r.stage || '') + ':' + role;
+        }).join(' | ');
+        log.audit({ title: 'CTC runBookEntityQuery rows', details: rowDump });
+
+        return rows.map(packEntityRowSql);
     };
 
     /**
@@ -483,11 +525,66 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      * @param {number} [params.limit=20]
      * @returns {{ rows: Array<Object>, total: number }} — `{ error }` on failure
      */
+    /**
+     * Returns the true book size + per-stage breakdown for the current rep.
+     * Powers the Search tab's chip count badges so they reflect the *real*
+     * book ("My book 112 · Customer 95 · Prospect 4 · Lead 13") instead of
+     * the displayed-slice counts. Single COUNT(DISTINCT) query — cheap
+     * relative to the row-fetch.
+     *
+     * @param {Object} params
+     * @param {string|number} params.userId
+     * @returns {{ total: number, customer: number, prospect: number, lead: number }}
+     *          or `{ error, total: 0, ... }` on failure.
+     */
+    const getBookCounts = (params) => {
+        try {
+            params = params || {};
+            const userId = parseInt(params.userId, 10);
+            if (!userId) {
+                return { error: 'userId required', total: 0, customer: 0, prospect: 0, lead: 0 };
+            }
+            // CASE WHEN over a DISTINCT-counted set so a single query gives us
+            // the per-stage breakdown. The LEFT JOIN + COUNT DISTINCT collapses
+            // duplicate rows from the salesteam sublist (one customer can have
+            // multiple salesteam line rows; we count the customer once).
+            const sql =
+                'SELECT ' +
+                '  COUNT(DISTINCT c.id) AS total, ' +
+                '  COUNT(DISTINCT CASE WHEN c.stage = \'CUSTOMER\' THEN c.id END) AS customer, ' +
+                '  COUNT(DISTINCT CASE WHEN c.stage = \'PROSPECT\' THEN c.id END) AS prospect, ' +
+                '  COUNT(DISTINCT CASE WHEN c.stage = \'LEAD\'     THEN c.id END) AS lead ' +
+                'FROM customer c ' +
+                'LEFT JOIN customerSalesTeam cst ON cst.customer = c.id ' +
+                'WHERE (c.salesrep = ? OR cst.employee = ?) ' +
+                '  AND c.isInactive = \'F\' ' +
+                '  AND c.stage IN (\'LEAD\',\'PROSPECT\',\'CUSTOMER\')';
+
+            const rs = query.runSuiteQL({ query: sql, params: [userId, userId] });
+            const r = (rs.asMappedResults()[0]) || {};
+            return {
+                total:    parseInt(r.total, 10)    || 0,
+                customer: parseInt(r.customer, 10) || 0,
+                prospect: parseInt(r.prospect, 10) || 0,
+                lead:     parseInt(r.lead, 10)     || 0
+            };
+        } catch (e) {
+            log.error({
+                title: 'CTC getBookCounts Failed',
+                details: 'name=' + (e && e.name) + ' message=' + (e && e.message) + ' stack=' + (e && e.stack)
+            });
+            return { error: 'Book counts fetch failed: ' + (e && e.message), total: 0, customer: 0, prospect: 0, lead: 0 };
+        }
+    };
+
     const getSuggestedContacts = (params) => {
         try {
             params = params || {};
             const userId = params.userId;
-            const limit = Math.min(parseInt(params.limit, 10) || 20, 50);
+            // Default 30 (up from 20) — Burt's book is 112, so a 30-row
+            // most-recent slice gives reps better coverage in the empty-state
+            // pre-fill. Hard cap stays at 50.
+            const limit = Math.min(parseInt(params.limit, 10) || 30, 50);
             if (!userId) {
                 return { error: 'userId required', rows: [], total: 0 };
             }
@@ -727,6 +824,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         // Phase 2 — softphone Search tab
         getSuggestedContacts,
         searchOwnedEntities,
+        getBookCounts,
         // Phase 6 — in-call account snapshot
         getAccountSnapshot
     };
