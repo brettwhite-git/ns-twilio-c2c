@@ -2,25 +2,24 @@
 /**
  * @NApiVersion 2.1
  *
- * Setup Wizard v2 — SpaClient (first real render).
+ * Setup Wizard v2 — SpaClient (UI polish pass).
  *
- * Diagnostic v2 (commit dc1575e) confirmed the mount API:
- *   scriptContext = { baseUrl, uifContext, setLayout, setContent,
- *                     setSupportedThemes }
- *   Mount point: scriptContext.setContent(rootComponent)
- *   UIF imperative construction works: `new component.X({...})` ✓
+ * Render proven (commit 77c7da8 + render-3): scriptContext.setContent
+ * with a StackPanel root renders. Confirmed:
+ *   - GapSize.M = 'm' (lowercase string enum) via component.StackPanel.GapSize.M
+ *   - component.Stepper.Item exists as a constructor
+ *   - setContent is the visible-content slot; setLayout is page chrome
+ *     (calling both with the same tree double-rendered)
  *
- * This first-real-render version:
- *   - Builds a Stepper + Heading + placeholder Text content for the
- *     current step
- *   - Wraps everything in a StackPanel
- *   - Mounts via scriptContext.setContent
- *   - Each component construction is wrapped in try/catch so a single
- *     bad component option doesn't blank the page — we log and fall
- *     back to the next simpler thing
- *
- * Per-step business logic ships in U3-U7. This proves the render path
- * end-to-end and gives a visible "you reached the wizard" surface.
+ * This pass:
+ *   1. Outer StackPanel switches to VERTICAL orientation so heading /
+ *      stepper / step body stack top-to-bottom (default horizontal
+ *      squashed everything onto one line)
+ *   2. Drops the experimental setLayout(root) call — setContent is enough
+ *   3. Stepper uses Stepper.Item class instances (the class exists)
+ *   4. Wraps content in a ContentPanel for padding + page chrome
+ *   5. Logs the resolved orientation enum + ContentPanel availability
+ *      so we can iterate if either doesn't render the way we expect
  */
 define(["require", "exports", "@uif-js/core", "@uif-js/component"],
        function (require, exports, core, component) {
@@ -36,45 +35,48 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         { num: 5, label: 'Reps & roles',    sub: 'Permissions' },
         { num: 6, label: 'Test & activate', sub: 'Go live' }
     ];
-
-    // Until U3 wires the server-snapshot fetch, land on Step 1 (prereqs).
-    // Resumability via config snapshot ships in U3.
     var CURRENT_STEP = 1;
 
     var run = function (scriptContext) {
         try {
-            if (!scriptContext || typeof scriptContext.setContent !== 'function') {
-                console.error("[CTC Setup Wizard] scriptContext.setContent " +
-                    "is not a function — cannot mount. Keys:",
-                    scriptContext ? Object.keys(scriptContext) : "(null)");
-                return;
+            console.log("[CTC Setup Wizard] === UI POLISH PASS ===");
+
+            // Resolve enums up front.
+            var SP = component.StackPanel;
+            var GapSize = (SP && SP.GapSize) || {};
+            var Orientation = (SP && SP.Orientation) || {};
+            var GAP_M = GapSize.M;
+            var GAP_L = GapSize.L;
+            var VERTICAL = Orientation.VERTICAL;
+            var HORIZONTAL = Orientation.HORIZONTAL;
+
+            console.log("[CTC Setup Wizard] GAP_M=" + GAP_M +
+                ", GAP_L=" + GAP_L +
+                ", VERTICAL=" + VERTICAL +
+                ", HORIZONTAL=" + HORIZONTAL);
+
+            if (VERTICAL === undefined) {
+                console.log("[CTC Setup Wizard] StackPanel.Orientation " +
+                    "static keys:", SP && Object.keys(SP.Orientation || {}));
+                logShape("component.StackPanel", SP);
             }
 
-            var root = buildRoot(component);
-            console.log("[CTC Setup Wizard] mounting root component:", root);
+            var root = buildRoot({
+                GAP_M: GAP_M,
+                GAP_L: GAP_L,
+                VERTICAL: VERTICAL,
+                HORIZONTAL: HORIZONTAL
+            });
+
+            console.log("[CTC Setup Wizard] Mounting root:", root);
             scriptContext.setContent(root);
-            console.log("[CTC Setup Wizard] mount complete");
+            console.log("[CTC Setup Wizard] setContent OK");
         } catch (e) {
             console.error("[CTC Setup Wizard] run() threw:", e);
-            // Last-resort visible surface: bare heading via setContent.
-            try {
-                var fallback = new component.Heading({
-                    text: "CTC Setup Wizard — rendering error: " +
-                        (e && e.message ? e.message : String(e))
-                });
-                scriptContext.setContent(fallback);
-            } catch (e2) {
-                console.error("[CTC Setup Wizard] fallback render also " +
-                    "failed:", e2);
-            }
         }
     };
 
-    /**
-     * Compose the wizard root. Each layer is try/caught so partial
-     * render is possible if the framework rejects an option shape.
-     */
-    function buildRoot(component) {
+    function buildRoot(enums) {
         var heading = safeNew(component.Heading, {
             text: "Click-to-Call Setup Wizard"
         }, "Heading");
@@ -82,70 +84,89 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         var subheading = safeNew(component.Text, {
             text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
                 STEPS[CURRENT_STEP - 1].label
-        }, "Text");
+        }, "Text(sub)");
 
-        var stepper = buildStepper(component);
+        var stepper = buildStepper(enums);
 
-        var stepContent = safeNew(component.Text, {
-            text: "This step's UI ships in U3. The render path is " +
-                "confirmed working — setContent mount via UIF " +
-                "components is the right pattern for this SuiteApp."
-        }, "Text(stepContent)");
+        var stepBody = safeNew(component.Text, {
+            text: "Per-step UI ships in U3-U7. The render path is " +
+                "confirmed working — scriptContext.setContent with UIF " +
+                "components is the SPA mount API for this SuiteApp."
+        }, "Text(body)");
 
-        // Try to wrap in a StackPanel. If the children/items API isn't
-        // what we guessed, fall back to a single component.
-        var stackChildren = [heading, subheading, stepper, stepContent]
+        var children = [heading, subheading, stepper, stepBody]
             .filter(function (c) { return c != null; });
 
-        // Try several known-pattern children options in priority order.
-        var stack = safeNew(component.StackPanel, {
-            items: stackChildren,
-            itemGap: 'M'
-        }, "StackPanel(items)");
+        // Outer wrapper: vertical StackPanel so children stack top-to-bottom.
+        var stackOpts = { items: children };
+        if (enums.VERTICAL !== undefined) stackOpts.orientation = enums.VERTICAL;
+        if (enums.GAP_L !== undefined) stackOpts.itemGap = enums.GAP_L;
+
+        var stack = safeNew(component.StackPanel, stackOpts,
+            "StackPanel(vertical)");
 
         if (!stack) {
-            stack = safeNew(component.StackPanel, {
-                children: stackChildren,
-                itemGap: 'M'
-            }, "StackPanel(children)");
+            // Last-resort fallback if orientation enum was wrong: try
+            // without orientation set (default), accept horizontal squash
+            // over total non-render.
+            stack = safeNew(component.StackPanel,
+                { items: children, itemGap: enums.GAP_L },
+                "StackPanel(no orientation)");
         }
 
-        // If StackPanel composition fails entirely, mount the heading
-        // alone so we at least see *something* rendered.
-        return stack || heading || subheading;
+        // Wrap in ContentPanel for page padding + visual chrome.
+        if (stack && component.ContentPanel) {
+            var panel = safeNew(component.ContentPanel, {
+                content: stack,
+                outerGap: enums.GAP_L
+            }, "ContentPanel");
+            if (panel) return panel;
+        }
+
+        return stack || heading;
     }
 
-    function buildStepper(component) {
-        if (!component.Stepper) {
-            console.log("[CTC Setup Wizard] component.Stepper not found; " +
-                "skipping stepper");
-            return null;
-        }
+    function buildStepper(enums) {
+        if (!component.Stepper) return null;
 
-        // StepperItem children
-        var items = [];
-        for (var i = 0; i < STEPS.length; i++) {
-            var s = STEPS[i];
-            var stepperItem = safeNew(component.StepperItem, {
-                label: s.label,
-                description: s.sub,
-                done: (s.num < CURRENT_STEP),
-                disabled: (s.num > CURRENT_STEP)
-            }, "StepperItem(" + s.label + ")");
-            if (stepperItem) items.push(stepperItem);
+        // Stepper.Item is a real class (confirmed in render-3 logs).
+        var ItemCtor = component.Stepper && component.Stepper.Item;
+
+        var items;
+        if (ItemCtor) {
+            items = STEPS.map(function (s) {
+                return safeNew(ItemCtor, {
+                    label: s.label,
+                    description: s.sub,
+                    done: s.num < CURRENT_STEP,
+                    disabled: s.num > CURRENT_STEP
+                }, "Stepper.Item(" + s.label + ")");
+            }).filter(function (it) { return it != null; });
+        } else {
+            // Plain-object fallback (worked in render-3).
+            items = STEPS.map(function (s) {
+                return {
+                    label: s.label,
+                    description: s.sub,
+                    done: s.num < CURRENT_STEP,
+                    disabled: s.num > CURRENT_STEP
+                };
+            });
         }
         if (items.length === 0) return null;
 
-        return safeNew(component.Stepper, {
+        // Stepper stays horizontal — that's the wizard convention.
+        var stepperOpts = {
             items: items,
             selectedStepIndex: CURRENT_STEP - 1
-        }, "Stepper");
+        };
+        if (enums.HORIZONTAL !== undefined) {
+            stepperOpts.orientation = enums.HORIZONTAL;
+        }
+
+        return safeNew(component.Stepper, stepperOpts, "Stepper");
     }
 
-    /**
-     * Construct a UIF component with try/catch. Logs on failure and
-     * returns null so the caller can fall back gracefully.
-     */
     function safeNew(Ctor, options, label) {
         if (!Ctor) {
             console.log("[CTC Setup Wizard] " + label + " constructor " +
@@ -153,13 +174,33 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             return null;
         }
         try {
-            var instance = new Ctor(options);
-            return instance;
+            return new Ctor(options);
         } catch (e) {
             console.log("[CTC Setup Wizard] " + label + " construction " +
                 "failed:", e && e.message ? e.message : e,
                 "— options:", options);
             return null;
+        }
+    }
+
+    function logShape(name, obj) {
+        if (obj == null) {
+            console.log("[CTC Setup Wizard] " + name + " = (null/undef)");
+            return;
+        }
+        if (typeof obj === 'function') {
+            console.log("[CTC Setup Wizard] " + name +
+                " static keys:", Object.keys(obj));
+        } else if (typeof obj === 'object') {
+            var keys = Object.keys(obj);
+            console.log("[CTC Setup Wizard] " + name + " keys:", keys);
+            keys.slice(0, 15).forEach(function (k) {
+                var v = obj[k];
+                if (typeof v !== 'object' && typeof v !== 'function') {
+                    console.log("[CTC Setup Wizard]   " + name + "." +
+                        k + " =", v);
+                }
+            });
         }
     }
 
