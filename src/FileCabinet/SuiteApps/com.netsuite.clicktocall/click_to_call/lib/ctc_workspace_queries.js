@@ -74,6 +74,58 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
     };
 
     /**
+     * Returns the full set of active customer internal IDs in the current
+     * rep's "book" — defined as records where the rep is EITHER the primary
+     * `salesrep` OR a member of the entity's Sales Team sublist (any role).
+     *
+     * Used by `loadHistoryRows` and `loadTaskGroups` to widen their scope
+     * from primary-only (the old N/search `company.salesrep` filter) to the
+     * same primary-OR-salesteam scope the softphone Search/Suggested tabs
+     * already use. The two callers pass the result into their existing
+     * N/search via `['company', 'anyof', <ids>]` — no changes to date /
+     * status / formula filters required.
+     *
+     * @param {Object} params
+     * @param {string|number} params.userId
+     * @returns {Array<string>} customer internal IDs (may be empty)
+     */
+    const getBookCustomerIds = (params) => {
+        try {
+            params = params || {};
+            const userId = parseInt(params.userId, 10);
+            if (!userId) return [];
+
+            const sql =
+                'SELECT DISTINCT c.id ' +
+                'FROM customer c ' +
+                'LEFT JOIN customerSalesTeam cst ON cst.customer = c.id ' +
+                'WHERE (c.salesrep = ? OR cst.employee = ?) ' +
+                '  AND c.isInactive = \'F\'';
+
+            const rs = query.runSuiteQL({ query: sql, params: [userId, userId] });
+            const ids = rs.asMappedResults().map((r) => String(r.id));
+
+            // Defensive: N/search `anyof` with a huge array bumps URL length
+            // and can fail with cryptic errors. Burt's book is 112; if a rep
+            // ever exceeds ~800 we still ship the result but log a warning.
+            if (ids.length > 800) {
+                log.audit({
+                    title: 'CTC getBookCustomerIds large book',
+                    details: 'userId=' + userId + ' bookSize=' + ids.length +
+                             ' — approaching the N/search anyof practical ceiling'
+                });
+            }
+            return ids;
+        } catch (e) {
+            log.error({
+                title: 'CTC getBookCustomerIds Failed',
+                details: 'name=' + (e && e.name) + ' message=' + (e && e.message) + ' stack=' + (e && e.stack)
+            });
+            return [];
+        }
+    };
+
+    /**
      * Load recent Phone Call rows assigned to a user, with optional filters.
      *
      * @param {Object} params
@@ -94,17 +146,24 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             const limit = parseInt(params.limit, 10) || 30;
             const userId = params.userId;
 
-            // Scope to calls where the customer's salesrep is the current user.
-            // `assigned` on Phone Call is unreliable (not always set, can point
-            // at the logger rather than the account owner). `company.salesrep`
-            // is the source of truth for who owns the account.
-            // NOTE: widening to `company.salesteam.employee` to include
-            // secondary team members returned zero results on sandbox
-            // td3061543 — likely a join-name or Team-Selling-feature mismatch.
-            // Pending verification of the correct N/search join syntax; for
-            // now we stay on the proven primary-salesrep filter.
+            // Scope to calls whose customer is in the rep's book (primary OR
+            // Sales Team member). `assigned` on Phone Call is unreliable (not
+            // always set, can point at the logger rather than the account
+            // owner). The old `['company.salesrep', 'anyof', userId]` filter
+            // missed any call to a customer where the rep was secondary on
+            // the Sales Team (Burt → Abbott was hidden). Hybrid approach:
+            // resolve the book customer-id set via SuiteQL (`getBookCustomerIds`),
+            // then pass the IDs to N/search via `['company', 'anyof', ids]`
+            // so all existing date/status/satMin filters keep working without
+            // a translation pass.
+            const bookCustomerIds = getBookCustomerIds({ userId: userId });
+            if (!bookCustomerIds.length) {
+                // No accessible customers → no rows. Short-circuit; the
+                // N/search `anyof` operator rejects empty arrays anyway.
+                return { rows: [], total: 0 };
+            }
             const searchFilters = [
-                ['company.salesrep', 'anyof', userId],
+                ['company', 'anyof', bookCustomerIds],
                 'AND',
                 ['custevent_ctc_call_sid', 'isnotempty', '']
             ];
@@ -226,14 +285,19 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                 filterParts.push([['custrecord_ctc_pt_phone_call', 'anyof', params.phoneCallId]]);
             } else {
                 // Two-step query: NetSuite search doesn't support the 3-hop join
-                // (proposed_task → phone_call → company → salesrep). So first find
-                // all phone calls where company.salesrep = user, then filter
-                // proposed_tasks where phone_call is in that set.
+                // (proposed_task → phone_call → company → salesteam). So first
+                // resolve the rep's book customer-id set via SuiteQL (primary OR
+                // Sales Team member), look up all phone calls on those customers,
+                // then filter proposed_tasks where phone_call is in that set.
+                const bookCustomerIds = getBookCustomerIds({ userId: userId });
+                if (!bookCustomerIds.length) {
+                    return { groups: [], totalTasks: 0 };
+                }
                 const myCallIds = [];
                 try {
                     const callResults = search.create({
                         type: search.Type.PHONE_CALL,
-                        filters: [['company.salesrep', 'anyof', userId]],
+                        filters: [['company', 'anyof', bookCustomerIds]],
                         columns: ['internalid']
                     }).run().getRange({ start: 0, end: 1000 });
                     callResults.forEach((r) => myCallIds.push(r.id));
