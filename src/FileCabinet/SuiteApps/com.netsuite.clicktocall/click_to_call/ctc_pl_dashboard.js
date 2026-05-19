@@ -25,11 +25,26 @@
  * Reference: /Users/brettwhite/Projects/opportunity-kanban (proven pattern).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_queries'],
-       (url, log, runtime, ctcHtml, workspaceQueries) => {
+define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_entity'],
+       (url, log, runtime, ctcHtml, workspaceQueries, ctcEntity) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
+    // Iteration B Phase 1: popup dimensions live in ctc_entity.js so the
+    // portlet, the UE phone button, and any future launcher all open the
+    // softphone at the same 380 × 640 emulator size.
+    const POPUP_OPTS = ctcEntity.SOFTPHONE_POPUP_OPTIONS;
+    const POPUP_NAME = ctcEntity.SOFTPHONE_POPUP_NAME;
+
+    // Modern handset SVG (Heroicons solid `phone`). fill='currentColor' so the icon
+    // inherits whatever text color its container sets — white on the navy CTA tile,
+    // navy on the per-row redial buttons. Sized via CSS rules on `.ctc-pl-call-icon
+    // svg` and `.ctc-pl-redial svg`. The path is exported separately so the inline
+    // client-side rebuilder (chip-click handler) can construct an equivalent SVG via
+    // document.createElementNS — keeps the server-rendered icon and the dynamically
+    // rebuilt icon in pixel-perfect sync from a single source of truth.
+    const PHONE_SVG_PATH = "M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5z";
+    const PHONE_SVG = "<svg viewBox='0 0 24 24' fill='currentColor'><path d='" + PHONE_SVG_PATH + "'/></svg>";
 
     /**
      * Portlet entry point.
@@ -45,9 +60,14 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
         let workspaceUrl = '';
 
         try {
+            // Iteration B Phase 2: every portlet softphone launch passes
+            // entryPoint=dashboard so the Suitelet defaults to the Search
+            // tab (no record context → can't pre-fill Dial). The redial
+            // launcher overrides entryPoint=record when it has phone+entity.
             softphoneUrl = url.resolveScript({
                 scriptId: 'customscript_ctc_sl_softphone',
-                deploymentId: 'customdeploy_ctc_sl_softphone'
+                deploymentId: 'customdeploy_ctc_sl_softphone',
+                params: { entryPoint: 'dashboard' }
             });
         } catch (e) {
             log.error({ title: 'CTC Portlet — softphone URL resolve failed', details: e.message || e });
@@ -97,7 +117,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
 
     const buildPlaceCallOnclick = (softphoneUrl) => {
         if (!softphoneUrl) return '';
-        return "window.open('" + escapeJs(softphoneUrl) + "','ctc_softphone','width=400,height=820')";
+        return "window.open('" + escapeJs(softphoneUrl) + "','" + POPUP_NAME + "','" + POPUP_OPTS + "')";
     };
 
     const buildRedialOnclick = (softphoneUrl, phone, entityId) => {
@@ -113,7 +133,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
         }
         const sep = softphoneUrl.indexOf('?') >= 0 ? '&' : '?';
         const u = parts.length ? softphoneUrl + sep + parts.join('&') : softphoneUrl;
-        return "window.open('" + escapeJs(u) + "','ctc_softphone','width=400,height=820')";
+        return "window.open('" + escapeJs(u) + "','" + POPUP_NAME + "','" + POPUP_OPTS + "')";
     };
 
     const buildTabOnclick = (tabName) => {
@@ -224,8 +244,8 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
             '<span class="ctc-pl-dur">' + dur + '</span>' +
             '<a class="ctc-pl-view-call" href="' + callRecordUrl + '" target="_blank" rel="noopener" title="Open Phone Call record (transcript + AI summary)">📋</a>' +
             (redialOnclick
-                ? '<button class="ctc-pl-redial" type="button" title="Call this contact" onclick="' + escapeHtml(redialOnclick) + '">☎</button>'
-                : '<span class="ctc-pl-redial-disabled" title="Softphone unavailable">☎</span>'
+                ? '<button class="ctc-pl-redial" type="button" title="Call this contact" onclick="' + escapeHtml(redialOnclick) + '">' + PHONE_SVG + '</button>'
+                : '<span class="ctc-pl-redial-disabled" title="Softphone unavailable">' + PHONE_SVG + '</span>'
             ) +
         '</div>';
     };
@@ -294,7 +314,15 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
                     "var s=r.duration||0;du.textContent=s<60?(s+'s'):(Math.floor(s/60)+'m '+(s%60<10?'0':'')+(s%60)+'s');" +
                     "row.appendChild(du);" +
                     "var vw=document.createElement('a');vw.className='ctc-pl-view-call';vw.href='/app/crm/calendar/call.nl?id='+encodeURIComponent(r.id||'');vw.target='_blank';vw.rel='noopener';vw.title='Open Phone Call record (transcript + AI summary)';vw.textContent='📋';row.appendChild(vw);" +
-                    "var rd=document.createElement('button');rd.className='ctc-pl-redial';rd.type='button';rd.title='Call this contact';rd.textContent='☎';" +
+                    "var rd=document.createElement('button');rd.className='ctc-pl-redial';rd.type='button';rd.title='Call this contact';" +
+                    // Build phone SVG via DOM (XSS-safe; no innerHTML string parsing).
+                    // Iter B retains the SVG path over the legacy ☎ text glyph for
+                    // colour-inheritance + sizing consistency with the softphone
+                    // dialpad button.
+                    "var svgNS='http://www.w3.org/2000/svg';" +
+                    "var svg=document.createElementNS(svgNS,'svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','currentColor');" +
+                    "var p=document.createElementNS(svgNS,'path');p.setAttribute('d','" + escapeJs(PHONE_SVG_PATH) + "');" +
+                    "svg.appendChild(p);rd.appendChild(svg);" +
                     // Closure-based onclick (NOT setAttribute string) so `r.phone` / `r.companyId`
                     // are captured by the function's scope at row-build time. Mirrors the
                     // server-side `buildRedialOnclick` logic (lenient: phone / companyId / both / neither).
@@ -304,7 +332,7 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
                         "if(r.companyId){parts.push('entityId='+encodeURIComponent(r.companyId));parts.push('entityType=customer')}" +
                         "var sfu='" + escapeJs(softphoneUrl || '') + "';" +
                         "var u=parts.length?(sfu+(sfu.indexOf('?')>=0?'&':'?')+parts.join('&')):sfu;" +
-                        "rd.onclick=function(){window.open(u,'ctc_softphone','width=400,height=820')};" +
+                        "rd.onclick=function(){window.open(u,'" + POPUP_NAME + "','" + POPUP_OPTS + "')};" +
                     "}else{" +
                         "rd.disabled=true;rd.title='Softphone unavailable';" +
                     "}" +
@@ -579,11 +607,11 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
         // Place-a-Call button (icon-only; tooltip explains action; falls back to disabled state if URL missing)
         const callButtonHtml = placeCallOnclick
             ? '<button class="ctc-pl-call-btn" type="button" aria-label="Place a Call" title="Place a Call" onclick="' + escapeHtml(placeCallOnclick) + '">' +
-                '<span class="ctc-pl-call-icon" aria-hidden="true">☎</span>' +
+                '<span class="ctc-pl-call-icon" aria-hidden="true">' + PHONE_SVG + '</span>' +
               '</button>'
             : '<button class="ctc-pl-call-btn ctc-pl-call-btn-disabled" type="button" disabled ' +
               'aria-label="Place a Call (unavailable)" title="Softphone Suitelet not deployed — check CTC Configuration">' +
-                '<span class="ctc-pl-call-icon" aria-hidden="true">☎</span>' +
+                '<span class="ctc-pl-call-icon" aria-hidden="true">' + PHONE_SVG + '</span>' +
               '</button>';
 
         // Tab badge for pending tasks count
@@ -624,10 +652,12 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
     background: #8B8780; border-color: #8B8780; cursor: not-allowed; opacity: 0.65;
 }
 .ctc-pl-call-icon {
-    font-size: 38px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     line-height: 1;
-    display: inline-block;
 }
+.ctc-pl-call-icon svg { width: 38px; height: 38px; display: block; }
 
 /* KPI cards — borrowed from opportunity-kanban (Oracle Sans, bordered card) */
 .ctc-pl-kpis {
@@ -803,10 +833,11 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
 .ctc-pl-redial, .ctc-pl-redial-disabled {
     background: transparent; border: 1px solid #C9C5BE; color: #345D7E;
     border-radius: 4px; width: 28px; height: 24px;
-    font-size: 13px; cursor: pointer;
+    cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
     font-family: inherit;
 }
+.ctc-pl-redial svg, .ctc-pl-redial-disabled svg { width: 13px; height: 13px; display: block; }
 .ctc-pl-redial-disabled { opacity: 0.4; cursor: not-allowed; }
 .ctc-pl-redial:hover { background: rgba(52, 93, 126, 0.08); border-color: #345D7E; }
 .ctc-pl-view-call {

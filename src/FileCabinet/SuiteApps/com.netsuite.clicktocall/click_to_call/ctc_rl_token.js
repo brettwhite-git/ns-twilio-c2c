@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_workspace_queries'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, workspaceQueries) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_workspace_queries', './lib/ctc_entity'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, workspaceQueries, ctcEntity) => {
 
     const loadConfig = ctcConfig.loadConfig;
     const buildAuthHeader = ctcConfig.buildAuthHeader;
@@ -45,6 +45,12 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         if (body.action === 'searchEntities')       return searchEntities(body);
         if (body.action === 'getWorkspaceHistory')  return getWorkspaceHistory(body);
         if (body.action === 'getWorkspaceTasks')    return getWorkspaceTasks(body);
+        if (body.action === 'softphoneSuggested')   return softphoneSuggested(body);
+        if (body.action === 'softphoneSearch')      return softphoneSearch(body);
+        if (body.action === 'softphoneContacts')    return softphoneContacts(body);
+        if (body.action === 'softphoneRecents')     return softphoneRecents(body);
+        if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body);
+        if (body.action === 'softphoneBookCounts')  return softphoneBookCounts(body);
         if (body.action === 'approveProposedTask')  return approveProposedTask(body);
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
@@ -393,6 +399,112 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             phoneCallId: body.phoneCallId,
             limit: body.limit
         });
+    };
+
+    /**
+     * softphoneSuggested — Iteration B Phase 2.
+     * Returns the current user's top owned Customer / Prospect / Lead
+     * entities for the softphone Search tab's empty "Suggested · your book"
+     * state. Capped at 20 by default to keep the local prefix-match fast.
+     *
+     * @param {Object} body
+     * @param {number} [body.limit=20]
+     * @returns {Object} { rows: [...], total } or { error }
+     */
+    const softphoneSuggested = (body) => {
+        return workspaceQueries.getSuggestedContacts({
+            userId: runtime.getCurrentUser().id,
+            limit: body.limit
+        });
+    };
+
+    /**
+     * softphoneSearch — Iteration B Phase 2.
+     * Fuzzy match across the rep's owned book — name / company / phone /
+     * email. Called as a debounced fallback when the client-side prefix
+     * match on the suggested list returns fewer than ~3 results.
+     *
+     * @param {Object} body
+     * @param {string} body.query
+     * @param {'customer'|'prospect'|'lead'|''} [body.typeFilter]
+     * @param {number} [body.limit=20]
+     * @returns {Object} { rows: [...], total } or { error }
+     */
+    const softphoneSearch = (body) => {
+        return workspaceQueries.searchOwnedEntities({
+            userId: runtime.getCurrentUser().id,
+            query: body.query,
+            typeFilter: body.typeFilter,
+            limit: body.limit
+        });
+    };
+
+    /**
+     * softphoneBookCounts — Iter B Phase 6 refinements.
+     * Returns the rep's TRUE book size + per-stage breakdown so the Search
+     * tab's chip badges show real totals ("My book 112 · Customer 95 ·
+     * Prospect 4 · Lead 13") instead of the displayed-slice counts. Decouples
+     * the row-fetch (capped at 20 for the Suggested list) from the chip
+     * counts (the whole book).
+     *
+     * @returns {Object} { total, customer, prospect, lead } or { error, ... }
+     */
+    const softphoneBookCounts = () => {
+        return workspaceQueries.getBookCounts({
+            userId: runtime.getCurrentUser().id
+        });
+    };
+
+    /**
+     * softphoneContacts — Iteration B Phase 3.
+     * Returns every contact at an entity with all phones each contact has on
+     * file. The softphone uses this to hydrate the multi-contact picker when
+     * the user selects an entity from the Search tab.
+     *
+     * @param {Object} body
+     * @param {string|number} body.entityId
+     * @returns {Object} { rows: [...] } or { error }
+     */
+    const softphoneContacts = (body) => {
+        const entityId = body.entityId;
+        if (!entityId) return { error: 'entityId required', rows: [] };
+        return { rows: ctcEntity.getContactsAtEntity(entityId) };
+    };
+
+    /**
+     * softphoneRecents — Iteration B Phase 5.
+     * Returns the current rep's recent Phone Calls for the Recents tab AND
+     * the last-3-dialed shortcut on the empty Dial home. Reuses
+     * workspaceQueries.loadHistoryRows with a last-7-days default; client-side
+     * direction filter chips (All / Missed / Outbound / Inbound) filter the
+     * returned rows in the popup.
+     *
+     * @param {Object} body
+     * @param {string} [body.dateRange='last7days'] — last7days | today | last30days
+     * @param {number} [body.limit=50]
+     * @returns {Object} { rows: [...], total } or { error }
+     */
+    const softphoneRecents = (body) => {
+        return workspaceQueries.loadHistoryRows({
+            userId: runtime.getCurrentUser().id,
+            dateRange: body.dateRange || 'last7days',
+            limit: body.limit || 50
+        });
+    };
+
+    /**
+     * softphoneAccountSnapshot — Iteration B Phase 6.
+     * Returns the 4-tile rollup (outstanding / open opps / last invoice /
+     * last activity) for an entity. Fetched once when a call connects in
+     * the softphone popup; cached in popup scope for the call lifetime.
+     *
+     * @param {Object} body
+     * @param {string|number} body.entityId
+     * @returns {Object} {outstanding, openOpps, lastInvoice, lastActivity} or {error}
+     */
+    const softphoneAccountSnapshot = (body) => {
+        if (!body.entityId) return { error: 'entityId required' };
+        return workspaceQueries.getAccountSnapshot({ entityId: body.entityId });
     };
 
     /**
