@@ -144,29 +144,39 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     function buildStepper(d) {
         if (!d.Stp || !d.SI) return null;
 
-        // StepperItem Options accepts only `label` from the metadata we want;
-        // step state (active / done / future) is computed by the Stepper
-        // from its selectedStepIndex, NOT per-item flags.
-        var items = STEPS.map(function (s) {
+        // Per d.ts: StepperItem.Options.index is REQUIRED (no `?`) and
+        // Stepper.Options uses `children`, not `items` (the `items`
+        // property is class-level / writable, not in the constructor
+        // Options interface).
+        //
+        // type: PRIMARY for the active step makes it visually distinct;
+        // DEFAULT for others.
+        var SIType = (d.SI && d.SI.Type) || {};
+        var ACTIVE = SIType.PRIMARY != null ? SIType.PRIMARY :
+                     (SIType.INFO != null ? SIType.INFO : SIType.DEFAULT);
+        var DEFAULT = SIType.DEFAULT;
+
+        var items = STEPS.map(function (s, i) {
             return safeNew(d.SI, {
-                label: s.label
+                index: i,
+                label: s.label,
+                type: (s.num === CURRENT_STEP) ? ACTIVE : DEFAULT,
+                selected: (s.num === CURRENT_STEP)
             }, "StepperItem(" + s.label + ")");
         }).filter(function (it) { return it != null; });
 
         if (items.length === 0) return null;
 
         var opts = {
-            items: items,
-            selectedStepIndex: CURRENT_STEP - 1 // 0-based
+            children: items,                 // d.ts: Options uses `children`
+            selectedStepIndex: CURRENT_STEP - 1
         };
         if (d.Stp_Orient.HORIZONTAL !== undefined) {
             opts.orientation = d.Stp_Orient.HORIZONTAL;
         }
 
-        // Stepper exposes a descriptionGenerator(index, options) hook for
-        // sublabels. Use it to render the `sub` field per step (this is
-        // the documented way to attach descriptions; the StepperItem
-        // Options interface itself doesn't accept description).
+        // Per d.ts on Stepper namespace:
+        //   descriptionGenerator: (index, options) => content
         opts.descriptionGenerator = function (index) {
             var s = STEPS[index];
             return s ? s.sub : '';
