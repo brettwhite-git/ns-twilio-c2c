@@ -2,39 +2,66 @@
  * @NApiVersion 2.1
  * @NModuleScope SameAccount
  *
- * Twilio REST API wrappers used by the v2 Setup Wizard for live
- * validation of admin-entered credentials and resource SIDs.
+ * Twilio REST API wrappers used by the v2 Setup Wizard.
  *
- * Auth strategy: Basic Auth with API Key SID + API Key Secret value.
- * This validates two credentials at once (the pair must be correct
- * for any call to succeed) and matches the JWT signing path the
- * softphone uses at runtime — so the wizard validations dry-run the
- * same credentials reps will use.
+ * AUTH PATTERN — N/https.createSecureString with {custsecret_*} placeholder.
+ * The secret VALUE never enters SuiteScript scope — NetSuite's HTTP runtime
+ * expands the {custsecret_*} placeholder at the socket write boundary.
+ *
+ * Reference: Oracle's documented Suitelet sample for Basic Auth via secure
+ * string — https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/
+ * article_0111025229.html
  *
  * Every helper returns a typed envelope:
  *   { ok: true,  status: 200, ...response-specific-fields }
- *   { ok: false, status: <number|'TIMEOUT'>, errorCode, errorMessage }
+ *   { ok: false, status: <number|'NETWORK_ERROR'|'EMPTY_SECRET'>,
+ *                errorCode, errorMessage }
  *
  * Never throws. Caller gets a clean structured result either way.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
-       (https, encode, log, crypto) => {
+define(['N/https', 'N/encode', 'N/log'],
+       (https, encode, log) => {
 
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
 
+    // Twilio's REST API list endpoints default to 50 per page; the wizard
+    // caps at 100 numbers / 100 TwiML apps / 100 Intel services per
+    // account for v1. Accounts beyond that are uncommon for sales-team
+    // outbound calling and can be addressed in v2.
+    const LIST_PAGE_SIZE = 100;
+
     /**
-     * Build a Basic Auth header from API Key SID + the resolved secret
-     * value (the actual API Key Secret, not its script ID).
+     * Build a Basic Auth header as a SecureString. Caller passes the
+     * config snapshot (with apiKeySid + apiSecretId). The runtime
+     * expands `{custsecret_<id>}` at socket write — the secret VALUE
+     * is never in SuiteScript scope.
      */
-    const buildApiKeyAuthHeader = (apiKeySid, apiKeySecretValue) => {
-        const encoded = encode.convert({
-            string: apiKeySid + ':' + apiKeySecretValue,
-            inputEncoding: encode.Encoding.UTF_8,
-            outputEncoding: encode.Encoding.BASE_64
+    const buildSecureAuthHeader = (cfg) => {
+        if (!cfg || !cfg.apiKeySid || !cfg.apiSecretId) {
+            throw new Error('buildSecureAuthHeader: cfg.apiKeySid + ' +
+                'cfg.apiSecretId both required');
+        }
+        // SID is an identifier (not secret per Twilio); concatenate it
+        // plaintext with the placeholder for the secret value.
+        const credentialInput = cfg.apiKeySid + ':{' + cfg.apiSecretId + '}';
+        const credential = https.createSecureString({ input: credentialInput });
+
+        // Base64 the SID:SECRET pair (per HTTP Basic Auth spec).
+        credential.convertEncoding({
+            toEncoding: encode.Encoding.BASE_64,
+            fromEncoding: encode.Encoding.UTF_8
         });
-        return 'Basic ' + encoded;
+
+        // Prepend the 'Basic ' scheme. Result is a single SecureString
+        // suitable for the Authorization header.
+        const header = https.createSecureString({ input: 'Basic ' });
+        header.appendSecureString({
+            secureString: credential,
+            keepEncoding: true
+        });
+        return header;
     };
 
     /**
@@ -46,14 +73,20 @@ define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
     };
 
     /**
-     * Wrap N/https.get with a 15s timeout and clean envelope.
+     * Wrap N/https.get with a clean envelope. Detects:
+     *   - 2xx success → returns parsed body
+     *   - 401 → EMPTY_SECRET likely; specific error code so the SPA can
+     *     surface "secret value is empty — paste it at Setup > Company >
+     *     API Secrets"
+     *   - Other non-2xx → returns Twilio error envelope
+     *   - Network error → NETWORK_ERROR
      */
-    const httpGetJson = (url, authHeader) => {
+    const httpGetJson = (url, secureAuthHeader) => {
         try {
             const response = https.get({
                 url: url,
                 headers: {
-                    Authorization: authHeader,
+                    Authorization: secureAuthHeader,
                     Accept: 'application/json'
                 }
             });
@@ -64,6 +97,17 @@ define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
 
             if (status >= 200 && status < 300) {
                 return { ok: true, status: status, body: body };
+            }
+            if (status === 401) {
+                return {
+                    ok: false,
+                    status: 401,
+                    errorCode: 'EMPTY_SECRET_OR_INVALID',
+                    errorMessage: 'Twilio rejected the credentials. The ' +
+                        'API Key Secret in NetSuite API Secrets may be ' +
+                        'empty or invalid. Open Setup > Company > API ' +
+                        'Secrets and paste the secret value.'
+                };
             }
             return {
                 ok: false,
@@ -84,16 +128,16 @@ define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
     };
 
     /**
-     * GET /Accounts/{Sid}.json — proves Account SID + API Key pair is valid.
+     * GET /Accounts/{Sid}.json — proves Account SID + secret pair is valid.
+     * Used as the wizard's primary "are credentials wired?" check.
      */
-    const pingAccount = (accountSid, apiKeySid, apiKeySecretValue) => {
-        const url = TWILIO_API_BASE + '/' + accountSid + '.json';
-        const auth = buildApiKeyAuthHeader(apiKeySid, apiKeySecretValue);
-        const result = httpGetJson(url, auth);
+    const pingAccount = (cfg) => {
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid + '.json';
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
 
         log.audit({
             title: 'CTC Wizard — Twilio account ping',
-            details: 'sid=' + maskSid(accountSid) +
+            details: 'sid=' + maskSid(cfg.accountSid) +
                      ' status=' + result.status +
                      ' ok=' + result.ok
         });
@@ -103,28 +147,56 @@ define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
                 ok: true,
                 friendlyName: result.body.friendly_name,
                 twilioStatus: result.body.status,
-                accountSid: maskSid(result.body.sid || accountSid)
+                accountSid: maskSid(result.body.sid || cfg.accountSid)
             };
         }
         return result;
     };
 
     /**
-     * GET /Accounts/{Sid}/Applications/{TwiMLAppSid}.json — proves the
-     * TwiML App exists in this account and shows its voice_url so the
-     * admin can verify it points at the right place.
+     * GET /Accounts/{Sid}/Applications.json — list ALL TwiML apps in
+     * the account. Used by Step 3 to render the TwiML App dropdown.
      */
-    const getApplication = (accountSid, twimlAppSid, apiKeySid, apiKeySecretValue) => {
-        const url = TWILIO_API_BASE + '/' + accountSid + '/Applications/' +
-                    twimlAppSid + '.json';
-        const auth = buildApiKeyAuthHeader(apiKeySid, apiKeySecretValue);
-        const result = httpGetJson(url, auth);
+    const listApplications = (cfg) => {
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid +
+                    '/Applications.json?PageSize=' + LIST_PAGE_SIZE;
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
+
+        log.audit({
+            title: 'CTC Wizard — list TwiML applications',
+            details: 'status=' + result.status + ' ok=' + result.ok
+        });
+
+        if (!result.ok) return result;
+
+        const apps = (result.body && result.body.applications) || [];
+        return {
+            ok: true,
+            items: apps.map(function (a) {
+                return {
+                    sid: a.sid,
+                    friendlyName: a.friendly_name,
+                    voiceUrl: a.voice_url,
+                    voiceMethod: a.voice_method
+                };
+            }),
+            hasMore: !!(result.body && result.body.next_page_uri)
+        };
+    };
+
+    /**
+     * GET /Accounts/{Sid}/Applications/{TwiMLAppSid}.json — single-app
+     * detail. Kept for preflight in Step 6 (verify a specific app).
+     */
+    const getApplication = (cfg, twimlAppSid) => {
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid +
+                    '/Applications/' + twimlAppSid + '.json';
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
 
         log.audit({
             title: 'CTC Wizard — TwiML App validation',
             details: 'twimlApp=' + maskSid(twimlAppSid) +
-                     ' status=' + result.status +
-                     ' ok=' + result.ok
+                     ' status=' + result.status + ' ok=' + result.ok
         });
 
         if (result.ok) {
@@ -140,20 +212,53 @@ define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
     };
 
     /**
-     * GET /Accounts/{Sid}/IncomingPhoneNumbers.json?PhoneNumber=<E164> —
-     * verifies the number is owned by this Twilio account.
+     * GET /Accounts/{Sid}/IncomingPhoneNumbers.json — list ALL owned
+     * numbers. Used by Step 3 (caller-ID dropdown) and Step 5 (rep
+     * assignment grid).
      */
-    const getPhoneNumberLookup = (accountSid, phoneNumber, apiKeySid, apiKeySecretValue) => {
+    const listPhoneNumbers = (cfg) => {
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid +
+                    '/IncomingPhoneNumbers.json?PageSize=' + LIST_PAGE_SIZE;
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
+
+        log.audit({
+            title: 'CTC Wizard — list phone numbers',
+            details: 'status=' + result.status + ' ok=' + result.ok
+        });
+
+        if (!result.ok) return result;
+
+        const numbers = (result.body && result.body.incoming_phone_numbers) || [];
+        return {
+            ok: true,
+            items: numbers.map(function (n) {
+                return {
+                    sid: n.sid,
+                    phoneNumber: n.phone_number,
+                    friendlyName: n.friendly_name,
+                    capabilities: n.capabilities
+                };
+            }),
+            hasMore: !!(result.body && result.body.next_page_uri)
+        };
+    };
+
+    /**
+     * GET /Accounts/{Sid}/IncomingPhoneNumbers.json?PhoneNumber=<E164> —
+     * verify the number is owned by this Twilio account. Used by
+     * preflight when admin manually entered a number rather than picking
+     * from the list dropdown.
+     */
+    const getPhoneNumberLookup = (cfg, phoneNumber) => {
         const encodedNumber = encodeURIComponent(phoneNumber);
-        const url = TWILIO_API_BASE + '/' + accountSid +
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid +
                     '/IncomingPhoneNumbers.json?PhoneNumber=' + encodedNumber;
-        const auth = buildApiKeyAuthHeader(apiKeySid, apiKeySecretValue);
-        const result = httpGetJson(url, auth);
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
 
         log.audit({
             title: 'CTC Wizard — phone number lookup',
-            details: 'number=' + phoneNumber + ' status=' + result.status +
-                     ' ok=' + result.ok
+            details: 'number=' + phoneNumber +
+                     ' status=' + result.status + ' ok=' + result.ok
         });
 
         if (!result.ok) return result;
@@ -179,19 +284,44 @@ define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
     };
 
     /**
-     * GET intelligence.twilio.com/v2/Services/{Gid} — validates the
-     * Conversational Intelligence service SID exists.
+     * GET intelligence.twilio.com/v2/Services — list Intel services.
      */
-    const getIntelService = (intelServiceSid, apiKeySid, apiKeySecretValue) => {
+    const listIntelServices = (cfg) => {
+        const url = TWILIO_INTEL_BASE + '/Services?PageSize=' + LIST_PAGE_SIZE;
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
+
+        log.audit({
+            title: 'CTC Wizard — list Intel services',
+            details: 'status=' + result.status + ' ok=' + result.ok
+        });
+
+        if (!result.ok) return result;
+
+        const services = (result.body && result.body.services) || [];
+        return {
+            ok: true,
+            items: services.map(function (s) {
+                return {
+                    sid: s.sid,
+                    friendlyName: s.friendly_name,
+                    languageCode: s.language_code
+                };
+            })
+        };
+    };
+
+    /**
+     * GET intelligence.twilio.com/v2/Services/{Gid} — single-service
+     * detail. Kept for preflight in Step 6.
+     */
+    const getIntelService = (cfg, intelServiceSid) => {
         const url = TWILIO_INTEL_BASE + '/Services/' + intelServiceSid;
-        const auth = buildApiKeyAuthHeader(apiKeySid, apiKeySecretValue);
-        const result = httpGetJson(url, auth);
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
 
         log.audit({
             title: 'CTC Wizard — Intel Service validation',
             details: 'intelService=' + maskSid(intelServiceSid) +
-                     ' status=' + result.status +
-                     ' ok=' + result.ok
+                     ' status=' + result.status + ' ok=' + result.ok
         });
 
         if (result.ok) {
@@ -204,37 +334,15 @@ define(['N/https', 'N/encode', 'N/log', 'N/crypto'],
         return result;
     };
 
-    /**
-     * Materialize the API Key Secret value from its script ID via
-     * N/crypto. This is how the existing softphone JWT signer reads
-     * the secret. Used by every wizard validation action since we
-     * need the raw secret VALUE for Basic Auth (not just the SID).
-     *
-     * Note: createSecretKey returns a KEY HANDLE, not the raw bytes.
-     * For Basic Auth we need the raw secret. The existing token
-     * RESTlet uses crypto.createHmac to sign with the key — that works
-     * for HMAC but not for Basic Auth where we need to embed the
-     * secret in the header.
-     *
-     * Workaround: store the secret VALUE directly in a CLOBTEXT field
-     * on the config record at wizard-save time, OR have the wizard
-     * pass the secret VALUE in the request body (since the admin just
-     * typed it). The latter is the wizard's actual flow — admin
-     * pastes the secret, validates, then on save we store ONLY the
-     * pointer (not the value) and rely on N/crypto for HMAC paths.
-     *
-     * For wizard validation, the admin provides the secret VALUE in
-     * the request body; we use it directly for the Basic Auth call
-     * and never persist it. The script ID points at where they'll
-     * store it in NetSuite Secrets after validation passes.
-     */
-
     return {
-        buildApiKeyAuthHeader: buildApiKeyAuthHeader,
+        buildSecureAuthHeader: buildSecureAuthHeader,
         maskSid: maskSid,
         pingAccount: pingAccount,
+        listApplications: listApplications,
         getApplication: getApplication,
+        listPhoneNumbers: listPhoneNumbers,
         getPhoneNumberLookup: getPhoneNumberLookup,
+        listIntelServices: listIntelServices,
         getIntelService: getIntelService
     };
 });

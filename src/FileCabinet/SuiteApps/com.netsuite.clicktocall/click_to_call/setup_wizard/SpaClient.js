@@ -50,7 +50,20 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     var enums = null;              // cached enum bag from run()
     var STATE = {
         step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
-        step3: { twimlAppSid: '', phoneNumber: '', intelServiceSid: '' }
+        step3: {
+            twimlAppSid: '',
+            phoneNumber: '',
+            intelServiceSid: '',
+            // Auto-populated dropdown source lists. Fetched from the
+            // server via wizardListTwiMLApps / wizardListPhoneNumbers /
+            // wizardListIntelServices on Step 3 mount. Secret VALUE
+            // never travels — server uses SecureString + custsecret
+            // pointer at the N/https socket boundary.
+            twimlApps: null,        // null = not yet fetched
+            phoneNumbers: null,
+            intelServices: null,
+            listLoadError: null
+        }
     };
 
     /**
@@ -134,6 +147,7 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         CURRENT_STEP = Math.max(1, Math.min(STEPS.length, stepNum));
         rerender();
         if (CURRENT_STEP === 1) loadPrereqs();
+        if (CURRENT_STEP === 3) loadStep3Lists();
     }
 
     /**
@@ -465,31 +479,205 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         }, "Heading(step3)"));
 
         rows.push(safeNew(d.T, {
-            text: "Configure the TwiML application, default outbound " +
-                  "caller ID, and (optional) Conversational Intelligence " +
-                  "service for transcript analysis. Live validation " +
-                  "against Twilio runs at Step 6 (Test & activate)."
+            text: "Pick the TwiML application, default outbound caller " +
+                  "ID, and (optional) Conversational Intelligence " +
+                  "service from your Twilio account. These are fetched " +
+                  "live from Twilio using the secure API Secret " +
+                  "configured in Step 2 — the secret value never leaves " +
+                  "NetSuite's vault."
         }, "Text(step3-intro)"));
 
-        rows.push(buildTextField('TwiML App SID', 'AP...',
+        // Loading state — lists not yet fetched.
+        if (STATE.step3.twimlApps === null ||
+            STATE.step3.phoneNumbers === null ||
+            STATE.step3.intelServices === null) {
+            var loader = safeNew(component.Loader, {
+                label: "Loading from Twilio…",
+                indeterminate: true
+            }, "Loader(step3-lists)");
+            if (loader) rows.push(loader);
+            else rows.push(safeNew(d.T, {
+                text: "Loading from Twilio…"
+            }, "Text(loading-fallback)"));
+
+            return safeNew(d.SP, {
+                items: rows.filter(function (r) { return r != null; }),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(step3-loading)");
+        }
+
+        // Error state — at least one list failed.
+        if (STATE.step3.listLoadError) {
+            rows.push(safeNew(d.T, {
+                text: "✕ Could not load Twilio lists: " +
+                    STATE.step3.listLoadError + ". Verify the API " +
+                    "Secret value is set at Setup > Company > API " +
+                    "Secrets, then go back to Step 2 and Continue " +
+                    "again to retry.",
+                type: d.T_Type.STRONG
+            }, "Text(step3-error)"));
+
+            return safeNew(d.SP, {
+                items: rows.filter(function (r) { return r != null; }),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(step3-error)");
+        }
+
+        // Loaded — render dropdowns.
+        rows.push(buildDropdownField(d, 'TwiML Application',
+            STATE.step3.twimlApps,
             STATE.step3.twimlAppSid,
-            function (v) { STATE.step3.twimlAppSid = v; }));
+            function (sid) { STATE.step3.twimlAppSid = sid; }));
 
-        rows.push(buildTextField('Default outbound phone number (E.164)',
-            '+15551234567',
+        rows.push(buildDropdownField(d, 'Default outbound caller ID',
+            STATE.step3.phoneNumbers.map(function (n) {
+                return { value: n.phoneNumber,
+                         label: n.phoneNumber +
+                                (n.friendlyName ? ' — ' + n.friendlyName : '') };
+            }),
             STATE.step3.phoneNumber,
-            function (v) { STATE.step3.phoneNumber = v; }));
+            function (val) { STATE.step3.phoneNumber = val; },
+            { valueIsString: true }));
 
-        rows.push(buildTextField('Conversational Intelligence Service SID (optional)',
-            'GA...',
+        rows.push(buildDropdownField(d,
+            'Conversational Intelligence Service (optional)',
+            STATE.step3.intelServices,
             STATE.step3.intelServiceSid,
-            function (v) { STATE.step3.intelServiceSid = v; }));
+            function (sid) { STATE.step3.intelServiceSid = sid; },
+            { allowEmpty: true }));
 
         return safeNew(d.SP, {
             items: rows.filter(function (r) { return r != null; }),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.M
         }, "StackPanel(step3)");
+    }
+
+    /**
+     * Fire the three list-fetch actions in parallel. Populate STATE
+     * and rerender when each resolves. Called from goToStep when
+     * advancing INTO Step 3.
+     */
+    function loadStep3Lists() {
+        // Reset to loading state
+        STATE.step3.twimlApps = null;
+        STATE.step3.phoneNumbers = null;
+        STATE.step3.intelServices = null;
+        STATE.step3.listLoadError = null;
+
+        function handle(field, payload) {
+            if (payload && payload.items) {
+                STATE.step3[field] = payload.items;
+            } else {
+                STATE.step3[field] = [];
+                if (payload && payload.errorMessage) {
+                    STATE.step3.listLoadError = payload.errorMessage;
+                }
+            }
+            // Re-render once all three settle (or when the last one lands)
+            if (STATE.step3.twimlApps !== null &&
+                STATE.step3.phoneNumbers !== null &&
+                STATE.step3.intelServices !== null) {
+                rerender();
+            }
+        }
+
+        wizardCall('wizardListTwiMLApps', {})
+            .then(function (p) { handle('twimlApps', p); })
+            .catch(function (e) {
+                STATE.step3.listLoadError = 'TwiML apps: ' +
+                    (e && e.message ? e.message : String(e));
+                handle('twimlApps', null);
+            });
+
+        wizardCall('wizardListPhoneNumbers', {})
+            .then(function (p) { handle('phoneNumbers', p); })
+            .catch(function (e) {
+                STATE.step3.listLoadError = 'Phone numbers: ' +
+                    (e && e.message ? e.message : String(e));
+                handle('phoneNumbers', null);
+            });
+
+        wizardCall('wizardListIntelServices', {})
+            .then(function (p) { handle('intelServices', p); })
+            .catch(function (e) {
+                STATE.step3.listLoadError = 'Intel services: ' +
+                    (e && e.message ? e.message : String(e));
+                handle('intelServices', null);
+            });
+    }
+
+    /**
+     * Build a Field-like Dropdown row. Items can be either:
+     *   - List of { sid, friendlyName, ... } (Twilio resource shape) — uses
+     *     `sid` as value, "<friendlyName> — <sid>" as display
+     *   - List of { value, label } (already-shaped) — uses as-is when
+     *     opts.valueIsString = true
+     */
+    function buildDropdownField(d, label, items, currentValue, onChange, opts) {
+        opts = opts || {};
+
+        // Normalize items to { value, label }
+        var normalized = (items || []).map(function (it) {
+            if (opts.valueIsString) return it; // already { value, label }
+            return {
+                value: it.sid,
+                label: (it.friendlyName || '(unnamed)') +
+                    (it.sid ? '  [' + it.sid + ']' : '')
+            };
+        });
+
+        if (normalized.length === 0) {
+            return safeNew(component.StackPanel, {
+                items: [
+                    safeNew(component.Text, { text: label,
+                        type: component.Text.Type.STRONG,
+                        size: component.Text.Size.S
+                    }, "Text(label-" + label + ")"),
+                    safeNew(component.Text, {
+                        text: "(no items found in Twilio for this account)",
+                        type: component.Text.Type.WEAK,
+                        size: component.Text.Size.S
+                    }, "Text(empty-" + label + ")")
+                ].filter(function (c) { return c != null; }),
+                orientation: component.StackPanel.Orientation.VERTICAL,
+                itemGap: component.StackPanel.GapSize.XXS
+            }, "StackPanel(empty-" + label + ")");
+        }
+
+        var ds = new core.ArrayDataSource(normalized);
+
+        var dropdown = safeNew(component.Dropdown, {
+            dataSource: ds,
+            valueMember: 'value',
+            displayMember: 'label',
+            selectedValue: currentValue || (opts.allowEmpty ? null : normalized[0].value),
+            allowEmpty: !!opts.allowEmpty,
+            placeholder: opts.allowEmpty ? '(none)' : 'Select…',
+            onSelectionChanged: function (args) {
+                onChange(args && args.value);
+            }
+        }, "Dropdown(" + label + ")");
+
+        if (!dropdown) {
+            // Fallback to TextBox if Dropdown construction fails (shouldn't,
+            // but gives a usable form so admin can complete the wizard)
+            return buildTextField(label, '', currentValue || '', onChange);
+        }
+
+        var lblText = safeNew(component.Text, {
+            text: label,
+            type: component.Text.Type.STRONG,
+            size: component.Text.Size.S
+        }, "Text(label-" + label + ")");
+
+        return safeNew(component.StackPanel, {
+            items: [lblText, dropdown].filter(function (c) { return c != null; }),
+            orientation: component.StackPanel.Orientation.VERTICAL,
+            itemGap: component.StackPanel.GapSize.XXS
+        }, "StackPanel(field-" + label + ")") || dropdown;
     }
 
     /* ────────────────────────────────────────────────────────────────── */

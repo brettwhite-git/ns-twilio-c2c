@@ -391,24 +391,19 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
     /* ------------------------------------------------------------------ */
 
     /**
-     * Live-validate Account SID + API Key SID + API Key Secret VALUE
-     * (the admin pastes the secret value into the wizard; we use it
-     * for the Basic Auth call here but never persist it — the secret
-     * lives in NetSuite API Secrets and is referenced by script ID).
+     * Live-validate the persisted credentials by pinging Twilio's
+     * /Accounts/{Sid}.json endpoint. Uses N/https.createSecureString
+     * with the {custsecret_xxx} placeholder — the secret VALUE is
+     * never in script scope.
      *
-     * Validates BOTH credentials at once: the API Key pair must be
-     * correct for any call to succeed.
+     * Prerequisites: Step 2 must have already saved Account SID +
+     * API Key SID + API Key Secret script ID to the config record.
      */
-    const wizardValidateTwilio = (payload) => {
-        const sids = validateSidPayload(payload, ['accountSid', 'apiKeySid']);
-        if (sids.error) return sids;
+    const wizardValidateTwilio = () => {
+        const cfg = loadConfigOrError();
+        if (cfg.error) return cfg;
 
-        if (!payload.apiKeySecretValue || typeof payload.apiKeySecretValue !== 'string') {
-            return { ok: false, error: 'missing_api_key_secret' };
-        }
-
-        const result = twilio.pingAccount(
-            payload.accountSid, payload.apiKeySid, payload.apiKeySecretValue);
+        const result = twilio.pingAccount(cfg);
 
         if (result.ok) {
             return {
@@ -426,6 +421,53 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
                 errorMessage: result.errorMessage
             }
         };
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardListTwiMLApps / wizardListPhoneNumbers /             */
+    /*         wizardListIntelServices (Step 3 dropdowns + Step 5 grid)   */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * List all TwiML applications in the configured Twilio account.
+     * Returns `[{ sid, friendlyName, voiceUrl, voiceMethod }, ...]`.
+     */
+    const wizardListTwiMLApps = () => {
+        const cfg = loadConfigOrError();
+        if (cfg.error) return cfg;
+        const result = twilio.listApplications(cfg);
+        return result.ok
+            ? { items: result.items, hasMore: result.hasMore }
+            : { items: [], error: result.errorCode,
+                errorMessage: result.errorMessage };
+    };
+
+    /**
+     * List all phone numbers owned by the configured Twilio account.
+     * Returns `[{ sid, phoneNumber, friendlyName, capabilities }, ...]`.
+     */
+    const wizardListPhoneNumbers = () => {
+        const cfg = loadConfigOrError();
+        if (cfg.error) return cfg;
+        const result = twilio.listPhoneNumbers(cfg);
+        return result.ok
+            ? { items: result.items, hasMore: result.hasMore }
+            : { items: [], error: result.errorCode,
+                errorMessage: result.errorMessage };
+    };
+
+    /**
+     * List all Conversational Intelligence services in the configured
+     * Twilio account. Returns `[{ sid, friendlyName, languageCode }, ...]`.
+     */
+    const wizardListIntelServices = () => {
+        const cfg = loadConfigOrError();
+        if (cfg.error) return cfg;
+        const result = twilio.listIntelServices(cfg);
+        return result.ok
+            ? { items: result.items }
+            : { items: [], error: result.errorCode,
+                errorMessage: result.errorMessage };
     };
 
     /* ------------------------------------------------------------------ */
@@ -475,8 +517,8 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
 
     /**
      * Live-validate the TwiML App SID + optional phone number + optional
-     * Intel Service SID. Uses the API Key already saved in Step 2 — the
-     * admin doesn't need to re-enter credentials.
+     * Intel Service SID. Uses N/https.createSecureString — secret VALUE
+     * never in script scope. Called from Step 6 (Preflight).
      */
     const wizardValidateTwiML = (payload) => {
         const cfg = loadConfigOrError();
@@ -485,29 +527,18 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
         if (!payload.twimlAppSid || typeof payload.twimlAppSid !== 'string') {
             return { ok: false, error: 'missing_twiml_app_sid' };
         }
-        if (!payload.apiKeySecretValue || typeof payload.apiKeySecretValue !== 'string') {
-            return { ok: false, error: 'missing_api_key_secret' };
-        }
 
         const validations = {};
+        validations.twimlApp = twilio.getApplication(cfg, payload.twimlAppSid);
 
-        // TwiML App
-        validations.twimlApp = twilio.getApplication(
-            cfg.accountSid, payload.twimlAppSid,
-            cfg.apiKeySid, payload.apiKeySecretValue);
-
-        // Phone number (optional)
         if (payload.phoneNumber) {
             validations.phoneNumber = twilio.getPhoneNumberLookup(
-                cfg.accountSid, payload.phoneNumber,
-                cfg.apiKeySid, payload.apiKeySecretValue);
+                cfg, payload.phoneNumber);
         }
 
-        // Intel Service (optional)
         if (payload.intelServiceSid) {
             validations.intelService = twilio.getIntelService(
-                payload.intelServiceSid,
-                cfg.apiKeySid, payload.apiKeySecretValue);
+                cfg, payload.intelServiceSid);
         }
 
         return { validations: validations };
@@ -616,13 +647,16 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
     /* ------------------------------------------------------------------ */
 
     const ACTIONS = {
-        wizardPrereqs:        wizardPrereqs,
-        wizardSnapshot:       wizardSnapshot,
-        wizardValidateTwilio: wizardValidateTwilio,
-        wizardSavePublicIds:  wizardSavePublicIds,
-        wizardValidateTwiML:  wizardValidateTwiML,
-        wizardSaveVoice:      wizardSaveVoice
-        // U5-U7: wizardListNumbers, wizardSaveAssignments, wizardListReps,
+        wizardPrereqs:           wizardPrereqs,
+        wizardSnapshot:          wizardSnapshot,
+        wizardValidateTwilio:    wizardValidateTwilio,
+        wizardSavePublicIds:     wizardSavePublicIds,
+        wizardListTwiMLApps:     wizardListTwiMLApps,
+        wizardListPhoneNumbers:  wizardListPhoneNumbers,
+        wizardListIntelServices: wizardListIntelServices,
+        wizardValidateTwiML:     wizardValidateTwiML,
+        wizardSaveVoice:         wizardSaveVoice
+        // U5-U7: wizardSaveAssignments, wizardListReps,
         //        wizardSaveRoles, wizardRunPreflight, wizardActivate
     };
 
