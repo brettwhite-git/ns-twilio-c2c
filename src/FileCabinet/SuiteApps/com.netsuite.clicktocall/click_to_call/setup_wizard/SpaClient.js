@@ -49,10 +49,8 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     var bodyContainer = null;      // for swapping step body
     var enums = null;              // cached enum bag from run()
     var STATE = {
-        step2: { accountSid: '', apiKeySid: '', apiSecretId: '',
-                 apiKeySecretValue: '', validation: null },
-        step3: { twimlAppSid: '', phoneNumber: '', intelServiceSid: '',
-                 apiKeySecretValue: '', validations: null }
+        step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
+        step3: { twimlAppSid: '', phoneNumber: '', intelServiceSid: '' }
     };
 
     /**
@@ -429,7 +427,9 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             text: "Enter your Twilio Account SID and API Key SID. " +
                   "The API Key Secret must already exist in NetSuite " +
                   "API Secrets (Setup > Company > API Secrets) — paste " +
-                  "its script ID below."
+                  "its script ID below. Live validation against Twilio " +
+                  "runs at Step 6 (Test & activate) using the configured " +
+                  "secret pointer — no need to paste the secret value here."
         }, "Text(step2-intro)"));
 
         rows.push(buildTextField('Account SID', 'AC...',
@@ -445,72 +445,11 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             STATE.step2.apiSecretId,
             function (v) { STATE.step2.apiSecretId = v; }));
 
-        rows.push(safeNew(d.T, {
-            text: "Optional: paste the actual API Key Secret VALUE to " +
-                  "live-validate against Twilio's REST API. The value " +
-                  "is never stored — only used for this validation call.",
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(step2-validate-intro)"));
-
-        rows.push(buildTextField('API Key Secret value (for validation only)',
-            'paste secret to validate…',
-            STATE.step2.apiKeySecretValue,
-            function (v) { STATE.step2.apiKeySecretValue = v; }));
-
-        var validateBtn = safeNew(component.Button, {
-            label: "Validate with Twilio",
-            type: (component.Button && component.Button.Type)
-                ? component.Button.Type.DEFAULT : undefined,
-            action: function () { validateStep2(); }
-        }, "Button(validate-step2)");
-        if (validateBtn) rows.push(validateBtn);
-
-        // Inline validation result (populated post-validate, if any).
-        var resultText = STATE.step2.validation
-            ? safeNew(d.T, {
-                text: STATE.step2.validation.ok
-                    ? "✓ Connected to Twilio account: " +
-                      STATE.step2.validation.friendlyName + " (" +
-                      STATE.step2.validation.twilioStatus + ")"
-                    : "✕ Validation failed: " +
-                      STATE.step2.validation.errorMessage,
-                type: STATE.step2.validation.ok
-                    ? d.T_Type.STRONG : d.T_Type.STRONG
-            }, "Text(step2-result)")
-            : null;
-        if (resultText) rows.push(resultText);
-
         return safeNew(d.SP, {
             items: rows.filter(function (r) { return r != null; }),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.M
         }, "StackPanel(step2)");
-    }
-
-    function validateStep2() {
-        if (!STATE.step2.accountSid || !STATE.step2.apiKeySid ||
-            !STATE.step2.apiKeySecretValue) {
-            alert("Account SID, API Key SID, and API Key Secret VALUE " +
-                  "are all required to validate.");
-            return;
-        }
-        wizardCall('wizardValidateTwilio', {
-            accountSid:        STATE.step2.accountSid,
-            apiKeySid:         STATE.step2.apiKeySid,
-            apiKeySecretValue: STATE.step2.apiKeySecretValue
-        }).then(function (payload) {
-            STATE.step2.validation = (payload && payload.validation) || {
-                ok: false, errorMessage: 'No validation result returned.'
-            };
-            rerender();
-        }).catch(function (e) {
-            STATE.step2.validation = {
-                ok: false,
-                errorMessage: 'Network: ' + (e && e.message ? e.message : String(e))
-            };
-            rerender();
-        });
     }
 
     /* ────────────────────────────────────────────────────────────────── */
@@ -528,7 +467,8 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         rows.push(safeNew(d.T, {
             text: "Configure the TwiML application, default outbound " +
                   "caller ID, and (optional) Conversational Intelligence " +
-                  "service for transcript analysis."
+                  "service for transcript analysis. Live validation " +
+                  "against Twilio runs at Step 6 (Test & activate)."
         }, "Text(step3-intro)"));
 
         rows.push(buildTextField('TwiML App SID', 'AP...',
@@ -545,81 +485,11 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             STATE.step3.intelServiceSid,
             function (v) { STATE.step3.intelServiceSid = v; }));
 
-        rows.push(safeNew(d.T, {
-            text: "Paste the API Key Secret VALUE again to live-validate. " +
-                  "Same one as Step 2 — not stored.",
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(step3-validate-intro)"));
-
-        rows.push(buildTextField('API Key Secret value (for validation only)',
-            'paste secret to validate…',
-            STATE.step3.apiKeySecretValue,
-            function (v) { STATE.step3.apiKeySecretValue = v; }));
-
-        var validateBtn = safeNew(component.Button, {
-            label: "Validate with Twilio",
-            type: (component.Button && component.Button.Type)
-                ? component.Button.Type.DEFAULT : undefined,
-            action: function () { validateStep3(); }
-        }, "Button(validate-step3)");
-        if (validateBtn) rows.push(validateBtn);
-
-        // Per-resource validation results.
-        if (STATE.step3.validations) {
-            var v = STATE.step3.validations;
-            if (v.twimlApp) {
-                rows.push(safeNew(d.T, {
-                    text: v.twimlApp.ok
-                        ? "✓ TwiML App: " + v.twimlApp.friendlyName +
-                          " — voice_url=" + (v.twimlApp.voiceUrl || '(not set)')
-                        : "✕ TwiML App: " + v.twimlApp.errorMessage,
-                    type: d.T_Type.STRONG
-                }, "Text(step3-twiml-result)"));
-            }
-            if (v.phoneNumber) {
-                rows.push(safeNew(d.T, {
-                    text: v.phoneNumber.ok
-                        ? "✓ Phone number owned by this account: " +
-                          v.phoneNumber.phoneNumber
-                        : "✕ Phone number: " + v.phoneNumber.errorMessage,
-                    type: d.T_Type.STRONG
-                }, "Text(step3-phone-result)"));
-            }
-            if (v.intelService) {
-                rows.push(safeNew(d.T, {
-                    text: v.intelService.ok
-                        ? "✓ Intel Service: " + v.intelService.friendlyName
-                        : "✕ Intel Service: " + v.intelService.errorMessage,
-                    type: d.T_Type.STRONG
-                }, "Text(step3-intel-result)"));
-            }
-        }
-
         return safeNew(d.SP, {
             items: rows.filter(function (r) { return r != null; }),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.M
         }, "StackPanel(step3)");
-    }
-
-    function validateStep3() {
-        if (!STATE.step3.twimlAppSid || !STATE.step3.apiKeySecretValue) {
-            alert("TwiML App SID and API Key Secret VALUE are required.");
-            return;
-        }
-        wizardCall('wizardValidateTwiML', {
-            twimlAppSid:       STATE.step3.twimlAppSid,
-            phoneNumber:       STATE.step3.phoneNumber,
-            intelServiceSid:   STATE.step3.intelServiceSid,
-            apiKeySecretValue: STATE.step3.apiKeySecretValue
-        }).then(function (payload) {
-            STATE.step3.validations = (payload && payload.validations) || {};
-            rerender();
-        }).catch(function (e) {
-            alert("Network error validating Step 3: " +
-                (e && e.message ? e.message : String(e)));
-        });
     }
 
     /* ────────────────────────────────────────────────────────────────── */
