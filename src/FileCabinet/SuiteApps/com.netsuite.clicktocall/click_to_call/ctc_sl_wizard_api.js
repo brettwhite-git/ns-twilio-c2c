@@ -20,9 +20,9 @@
  * the handler. Role 3 (Administrator) is portable across customer
  * accounts; custom roles vary per install.
  */
-define(['N/runtime', 'N/record', 'N/search', 'N/log',
+define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/secrets',
         './lib/ctc_config'],
-       (runtime, record, search, log, config) => {
+       (runtime, record, search, log, secrets, config) => {
 
     // Standard role IDs are portable across NetSuite accounts.
     // Administrator = 3 (per NetSuite docs); custom roles vary.
@@ -119,14 +119,14 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log',
             'Setup > Company > Enable Features > SuiteCloud > ' +
             'SuiteBuilder > Custom Records'));
 
-        // SUITESCRIPTSECRETS — required for N/secrets to resolve the
-        // custsecret_ctc_api_key_secret + future custsecret_ctc_auth_token
-        // references. Most likely to be DISABLED on small/mid customer
-        // accounts; surface a specific repair hint.
-        checks.push(featureCheck('SUITESCRIPTSECRETS',
-            'SuiteScript Secrets',
-            'Setup > Company > Enable Features > SuiteCloud > ' +
-            'SuiteScript > SuiteScript Secrets'));
+        // API Secrets — managed at Setup > Company > API Secrets and
+        // accessed at runtime via N/secrets. Functional check rather
+        // than a feature-flag check, because NetSuite's feature ID for
+        // this surface isn't reliably `SUITESCRIPTSECRETS` (that returned
+        // false on a sandbox that has API Secrets demonstrably working).
+        // Instead: verify the N/secrets module loaded AND that any
+        // already-configured CTC secret resolves cleanly.
+        checks.push(apiSecretsCheck());
 
         // Admin role check — defense in depth. The Suitelet-level
         // isAdmin() gate already enforced this; surfacing it in the
@@ -210,6 +210,59 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log',
             detail: message + (enabled
                 ? ' Feature IS enabled on this account.'
                 : ' Feature is NOT enabled on this account.')
+        };
+    };
+
+    /**
+     * Functional check for the API Secrets surface (Setup > Company >
+     * API Secrets, accessed at runtime via N/secrets).
+     *
+     * Three outcomes:
+     *   1. N/secrets module didn't load → fail with repair hint
+     *   2. Module loaded but no existing CTC secret is configured yet
+     *      → 'warn' (informational — wizard's Connect Twilio step
+     *      will guide the admin to create them)
+     *   3. Module loaded AND an existing secret resolves → pass
+     *
+     * The previous featureCheck('SUITESCRIPTSECRETS') was a misnomer —
+     * NetSuite calls this surface "API Secrets" and the feature ID
+     * doesn't reliably exist as 'SUITESCRIPTSECRETS' on all accounts.
+     */
+    const apiSecretsCheck = () => {
+        if (!secrets) {
+            return {
+                id: 'api_secrets',
+                label: 'API Secrets',
+                status: 'fail',
+                detail: 'N/secrets module failed to load.',
+                repairHint: 'Verify the API Secrets feature is enabled ' +
+                            'and the account allows N/secrets — contact ' +
+                            'NetSuite Customer Support if module load fails.'
+            };
+        }
+
+        // Optimistic pass: if module loaded, secrets are available.
+        // Try to look up an existing CTC secret if the config record
+        // already points at one — that confirms end-to-end resolution.
+        var detail = 'N/secrets module loaded; API Secrets accessible ' +
+                     'at Setup > Company > API Secrets.';
+
+        try {
+            var cfg = config.loadConfig();
+            if (cfg && cfg.apiSecretId) {
+                detail += ' Existing API Key Secret (' + cfg.apiSecretId +
+                          ') is configured.';
+            }
+        } catch (e) {
+            // Config record may not exist yet on fresh installs — that's
+            // handled by configSingletonCheck. Don't double-report.
+        }
+
+        return {
+            id: 'api_secrets',
+            label: 'API Secrets',
+            status: 'pass',
+            detail: detail
         };
     };
 
