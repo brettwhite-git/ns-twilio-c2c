@@ -141,48 +141,85 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         return page || stack;
     }
 
+    /**
+     * Custom step indicator built from primitives (Badge + Text +
+     * StackPanel) rather than the UIF Stepper component.
+     *
+     * Background: 3 separate attempts to use component.Stepper produced
+     * a silent-invisible result — no console errors, no exception, no
+     * pixels. The Stepper.Options API (with `children`, `index`,
+     * `descriptionGenerator`) appeared to construct cleanly but the
+     * component never appeared in the DOM. Rather than spend more
+     * cycles debugging an opaque component, we build the step strip
+     * from documented primitives that demonstrably render.
+     *
+     * Structure per step:
+     *   StackPanel(VERTICAL, alignment=CENTER, gap=XS) [
+     *     Badge(content="1"|"2"|...|"✓", type=SOLID|SUBTLE),
+     *     Text(label, type=STRONG when current, else DEFAULT),
+     *     Text(sublabel, type=WEAK, size=S)
+     *   ]
+     *
+     * Outer container:
+     *   StackPanel(HORIZONTAL, justification=SPACE_BETWEEN, gap=M)
+     */
     function buildStepper(d) {
-        if (!d.Stp || !d.SI) return null;
-
-        // Per d.ts: StepperItem.Options.index is REQUIRED (no `?`) and
-        // Stepper.Options uses `children`, not `items` (the `items`
-        // property is class-level / writable, not in the constructor
-        // Options interface).
-        //
-        // type: PRIMARY for the active step makes it visually distinct;
-        // DEFAULT for others.
-        var SIType = (d.SI && d.SI.Type) || {};
-        var ACTIVE = SIType.PRIMARY != null ? SIType.PRIMARY :
-                     (SIType.INFO != null ? SIType.INFO : SIType.DEFAULT);
-        var DEFAULT = SIType.DEFAULT;
-
-        var items = STEPS.map(function (s, i) {
-            return safeNew(d.SI, {
-                index: i,
-                label: s.label,
-                type: (s.num === CURRENT_STEP) ? ACTIVE : DEFAULT,
-                selected: (s.num === CURRENT_STEP)
-            }, "StepperItem(" + s.label + ")");
-        }).filter(function (it) { return it != null; });
-
-        if (items.length === 0) return null;
-
-        var opts = {
-            children: items,                 // d.ts: Options uses `children`
-            selectedStepIndex: CURRENT_STEP - 1
-        };
-        if (d.Stp_Orient.HORIZONTAL !== undefined) {
-            opts.orientation = d.Stp_Orient.HORIZONTAL;
+        if (!d.SP || !d.T || !d.SI) {
+            // Note: d.SI here is just used as a presence check (StepperItem
+            // class) — we still want the badge if the rest fail.
         }
 
-        // Per d.ts on Stepper namespace:
-        //   descriptionGenerator: (index, options) => content
-        opts.descriptionGenerator = function (index) {
-            var s = STEPS[index];
-            return s ? s.sub : '';
-        };
+        var Badge = component.Badge;
+        var BadgeType = (Badge && Badge.Type) || {};
+        var BadgeSize = (Badge && Badge.Size) || {};
+        var TextType = (d.T && d.T.Type) || {};
+        var TextSize = (d.T && d.T.Size) || {};
 
-        return safeNew(d.Stp, opts, "Stepper");
+        var SPAlign = (d.SP && d.SP.Alignment) || {};
+        var SPJust = (d.SP && d.SP.Justification) || {};
+
+        var pills = STEPS.map(function (s) {
+            var isCurrent = (s.num === CURRENT_STEP);
+            var isDone    = (s.num < CURRENT_STEP);
+
+            var badge = safeNew(Badge, {
+                content: isDone ? "✓" : String(s.num), // ✓ for done
+                type: isCurrent || isDone
+                    ? BadgeType.SOLID
+                    : BadgeType.SUBTLE,
+                size: BadgeSize.DEFAULT
+            }, "Badge(" + s.num + ")");
+
+            var label = safeNew(d.T, {
+                text: s.label,
+                type: isCurrent ? TextType.STRONG : TextType.DEFAULT
+            }, "Text(label-" + s.num + ")");
+
+            var sublabel = safeNew(d.T, {
+                text: s.sub,
+                type: TextType.WEAK,
+                size: TextSize.S
+            }, "Text(sub-" + s.num + ")");
+
+            var pillItems = [badge, label, sublabel]
+                .filter(function (c) { return c != null; });
+
+            return safeNew(d.SP, {
+                items: pillItems,
+                orientation: d.SP_Orient.VERTICAL,
+                alignment: SPAlign.CENTER,
+                itemGap: d.SP_Gap.XS
+            }, "StackPanel(pill-" + s.num + ")");
+        }).filter(function (p) { return p != null; });
+
+        if (pills.length === 0) return null;
+
+        return safeNew(d.SP, {
+            items: pills,
+            orientation: d.SP_Orient.HORIZONTAL,
+            justification: SPJust.SPACE_BETWEEN,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(stepper-strip)");
     }
 
     function safeNew(Ctor, options, label) {
