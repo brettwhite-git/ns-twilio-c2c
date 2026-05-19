@@ -348,10 +348,6 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
     };
 
     /* ------------------------------------------------------------------ */
-    /* Action dispatch table                                              */
-    /* ------------------------------------------------------------------ */
-
-    /* ------------------------------------------------------------------ */
     /* Action: wizardSnapshot                                             */
     /* ------------------------------------------------------------------ */
 
@@ -643,6 +639,186 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Action: wizardListEmployees (Step 4 employee picker)               */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * List active employees that have NetSuite access (giveaccess = T).
+     * Used by Step 4 to populate the multi-select picker per phone
+     * number, and by Step 5 to pick CTC users.
+     *
+     * Returns `[{ id, name, email, role }, ...]`.
+     */
+    const wizardListEmployees = () => {
+        try {
+            const results = search.create({
+                type: 'employee',
+                filters: [
+                    ['isinactive', 'is', 'F'], 'AND',
+                    ['giveaccess', 'is', 'T']
+                ],
+                columns: ['entityid', 'firstname', 'lastname', 'email', 'role']
+            }).run().getRange({ start: 0, end: 1000 });
+
+            return {
+                items: results.map(function (r) {
+                    const first = r.getValue('firstname') || '';
+                    const last  = r.getValue('lastname') || '';
+                    const display = (first + ' ' + last).trim() ||
+                                    r.getValue('entityid') || '(no name)';
+                    return {
+                        id: r.id,
+                        name: display,
+                        email: r.getValue('email') || '',
+                        roleId: r.getValue('role') || null,
+                        roleName: r.getText('role') || ''
+                    };
+                })
+            };
+        } catch (e) {
+            log.error({
+                title: 'CTC Wizard — listEmployees failed',
+                details: e && e.message ? e.message : String(e)
+            });
+            return { items: [], error: 'list_employees_failed',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardLoadAssignments (Step 4 initial population)          */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Read all existing rep-assignment rows so the wizard can show
+     * current state on revisit. Returns `[{ id, phoneSid, phoneNumber,
+     * employeeId, employeeName, label, isPrimary }, ...]`.
+     */
+    const wizardLoadAssignments = () => {
+        try {
+            const results = search.create({
+                type: 'customrecord_ctc_rep_assignment',
+                filters: [['isinactive', 'is', 'F']],
+                columns: [
+                    'internalid',
+                    'custrecord_ctc_ra_employee',
+                    'custrecord_ctc_ra_phone_sid',
+                    'custrecord_ctc_ra_phone_number',
+                    'custrecord_ctc_ra_label',
+                    'custrecord_ctc_ra_is_primary'
+                ]
+            }).run().getRange({ start: 0, end: 1000 });
+
+            return {
+                items: results.map(function (r) {
+                    return {
+                        id: r.id,
+                        employeeId: r.getValue('custrecord_ctc_ra_employee'),
+                        employeeName: r.getText('custrecord_ctc_ra_employee') || '',
+                        phoneSid: r.getValue('custrecord_ctc_ra_phone_sid'),
+                        phoneNumber: r.getValue('custrecord_ctc_ra_phone_number'),
+                        label: r.getValue('custrecord_ctc_ra_label') || '',
+                        isPrimary: r.getValue('custrecord_ctc_ra_is_primary') === true ||
+                                   r.getValue('custrecord_ctc_ra_is_primary') === 'T'
+                    };
+                })
+            };
+        } catch (e) {
+            log.error({
+                title: 'CTC Wizard — loadAssignments failed',
+                details: e && e.message ? e.message : String(e)
+            });
+            return { items: [], error: 'load_assignments_failed' };
+        }
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardSaveAssignments (Step 4 save)                        */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Upsert rep assignments. Strategy: delete-then-insert. For each
+     * phoneSid in the payload, delete all existing rows referencing it,
+     * then insert one row per (phoneSid, employeeId) pair from the
+     * payload. Atomic enough for a non-concurrent admin flow.
+     *
+     * Payload shape:
+     *   { assignments: [
+     *       { phoneSid, phoneNumber, label, employeeIds: [N, M, ...],
+     *         primaryEmployeeId: <id> },
+     *       ...
+     *   ]}
+     */
+    const wizardSaveAssignments = (payload) => {
+        if (!payload || !Array.isArray(payload.assignments)) {
+            return { ok: false, error: 'missing_assignments' };
+        }
+
+        let inserted = 0;
+        let deleted = 0;
+
+        try {
+            for (let i = 0; i < payload.assignments.length; i++) {
+                const a = payload.assignments[i];
+                if (!a.phoneSid) continue;
+
+                // Delete existing rows for this phoneSid
+                const existing = search.create({
+                    type: 'customrecord_ctc_rep_assignment',
+                    filters: [
+                        ['custrecord_ctc_ra_phone_sid', 'is', a.phoneSid]
+                    ],
+                    columns: ['internalid']
+                }).run().getRange({ start: 0, end: 1000 });
+
+                for (let j = 0; j < existing.length; j++) {
+                    record.delete({
+                        type: 'customrecord_ctc_rep_assignment',
+                        id: existing[j].id
+                    });
+                    deleted++;
+                }
+
+                // Insert one row per employee
+                const empIds = Array.isArray(a.employeeIds) ? a.employeeIds : [];
+                for (let k = 0; k < empIds.length; k++) {
+                    const empId = empIds[k];
+                    if (!empId) continue;
+                    const rec = record.create({
+                        type: 'customrecord_ctc_rep_assignment',
+                        isDynamic: false
+                    });
+                    rec.setValue({ fieldId: 'custrecord_ctc_ra_employee', value: Number(empId) });
+                    rec.setValue({ fieldId: 'custrecord_ctc_ra_phone_sid', value: a.phoneSid });
+                    rec.setValue({ fieldId: 'custrecord_ctc_ra_phone_number', value: a.phoneNumber || '' });
+                    if (a.label) rec.setValue({ fieldId: 'custrecord_ctc_ra_label', value: a.label });
+                    rec.setValue({
+                        fieldId: 'custrecord_ctc_ra_is_primary',
+                        value: Number(empId) === Number(a.primaryEmployeeId)
+                    });
+                    rec.save();
+                    inserted++;
+                }
+            }
+
+            log.audit({
+                title: 'CTC Wizard — Step 4 assignments saved',
+                details: 'deleted=' + deleted + ' inserted=' + inserted +
+                         ' phoneSids=' + payload.assignments.length
+            });
+
+            return { saved: true, deleted: deleted, inserted: inserted };
+        } catch (e) {
+            log.error({
+                title: 'CTC Wizard — saveAssignments failed',
+                details: e && e.message ? e.message : String(e)
+            });
+            return { ok: false, error: 'save_failed',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Action dispatch table                                              */
     /* ------------------------------------------------------------------ */
 
@@ -655,9 +831,11 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
         wizardListPhoneNumbers:  wizardListPhoneNumbers,
         wizardListIntelServices: wizardListIntelServices,
         wizardValidateTwiML:     wizardValidateTwiML,
-        wizardSaveVoice:         wizardSaveVoice
-        // U5-U7: wizardSaveAssignments, wizardListReps,
-        //        wizardSaveRoles, wizardRunPreflight, wizardActivate
+        wizardSaveVoice:         wizardSaveVoice,
+        wizardListEmployees:     wizardListEmployees,
+        wizardLoadAssignments:   wizardLoadAssignments,
+        wizardSaveAssignments:   wizardSaveAssignments
+        // U6-U7: wizardRunPreflight, wizardActivate
     };
 
     return { onRequest };
