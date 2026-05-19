@@ -63,5 +63,20 @@
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_auth_token_id">
+            <label>Auth Token Secret ID</label>
+            <description>Script ID for the NetSuite Secret holding the Twilio Auth Token (e.g., custsecret_ctc_auth_token). Mirrors the API Key Secret ID pattern. Populated by the v2 Setup Wizard. The legacy custrecord_ctc_auth_token CLOBTEXT field is retained for backwards-compatibility on existing installs; the runtime auth-header builder prefers this secret reference when populated.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_active">
+            <label>CTC Activated</label>
+            <description>Flipped to T by the v2 Setup Wizard when all preflight checks pass. The phone-icon User Event script reads this flag and stays hidden until activation succeeds, so reps never see a half-configured icon. Default F on fresh installs.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultvalue>F</defaultvalue>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
     </customrecordcustomfields>
 </customrecordtype>
