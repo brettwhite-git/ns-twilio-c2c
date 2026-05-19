@@ -2,24 +2,24 @@
 /**
  * @NApiVersion 2.1
  *
- * Setup Wizard v2 — SpaClient (UI polish pass).
+ * Setup Wizard v2 — SpaClient (proper props, no more guessing).
  *
- * Render proven (commit 77c7da8 + render-3): scriptContext.setContent
- * with a StackPanel root renders. Confirmed:
- *   - GapSize.M = 'm' (lowercase string enum) via component.StackPanel.GapSize.M
- *   - component.Stepper.Item exists as a constructor
- *   - setContent is the visible-content slot; setLayout is page chrome
- *     (calling both with the same tree double-rendered)
+ * Rewrote against the actual @uif-js TypeScript definitions
+ * (component.d.ts from the netsuite-uif-reference skill). Earlier
+ * iterations were guessing prop names from JSX conventions. Real shapes:
  *
- * This pass:
- *   1. Outer StackPanel switches to VERTICAL orientation so heading /
- *      stepper / step body stack top-to-bottom (default horizontal
- *      squashed everything onto one line)
- *   2. Drops the experimental setLayout(root) call — setContent is enough
- *   3. Stepper uses Stepper.Item class instances (the class exists)
- *   4. Wraps content in a ContentPanel for padding + page chrome
- *   5. Logs the resolved orientation enum + ContentPanel availability
- *      so we can iterate if either doesn't render the way we expect
+ *   Heading       — `content` (NOT `text`), `type: PAGE_TITLE|...`
+ *   Text          — `text` (correct), `type/size/weight/color` enums
+ *   StepperItem   — `label` only (description/done/disabled aren't in Options)
+ *   Stepper       — `items, selectedStepIndex, orientation, descriptionGenerator`
+ *                   step "done/active" is computed from selectedStepIndex
+ *   ContentPanel  — `content, horizontalAlignment: STRETCH, outerGap`
+ *   StackPanel    — `items, orientation, itemGap` (with own enums)
+ *
+ * The HTML reference at docs/architecture/setup-wizard-v2.html ships a
+ * specific page layout (stepper across the top, content card below); the
+ * UIF equivalent below uses StackPanel(VERTICAL) [ContentPanel-wrapped
+ * Stepper, ContentPanel-wrapped step body ].
  */
 define(["require", "exports", "@uif-js/core", "@uif-js/component"],
        function (require, exports, core, component) {
@@ -35,37 +35,39 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         { num: 5, label: 'Reps & roles',    sub: 'Permissions' },
         { num: 6, label: 'Test & activate', sub: 'Go live' }
     ];
-    var CURRENT_STEP = 1;
+    var CURRENT_STEP = 1; // 1-based
 
     var run = function (scriptContext) {
         try {
-            console.log("[CTC Setup Wizard] === UI POLISH PASS ===");
+            console.log("[CTC Setup Wizard] === REAL API PASS ===");
 
-            // Resolve enums up front.
-            var SP = component.StackPanel;
-            var GapSize = (SP && SP.GapSize) || {};
-            var Orientation = (SP && SP.Orientation) || {};
-            var GAP_M = GapSize.M;
-            var GAP_L = GapSize.L;
-            var VERTICAL = Orientation.VERTICAL;
-            var HORIZONTAL = Orientation.HORIZONTAL;
+            // Resolve enums from the actual classes (verified against d.ts).
+            var SP    = component.StackPanel;
+            var CP    = component.ContentPanel;
+            var H     = component.Heading;
+            var T     = component.Text;
+            var Stp   = component.Stepper;
+            var SI    = component.StepperItem;
 
-            console.log("[CTC Setup Wizard] GAP_M=" + GAP_M +
-                ", GAP_L=" + GAP_L +
-                ", VERTICAL=" + VERTICAL +
-                ", HORIZONTAL=" + HORIZONTAL);
-
-            if (VERTICAL === undefined) {
-                console.log("[CTC Setup Wizard] StackPanel.Orientation " +
-                    "static keys:", SP && Object.keys(SP.Orientation || {}));
-                logShape("component.StackPanel", SP);
-            }
+            var SP_Orient = SP && SP.Orientation || {};
+            var SP_Gap    = SP && SP.GapSize || {};
+            var CP_Gap    = CP && CP.GapSize || {};
+            var CP_HAlign = CP && CP.HorizontalAlignment || {};
+            var H_Type    = H && H.Type || {};
+            var T_Type    = T && T.Type || {};
+            // Stepper.Orientation aliases StepperItem.Orientation per d.ts
+            var Stp_Orient = (Stp && Stp.Orientation) ||
+                             (SI && SI.Orientation) || {};
 
             var root = buildRoot({
-                GAP_M: GAP_M,
-                GAP_L: GAP_L,
-                VERTICAL: VERTICAL,
-                HORIZONTAL: HORIZONTAL
+                SP: SP, CP: CP, H: H, T: T, Stp: Stp, SI: SI,
+                SP_Orient: SP_Orient,
+                SP_Gap: SP_Gap,
+                CP_Gap: CP_Gap,
+                CP_HAlign: CP_HAlign,
+                H_Type: H_Type,
+                T_Type: T_Type,
+                Stp_Orient: Stp_Orient
             });
 
             console.log("[CTC Setup Wizard] Mounting root:", root);
@@ -76,113 +78,101 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         }
     };
 
-    function buildRoot(enums) {
-        // Heading needs a `type` enum to render visibly. Default (no type)
-        // produces a zero-height element in the UI polish pass.
-        var HType = (component.Heading && component.Heading.Type) || {};
-        var headingType = HType.LARGE_HEADING || HType.LARGE ||
-                          HType.MEDIUM_HEADING || HType.MEDIUM ||
-                          HType.HEADING;
-        console.log("[CTC Setup Wizard] Heading.Type keys:",
-            Object.keys(HType), "-> picked:", headingType);
+    function buildRoot(d) {
+        // ── Page title (Heading uses `content`, not `text`) ─────────────
+        var title = safeNew(d.H, {
+            content: "Click-to-Call Setup Wizard",
+            type: d.H_Type.PAGE_TITLE
+        }, "Heading(title)");
 
-        var heading = safeNew(component.Heading, {
-            text: "Click-to-Call Setup Wizard",
-            type: headingType
-        }, "Heading");
-
-        var subheading = safeNew(component.Text, {
+        var subtitle = safeNew(d.T, {
             text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
                 STEPS[CURRENT_STEP - 1].label
-        }, "Text(sub)");
+        }, "Text(subtitle)");
 
-        var stepper = buildStepper(enums);
+        // ── Stepper (full-width, horizontal) ────────────────────────────
+        var stepper = buildStepper(d);
 
-        var stepBody = safeNew(component.Text, {
-            text: "Per-step UI ships in U3-U7. The render path is " +
-                "confirmed working — scriptContext.setContent with UIF " +
-                "components is the SPA mount API for this SuiteApp."
+        // Wrap stepper in a STRETCH-aligned ContentPanel so it fills the
+        // page width (fix for the overlapping-labels issue: items got
+        // tiny widths because the Stepper container itself was narrow).
+        var stepperBox = null;
+        if (stepper) {
+            stepperBox = safeNew(d.CP, {
+                content: stepper,
+                horizontalAlignment: d.CP_HAlign.STRETCH,
+                outerGap: d.CP_Gap.M
+            }, "ContentPanel(stepper, STRETCH)") || stepper;
+        }
+
+        // ── Step body placeholder ───────────────────────────────────────
+        var bodyText = safeNew(d.T, {
+            text: "Per-step UI ships in U3-U7. Real UIF API confirmed " +
+                "via the @uif-js TypeScript definitions — no more " +
+                "prop-name guessing."
         }, "Text(body)");
 
-        var children = [heading, subheading, stepper, stepBody]
+        var bodyBox = bodyText ? safeNew(d.CP, {
+            content: bodyText,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            outerGap: d.CP_Gap.L
+        }, "ContentPanel(body)") || bodyText : null;
+
+        // ── Outer vertical stack ────────────────────────────────────────
+        var children = [title, subtitle, stepperBox, bodyBox]
             .filter(function (c) { return c != null; });
 
-        // Outer wrapper: vertical StackPanel so children stack top-to-bottom.
-        var stackOpts = { items: children };
-        if (enums.VERTICAL !== undefined) stackOpts.orientation = enums.VERTICAL;
-        if (enums.GAP_L !== undefined) stackOpts.itemGap = enums.GAP_L;
+        var stack = safeNew(d.SP, {
+            items: children,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, "StackPanel(outer)");
 
-        var stack = safeNew(component.StackPanel, stackOpts,
-            "StackPanel(vertical)");
+        if (!stack) return title || subtitle;
 
-        if (!stack) {
-            // Last-resort fallback if orientation enum was wrong: try
-            // without orientation set (default), accept horizontal squash
-            // over total non-render.
-            stack = safeNew(component.StackPanel,
-                { items: children, itemGap: enums.GAP_L },
-                "StackPanel(no orientation)");
-        }
+        // Wrap outer stack in a top-level ContentPanel for page padding +
+        // STRETCH so it fills the available width.
+        var page = safeNew(d.CP, {
+            content: stack,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            outerGap: d.CP_Gap.L
+        }, "ContentPanel(page)");
 
-        // Wrap in ContentPanel for page padding + visual chrome.
-        if (stack && component.ContentPanel) {
-            var panel = safeNew(component.ContentPanel, {
-                content: stack,
-                outerGap: enums.GAP_L
-            }, "ContentPanel");
-            if (panel) return panel;
-        }
-
-        return stack || heading;
+        return page || stack;
     }
 
-    function buildStepper(enums) {
-        if (!component.Stepper) return null;
+    function buildStepper(d) {
+        if (!d.Stp || !d.SI) return null;
 
-        // Stepper.Item is a real class (confirmed in render-3 logs).
-        var ItemCtor = component.Stepper && component.Stepper.Item;
+        // StepperItem Options accepts only `label` from the metadata we want;
+        // step state (active / done / future) is computed by the Stepper
+        // from its selectedStepIndex, NOT per-item flags.
+        var items = STEPS.map(function (s) {
+            return safeNew(d.SI, {
+                label: s.label
+            }, "StepperItem(" + s.label + ")");
+        }).filter(function (it) { return it != null; });
 
-        var items;
-        if (ItemCtor) {
-            items = STEPS.map(function (s) {
-                return safeNew(ItemCtor, {
-                    label: s.label,
-                    description: s.sub,
-                    done: s.num < CURRENT_STEP,
-                    disabled: s.num > CURRENT_STEP
-                }, "Stepper.Item(" + s.label + ")");
-            }).filter(function (it) { return it != null; });
-        } else {
-            // Plain-object fallback (worked in render-3).
-            items = STEPS.map(function (s) {
-                return {
-                    label: s.label,
-                    description: s.sub,
-                    done: s.num < CURRENT_STEP,
-                    disabled: s.num > CURRENT_STEP
-                };
-            });
-        }
         if (items.length === 0) return null;
 
-        // Stepper has its OWN Orientation enum (Stepper.Orientation),
-        // distinct from StackPanel.Orientation — passing the wrong one
-        // fails enum validation. Default is horizontal; just omit unless
-        // we explicitly need vertical.
-        var SOrientation = (component.Stepper && component.Stepper.Orientation) || {};
-        console.log("[CTC Setup Wizard] Stepper.Orientation keys:",
-            Object.keys(SOrientation));
-
-        var stepperOpts = {
+        var opts = {
             items: items,
-            selectedStepIndex: CURRENT_STEP - 1
+            selectedStepIndex: CURRENT_STEP - 1 // 0-based
         };
-        // Only set orientation if Stepper's own enum has HORIZONTAL.
-        if (SOrientation.HORIZONTAL !== undefined) {
-            stepperOpts.orientation = SOrientation.HORIZONTAL;
+        if (d.Stp_Orient.HORIZONTAL !== undefined) {
+            opts.orientation = d.Stp_Orient.HORIZONTAL;
         }
 
-        return safeNew(component.Stepper, stepperOpts, "Stepper");
+        // Stepper exposes a descriptionGenerator(index, options) hook for
+        // sublabels. Use it to render the `sub` field per step (this is
+        // the documented way to attach descriptions; the StepperItem
+        // Options interface itself doesn't accept description).
+        opts.descriptionGenerator = function (index) {
+            var s = STEPS[index];
+            return s ? s.sub : '';
+        };
+
+        return safeNew(d.Stp, opts, "Stepper");
     }
 
     function safeNew(Ctor, options, label) {
@@ -198,27 +188,6 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                 "failed:", e && e.message ? e.message : e,
                 "— options:", options);
             return null;
-        }
-    }
-
-    function logShape(name, obj) {
-        if (obj == null) {
-            console.log("[CTC Setup Wizard] " + name + " = (null/undef)");
-            return;
-        }
-        if (typeof obj === 'function') {
-            console.log("[CTC Setup Wizard] " + name +
-                " static keys:", Object.keys(obj));
-        } else if (typeof obj === 'object') {
-            var keys = Object.keys(obj);
-            console.log("[CTC Setup Wizard] " + name + " keys:", keys);
-            keys.slice(0, 15).forEach(function (k) {
-                var v = obj[k];
-                if (typeof v !== 'object' && typeof v !== 'function') {
-                    console.log("[CTC Setup Wizard]   " + name + "." +
-                        k + " =", v);
-                }
-            });
         }
     }
 
