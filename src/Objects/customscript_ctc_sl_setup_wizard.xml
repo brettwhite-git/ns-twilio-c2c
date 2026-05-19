@@ -1,0 +1,31 @@
+<suitelet scriptid="customscript_ctc_sl_setup_wizard">
+    <name>CTC Setup Wizard</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_sl_setup_wizard.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <isinactive>F</isinactive>
+    <loglevel>DEBUG</loglevel>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_sl_setup_wizard">
+            <title>CTC Setup Wizard</title>
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <loglevel>DEBUG</loglevel>
+            <!-- SECURITY (SDF Pitfall #135): isonline=F requires login. Wizard
+                 writes to NetSuite Secrets, flips activation, submits Employee
+                 records — must never run anonymously. Always set explicitly;
+                 do not rely on implicit defaults. -->
+            <isonline>F</isonline>
+            <!-- Admin-only access. Standard role ADMINISTRATOR is portable
+                 across all NetSuite accounts. Custom roles cannot be
+                 referenced in SuiteApp XML per the SuiteApp constraint. -->
+            <permittedrole>ADMINISTRATOR</permittedrole>
+            <!-- NO <runasrole> (SDF security guide: never <runasrole>ADMINISTRATOR</runasrole>
+                 in production — privilege-escalation antipattern). The calling
+                 admin's own privileges authorize the writes. -->
+            <!-- NO <allroles>T</allroles> — admin-only, not all internal roles. -->
+        </scriptdeployment>
+    </scriptdeployments>
+</suitelet>
