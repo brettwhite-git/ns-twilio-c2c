@@ -405,50 +405,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         .status-pill.connected { color: #14B981; }
         .status-pill.ended { color: var(--phone-text-faint); }
         .status-pill.error { color: #FCA5A5; }
-        /* Contact picker — lives on the dark phone surface below the device selectors */
-        .picker-row {
-            width: 100%;
-            margin-bottom: 10px;
-            display: none;
-            position: relative;
-        }
-        .picker-row.visible { display: block; }
-        .picker-row select {
-            appearance: none;
-            -webkit-appearance: none;
-            background: var(--phone-card);
-            color: var(--phone-text);
-            border: 1px solid var(--phone-card-border);
-            border-radius: 8px;
-            font-family: inherit;
-            font-size: 12.5px;
-            font-weight: 500;
-            width: 100%;
-            cursor: pointer;
-            outline: none;
-            padding: 8px 30px 8px 12px;
-            transition: border-color 0.15s ease, box-shadow 0.15s ease;
-        }
-        .picker-row select:focus {
-            border-color: rgba(255, 255, 255, 0.32);
-            box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
-        }
-        .picker-row select option {
-            background: var(--phone-bg-2);
-            color: var(--phone-text);
-        }
-        .picker-row::after {
-            content: "";
-            position: absolute;
-            top: 50%;
-            right: 12px;
-            width: 7px; height: 7px;
-            border-right: 2px solid var(--phone-text-muted);
-            border-bottom: 2px solid var(--phone-text-muted);
-            transform: translateY(-75%) rotate(45deg);
-            pointer-events: none;
-        }
-
         /* Subtle blue divider between audio selectors and the contact picker — barely visible */
         .phone-divider {
             width: 100%;
@@ -513,26 +469,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             display: none;
         }
         .timer.visible { display: block; }
-        .origin-line {
-            /* Phase 1.5: hidden by default. The "from caller-ID" affordance
-               will be re-surfaced inside the audio-settings overlay in
-               Phase 4. Existing JS still updates textContent on token
-               fetch — that's harmless while the element is display:none. */
-            display: none;
-            align-items: center;
-            gap: 6px;
-            font-size: 11px;
-            color: var(--phone-text-muted);
-            background: var(--phone-card);
-            border: 1px solid var(--phone-card-border);
-            border-radius: 999px;
-            padding: 4px 10px;
-            margin-bottom: 12px;
-            max-width: 320px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
         /* No-phone-on-file CTA — shown when an entity is loaded but has no
            phone number. Mirrors the Search-tab "no phone on file" vocabulary
            and gives the rep a one-click jump to fix the record. */
@@ -1263,6 +1199,29 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             outline: none;
         }
         .audio-overlay select:focus { border-color: rgba(116, 192, 252, 0.45); }
+        /* Phase 7 polish: live mic-level meter under the Input select. */
+        .mic-meter {
+            margin-top: 8px;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--phone-card);
+            border: 1px solid var(--phone-card-border);
+            overflow: hidden;
+        }
+        .mic-meter-bar {
+            display: block;
+            width: 0%;
+            height: 100%;
+            background: linear-gradient(90deg, #74C0FC 0%, #74C0FC 60%, #F4C76A 80%, #FCA5A5 100%);
+            transition: width 60ms linear;
+            transform-origin: left center;
+        }
+        .mic-meter-hint {
+            margin-top: 6px;
+            font-size: 10.5px;
+            color: var(--phone-text-faint);
+            letter-spacing: 0.02em;
+        }
         .audio-overlay .save-default {
             display: flex;
             align-items: center;
@@ -1518,17 +1477,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
             <div class="timer" id="timer">00:00</div>
 
-            <div class="origin-line" id="originLine">Outbound · from main line</div>
-
             <hr class="phone-divider" id="phoneDivider">
-
-            <!-- Legacy single-select contact picker — Phase 3 hides this by
-                 default and keeps it as a vestigial data store so existing
-                 contactSelect.change handlers stay wired. The new picker-card
-                 below replaces it visually. Phase 7 polish removes both. -->
-            <div class="picker-row" id="contactRow" style="display:none">
-                <select id="contactSelect"></select>
-            </div>
 
             <!-- Phase 3 multi-contact picker. Hidden when entity has 0 contacts
                  (Lead with no contact records) — the existing phoneNumber line
@@ -1680,6 +1629,15 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             <div class="field">
                 <span class="field-label">Input &middot; microphone</span>
                 <select id="inputDevice"><option value="">Loading&hellip;</option></select>
+                <!-- Phase 7 polish: live VU meter so reps can verify the mic
+                     is actually picking up sound (catches "muted at the OS
+                     level" before they dial). Powered by Web Audio API
+                     AudioContext.createAnalyser; runs only while the overlay
+                     is open. -->
+                <div class="mic-meter" id="micMeter" aria-hidden="true">
+                    <div class="mic-meter-bar" id="micMeterBar"></div>
+                </div>
+                <div class="mic-meter-hint" id="micMeterHint">Speak to test &mdash; bar lights up when the mic hears you.</div>
             </div>
             <div class="field" id="outputRow">
                 <span class="field-label">Output &middot; speaker</span>
@@ -1795,11 +1753,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var dialpadEl = document.getElementById('dialpad');
         var dialKeys = document.querySelectorAll('.dial-key');
         var muteLabel = document.getElementById('muteLabel');
-        var originLine = document.getElementById('originLine');
         var errorBox = document.getElementById('errorBox');
         var logStatusEl = document.getElementById('logStatus');
-        var contactRow = document.getElementById('contactRow');
-        var contactSelect = document.getElementById('contactSelect');
         var phoneNumberEl = document.getElementById('phoneNumber');
         var noPhoneCtaEl = document.getElementById('noPhoneCta');
 
@@ -2017,11 +1972,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function setDialedNumber(next, opts) {
             PHONE = normalizeDigits(next);
             phoneNumberEl.textContent = renderPhoneFallback();
-            // Manual edits decouple from the dropdown's selected contact (unless
-            // the caller is the dropdown itself, in which case it manages SELECTED_CONTACT_ID).
-            if (contactSelect && !(opts && opts.fromPicker)) {
+            // Manual edits decouple SELECTED_CONTACT_ID from the picker so a
+            // later picker change is treated as a fresh selection.
+            // opts.fromPicker suppresses this when the picker itself is the
+            // caller — it owns SELECTED_CONTACT_ID via selectPickerPhone.
+            if (!(opts && opts.fromPicker)) {
                 SELECTED_CONTACT_ID = '';
-                if (contactSelect.options.length) contactSelect.selectedIndex = 0;
             }
             syncBackspaceVisibility();
             if (btnCall) btnCall.disabled = !PHONE;
@@ -2155,62 +2111,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             }
             return null;
         }
-
-        function initContactDropdown() {
-            if (!CONTACTS.length) return;
-            var mainOpt = document.createElement('option');
-            mainOpt.value = '';
-            mainOpt.textContent = 'Company main \\u2014 ' + ENTITY_NAME;
-            contactSelect.appendChild(mainOpt);
-            CONTACTS.forEach(function (c) {
-                if (c.phone) {
-                    var opt = document.createElement('option');
-                    opt.value = c.id + '|' + c.phone;
-                    opt.textContent = c.name + ' \\u2014 ' + c.phone;
-                    contactSelect.appendChild(opt);
-                }
-                if (c.mobile) {
-                    var mopt = document.createElement('option');
-                    mopt.value = c.id + '|' + c.mobile;
-                    mopt.textContent = c.name + ' (mobile) \\u2014 ' + c.mobile;
-                    contactSelect.appendChild(mopt);
-                }
-            });
-            contactRow.classList.add('visible');
-            contactSelect.addEventListener('change', function () {
-                var val = this.value;
-                var entityNameEl = document.getElementById('entityName');
-                if (!val) {
-                    PHONE = '${jsPhone}';
-                    SELECTED_CONTACT_ID = '';
-                    if (entityNameEl) entityNameEl.textContent = ENTITY_NAME;
-                    renderContactInfoFor(ENTITY_INFO, (window.__CTC_ENTITY_TYPE__ || 'record'));
-                    if (contactLinkEl && ENTITY_RECORD_URL) contactLinkEl.href = ENTITY_RECORD_URL;
-                } else {
-                    var parts = val.split('|');
-                    SELECTED_CONTACT_ID = parts[0];
-                    PHONE = parts[1];
-                    var c = findContactById(SELECTED_CONTACT_ID);
-                    if (c) {
-                        if (entityNameEl) entityNameEl.textContent = c.name || ENTITY_NAME;
-                        renderContactInfoFor({
-                            email: c.email || '',
-                            title: c.title || '',
-                            parent: ENTITY_NAME,
-                            owner: ENTITY_INFO.owner || ''
-                        }, 'contact');
-                        if (contactLinkEl) contactLinkEl.href = '/app/common/entity/contact.nl?id=' + encodeURIComponent(SELECTED_CONTACT_ID);
-                    }
-                }
-                PHONE = normalizeDigits(PHONE);
-                phoneNumberEl.textContent = renderPhoneFallback();
-                if (btnCall) btnCall.disabled = !PHONE;
-                syncBackspaceVisibility();
-                // Picker selection resets fresh-start so the next typed digit replaces, not appends
-                freshNumberOnNextDigit = true;
-            });
-        }
-        initContactDropdown();
 
         // --- Call logging ---
         function logCallToNetSuite(callSid, duration) {
@@ -2431,6 +2331,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             setStatus('Connecting\\u2026', 'connecting');
             setButtons(false, false, false);
             setCallView('active');
+            // Release our diagnostic mic stream before Twilio claims it.
+            // The meter restarts automatically if the rep re-opens the gear
+            // after the call ends.
+            if (typeof stopMicMeter === 'function') stopMicMeter();
 
             device.connect({ params: { To: dialableFormat(PHONE), CallerId: callerId } }).then(function (call) {
                 activeCall = call;
@@ -3206,6 +3110,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 audioGear.classList.add('active');
                 audioGear.setAttribute('aria-expanded', 'true');
             }
+            startMicMeter();
         }
         function closeAudioOverlay() {
             if (!audioOverlay) return;
@@ -3214,6 +3119,96 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 audioGear.classList.remove('active');
                 audioGear.setAttribute('aria-expanded', 'false');
             }
+            stopMicMeter();
+        }
+
+        // ─── Phase 7 polish: live mic-level VU meter ───────────────────────
+        // Only runs while the audio overlay is open (cleanup on close + when a
+        // call connects, since Twilio's Voice SDK owns the mic stream during
+        // a call). Tracks the selected inputDevice so swapping mics re-opens
+        // the stream on the right device. Catches "muted at the OS level"
+        // before the rep dials.
+        var micMeterStream = null;
+        var micMeterCtx    = null;
+        var micMeterAnalyser = null;
+        var micMeterRAF    = null;
+        var micMeterBufLen = 0;
+        var micMeterBuf    = null;
+
+        function startMicMeter() {
+            // Don't double-start; don't run during an active call (Twilio
+            // owns the mic). Guard against missing Web Audio support.
+            if (micMeterStream) return;
+            if (activeCall) return;
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+            if (typeof AudioContext === 'undefined' && typeof webkitAudioContext === 'undefined') return;
+
+            var constraints = { audio: true };
+            var deviceId = inputSelect && inputSelect.value;
+            if (deviceId) {
+                constraints.audio = { deviceId: { exact: deviceId } };
+            }
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(function (stream) {
+                    // If the overlay closed between the request and the resolve,
+                    // throw the stream away.
+                    if (audioOverlay && audioOverlay.classList.contains('hidden')) {
+                        stream.getTracks().forEach(function (t) { t.stop(); });
+                        return;
+                    }
+                    micMeterStream = stream;
+                    var Ctor = window.AudioContext || window.webkitAudioContext;
+                    micMeterCtx = new Ctor();
+                    var source = micMeterCtx.createMediaStreamSource(stream);
+                    micMeterAnalyser = micMeterCtx.createAnalyser();
+                    micMeterAnalyser.fftSize = 512;
+                    micMeterAnalyser.smoothingTimeConstant = 0.5;
+                    micMeterBufLen = micMeterAnalyser.frequencyBinCount;
+                    micMeterBuf = new Uint8Array(micMeterBufLen);
+                    source.connect(micMeterAnalyser);
+                    drawMicMeter();
+                })
+                .catch(function (err) {
+                    // Mic blocked or unavailable — hint stays as the static
+                    // "speak to test" copy; bar remains at 0%. Don't crash.
+                    console.log('[CTC] mic meter getUserMedia failed', err && err.message || err);
+                });
+        }
+
+        function drawMicMeter() {
+            if (!micMeterAnalyser || !micMeterBuf) return;
+            micMeterAnalyser.getByteTimeDomainData(micMeterBuf);
+            // RMS over the buffer → normalized 0..1
+            var sum = 0;
+            for (var i = 0; i < micMeterBufLen; i++) {
+                var v = (micMeterBuf[i] - 128) / 128;
+                sum += v * v;
+            }
+            var rms = Math.sqrt(sum / micMeterBufLen);
+            // Scale up so normal speech reaches ~70% of the bar
+            var pct = Math.min(100, Math.round(rms * 240));
+            var bar = document.getElementById('micMeterBar');
+            if (bar) bar.style.width = pct + '%';
+            micMeterRAF = window.requestAnimationFrame(drawMicMeter);
+        }
+
+        function stopMicMeter() {
+            if (micMeterRAF) {
+                window.cancelAnimationFrame(micMeterRAF);
+                micMeterRAF = null;
+            }
+            if (micMeterStream) {
+                micMeterStream.getTracks().forEach(function (t) { t.stop(); });
+                micMeterStream = null;
+            }
+            if (micMeterCtx) {
+                try { micMeterCtx.close(); } catch (e) { /* ignore */ }
+                micMeterCtx = null;
+            }
+            micMeterAnalyser = null;
+            micMeterBuf = null;
+            var bar = document.getElementById('micMeterBar');
+            if (bar) bar.style.width = '0%';
         }
 
         if (audioGear) {
@@ -3229,6 +3224,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         if (inputSelect) {
             inputSelect.addEventListener('change', function () {
                 persistAudioPref('inputDeviceId', inputSelect.value);
+                // Phase 7 polish: swap the mic-meter stream onto the newly
+                // selected device so the bar reflects what reps actually
+                // hear when they dial.
+                if (audioOverlay && !audioOverlay.classList.contains('hidden')) {
+                    stopMicMeter();
+                    startMicMeter();
+                }
             });
         }
         if (outputSelect) {
@@ -3636,9 +3638,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         fetchToken()
             .then(function (result) {
                 callerId = result.phoneNumber || '';
-                if (originLine && callerId) {
-                    originLine.textContent = 'Outbound \\u00b7 from ' + callerId;
-                }
                 initDevice(result.token);
             })
             .catch(function (err) {

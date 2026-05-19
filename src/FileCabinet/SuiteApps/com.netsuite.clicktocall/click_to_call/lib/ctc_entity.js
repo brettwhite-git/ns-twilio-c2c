@@ -32,7 +32,11 @@ define(['N/search', 'N/log'], (search, log) => {
     // v5 (Phase 6 refinements): honest chip counts via softphoneBookCounts —
     // force fresh window so reps see the true book size (95 / 4 / 13)
     // instead of the cached "displayed slice" counts (16 / 3 / 1).
-    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v5';
+    // v6 (Phase 7 polish): legacy contactRow/originLine removed + mic-level
+    // VU meter added to audio overlay. Force fresh popup so reps see the
+    // new meter and don't end up running JS that references the now-deleted
+    // contactSelect element.
+    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v6';
 
     /**
      * Resolve a display name from a NetSuite record by type.
