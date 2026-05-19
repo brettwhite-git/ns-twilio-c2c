@@ -20,9 +20,9 @@
  * the handler. Role 3 (Administrator) is portable across customer
  * accounts; custom roles vary per install.
  */
-define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/secrets',
+define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
         './lib/ctc_config'],
-       (runtime, record, search, log, secrets, config) => {
+       (runtime, record, search, log, crypto, config) => {
 
     // Standard role IDs are portable across NetSuite accounts.
     // Administrator = 3 (per NetSuite docs); custom roles vary.
@@ -215,47 +215,74 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/secrets',
 
     /**
      * Functional check for the API Secrets surface (Setup > Company >
-     * API Secrets, accessed at runtime via N/secrets).
+     * API Secrets). CTC accesses these via N/crypto.createSecretKey
+     * with the secret's script ID (this account does not have the
+     * separate N/secrets module — MODULE_DOES_NOT_EXIST on import).
      *
      * Three outcomes:
-     *   1. N/secrets module didn't load → fail with repair hint
-     *   2. Module loaded but no existing CTC secret is configured yet
+     *   1. N/crypto didn't load → fail (catastrophic; this is core SS 2.x)
+     *   2. Loaded but no existing CTC secret pointer is configured
      *      → 'warn' (informational — wizard's Connect Twilio step
-     *      will guide the admin to create them)
-     *   3. Module loaded AND an existing secret resolves → pass
-     *
-     * The previous featureCheck('SUITESCRIPTSECRETS') was a misnomer —
-     * NetSuite calls this surface "API Secrets" and the feature ID
-     * doesn't reliably exist as 'SUITESCRIPTSECRETS' on all accounts.
+     *      will guide the admin to create one)
+     *   3. Loaded AND createSecretKey({ secret: id }) works for the
+     *      already-configured pointer → pass
      */
     const apiSecretsCheck = () => {
-        if (!secrets) {
+        if (!crypto) {
             return {
                 id: 'api_secrets',
                 label: 'API Secrets',
                 status: 'fail',
-                detail: 'N/secrets module failed to load.',
-                repairHint: 'Verify the API Secrets feature is enabled ' +
-                            'and the account allows N/secrets — contact ' +
-                            'NetSuite Customer Support if module load fails.'
+                detail: 'N/crypto module failed to load.',
+                repairHint: 'N/crypto is core SuiteScript 2.x — contact ' +
+                            'NetSuite Customer Support if this fails.'
             };
         }
 
-        // Optimistic pass: if module loaded, secrets are available.
-        // Try to look up an existing CTC secret if the config record
-        // already points at one — that confirms end-to-end resolution.
-        var detail = 'N/secrets module loaded; API Secrets accessible ' +
-                     'at Setup > Company > API Secrets.';
+        var detail = 'N/crypto module loaded; API Secrets surface ' +
+                     'accessible at Setup > Company > API Secrets.';
 
         try {
             var cfg = config.loadConfig();
             if (cfg && cfg.apiSecretId) {
-                detail += ' Existing API Key Secret (' + cfg.apiSecretId +
-                          ') is configured.';
+                // Functional verification: try to materialize the
+                // existing secret key. If the secret exists AND this
+                // script is in its allow-list, createSecretKey returns
+                // a key handle; otherwise it throws.
+                try {
+                    crypto.createSecretKey({
+                        secret: cfg.apiSecretId,
+                        encoding: crypto.Encoding.UTF_8
+                    });
+                    detail += ' Existing API Key Secret (' + cfg.apiSecretId +
+                              ') resolves cleanly.';
+                } catch (resolveErr) {
+                    return {
+                        id: 'api_secrets',
+                        label: 'API Secrets',
+                        status: 'warn',
+                        detail: 'Configured secret pointer (' +
+                                cfg.apiSecretId + ') exists but did not ' +
+                                'resolve: ' + (resolveErr && resolveErr.message
+                                    ? resolveErr.message : String(resolveErr)),
+                        repairHint: 'Add customscript_ctc_sl_wizard_api to ' +
+                                    'the secret\'s Restricted Scripts list ' +
+                                    '(Setup > Company > API Secrets > edit ' +
+                                    'the secret).'
+                    };
+                }
+            } else {
+                return {
+                    id: 'api_secrets',
+                    label: 'API Secrets',
+                    status: 'warn',
+                    detail: 'No API Key Secret pointer configured yet on ' +
+                            'the CTC config record. Step 2 (Connect Twilio) ' +
+                            'will guide you through creating one.'
+                };
             }
         } catch (e) {
-            // Config record may not exist yet on fresh installs — that's
-            // handled by configSingletonCheck. Don't double-report.
+            // Config record doesn't exist yet — handled by configSingletonCheck
         }
 
         return {
