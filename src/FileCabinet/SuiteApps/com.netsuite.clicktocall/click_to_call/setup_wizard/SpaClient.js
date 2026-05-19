@@ -35,7 +35,7 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         { num: 5, label: 'Reps & roles',    sub: 'Permissions' },
         { num: 6, label: 'Test & activate', sub: 'Go live' }
     ];
-    var CURRENT_STEP = 1; // 1-based
+    var CURRENT_STEP = 1; // 1-based; mutated by Continue/Back
 
     // Suitelet-as-API endpoint backing the wizard SPA. Same-origin →
     // NetSuite session cookies carry through; no separate auth needed.
@@ -44,9 +44,29 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         '?script=customscript_ctc_sl_wizard_api' +
         '&deploy=customdeploy_ctc_sl_wizard_api';
 
-    // Module-level handle to the step body container so the async
-    // wizardPrereqs response can swap its content post-mount.
-    var bodyContainer = null;
+    // Module-level state — populated by mount + form inputs.
+    var scriptCtx = null;          // for re-render via setContent
+    var bodyContainer = null;      // for swapping step body
+    var enums = null;              // cached enum bag from run()
+    var STATE = {
+        step2: { accountSid: '', apiKeySid: '', apiSecretId: '',
+                 apiKeySecretValue: '', validation: null },
+        step3: { twimlAppSid: '', phoneNumber: '', intelServiceSid: '',
+                 apiKeySecretValue: '', validations: null }
+    };
+
+    /**
+     * Shared Ajax helper. POSTs to the wizard API and returns the
+     * unwrapped payload (or null).
+     */
+    function wizardCall(action, payload) {
+        return core.Ajax.post(
+            WIZARD_API_URL + '&action=' + action,
+            payload || {},
+            { dataType: core.Ajax.DataType.JSON,
+              responseType: core.Ajax.ResponseType.JSON }
+        ).then(extractPayload);
+    }
 
     var run = function (scriptContext) {
         try {
@@ -70,7 +90,7 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             var Stp_Orient = (Stp && Stp.Orientation) ||
                              (SI && SI.Orientation) || {};
 
-            var root = buildRoot({
+            enums = {
                 SP: SP, CP: CP, H: H, T: T, Stp: Stp, SI: SI,
                 SP_Orient: SP_Orient,
                 SP_Gap: SP_Gap,
@@ -79,20 +99,44 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                 H_Type: H_Type,
                 T_Type: T_Type,
                 Stp_Orient: Stp_Orient
-            });
+            };
+            scriptCtx = scriptContext;
 
-            console.log("[CTC Setup Wizard] Mounting root:", root);
-            scriptContext.setContent(root);
-            console.log("[CTC Setup Wizard] setContent OK");
+            rerender();
 
             // Fire the Step 1 prereqs Ajax call now that the shell is
             // mounted. The body container shows a Loader until the
             // response arrives and replaces it with the check rows.
-            loadPrereqs();
+            if (CURRENT_STEP === 1) loadPrereqs();
         } catch (e) {
             console.error("[CTC Setup Wizard] run() threw:", e);
         }
     };
+
+    /**
+     * Rebuild and mount the full root tree. Called on initial render
+     * and on every step navigation. Keeps the stepper + title in sync
+     * with CURRENT_STEP.
+     */
+    function rerender() {
+        if (!scriptCtx || !enums) return;
+        try {
+            var root = buildRoot(enums);
+            scriptCtx.setContent(root);
+            console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
+        } catch (e) {
+            console.error("[CTC Setup Wizard] rerender threw:", e);
+        }
+    }
+
+    /**
+     * Advance to the next step (or jump to a specific step). Re-renders.
+     */
+    function goToStep(stepNum) {
+        CURRENT_STEP = Math.max(1, Math.min(STEPS.length, stepNum));
+        rerender();
+        if (CURRENT_STEP === 1) loadPrereqs();
+    }
 
     /**
      * Call the wizardPrereqs action and swap the body content with
@@ -105,30 +149,29 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             return;
         }
         console.log("[CTC Setup Wizard] Calling wizardPrereqs...");
-        core.Ajax.post(
-            WIZARD_API_URL + '&action=wizardPrereqs',
-            {},
-            { dataType: core.Ajax.DataType.JSON,
-              responseType: core.Ajax.ResponseType.JSON }
-        ).then(function (response) {
-            console.log("[CTC Setup Wizard] wizardPrereqs response:", response);
-            console.log("[CTC Setup Wizard]   typeof:", typeof response,
-                "keys:", response && typeof response === 'object'
-                    ? Object.keys(response) : "(n/a)");
-            // core.Ajax may return the parsed body directly OR a wrapper
-            // like { status, data, ... }. Try both shapes.
-            var payload = extractPayload(response);
-            console.log("[CTC Setup Wizard]   extracted payload:", payload);
-
+        wizardCall('wizardPrereqs', {}).then(function (payload) {
             var body;
             if (payload && payload.ok && payload.checks) {
+                // Wrap prereqs list with the nav footer so Continue button
+                // sits below the rows. Since loadPrereqs runs ONLY on
+                // initial Step 1 mount, we re-render the whole tree to
+                // pick up the new body.
                 body = buildPrereqsList(payload.checks);
             } else if (payload && payload.error) {
                 body = buildErrorBox(payload.error);
             } else {
                 body = buildErrorBox('unexpected response shape — see console');
             }
-            try { bodyContainer.setContent(body); }
+
+            // Compose body + nav footer so the Continue button is visible.
+            var stack = safeNew(component.StackPanel, {
+                items: [body, buildNavFooter(enums)]
+                    .filter(function (c) { return c != null; }),
+                orientation: component.StackPanel.Orientation.VERTICAL,
+                itemGap: component.StackPanel.GapSize.L
+            }, "StackPanel(prereqs+footer)") || body;
+
+            try { bodyContainer.setContent(stack); }
             catch (e) {
                 console.error("[CTC Setup Wizard] bodyContainer.setContent " +
                     "failed:", e);
@@ -138,7 +181,8 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             try {
                 bodyContainer.setContent(buildErrorBox(
                     'Network or server error calling wizardPrereqs — ' +
-                    'check browser DevTools Network tab for details.'));
+                    'check browser DevTools Network tab and the NetSuite ' +
+                    'Script Execution Log for details.'));
             } catch (e) { /* ignore */ }
         });
     }
@@ -252,29 +296,359 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     }
 
     /**
-     * Build the step body's outer container with a Loader inside.
-     * Stash the container on a module-level variable so loadPrereqs()
-     * can call setContent() on it once the Ajax response lands.
+     * Step-router for the body content. Dispatches on CURRENT_STEP and
+     * builds the appropriate per-step UI. Stash the outer container on
+     * a module-level variable so async actions can swap its content.
      */
     function buildStepBodyContainer(d) {
-        var loader = safeNew(component.Loader, {
-            label: "Running prerequisite checks…",
-            indeterminate: true
-        }, "Loader(prereqs)");
+        var initial;
+        if (CURRENT_STEP === 1) {
+            initial = safeNew(component.Loader, {
+                label: "Running prerequisite checks…",
+                indeterminate: true
+            }, "Loader(prereqs)") || safeNew(d.T, {
+                text: "Loading prerequisite checks…"
+            }, "Text(loading-fallback)");
+        } else if (CURRENT_STEP === 2) {
+            initial = buildStep2Form(d);
+        } else if (CURRENT_STEP === 3) {
+            initial = buildStep3Form(d);
+        } else {
+            initial = safeNew(d.T, {
+                text: "Step " + CURRENT_STEP + " ships in U5-U7.",
+                type: d.T_Type.WEAK
+            }, "Text(stub-step-" + CURRENT_STEP + ")");
+        }
 
-        var initial = loader || safeNew(d.T, {
-            text: "Loading prerequisite checks…"
-        }, "Text(loading-fallback)");
+        // Wrap content + navigation footer (Back/Continue) in a vertical
+        // StackPanel so the footer sits below whatever the step renders.
+        var stack = safeNew(d.SP, {
+            items: [initial, buildNavFooter(d)]
+                .filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, "StackPanel(body+footer)");
 
         var box = safeNew(d.CP, {
-            content: initial,
+            content: stack || initial,
             horizontalAlignment: d.CP_HAlign.STRETCH,
             outerGap: d.CP_Gap.L
         }, "ContentPanel(body)");
 
-        bodyContainer = box; // module-level for setContent swap later
+        bodyContainer = box;
         return box;
     }
+
+    /**
+     * Back / Continue button row at the bottom of every step.
+     * Step 1: no Back; Step N>1: Back goes to N-1; Continue advances
+     * (with per-step validation/save in onContinueClick).
+     */
+    function buildNavFooter(d) {
+        var ButtonType = (component.Button && component.Button.Type) || {};
+
+        var backBtn = (CURRENT_STEP > 1) ? safeNew(component.Button, {
+            label: "Back",
+            type: ButtonType.DEFAULT,
+            action: function () { goToStep(CURRENT_STEP - 1); }
+        }, "Button(back)") : null;
+
+        var nextBtn = (CURRENT_STEP < STEPS.length) ? safeNew(component.Button, {
+            label: "Continue",
+            type: ButtonType.PRIMARY,
+            action: function () { onContinueClick(); }
+        }, "Button(continue)") : null;
+
+        var items = [backBtn, nextBtn]
+            .filter(function (c) { return c != null; });
+        if (items.length === 0) return null;
+
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(nav-footer)");
+    }
+
+    /**
+     * Per-step Continue logic. Step 1 has no validation server-side
+     * (the prereqs were already loaded; admin chose to advance). Steps
+     * 2 + 3 dispatch the Save action; if it returns ok, advance.
+     */
+    function onContinueClick() {
+        if (CURRENT_STEP === 1) {
+            goToStep(2);
+            return;
+        }
+        if (CURRENT_STEP === 2) {
+            wizardCall('wizardSavePublicIds', {
+                accountSid:   STATE.step2.accountSid,
+                apiKeySid:    STATE.step2.apiKeySid,
+                apiSecretId:  STATE.step2.apiSecretId
+            }).then(function (payload) {
+                if (payload && payload.saved) goToStep(3);
+                else alert("Save failed: " +
+                    ((payload && payload.error) || 'unknown'));
+            }).catch(function (e) {
+                alert("Network error saving Step 2: " +
+                    (e && e.message ? e.message : String(e)));
+            });
+            return;
+        }
+        if (CURRENT_STEP === 3) {
+            wizardCall('wizardSaveVoice', {
+                twimlAppSid:     STATE.step3.twimlAppSid,
+                phoneNumber:     STATE.step3.phoneNumber,
+                intelServiceSid: STATE.step3.intelServiceSid
+            }).then(function (payload) {
+                if (payload && payload.saved) goToStep(4);
+                else alert("Save failed: " +
+                    ((payload && payload.error) || 'unknown'));
+            }).catch(function (e) {
+                alert("Network error saving Step 3: " +
+                    (e && e.message ? e.message : String(e)));
+            });
+            return;
+        }
+        goToStep(CURRENT_STEP + 1);
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* Step 2 — Connect Twilio                                            */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    function buildStep2Form(d) {
+        var rows = [];
+
+        rows.push(safeNew(d.H, {
+            content: "Connect to your Twilio account",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(step2)"));
+
+        rows.push(safeNew(d.T, {
+            text: "Enter your Twilio Account SID and API Key SID. " +
+                  "The API Key Secret must already exist in NetSuite " +
+                  "API Secrets (Setup > Company > API Secrets) — paste " +
+                  "its script ID below."
+        }, "Text(step2-intro)"));
+
+        rows.push(buildTextField('Account SID', 'AC...',
+            STATE.step2.accountSid,
+            function (v) { STATE.step2.accountSid = v; }));
+
+        rows.push(buildTextField('API Key SID', 'SK...',
+            STATE.step2.apiKeySid,
+            function (v) { STATE.step2.apiKeySid = v; }));
+
+        rows.push(buildTextField('API Key Secret script ID',
+            'custsecret_...',
+            STATE.step2.apiSecretId,
+            function (v) { STATE.step2.apiSecretId = v; }));
+
+        rows.push(safeNew(d.T, {
+            text: "Optional: paste the actual API Key Secret VALUE to " +
+                  "live-validate against Twilio's REST API. The value " +
+                  "is never stored — only used for this validation call.",
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, "Text(step2-validate-intro)"));
+
+        rows.push(buildTextField('API Key Secret value (for validation only)',
+            'paste secret to validate…',
+            STATE.step2.apiKeySecretValue,
+            function (v) { STATE.step2.apiKeySecretValue = v; }));
+
+        var validateBtn = safeNew(component.Button, {
+            label: "Validate with Twilio",
+            type: (component.Button && component.Button.Type)
+                ? component.Button.Type.DEFAULT : undefined,
+            action: function () { validateStep2(); }
+        }, "Button(validate-step2)");
+        if (validateBtn) rows.push(validateBtn);
+
+        // Inline validation result (populated post-validate, if any).
+        var resultText = STATE.step2.validation
+            ? safeNew(d.T, {
+                text: STATE.step2.validation.ok
+                    ? "✓ Connected to Twilio account: " +
+                      STATE.step2.validation.friendlyName + " (" +
+                      STATE.step2.validation.twilioStatus + ")"
+                    : "✕ Validation failed: " +
+                      STATE.step2.validation.errorMessage,
+                type: STATE.step2.validation.ok
+                    ? d.T_Type.STRONG : d.T_Type.STRONG
+            }, "Text(step2-result)")
+            : null;
+        if (resultText) rows.push(resultText);
+
+        return safeNew(d.SP, {
+            items: rows.filter(function (r) { return r != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(step2)");
+    }
+
+    function validateStep2() {
+        if (!STATE.step2.accountSid || !STATE.step2.apiKeySid ||
+            !STATE.step2.apiKeySecretValue) {
+            alert("Account SID, API Key SID, and API Key Secret VALUE " +
+                  "are all required to validate.");
+            return;
+        }
+        wizardCall('wizardValidateTwilio', {
+            accountSid:        STATE.step2.accountSid,
+            apiKeySid:         STATE.step2.apiKeySid,
+            apiKeySecretValue: STATE.step2.apiKeySecretValue
+        }).then(function (payload) {
+            STATE.step2.validation = (payload && payload.validation) || {
+                ok: false, errorMessage: 'No validation result returned.'
+            };
+            rerender();
+        }).catch(function (e) {
+            STATE.step2.validation = {
+                ok: false,
+                errorMessage: 'Network: ' + (e && e.message ? e.message : String(e))
+            };
+            rerender();
+        });
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* Step 3 — Voice config                                              */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    function buildStep3Form(d) {
+        var rows = [];
+
+        rows.push(safeNew(d.H, {
+            content: "Voice configuration",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(step3)"));
+
+        rows.push(safeNew(d.T, {
+            text: "Configure the TwiML application, default outbound " +
+                  "caller ID, and (optional) Conversational Intelligence " +
+                  "service for transcript analysis."
+        }, "Text(step3-intro)"));
+
+        rows.push(buildTextField('TwiML App SID', 'AP...',
+            STATE.step3.twimlAppSid,
+            function (v) { STATE.step3.twimlAppSid = v; }));
+
+        rows.push(buildTextField('Default outbound phone number (E.164)',
+            '+15551234567',
+            STATE.step3.phoneNumber,
+            function (v) { STATE.step3.phoneNumber = v; }));
+
+        rows.push(buildTextField('Conversational Intelligence Service SID (optional)',
+            'GA...',
+            STATE.step3.intelServiceSid,
+            function (v) { STATE.step3.intelServiceSid = v; }));
+
+        rows.push(safeNew(d.T, {
+            text: "Paste the API Key Secret VALUE again to live-validate. " +
+                  "Same one as Step 2 — not stored.",
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, "Text(step3-validate-intro)"));
+
+        rows.push(buildTextField('API Key Secret value (for validation only)',
+            'paste secret to validate…',
+            STATE.step3.apiKeySecretValue,
+            function (v) { STATE.step3.apiKeySecretValue = v; }));
+
+        var validateBtn = safeNew(component.Button, {
+            label: "Validate with Twilio",
+            type: (component.Button && component.Button.Type)
+                ? component.Button.Type.DEFAULT : undefined,
+            action: function () { validateStep3(); }
+        }, "Button(validate-step3)");
+        if (validateBtn) rows.push(validateBtn);
+
+        // Per-resource validation results.
+        if (STATE.step3.validations) {
+            var v = STATE.step3.validations;
+            if (v.twimlApp) {
+                rows.push(safeNew(d.T, {
+                    text: v.twimlApp.ok
+                        ? "✓ TwiML App: " + v.twimlApp.friendlyName +
+                          " — voice_url=" + (v.twimlApp.voiceUrl || '(not set)')
+                        : "✕ TwiML App: " + v.twimlApp.errorMessage,
+                    type: d.T_Type.STRONG
+                }, "Text(step3-twiml-result)"));
+            }
+            if (v.phoneNumber) {
+                rows.push(safeNew(d.T, {
+                    text: v.phoneNumber.ok
+                        ? "✓ Phone number owned by this account: " +
+                          v.phoneNumber.phoneNumber
+                        : "✕ Phone number: " + v.phoneNumber.errorMessage,
+                    type: d.T_Type.STRONG
+                }, "Text(step3-phone-result)"));
+            }
+            if (v.intelService) {
+                rows.push(safeNew(d.T, {
+                    text: v.intelService.ok
+                        ? "✓ Intel Service: " + v.intelService.friendlyName
+                        : "✕ Intel Service: " + v.intelService.errorMessage,
+                    type: d.T_Type.STRONG
+                }, "Text(step3-intel-result)"));
+            }
+        }
+
+        return safeNew(d.SP, {
+            items: rows.filter(function (r) { return r != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(step3)");
+    }
+
+    function validateStep3() {
+        if (!STATE.step3.twimlAppSid || !STATE.step3.apiKeySecretValue) {
+            alert("TwiML App SID and API Key Secret VALUE are required.");
+            return;
+        }
+        wizardCall('wizardValidateTwiML', {
+            twimlAppSid:       STATE.step3.twimlAppSid,
+            phoneNumber:       STATE.step3.phoneNumber,
+            intelServiceSid:   STATE.step3.intelServiceSid,
+            apiKeySecretValue: STATE.step3.apiKeySecretValue
+        }).then(function (payload) {
+            STATE.step3.validations = (payload && payload.validations) || {};
+            rerender();
+        }).catch(function (e) {
+            alert("Network error validating Step 3: " +
+                (e && e.message ? e.message : String(e)));
+        });
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* Shared form helper                                                 */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    function buildTextField(label, placeholder, currentValue, onChange) {
+        var tb = safeNew(component.TextBox, {
+            text: currentValue || '',
+            placeholder: placeholder,
+            onTextChanged: function (args) {
+                onChange(args && args.text ? args.text : '');
+            }
+        }, "TextBox(" + label + ")");
+        if (!tb) return null;
+
+        var lbl = safeNew(component.Text, {
+            text: label,
+            type: component.Text.Type.STRONG,
+            size: component.Text.Size ? component.Text.Size.S : undefined
+        }, "Text(label-" + label + ")");
+
+        return safeNew(component.StackPanel, {
+            items: [lbl, tb].filter(function (c) { return c != null; }),
+            orientation: component.StackPanel.Orientation.VERTICAL,
+            itemGap: component.StackPanel.GapSize.XXS
+        }, "StackPanel(field-" + label + ")") || tb;
+    }
+
 
     /**
      * Render a vertical list of prerequisite check rows.

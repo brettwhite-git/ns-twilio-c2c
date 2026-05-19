@@ -21,8 +21,8 @@
  * accounts; custom roles vary per install.
  */
 define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
-        './lib/ctc_config'],
-       (runtime, record, search, log, crypto, config) => {
+        './lib/ctc_config', './lib/ctc_twilio_admin'],
+       (runtime, record, search, log, crypto, config, twilio) => {
 
     // Standard role IDs are portable across NetSuite accounts.
     // Administrator = 3 (per NetSuite docs); custom roles vary.
@@ -351,12 +351,279 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
     /* Action dispatch table                                              */
     /* ------------------------------------------------------------------ */
 
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardSnapshot                                             */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Return the config snapshot the SPA uses to decide which step to
+     * land on. Pure read; no side effects. Called by the SpaClient on
+     * mount AFTER prereqs so the wizard can resume to the right step.
+     */
+    const wizardSnapshot = () => {
+        try {
+            const cfg = config.loadConfig();
+            return {
+                snapshot: {
+                    accountSid:        maskOrEmpty(cfg.accountSid),
+                    apiKeySid:         maskOrEmpty(cfg.apiKeySid),
+                    apiSecretId:       cfg.apiSecretId || '',
+                    twimlAppSid:       maskOrEmpty(cfg.twimlAppSid),
+                    phoneNumber:       cfg.phoneNumber || '',
+                    intelServiceSid:   maskOrEmpty(cfg.intelServiceSid),
+                    active:            cfg.active === true
+                }
+            };
+        } catch (e) {
+            // No config record yet — fresh install. Step 1's
+            // configSingletonCheck will create one.
+            return { snapshot: null };
+        }
+    };
+
+    const maskOrEmpty = (s) => {
+        if (!s || typeof s !== 'string' || !s.length) return '';
+        return twilio.maskSid(s);
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardValidateTwilio (Step 2)                              */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Live-validate Account SID + API Key SID + API Key Secret VALUE
+     * (the admin pastes the secret value into the wizard; we use it
+     * for the Basic Auth call here but never persist it — the secret
+     * lives in NetSuite API Secrets and is referenced by script ID).
+     *
+     * Validates BOTH credentials at once: the API Key pair must be
+     * correct for any call to succeed.
+     */
+    const wizardValidateTwilio = (payload) => {
+        const sids = validateSidPayload(payload, ['accountSid', 'apiKeySid']);
+        if (sids.error) return sids;
+
+        if (!payload.apiKeySecretValue || typeof payload.apiKeySecretValue !== 'string') {
+            return { ok: false, error: 'missing_api_key_secret' };
+        }
+
+        const result = twilio.pingAccount(
+            payload.accountSid, payload.apiKeySid, payload.apiKeySecretValue);
+
+        if (result.ok) {
+            return {
+                validation: {
+                    ok: true,
+                    friendlyName: result.friendlyName,
+                    twilioStatus: result.twilioStatus
+                }
+            };
+        }
+        return {
+            validation: {
+                ok: false,
+                errorCode: result.errorCode,
+                errorMessage: result.errorMessage
+            }
+        };
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardSavePublicIds (Step 2)                               */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Persist Account SID + API Key SID + API Key Secret script-ID
+     * pointer to the config singleton. NEVER writes the secret value.
+     * The admin is expected to have created the secret in NetSuite's
+     * API Secrets UI first and entered its script ID here.
+     */
+    const wizardSavePublicIds = (payload) => {
+        const sids = validateSidPayload(payload, ['accountSid', 'apiKeySid']);
+        if (sids.error) return sids;
+
+        if (!payload.apiSecretId || typeof payload.apiSecretId !== 'string') {
+            return { ok: false, error: 'missing_api_secret_id' };
+        }
+
+        const id = getConfigRecordId();
+        if (!id) return { ok: false, error: 'config_not_found' };
+
+        record.submitFields({
+            type: 'customrecord_ctc_config',
+            id: id,
+            values: {
+                custrecord_ctc_account_sid: payload.accountSid,
+                custrecord_ctc_api_key_sid: payload.apiKeySid,
+                custrecord_ctc_api_secret_id: payload.apiSecretId
+            }
+        });
+
+        log.audit({
+            title: 'CTC Wizard — Step 2 saved',
+            details: 'accountSid=' + twilio.maskSid(payload.accountSid) +
+                     ' apiKeySid=' + twilio.maskSid(payload.apiKeySid) +
+                     ' apiSecretId=' + payload.apiSecretId
+        });
+
+        return { saved: true };
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardValidateTwiML (Step 3)                               */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Live-validate the TwiML App SID + optional phone number + optional
+     * Intel Service SID. Uses the API Key already saved in Step 2 — the
+     * admin doesn't need to re-enter credentials.
+     */
+    const wizardValidateTwiML = (payload) => {
+        const cfg = loadConfigOrError();
+        if (cfg.error) return cfg;
+
+        if (!payload.twimlAppSid || typeof payload.twimlAppSid !== 'string') {
+            return { ok: false, error: 'missing_twiml_app_sid' };
+        }
+        if (!payload.apiKeySecretValue || typeof payload.apiKeySecretValue !== 'string') {
+            return { ok: false, error: 'missing_api_key_secret' };
+        }
+
+        const validations = {};
+
+        // TwiML App
+        validations.twimlApp = twilio.getApplication(
+            cfg.accountSid, payload.twimlAppSid,
+            cfg.apiKeySid, payload.apiKeySecretValue);
+
+        // Phone number (optional)
+        if (payload.phoneNumber) {
+            validations.phoneNumber = twilio.getPhoneNumberLookup(
+                cfg.accountSid, payload.phoneNumber,
+                cfg.apiKeySid, payload.apiKeySecretValue);
+        }
+
+        // Intel Service (optional)
+        if (payload.intelServiceSid) {
+            validations.intelService = twilio.getIntelService(
+                payload.intelServiceSid,
+                cfg.apiKeySid, payload.apiKeySecretValue);
+        }
+
+        return { validations: validations };
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardSaveVoice (Step 3)                                   */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Persist TwiML App SID + phone number + Intel Service SID to the
+     * config singleton.
+     */
+    const wizardSaveVoice = (payload) => {
+        const sids = validateSidPayload(payload, ['twimlAppSid']);
+        if (sids.error) return sids;
+
+        if (!payload.phoneNumber || typeof payload.phoneNumber !== 'string') {
+            return { ok: false, error: 'missing_phone_number' };
+        }
+
+        const id = getConfigRecordId();
+        if (!id) return { ok: false, error: 'config_not_found' };
+
+        const values = {
+            custrecord_ctc_twiml_app_sid: payload.twimlAppSid,
+            custrecord_ctc_phone_number: payload.phoneNumber
+        };
+        if (payload.intelServiceSid) {
+            values.custrecord_ctc_intel_service_sid = payload.intelServiceSid;
+        }
+
+        record.submitFields({
+            type: 'customrecord_ctc_config',
+            id: id,
+            values: values
+        });
+
+        log.audit({
+            title: 'CTC Wizard — Step 3 saved',
+            details: 'twimlApp=' + twilio.maskSid(payload.twimlAppSid) +
+                     ' phone=' + payload.phoneNumber +
+                     ' intelService=' +
+                        (payload.intelServiceSid
+                            ? twilio.maskSid(payload.intelServiceSid)
+                            : '(none)')
+        });
+
+        return { saved: true };
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Internal helpers used by Step 2 + 3                                */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Validate that a payload has all the required Twilio SID fields
+     * and that each one matches the expected prefix pattern.
+     */
+    const SID_PATTERNS = {
+        accountSid: /^AC[A-Za-z0-9]{32}$/,
+        apiKeySid: /^SK[A-Za-z0-9]{32}$/,
+        twimlAppSid: /^AP[A-Za-z0-9]{32}$/,
+        intelServiceSid: /^GA[A-Za-z0-9]{32}$/
+    };
+
+    const validateSidPayload = (payload, requiredFields) => {
+        for (let i = 0; i < requiredFields.length; i++) {
+            const field = requiredFields[i];
+            const value = payload && payload[field];
+            if (!value || typeof value !== 'string') {
+                return { ok: false, error: 'missing_' + field };
+            }
+            const pattern = SID_PATTERNS[field];
+            if (pattern && !pattern.test(value)) {
+                return { ok: false, error: 'invalid_format_' + field };
+            }
+        }
+        return {};
+    };
+
+    const getConfigRecordId = () => {
+        try {
+            const results = search.create({
+                type: 'customrecord_ctc_config',
+                filters: [['isinactive', 'is', 'F']],
+                columns: ['internalid']
+            }).run().getRange({ start: 0, end: 1 });
+            return results.length > 0 ? results[0].id : null;
+        } catch (e) {
+            log.error({
+                title: 'CTC Wizard — getConfigRecordId failed',
+                details: e && e.message ? e.message : String(e)
+            });
+            return null;
+        }
+    };
+
+    const loadConfigOrError = () => {
+        try { return config.loadConfig(); }
+        catch (e) { return { error: 'config_not_found' }; }
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action dispatch table                                              */
+    /* ------------------------------------------------------------------ */
+
     const ACTIONS = {
-        wizardPrereqs: wizardPrereqs
-        // U4-U7: wizardSavePublicIds, wizardValidateTwilio, wizardSaveVoice,
-        //        wizardValidateTwiML, wizardListNumbers, wizardSaveAssignments,
-        //        wizardListReps, wizardSaveRoles, wizardRunPreflight,
-        //        wizardActivate
+        wizardPrereqs:        wizardPrereqs,
+        wizardSnapshot:       wizardSnapshot,
+        wizardValidateTwilio: wizardValidateTwilio,
+        wizardSavePublicIds:  wizardSavePublicIds,
+        wizardValidateTwiML:  wizardValidateTwiML,
+        wizardSaveVoice:      wizardSaveVoice
+        // U5-U7: wizardListNumbers, wizardSaveAssignments, wizardListReps,
+        //        wizardSaveRoles, wizardRunPreflight, wizardActivate
     };
 
     return { onRequest };
