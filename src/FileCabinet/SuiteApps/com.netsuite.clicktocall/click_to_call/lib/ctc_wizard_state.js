@@ -77,23 +77,30 @@ define([], () => {
         if (!snapshot.hasVoiceConfig)    return 3;
         // Phone-number assignments live in a separate record; the Suitelet
         // queries that count on render. For snapshot purposes we treat
-        // hasVoiceConfig + !isActive as "still in Step 4 or 5 or 6". The
+        // hasVoiceConfig + !isActive as "still in Step 4 or 5". The
         // Suitelet refines this by also checking the rep_assignment count.
-        if (!snapshot.isActive)          return 6; // preflight + activate
-        return 6;                                  // activated — re-runnable preflight surface
+        if (!snapshot.isActive)          return 5; // preflight + activate
+        return 5;                                  // activated — re-runnable preflight surface
     };
 
     /**
      * Step number → display metadata for the stepper UI. Kept here so the
      * Suitelet's HTML render is data-driven.
      */
+    // 5-step flow. Original plan had 6 steps with a separate "Reps &
+    // roles" step, but it turned out redundant given Step 4 (phone
+    // number → rep assignments) already establishes the rep list, AND
+    // the deployment audience (`<allroles>T</allroles>` + runtime role
+    // check) means no role-level wiring is needed. Step 5 collapses
+    // into the final Test & Activate page, which now combines a
+    // configuration review, preflight checks, and activation in one
+    // surface — the "look once, run preflight, click activate" pattern.
     const STEPS = [
-        { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
-        { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
-        { num: 3, label: 'Voice config',  sub: 'TwiML & caller ID' },
-        { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
-        { num: 5, label: 'Reps & roles',  sub: 'Permissions' },
-        { num: 6, label: 'Test & activate', sub: 'Go live' }
+        { num: 1, label: 'Prerequisites',   sub: 'Setup checks' },
+        { num: 2, label: 'Connect Twilio',  sub: 'SIDs & secrets' },
+        { num: 3, label: 'Voice config',    sub: 'TwiML & caller ID' },
+        { num: 4, label: 'Phone numbers',   sub: 'Claim & assign' },
+        { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
 
     return {

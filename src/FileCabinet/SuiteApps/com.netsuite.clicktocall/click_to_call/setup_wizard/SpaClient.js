@@ -27,13 +27,16 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.run = void 0;
 
+    // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
+    // 6-step plan collapsed "Reps & roles" into the final "Test &
+    // activate" page (which now combines review + preflight + activate
+    // in one surface — see U7-collapse commit).
     var STEPS = [
         { num: 1, label: 'Prerequisites',   sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio',  sub: 'SIDs & secrets' },
         { num: 3, label: 'Voice config',    sub: 'TwiML & caller ID' },
         { num: 4, label: 'Phone numbers',   sub: 'Claim & assign' },
-        { num: 5, label: 'Reps & roles',    sub: 'Permissions' },
-        { num: 6, label: 'Test & activate', sub: 'Go live' }
+        { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
     var CURRENT_STEP = 1; // 1-based; mutated by Continue/Back
 
@@ -71,6 +74,14 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             // assignments shape: { <phoneSid>: { employeeIds: [n], label: '', primaryEmployeeId: n }, ... }
             assignments: {},
             listLoadError: null
+        },
+        step5: {
+            snapshot: null,        // from wizardSnapshot — config record state
+            assignments: null,     // from wizardLoadAssignments — current rep list
+            preflight: null,       // from wizardRunPreflight — check results array
+            activated: false,      // true after successful activate
+            activateError: null,
+            loading: false         // true while preflight is running
         }
     };
 
@@ -157,6 +168,7 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         if (CURRENT_STEP === 1) loadPrereqs();
         if (CURRENT_STEP === 3) loadStep3Lists();
         if (CURRENT_STEP === 4) loadStep4Lists();
+        if (CURRENT_STEP === 5) loadStep5();
     }
 
     /**
@@ -336,9 +348,11 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             initial = buildStep3Form(d);
         } else if (CURRENT_STEP === 4) {
             initial = buildStep4Form(d);
+        } else if (CURRENT_STEP === 5) {
+            initial = buildStep5Activate(d);
         } else {
             initial = safeNew(d.T, {
-                text: "Step " + CURRENT_STEP + " ships in U6-U7.",
+                text: "Step " + CURRENT_STEP + " not implemented.",
                 type: d.T_Type.WEAK
             }, "Text(stub-step-" + CURRENT_STEP + ")");
         }
@@ -931,6 +945,180 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                 // arrival triggers the render and picks up assignments
                 // synchronously since they're already in STATE.
             }).catch(function () { /* ignore — non-fatal */ });
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* Step 5 — Test & activate (review + preflight + activate)           */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    function buildStep5Activate(d) {
+        var rows = [];
+
+        rows.push(safeNew(d.H, {
+            content: "Test & activate",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(step5)"));
+
+        // If activated, show success state
+        if (STATE.step5.activated) {
+            rows.push(safeNew(d.T, {
+                text: "✓ Click-to-Call is active. Sales reps can now use " +
+                      "the phone icon on Customer, Lead, and Contact " +
+                      "records.",
+                type: d.T_Type.STRONG
+            }, "Text(activated)"));
+            return safeNew(d.SP, {
+                items: rows.filter(function (r) { return r != null; }),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(step5-activated)");
+        }
+
+        // Loading state (preflight running)
+        if (STATE.step5.loading) {
+            var loader = safeNew(component.Loader, {
+                label: "Running preflight checks…",
+                indeterminate: true
+            }, "Loader(step5)");
+            if (loader) rows.push(loader);
+            return safeNew(d.SP, {
+                items: rows.filter(function (r) { return r != null; }),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(step5-loading)");
+        }
+
+        // ── Configuration review section ─────────────────────────────
+        if (STATE.step5.snapshot) {
+            rows.push(safeNew(d.H, {
+                content: "Configuration review",
+                type: d.H_Type.SMALL_HEADING
+            }, "Heading(review)"));
+
+            var snap = STATE.step5.snapshot;
+            var assignmentCount = (STATE.step5.assignments || []).length;
+            var phoneNumbersWithReps = {};
+            (STATE.step5.assignments || []).forEach(function (a) {
+                if (a.phoneSid) phoneNumbersWithReps[a.phoneSid] = true;
+            });
+
+            var lines = [
+                'Account SID:        ' + (snap.accountSid || '(not set)'),
+                'API Key SID:        ' + (snap.apiKeySid || '(not set)'),
+                'API Key Secret:     ' + (snap.apiSecretId || '(not set)'),
+                'TwiML Application:  ' + (snap.twimlAppSid || '(not set)'),
+                'Default caller ID:  ' + (snap.phoneNumber || '(not set)'),
+                'Intel Service:      ' + (snap.intelServiceSid || '(none)'),
+                'Phone assignments:  ' + assignmentCount + ' rep(s) across ' +
+                    Object.keys(phoneNumbersWithReps).length + ' number(s)'
+            ];
+            lines.forEach(function (l) {
+                rows.push(safeNew(d.T, {
+                    text: l,
+                    type: d.T_Type.DEFAULT,
+                    size: d.T && d.T.Size ? d.T.Size.S : undefined
+                }, "Text(review-line)"));
+            });
+        }
+
+        // ── Preflight checks section ─────────────────────────────────
+        if (STATE.step5.preflight) {
+            rows.push(safeNew(d.H, {
+                content: "Preflight checks",
+                type: d.H_Type.SMALL_HEADING
+            }, "Heading(preflight)"));
+
+            STATE.step5.preflight.forEach(function (check) {
+                rows.push(buildCheckRow(check));
+            });
+        }
+
+        // ── Activate button ──────────────────────────────────────────
+        var allPassed = STATE.step5.preflight &&
+            STATE.step5.preflight.every(function (c) { return c.status === 'pass'; });
+
+        var activateBtn = safeNew(component.Button, {
+            label: allPassed ? "Activate Click-to-Call"
+                             : "Activate Click-to-Call (fix preflight first)",
+            type: (component.Button && component.Button.Type)
+                ? component.Button.Type.PRIMARY : undefined,
+            enabled: allPassed,
+            action: function () { onActivateClick(); }
+        }, "Button(activate)");
+        if (activateBtn) rows.push(activateBtn);
+
+        if (STATE.step5.activateError) {
+            rows.push(safeNew(d.T, {
+                text: "✕ Activation failed: " + STATE.step5.activateError,
+                type: d.T_Type.STRONG
+            }, "Text(activate-error)"));
+        }
+
+        // Re-run preflight button (for transient failures)
+        var rerunBtn = safeNew(component.Button, {
+            label: "Re-run preflight",
+            type: (component.Button && component.Button.Type)
+                ? component.Button.Type.DEFAULT : undefined,
+            action: function () { loadStep5(); }
+        }, "Button(rerun-preflight)");
+        if (rerunBtn) rows.push(rerunBtn);
+
+        return safeNew(d.SP, {
+            items: rows.filter(function (r) { return r != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(step5)");
+    }
+
+    function loadStep5() {
+        STATE.step5.loading = true;
+        STATE.step5.activateError = null;
+        rerender();
+
+        // Fire snapshot + assignments + preflight in parallel
+        wizardCall('wizardSnapshot', {})
+            .then(function (p) { STATE.step5.snapshot = p && p.snapshot; })
+            .catch(function () { STATE.step5.snapshot = null; });
+
+        wizardCall('wizardLoadAssignments', {})
+            .then(function (p) { STATE.step5.assignments = (p && p.items) || []; })
+            .catch(function () { STATE.step5.assignments = []; });
+
+        wizardCall('wizardRunPreflight', {})
+            .then(function (p) {
+                STATE.step5.preflight = (p && p.checks) || [];
+                STATE.step5.loading = false;
+                rerender();
+            }).catch(function (e) {
+                STATE.step5.preflight = [{
+                    id: 'network', label: 'Preflight call', status: 'fail',
+                    detail: 'Network error: ' +
+                        (e && e.message ? e.message : String(e))
+                }];
+                STATE.step5.loading = false;
+                rerender();
+            });
+    }
+
+    function onActivateClick() {
+        wizardCall('wizardActivate', {})
+        .then(function (payload) {
+            if (payload && payload.activated) {
+                STATE.step5.activated = true;
+                STATE.step5.activateError = null;
+            } else {
+                STATE.step5.activateError =
+                    (payload && payload.error) || 'unknown';
+                if (payload && payload.failedChecks) {
+                    STATE.step5.preflight = payload.failedChecks;
+                }
+            }
+            rerender();
+        }).catch(function (e) {
+            STATE.step5.activateError = 'Network: ' +
+                (e && e.message ? e.message : String(e));
+            rerender();
+        });
     }
 
     /* ────────────────────────────────────────────────────────────────── */

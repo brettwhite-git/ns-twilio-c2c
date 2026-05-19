@@ -21,8 +21,9 @@
  * accounts; custom roles vary per install.
  */
 define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
-        './lib/ctc_config', './lib/ctc_twilio_admin'],
-       (runtime, record, search, log, crypto, config, twilio) => {
+        './lib/ctc_config', './lib/ctc_twilio_admin',
+        './lib/ctc_twilio_jwt'],
+       (runtime, record, search, log, crypto, config, twilio, jwt) => {
 
     // Standard role IDs are portable across NetSuite accounts.
     // Administrator = 3 (per NetSuite docs); custom roles vary.
@@ -822,6 +823,231 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
     /* Action dispatch table                                              */
     /* ------------------------------------------------------------------ */
 
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardRunPreflight (Step 5 — Test & activate)              */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Run 5 preflight checks in sequence. Returns structured results
+     * the SPA renders as a pass/fail list. The "Activate" button is
+     * enabled only when all 5 pass.
+     */
+    const wizardRunPreflight = () => {
+        const checks = [];
+        let cfg = null;
+
+        try { cfg = config.loadConfig(); }
+        catch (e) {
+            checks.push({ id: 'config', label: 'Configuration loaded',
+                          status: 'fail',
+                          detail: 'Config record missing — return to Step 2.' });
+            return { checks: checks, allPassed: false };
+        }
+
+        // 1. Twilio REST ping
+        const ping = twilio.pingAccount(cfg);
+        checks.push({
+            id: 'twilio_ping',
+            label: 'Twilio REST API reachable',
+            status: ping.ok ? 'pass' : 'fail',
+            detail: ping.ok
+                ? 'Connected to account: ' + ping.friendlyName +
+                  ' (' + ping.twilioStatus + ')'
+                : (ping.errorMessage || 'Twilio call failed'),
+            repairHint: ping.ok ? null
+                : (ping.errorCode === 'EMPTY_SECRET_OR_INVALID'
+                    ? 'Paste API Key Secret value at Setup > Company > API Secrets'
+                    : 'Verify Account SID, API Key SID, and API Key Secret')
+        });
+
+        // 2. JWT mint dry-run
+        try {
+            const token = jwt.generateAccessToken({
+                accountSid: cfg.accountSid,
+                apiKeySid: cfg.apiKeySid,
+                apiSecretId: cfg.apiSecretId,
+                twimlAppSid: cfg.twimlAppSid,
+                identity: 'wizard-preflight',
+                ttl: 60
+            });
+            const looksLikeJWT = typeof token === 'string' &&
+                                 token.split('.').length === 3;
+            checks.push({
+                id: 'jwt_mint',
+                label: 'Voice token (JWT) mints',
+                status: looksLikeJWT ? 'pass' : 'fail',
+                detail: looksLikeJWT
+                    ? 'Token signed with HMAC-SHA256 via N/crypto + custsecret'
+                    : 'Unexpected token shape: ' + String(token).slice(0, 60)
+            });
+        } catch (e) {
+            checks.push({
+                id: 'jwt_mint',
+                label: 'Voice token (JWT) mints',
+                status: 'fail',
+                detail: 'JWT mint threw: ' + (e && e.message ? e.message : e),
+                repairHint: 'Verify the API Key Secret pointer (' +
+                            cfg.apiSecretId + ') is configured at Setup > ' +
+                            'Company > API Secrets with a valid value.'
+            });
+        }
+
+        // 3. N/crypto secret resolves
+        try {
+            crypto.createSecretKey({
+                secret: cfg.apiSecretId,
+                encoding: crypto.Encoding.UTF_8
+            });
+            checks.push({
+                id: 'secret_resolves',
+                label: 'API Key Secret resolves via N/crypto',
+                status: 'pass',
+                detail: cfg.apiSecretId + ' is in this script\'s allow-list.'
+            });
+        } catch (e) {
+            checks.push({
+                id: 'secret_resolves',
+                label: 'API Key Secret resolves via N/crypto',
+                status: 'fail',
+                detail: 'createSecretKey threw: ' +
+                        (e && e.message ? e.message : String(e)),
+                repairHint: 'Add this Suitelet to ' + cfg.apiSecretId +
+                            '\'s Restricted Scripts list'
+            });
+        }
+
+        // 4. rep_assignment record queryable
+        try {
+            const rows = search.create({
+                type: 'customrecord_ctc_rep_assignment',
+                filters: [['isinactive', 'is', 'F']],
+                columns: ['internalid']
+            }).run().getRange({ start: 0, end: 1000 });
+            checks.push({
+                id: 'rep_assignments',
+                label: 'Rep assignments queryable',
+                status: 'pass',
+                detail: rows.length + ' assignment row(s) exist.'
+            });
+        } catch (e) {
+            checks.push({
+                id: 'rep_assignments',
+                label: 'Rep assignments queryable',
+                status: 'fail',
+                detail: e && e.message ? e.message : String(e)
+            });
+        }
+
+        // 5. CTC script deployments active
+        try {
+            const ctcScriptIds = [
+                'customscript_ctc_ue_phone_button',
+                'customscript_ctc_ue_transcript_viewer',
+                'customscript_ctc_sl_softphone',
+                'customscript_ctc_rl_token',
+                'customscript_ctc_ss_poll',
+                'customscript_ctc_pl_dashboard',
+                'customscript_ctc_sl_wizard_api'
+            ];
+            const deploys = search.create({
+                type: 'scriptdeployment',
+                filters: [
+                    ['script.scriptid', 'anyof', ctcScriptIds], 'AND',
+                    ['isdeployed', 'is', 'T']
+                ],
+                columns: ['scriptid', 'script']
+            }).run().getRange({ start: 0, end: 50 });
+            checks.push({
+                id: 'deployments',
+                label: 'CTC script deployments active',
+                status: deploys.length >= ctcScriptIds.length - 1 ? 'pass' : 'warn',
+                detail: deploys.length + ' active deployment(s) found ' +
+                        '(expected ' + ctcScriptIds.length + ').'
+            });
+        } catch (e) {
+            checks.push({
+                id: 'deployments',
+                label: 'CTC script deployments active',
+                status: 'warn',
+                detail: 'Could not enumerate: ' +
+                        (e && e.message ? e.message : String(e))
+            });
+        }
+
+        const allPassed = checks.every(function (c) { return c.status === 'pass'; });
+        return { checks: checks, allPassed: allPassed };
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardActivate (Step 5 — flip active flag)                 */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Server re-runs preflight, then if all checks pass, flips
+     * `custrecord_ctc_active` to T on the config singleton. Idempotent
+     * — calling twice returns alreadyActive=true.
+     */
+    const wizardActivate = () => {
+        const id = getConfigRecordId();
+        if (!id) return { ok: false, error: 'config_not_found' };
+
+        // Server-side re-validation (don't trust client claim of "all pass")
+        const preflight = wizardRunPreflight();
+        if (!preflight.allPassed) {
+            return {
+                ok: false,
+                error: 'preflight_failed',
+                failedChecks: preflight.checks.filter(function (c) {
+                    return c.status !== 'pass';
+                })
+            };
+        }
+
+        try {
+            const current = search.lookupFields({
+                type: 'customrecord_ctc_config',
+                id: id,
+                columns: ['custrecord_ctc_active']
+            });
+            const alreadyActive = current.custrecord_ctc_active === true ||
+                                  current.custrecord_ctc_active === 'T';
+
+            if (!alreadyActive) {
+                record.submitFields({
+                    type: 'customrecord_ctc_config',
+                    id: id,
+                    values: { custrecord_ctc_active: true }
+                });
+
+                // Count reps + numbers for the audit log
+                const assignmentCount = search.create({
+                    type: 'customrecord_ctc_rep_assignment',
+                    filters: [['isinactive', 'is', 'F']],
+                    columns: ['internalid']
+                }).run().getRange({ start: 0, end: 1000 }).length;
+
+                log.audit({
+                    title: 'CTC Activated',
+                    details: 'user=' + runtime.getCurrentUser().id +
+                             ' assignmentCount=' + assignmentCount
+                });
+            }
+
+            return { activated: true, alreadyActive: alreadyActive };
+        } catch (e) {
+            log.error({
+                title: 'CTC Wizard — activate failed',
+                details: e && e.message ? e.message : String(e)
+            });
+            return { ok: false, error: 'activate_failed',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action dispatch table                                              */
+    /* ------------------------------------------------------------------ */
+
     const ACTIONS = {
         wizardPrereqs:           wizardPrereqs,
         wizardSnapshot:          wizardSnapshot,
@@ -834,8 +1060,9 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto',
         wizardSaveVoice:         wizardSaveVoice,
         wizardListEmployees:     wizardListEmployees,
         wizardLoadAssignments:   wizardLoadAssignments,
-        wizardSaveAssignments:   wizardSaveAssignments
-        // U6-U7: wizardRunPreflight, wizardActivate
+        wizardSaveAssignments:   wizardSaveAssignments,
+        wizardRunPreflight:      wizardRunPreflight,
+        wizardActivate:          wizardActivate
     };
 
     return { onRequest };
