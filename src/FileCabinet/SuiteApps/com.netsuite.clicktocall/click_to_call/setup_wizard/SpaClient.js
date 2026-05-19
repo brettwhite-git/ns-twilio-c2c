@@ -112,11 +112,21 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
               responseType: core.Ajax.ResponseType.JSON }
         ).then(function (response) {
             console.log("[CTC Setup Wizard] wizardPrereqs response:", response);
+            console.log("[CTC Setup Wizard]   typeof:", typeof response,
+                "keys:", response && typeof response === 'object'
+                    ? Object.keys(response) : "(n/a)");
+            // core.Ajax may return the parsed body directly OR a wrapper
+            // like { status, data, ... }. Try both shapes.
+            var payload = extractPayload(response);
+            console.log("[CTC Setup Wizard]   extracted payload:", payload);
+
             var body;
-            if (response && response.ok && response.checks) {
-                body = buildPrereqsList(response.checks);
+            if (payload && payload.ok && payload.checks) {
+                body = buildPrereqsList(payload.checks);
+            } else if (payload && payload.error) {
+                body = buildErrorBox(payload.error);
             } else {
-                body = buildErrorBox(response && response.error || 'unknown_error');
+                body = buildErrorBox('unexpected response shape — see console');
             }
             try { bodyContainer.setContent(body); }
             catch (e) {
@@ -210,6 +220,37 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
      * Outer container:
      *   StackPanel(HORIZONTAL, justification=SPACE_BETWEEN, gap=M)
      */
+    /**
+     * core.Ajax may return either the parsed JSON body directly, or a
+     * wrapper object like { status, statusText, data, responseHeaders }.
+     * Probe both shapes so we don't care which one this UIF version
+     * uses.
+     */
+    function extractPayload(response) {
+        if (response == null) return null;
+        // Direct: response IS the parsed body
+        if (response.ok !== undefined || response.checks !== undefined ||
+            response.error !== undefined) {
+            return response;
+        }
+        // Wrapped: try common wrapper keys
+        if (typeof response === 'object') {
+            if (response.data && typeof response.data === 'object') return response.data;
+            if (response.body && typeof response.body === 'object') return response.body;
+            if (response.response && typeof response.response === 'object') return response.response;
+            // Sometimes the response is a string that needs re-parse
+            if (typeof response.responseText === 'string') {
+                try { return JSON.parse(response.responseText); }
+                catch (e) { /* fall through */ }
+            }
+        }
+        if (typeof response === 'string') {
+            try { return JSON.parse(response); }
+            catch (e) { return null; }
+        }
+        return null;
+    }
+
     /**
      * Build the step body's outer container with a Loader inside.
      * Stash the container on a module-level variable so loadPrereqs()
