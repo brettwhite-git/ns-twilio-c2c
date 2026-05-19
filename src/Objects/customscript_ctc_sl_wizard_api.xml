@@ -1,0 +1,41 @@
+<suitelet scriptid="customscript_ctc_sl_wizard_api">
+    <name>CTC Setup Wizard API</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_sl_wizard_api.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <status>RELEASED</status>
+    <isinactive>F</isinactive>
+    <loglevel>DEBUG</loglevel>
+    <!--
+      JSON-only Suitelet that backs the v2 Setup Wizard SPA. Suitelet-as-API
+      pattern (plan §3 / SDF Pitfall #29/30) — routes wizard AJAX through
+      user-session bandwidth instead of the RESTlet Web Services Concurrent
+      User Limit (which is shared with the softphone token RESTlet).
+
+      Admin-only:
+        - <allroles>T</allroles> at the deployment level lets the URL be
+          *reachable* by any internal role; the Suitelet's onRequest
+          enforces the actual admin gate at runtime (defense in depth).
+          (We can't use <permittedrole>ADMINISTRATOR</permittedrole> on
+          scriptdeployment XML — SDF silently ignores it; that element is
+          only valid on customrecord <permissions> blocks. See the
+          U2-fix lesson in commit 19dc379.)
+        - <isonline>F</isonline> is REQUIRED for data-modifying Suitelets
+          (SDF Pitfall #135). The wizard creates the config singleton on
+          fresh installs and will eventually write Twilio credentials.
+        - NO <runasrole> — calling admin already has the privileges;
+          avoid privilege-escalation antipattern.
+    -->
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_sl_wizard_api">
+            <title>CTC Setup Wizard API</title>
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <loglevel>DEBUG</loglevel>
+            <allroles>T</allroles>
+            <isonline>F</isonline>
+        </scriptdeployment>
+    </scriptdeployments>
+</suitelet>

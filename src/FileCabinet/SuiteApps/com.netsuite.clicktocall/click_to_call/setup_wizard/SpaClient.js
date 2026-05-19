@@ -37,6 +37,17 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     ];
     var CURRENT_STEP = 1; // 1-based
 
+    // Suitelet-as-API endpoint backing the wizard SPA. Same-origin →
+    // NetSuite session cookies carry through; no separate auth needed.
+    var WIZARD_API_URL =
+        '/app/site/hosting/scriptlet.nl' +
+        '?script=customscript_ctc_sl_wizard_api' +
+        '&deploy=customdeploy_ctc_sl_wizard_api';
+
+    // Module-level handle to the step body container so the async
+    // wizardPrereqs response can swap its content post-mount.
+    var bodyContainer = null;
+
     var run = function (scriptContext) {
         try {
             console.log("[CTC Setup Wizard] === REAL API PASS ===");
@@ -73,10 +84,54 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             console.log("[CTC Setup Wizard] Mounting root:", root);
             scriptContext.setContent(root);
             console.log("[CTC Setup Wizard] setContent OK");
+
+            // Fire the Step 1 prereqs Ajax call now that the shell is
+            // mounted. The body container shows a Loader until the
+            // response arrives and replaces it with the check rows.
+            loadPrereqs();
         } catch (e) {
             console.error("[CTC Setup Wizard] run() threw:", e);
         }
     };
+
+    /**
+     * Call the wizardPrereqs action and swap the body content with
+     * the rendered check rows when the response arrives.
+     */
+    function loadPrereqs() {
+        if (!bodyContainer) {
+            console.warn("[CTC Setup Wizard] bodyContainer missing — " +
+                "cannot render prereqs");
+            return;
+        }
+        console.log("[CTC Setup Wizard] Calling wizardPrereqs...");
+        core.Ajax.post(
+            WIZARD_API_URL + '&action=wizardPrereqs',
+            {},
+            { dataType: core.Ajax.DataType.JSON,
+              responseType: core.Ajax.ResponseType.JSON }
+        ).then(function (response) {
+            console.log("[CTC Setup Wizard] wizardPrereqs response:", response);
+            var body;
+            if (response && response.ok && response.checks) {
+                body = buildPrereqsList(response.checks);
+            } else {
+                body = buildErrorBox(response && response.error || 'unknown_error');
+            }
+            try { bodyContainer.setContent(body); }
+            catch (e) {
+                console.error("[CTC Setup Wizard] bodyContainer.setContent " +
+                    "failed:", e);
+            }
+        }).catch(function (err) {
+            console.error("[CTC Setup Wizard] wizardPrereqs Ajax failed:", err);
+            try {
+                bodyContainer.setContent(buildErrorBox(
+                    'Network or server error calling wizardPrereqs — ' +
+                    'check browser DevTools Network tab for details.'));
+            } catch (e) { /* ignore */ }
+        });
+    }
 
     function buildRoot(d) {
         // ── Page title (Heading uses `content`, not `text`) ─────────────
@@ -105,18 +160,10 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             }, "ContentPanel(stepper, STRETCH)") || stepper;
         }
 
-        // ── Step body placeholder ───────────────────────────────────────
-        var bodyText = safeNew(d.T, {
-            text: "Per-step UI ships in U3-U7. Real UIF API confirmed " +
-                "via the @uif-js TypeScript definitions — no more " +
-                "prop-name guessing."
-        }, "Text(body)");
-
-        var bodyBox = bodyText ? safeNew(d.CP, {
-            content: bodyText,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            outerGap: d.CP_Gap.L
-        }, "ContentPanel(body)") || bodyText : null;
+        // ── Step body — buildStepBody is async (Ajax call) ──────────────
+        //   Initial render shows a Loader; the Ajax response replaces it
+        //   via the body container's setContent post-mount.
+        var bodyBox = buildStepBodyContainer(d);
 
         // ── Outer vertical stack ────────────────────────────────────────
         var children = [title, subtitle, stepperBox, bodyBox]
@@ -163,6 +210,145 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
      * Outer container:
      *   StackPanel(HORIZONTAL, justification=SPACE_BETWEEN, gap=M)
      */
+    /**
+     * Build the step body's outer container with a Loader inside.
+     * Stash the container on a module-level variable so loadPrereqs()
+     * can call setContent() on it once the Ajax response lands.
+     */
+    function buildStepBodyContainer(d) {
+        var loader = safeNew(component.Loader, {
+            label: "Running prerequisite checks…",
+            indeterminate: true
+        }, "Loader(prereqs)");
+
+        var initial = loader || safeNew(d.T, {
+            text: "Loading prerequisite checks…"
+        }, "Text(loading-fallback)");
+
+        var box = safeNew(d.CP, {
+            content: initial,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            outerGap: d.CP_Gap.L
+        }, "ContentPanel(body)");
+
+        bodyContainer = box; // module-level for setContent swap later
+        return box;
+    }
+
+    /**
+     * Render a vertical list of prerequisite check rows.
+     * Each row: pass/fail icon + label + detail (+ repair hint if any).
+     */
+    function buildPrereqsList(checks) {
+        var rows = checks.map(function (c) { return buildCheckRow(c); })
+                         .filter(function (r) { return r != null; });
+
+        if (rows.length === 0) {
+            return safeNew(component.Text, {
+                text: "No checks returned."
+            }, "Text(empty-checks)");
+        }
+
+        return safeNew(component.StackPanel, {
+            items: rows,
+            orientation: component.StackPanel.Orientation.VERTICAL,
+            itemGap: component.StackPanel.GapSize.M
+        }, "StackPanel(prereqs)");
+    }
+
+    /**
+     * One check row. Status icon comes from a Badge (SOLID green-ish
+     * for pass, SUBTLE for warn/info, SOLID red-ish for fail — within
+     * the limits of Badge.Type's two-value enum).
+     */
+    function buildCheckRow(check) {
+        var icon = badgeFor(check.status);
+
+        var labelText = safeNew(component.Text, {
+            text: check.label,
+            type: component.Text.Type.STRONG
+        }, "Text(row-label)");
+
+        var detailText = check.detail ? safeNew(component.Text, {
+            text: check.detail,
+            type: component.Text.Type.WEAK,
+            size: component.Text.Size.S
+        }, "Text(row-detail)") : null;
+
+        var hintText = check.repairHint ? safeNew(component.Text, {
+            text: "→ " + check.repairHint,
+            type: component.Text.Type.DEFAULT,
+            size: component.Text.Size.S
+        }, "Text(row-hint)") : null;
+
+        var rightStackItems = [labelText, detailText, hintText]
+            .filter(function (c) { return c != null; });
+
+        var rightStack = safeNew(component.StackPanel, {
+            items: rightStackItems,
+            orientation: component.StackPanel.Orientation.VERTICAL,
+            itemGap: component.StackPanel.GapSize.XXS
+        }, "StackPanel(row-right)");
+
+        var rowItems = [icon, rightStack]
+            .filter(function (c) { return c != null; });
+
+        return safeNew(component.StackPanel, {
+            items: rowItems,
+            orientation: component.StackPanel.Orientation.HORIZONTAL,
+            alignment: component.StackPanel.Alignment.START,
+            itemGap: component.StackPanel.GapSize.M
+        }, "StackPanel(row)");
+    }
+
+    /**
+     * Status badge: pass=✓, fail=✕, warn=!, info_enabled=ⓘ, info_disabled=○
+     */
+    function badgeFor(status) {
+        var content, type;
+        switch (status) {
+            case 'pass':
+                content = '✓';
+                type = component.Badge.Type.SOLID;
+                break;
+            case 'fail':
+                content = '✕';
+                type = component.Badge.Type.SOLID;
+                break;
+            case 'warn':
+                content = '!';
+                type = component.Badge.Type.SOLID;
+                break;
+            case 'info_enabled':
+                content = 'ⓘ';
+                type = component.Badge.Type.SUBTLE;
+                break;
+            case 'info_disabled':
+                content = '○';
+                type = component.Badge.Type.SUBTLE;
+                break;
+            default:
+                content = '?';
+                type = component.Badge.Type.SUBTLE;
+        }
+        return safeNew(component.Badge, {
+            content: content,
+            type: type,
+            size: component.Badge.Size.DEFAULT
+        }, "Badge(status-" + status + ")");
+    }
+
+    /**
+     * Error-state body content when the Ajax call fails or the server
+     * returns ok=false.
+     */
+    function buildErrorBox(errorMessage) {
+        return safeNew(component.Text, {
+            text: "Could not load prerequisite checks: " + errorMessage,
+            type: component.Text.Type.STRONG
+        }, "Text(error)");
+    }
+
     function buildStepper(d) {
         if (!d.SP || !d.T || !d.SI) {
             // Note: d.SI here is just used as a presence check (StepperItem
