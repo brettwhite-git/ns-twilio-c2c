@@ -77,8 +77,18 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     };
 
     function buildRoot(enums) {
+        // Heading needs a `type` enum to render visibly. Default (no type)
+        // produces a zero-height element in the UI polish pass.
+        var HType = (component.Heading && component.Heading.Type) || {};
+        var headingType = HType.LARGE_HEADING || HType.LARGE ||
+                          HType.MEDIUM_HEADING || HType.MEDIUM ||
+                          HType.HEADING;
+        console.log("[CTC Setup Wizard] Heading.Type keys:",
+            Object.keys(HType), "-> picked:", headingType);
+
         var heading = safeNew(component.Heading, {
-            text: "Click-to-Call Setup Wizard"
+            text: "Click-to-Call Setup Wizard",
+            type: headingType
         }, "Heading");
 
         var subheading = safeNew(component.Text, {
@@ -155,13 +165,21 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         }
         if (items.length === 0) return null;
 
-        // Stepper stays horizontal — that's the wizard convention.
+        // Stepper has its OWN Orientation enum (Stepper.Orientation),
+        // distinct from StackPanel.Orientation — passing the wrong one
+        // fails enum validation. Default is horizontal; just omit unless
+        // we explicitly need vertical.
+        var SOrientation = (component.Stepper && component.Stepper.Orientation) || {};
+        console.log("[CTC Setup Wizard] Stepper.Orientation keys:",
+            Object.keys(SOrientation));
+
         var stepperOpts = {
             items: items,
             selectedStepIndex: CURRENT_STEP - 1
         };
-        if (enums.HORIZONTAL !== undefined) {
-            stepperOpts.orientation = enums.HORIZONTAL;
+        // Only set orientation if Stepper's own enum has HORIZONTAL.
+        if (SOrientation.HORIZONTAL !== undefined) {
+            stepperOpts.orientation = SOrientation.HORIZONTAL;
         }
 
         return safeNew(component.Stepper, stepperOpts, "Stepper");
