@@ -18,14 +18,24 @@
                  records — must never run anonymously. Always set explicitly;
                  do not rely on implicit defaults. -->
             <isonline>F</isonline>
-            <!-- Admin-only access. Standard role ADMINISTRATOR is portable
-                 across all NetSuite accounts. Custom roles cannot be
-                 referenced in SuiteApp XML per the SuiteApp constraint. -->
-            <permittedrole>ADMINISTRATOR</permittedrole>
+            <!-- Audience: all internal roles can REACH the URL; the Suitelet's
+                 runtime onRequest immediately gates non-admin role IDs and
+                 returns an access-denied HTML page. Runtime gating (Layer 2
+                 in the plan) is the actual security boundary; the deployment
+                 audience just controls who can hit the URL.
+
+                 Note: an earlier draft tried <permittedrole>ADMINISTRATOR
+                 </permittedrole> on this deployment — that element is NOT
+                 valid on a <scriptdeployment> (it belongs on customrecord
+                 <permissions> blocks) and SDF silently ignored it, leaving
+                 the deployment with no audience and locking out every role
+                 including ADMINISTRATOR. Centerlink-level audience controls
+                 who SEES the menu link; deployment-level audience controls
+                 who can hit the URL even if they have it. -->
+            <allroles>T</allroles>
             <!-- NO <runasrole> (SDF security guide: never <runasrole>ADMINISTRATOR</runasrole>
                  in production — privilege-escalation antipattern). The calling
                  admin's own privileges authorize the writes. -->
-            <!-- NO <allroles>T</allroles> — admin-only, not all internal roles. -->
         </scriptdeployment>
     </scriptdeployments>
 </suitelet>
