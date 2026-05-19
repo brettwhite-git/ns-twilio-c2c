@@ -315,7 +315,10 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
                     "row.appendChild(du);" +
                     "var vw=document.createElement('a');vw.className='ctc-pl-view-call';vw.href='/app/crm/calendar/call.nl?id='+encodeURIComponent(r.id||'');vw.target='_blank';vw.rel='noopener';vw.title='Open Phone Call record (transcript + AI summary)';vw.textContent='📋';row.appendChild(vw);" +
                     "var rd=document.createElement('button');rd.className='ctc-pl-redial';rd.type='button';rd.title='Call this contact';" +
-                    // Build phone SVG via DOM (XSS-safe; no innerHTML string parsing)
+                    // Build phone SVG via DOM (XSS-safe; no innerHTML string parsing).
+                    // Iter B retains the SVG path over the legacy ☎ text glyph for
+                    // colour-inheritance + sizing consistency with the softphone
+                    // dialpad button.
                     "var svgNS='http://www.w3.org/2000/svg';" +
                     "var svg=document.createElementNS(svgNS,'svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','currentColor');" +
                     "var p=document.createElementNS(svgNS,'path');p.setAttribute('d','" + escapeJs(PHONE_SVG_PATH) + "');" +
