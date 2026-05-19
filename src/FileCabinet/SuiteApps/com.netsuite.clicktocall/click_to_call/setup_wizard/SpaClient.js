@@ -1,21 +1,31 @@
+/* eslint-disable suitescript/script-type */
 /**
  * @NApiVersion 2.1
  *
- * Setup Wizard v2 — client-side UIF app (browser-side).
+ * Setup Wizard v2 — DIAGNOSTIC client script.
  *
- * U2-rev shell: lays down the Stepper + step-pane shell with placeholder
- * content for Steps 1-6. U3-U7 fill in each step's form, validation, and
- * server-action calls.
+ * The earlier hand-authored "imperative API" attempt at this file
+ * rendered a blank page because I guessed at the UIF method signatures
+ * (Component.create({...}), addItem({item:x}), StackOrientation enum,
+ * etc.) — none of which exist. UIF's authoring surface is React-style
+ * JSX, which compiles to `new ComponentName(options)` constructor calls.
+ * Without a JSX build chain (Babel + the @uif-js Babel preset), we
+ * cannot hand-author UIF SPAs from this project today.
  *
- * UIF authoring constraints (SDF Pitfall #98):
- *   - No raw DOM access — `document.getElementById`, jQuery, innerHTML
- *     are forbidden. Use UIF components only.
- *   - All UI built via @uif-js/core (StackPanel, FlexLayout, etc.) and
- *     @uif-js/component (Button, Form, Stepper, etc.).
+ * THIS DIAGNOSTIC VERSION:
+ *   1. Logs the full shape of `scriptContext` to the browser console
+ *      so the next session can see exactly what's reachable.
+ *   2. Tries the most likely mount patterns in order, logging which
+ *      one succeeds (if any).
+ *   3. Surfaces a visible error in the DOM if every pattern fails, so
+ *      blank-page-no-feedback debugging stops here.
  *
- * The wizard's state-machine logic (which step to land on, snapshot
- * derivation) is shared with the retired Suitelet via lib/ctc_wizard_state.js
- * — pure functions that don't depend on the rendering layer.
+ * Next session task: based on this diagnostic output, decide whether to
+ *   (a) set up a JSX build chain locally and author the wizard properly
+ *       in TSX/JSX (compile to AMD on deploy), or
+ *   (b) revert to the Suitelet shell that was working before the SPA
+ *       pivot and ship the wizard there with a proper centerlink for
+ *       Setup > Click-to-Call menu placement.
  */
 define(["require", "exports", "@uif-js/core", "@uif-js/component"],
        function (require, exports, core, component) {
@@ -23,172 +33,110 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.run = void 0;
 
-    // Step catalog mirrors lib/ctc_wizard_state.STEPS (kept in sync
-    // manually until U3 wires the server snapshot fetch). Once the
-    // first server action ships, this comes from the snapshot payload.
-    var STEPS = [
-        { num: 1, label: "Prerequisites",   sub: "Setup checks" },
-        { num: 2, label: "Connect Twilio",  sub: "SIDs & secrets" },
-        { num: 3, label: "Voice config",    sub: "TwiML & caller ID" },
-        { num: 4, label: "Phone numbers",   sub: "Claim & assign" },
-        { num: 5, label: "Reps & roles",    sub: "Permissions" },
-        { num: 6, label: "Test & activate", sub: "Go live" }
-    ];
-
-    /**
-     * Required SpaClientScript entry point.
-     * @param {Object} scriptContext — UIF SPA framework context;
-     *                                 scriptContext.rootContainer is
-     *                                 where we mount the wizard UI.
-     */
     var run = function (scriptContext) {
-        // Current step is held in a tiny client-side observable.
-        // U3+ will hydrate from a server snapshot fetch on mount.
-        var state = {
-            currentStep: 1
-        };
+        try {
+            console.log("[CTC Setup Wizard] SpaClient.run invoked");
+            console.log("[CTC Setup Wizard] scriptContext keys:",
+                scriptContext ? Object.keys(scriptContext) : "(null)");
+            console.log("[CTC Setup Wizard] scriptContext:", scriptContext);
+            console.log("[CTC Setup Wizard] @uif-js/core keys:",
+                core ? Object.keys(core).slice(0, 30) : "(null)");
+            console.log("[CTC Setup Wizard] @uif-js/component keys:",
+                component ? Object.keys(component).slice(0, 30) : "(null)");
 
-        // Build the wizard root: a vertical StackPanel holding
-        // [page header] → [stepper] → [step content area] → [footer]
-        var rootPanel = component.StackPanel.create({
-            orientation: core.StackOrientation.VERTICAL,
-            gap: core.Spacing.SPACE_16
-        });
+            // Try the most likely mount patterns. The first one that
+            // doesn't throw wins. All others get caught and logged.
+            var mounted = tryMountPatterns(scriptContext, component);
 
-        rootPanel.addItem({ item: buildHeader() });
-        var stepperWrapper = buildStepper(state);
-        rootPanel.addItem({ item: stepperWrapper.container });
-
-        var stepContentHost = component.StackPanel.create({
-            orientation: core.StackOrientation.VERTICAL,
-            gap: core.Spacing.SPACE_12
-        });
-        rootPanel.addItem({ item: stepContentHost });
-
-        rootPanel.addItem({
-            item: buildFooter(state, function (nextStep) {
-                state.currentStep = nextStep;
-                renderStepContent(stepContentHost, state);
-                stepperWrapper.refresh(state);
-            })
-        });
-
-        // Initial render
-        renderStepContent(stepContentHost, state);
-
-        scriptContext.rootContainer.addItem({ item: rootPanel });
+            if (!mounted) {
+                fallbackVisibleError(scriptContext,
+                    "UIF mount failed — see browser console for diagnostic output. " +
+                    "All known mount patterns threw. Next session: pick a build-chain path OR revert to Suitelet.");
+            }
+        } catch (e) {
+            console.error("[CTC Setup Wizard] run() threw:", e);
+            try {
+                fallbackVisibleError(scriptContext,
+                    "Wizard initialization failed: " + (e && e.message ? e.message : String(e)));
+            } catch (e2) {
+                console.error("[CTC Setup Wizard] fallback error also threw:", e2);
+            }
+        }
     };
 
-    // ─── Header ──────────────────────────────────────────────────────
+    function tryMountPatterns(scriptContext, component) {
+        var patterns = [
+            {
+                name: "new Heading + scriptContext.rootContainer.addItem",
+                fn: function () {
+                    if (!component || !component.Heading) throw new Error("component.Heading undefined");
+                    var heading = new component.Heading({ text: "CTC Setup Wizard — diagnostic mount A" });
+                    scriptContext.rootContainer.addItem({ item: heading });
+                }
+            },
+            {
+                name: "new Heading + scriptContext.rootContainer.addItem(child) without wrapper",
+                fn: function () {
+                    var heading = new component.Heading({ text: "CTC Setup Wizard — diagnostic mount B" });
+                    scriptContext.rootContainer.addItem(heading);
+                }
+            },
+            {
+                name: "new Text + scriptContext.addItem",
+                fn: function () {
+                    if (!scriptContext.addItem) throw new Error("scriptContext.addItem undefined");
+                    var text = new component.Text({ text: "CTC Setup Wizard — diagnostic mount C" });
+                    scriptContext.addItem({ item: text });
+                }
+            },
+            {
+                name: "new StackPanel with children option + rootContainer.addItem",
+                fn: function () {
+                    var stack = new component.StackPanel({
+                        children: [
+                            new component.Heading({ text: "CTC Setup Wizard — diagnostic mount D" })
+                        ]
+                    });
+                    scriptContext.rootContainer.addItem({ item: stack });
+                }
+            },
+            {
+                name: "scriptContext.render(component)",
+                fn: function () {
+                    if (!scriptContext.render) throw new Error("scriptContext.render undefined");
+                    scriptContext.render(new component.Heading({ text: "CTC Setup Wizard — diagnostic mount E" }));
+                }
+            }
+        ];
 
-    function buildHeader() {
-        var stack = component.StackPanel.create({
-            orientation: core.StackOrientation.VERTICAL,
-            gap: core.Spacing.SPACE_4
-        });
-        stack.addItem({
-            item: component.Label.create({
-                text: "Click-to-Call — Setup Wizard",
-                heading: component.LabelHeading.H1
-            })
-        });
-        stack.addItem({
-            item: component.Label.create({
-                text: "Six steps to a working softphone install. Each step validates against Twilio live before you can move on."
-            })
-        });
-        return stack;
-    }
-
-    // ─── Stepper ─────────────────────────────────────────────────────
-
-    function buildStepper(state) {
-        // UIF doesn't ship a vertical-stepper component out of the box
-        // in every release — compose one from horizontal labels.
-        // U3+ may swap for component.Stepper if the framework version
-        // exposes it; the shell shape stays the same.
-        var container = component.StackPanel.create({
-            orientation: core.StackOrientation.HORIZONTAL,
-            gap: core.Spacing.SPACE_8
-        });
-
-        var labels = STEPS.map(function (step) {
-            var stepLabel = component.Label.create({
-                text: step.num + ". " + step.label
-            });
-            container.addItem({ item: stepLabel });
-            return { stepLabel: stepLabel, num: step.num };
-        });
-
-        function refresh(updatedState) {
-            // U3+ will style active/done states once we wire UIF style hooks.
-            // The shell renders text-only step labels for now.
-            labels.forEach(function (entry) {
-                var prefix = entry.num === updatedState.currentStep ? "▶ " : "  ";
-                var stepDef = STEPS[entry.num - 1];
-                entry.stepLabel.text = prefix + entry.num + ". " + stepDef.label;
-            });
+        for (var i = 0; i < patterns.length; i++) {
+            var p = patterns[i];
+            try {
+                p.fn();
+                console.log("[CTC Setup Wizard] MOUNT SUCCESS via pattern: " + p.name);
+                return true;
+            } catch (e) {
+                console.log("[CTC Setup Wizard] Pattern '" + p.name + "' failed:", e && e.message ? e.message : e);
+            }
         }
-
-        refresh(state); // initial state
-        return { container: container, refresh: refresh };
+        return false;
     }
 
-    // ─── Step content ────────────────────────────────────────────────
-
-    function renderStepContent(host, state) {
-        // Clear any existing content (UIF: remove all items from the host).
-        // Defensive — some UIF versions throw when called with no children.
-        try { host.removeAllItems && host.removeAllItems(); } catch (e) { /* ignore */ }
-
-        var stepDef = STEPS[state.currentStep - 1];
-
-        var eyebrow = component.Label.create({
-            text: "Step " + state.currentStep + " — " + stepDef.label
-        });
-        host.addItem({ item: eyebrow });
-
-        var title = component.Label.create({
-            text: stepDef.label,
-            heading: component.LabelHeading.H2
-        });
-        host.addItem({ item: title });
-
-        var body = component.Label.create({
-            text: "This step ships in implementation unit U" + (state.currentStep + 2) +
-                  ". The SPA shell is in place; each step's form, validation, and " +
-                  "server-action wiring plugs in next."
-        });
-        host.addItem({ item: body });
-    }
-
-    // ─── Footer (Back / Continue) ────────────────────────────────────
-
-    function buildFooter(state, onStepChange) {
-        var footer = component.StackPanel.create({
-            orientation: core.StackOrientation.HORIZONTAL,
-            gap: core.Spacing.SPACE_8
-        });
-
-        var backBtn = component.Button.create({
-            label: "← Back",
-            type: component.ButtonType.SECONDARY,
-            onClick: function () {
-                if (state.currentStep > 1) onStepChange(state.currentStep - 1);
+    function fallbackVisibleError(scriptContext, message) {
+        // Last-resort visible error path. UIF doesn't allow raw DOM, but
+        // if we got here every other path already failed — try anyway.
+        try {
+            if (component && component.Banner) {
+                var banner = new component.Banner({
+                    title: "Setup Wizard error",
+                    content: message,
+                    color: "ORANGE"
+                });
+                scriptContext.rootContainer.addItem({ item: banner });
             }
-        });
-
-        var continueBtn = component.Button.create({
-            label: "Continue →",
-            type: component.ButtonType.PRIMARY,
-            onClick: function () {
-                if (state.currentStep < STEPS.length) onStepChange(state.currentStep + 1);
-            }
-        });
-
-        footer.addItem({ item: backBtn });
-        footer.addItem({ item: continueBtn });
-        return footer;
+        } catch (e) {
+            console.error("[CTC Setup Wizard] Even Banner failed:", e);
+        }
     }
 
     exports.run = run;
