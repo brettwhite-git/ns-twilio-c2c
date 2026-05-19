@@ -570,6 +570,23 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         function handle(field, payload) {
             if (payload && payload.items) {
                 STATE.step3[field] = payload.items;
+
+                // Sync the first item's value to STATE so Continue sees
+                // a valid selection even if the admin never touched the
+                // dropdown. UIF's onSelectionChanged only fires on USER
+                // interaction — not on the constructor's selectedValue
+                // default — so STATE would otherwise stay empty when
+                // the admin accepts the default.
+                if (payload.items.length > 0) {
+                    if (field === 'twimlApps' && !STATE.step3.twimlAppSid) {
+                        STATE.step3.twimlAppSid = payload.items[0].sid;
+                    }
+                    if (field === 'phoneNumbers' && !STATE.step3.phoneNumber) {
+                        STATE.step3.phoneNumber = payload.items[0].phoneNumber;
+                    }
+                    // intelServiceSid stays empty by default — that field
+                    // is optional (allowEmpty: true on the dropdown)
+                }
             } else {
                 STATE.step3[field] = [];
                 if (payload && payload.errorMessage) {
