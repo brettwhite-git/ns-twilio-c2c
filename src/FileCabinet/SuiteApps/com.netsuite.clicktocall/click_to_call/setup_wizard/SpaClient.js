@@ -39,6 +39,19 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
     var CURRENT_STEP = 1; // 1-based; mutated by Continue/Back
+    // U11: 'stepper' (default — Steps 1-5) vs 'console' (post-activation
+    // Admin Console). Mutated by run() resumability + console actions
+    // ("Re-run wizard from start" flips back to 'stepper').
+    var MODE = 'stepper';
+    // U1 (Phase 3a — multi-section console): active section when
+    // MODE='console'. Routes content via NavigationDrawer onSelectedValueChanged.
+    // 'overview' | 'phones' | 'voice' | 'credentials' | 'health'
+    var SELECTED_SECTION = 'overview';
+    // U1.5: once admin has reached the console (snapshot.active === true),
+    // the left rail stays visible even when they click "Re-run wizard" and
+    // drop back into stepper mode. Only fresh installs (never activated)
+    // see the rail-less full-page stepper.
+    var RAIL_VISIBLE = false;
 
     // Suitelet-as-API endpoint backing the wizard SPA. Same-origin →
     // NetSuite session cookies carry through; no separate auth needed.
@@ -82,6 +95,33 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             activated: false,      // true after successful activate
             activateError: null,
             loading: false         // true while preflight is running
+        },
+        // U1 (Phase 3a): multi-section Admin Console state. The 5 sections
+        // share most data — snapshot + assignments + preflight are fetched
+        // once on console mount and reused across sections. Drift is
+        // computed client-side from snapshot vs live wizardList* responses.
+        console: {
+            snapshot: null,        // from wizardSnapshot
+            assignments: null,     // from wizardLoadAssignments
+            preflight: null,       // from wizardRunPreflight (Health + Overview)
+            activity: null,        // from wizardActivity (U8 — Phase 3c); null until then
+            drift: null,           // client-computed {phoneNumbers, voiceUrl, intelService}
+            loading: false,        // initial-load gate
+
+            // Section-specific state surfaces below.
+            // Phones section (U3 — Phase 3b): per-row save state.
+            phonesSaving: {},      // { phoneSid: bool }
+            phonesError: null,
+            // Voice section (U4 — Phase 3b): which field is in EDIT mode.
+            voiceEditing: null,    // null | 'twimlAppSid' | 'phoneNumber' | 'intelServiceSid'
+            voiceError: null,
+            // Credentials section (U5 — Phase 3c): modal state.
+            activeModal: null,     // null | 'rotate-secret'
+            // Health + Deactivate flow (U6 / U11 carry-over).
+            pendingDeactivateConfirm: false,
+            deactivateError: null,
+            // Cross-section error surface.
+            actionError: null
         }
     };
 
@@ -109,6 +149,14 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             var T     = component.Text;
             var Stp   = component.Stepper;
             var SI    = component.StepperItem;
+            // U1 (Phase 3a) — console-specific components.
+            var ND    = component.NavigationDrawer;
+            var GP    = component.GridPanel;
+            var Bn    = component.Banner;
+            var Cd    = component.Card;
+            var Tb    = component.ToolBar;
+            // U1.5 — ScrollPanel for content-pane internal scrolling.
+            var Sp    = component.ScrollPanel;
 
             var SP_Orient = SP && SP.Orientation || {};
             var SP_Gap    = SP && SP.GapSize || {};
@@ -119,18 +167,46 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             // Stepper.Orientation aliases StepperItem.Orientation per d.ts
             var Stp_Orient = (Stp && Stp.Orientation) ||
                              (SI && SI.Orientation) || {};
+            var Bn_Color  = Bn && Bn.Color || {};
+            var GP_Gap    = GP && GP.GapSize || {};
+
+            // U1-polish: SystemIcon for NavigationDrawer item icons.
+            // Without these, NavigationDrawer falls back to a first-
+            // letter monogram per the catalog docs — works but ugly.
+            var SysIcon = (core && core.SystemIcon) || {};
 
             enums = {
                 SP: SP, CP: CP, H: H, T: T, Stp: Stp, SI: SI,
+                ND: ND, GP: GP, Bn: Bn, Cd: Cd, Tb: Tb,
+                Sp: Sp,
                 SP_Orient: SP_Orient,
                 SP_Gap: SP_Gap,
                 CP_Gap: CP_Gap,
                 CP_HAlign: CP_HAlign,
                 H_Type: H_Type,
                 T_Type: T_Type,
-                Stp_Orient: Stp_Orient
+                Stp_Orient: Stp_Orient,
+                Bn_Color: Bn_Color,
+                GP_Gap: GP_Gap,
+                SysIcon: SysIcon
             };
             scriptCtx = scriptContext;
+
+            // U1.5: per the UIF catalog (Integration > SuiteApps >
+            // Code tips > Layout), calling context.setLayout('application')
+            // makes the SPA fill the entire viewport (vs the default
+            // 'natural' which sizes the SPA to its content). This is
+            // what enables the rail's `rows: '100%'` to actually fill
+            // the visible area below NetSuite's chrome — without it,
+            // 100% resolves to content height and the rail collapses.
+            try {
+                if (scriptContext && typeof scriptContext.setLayout === 'function') {
+                    scriptContext.setLayout('application');
+                }
+            } catch (e) {
+                console.warn("[CTC Setup Wizard] setLayout('application') " +
+                    "failed; rail may not fill viewport:", e);
+            }
 
             // U9 fix: previously CURRENT_STEP was always 1 on mount,
             // dropping returning admins back at the prereqs check.
@@ -148,7 +224,10 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                 var snap = payload && payload.snapshot;
                 if (!snap) return; // fresh install — stay on Step 1
                 var target = determineLandingStep(snap);
-                if (target !== CURRENT_STEP) {
+                if (target === 'console') {
+                    console.log("[CTC Setup Wizard] resumability — routing to Admin Console");
+                    goToConsole();
+                } else if (target !== CURRENT_STEP) {
                     console.log("[CTC Setup Wizard] resumability — routing to step " + target);
                     goToStep(target);
                 }
@@ -162,25 +241,21 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     };
 
     /**
-     * U9: Determine the right landing step from a snapshot. Mirrors
-     * `lib/ctc_wizard_state.js:determineCurrentStep`. Inlined here
-     * because SPA Client runtime AMD require semantics for cross-folder
-     * libs are uncertain in NetSuite UIF — safer to keep the routing
-     * tiny and local.
+     * U9 + U11: Determine the right landing step from a snapshot.
+     * Mirrors `lib/ctc_wizard_state.js:determineCurrentStep`. Inlined
+     * here because SPA Client runtime AMD require semantics for
+     * cross-folder libs are uncertain in NetSuite UIF — safer to keep
+     * the routing tiny and local.
      *
      * @param {Object} snap — masked snapshot from wizardSnapshot action
-     * @returns {number} 1..5
+     * @returns {number|string} 1..5 or 'console'
      */
     function determineLandingStep(snap) {
         var has = function (v) { return !!(v && String(v).trim().length > 0); };
         if (!has(snap.accountSid) || !has(snap.apiKeySid)) return 2;
         if (!has(snap.apiSecretId)) return 2;
         if (!has(snap.twimlAppSid) || !has(snap.phoneNumber)) return 3;
-        // hasVoiceConfig met. Step 4 (phone assignments) or Step 5 (activate).
-        // We don't have the rep-assignment count in the snapshot — Step 4's
-        // loader will reveal it. Land on Step 5 when active; otherwise land
-        // on Step 4 so admin can review/adjust assignments before preflight.
-        if (snap.active) return 5;
+        if (snap.active) return 'console';
         return 4;
     }
 
@@ -202,14 +277,176 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
 
     /**
      * Advance to the next step (or jump to a specific step). Re-renders.
+     * Always flips MODE back to 'stepper' — used both for normal nav
+     * AND for jumping out of the Admin Console into a specific step.
      */
     function goToStep(stepNum) {
+        MODE = 'stepper';
         CURRENT_STEP = Math.max(1, Math.min(STEPS.length, stepNum));
         rerender();
         if (CURRENT_STEP === 1) loadPrereqs();
         if (CURRENT_STEP === 3) loadStep3Lists();
         if (CURRENT_STEP === 4) loadStep4Lists();
         if (CURRENT_STEP === 5) loadStep5();
+    }
+
+    /**
+     * U1 (Phase 3a): enter Admin Console mode. Lands admin on 'overview'
+     * section by default and triggers the once-per-mount data load.
+     * U1.5: also flips RAIL_VISIBLE so the left rail persists into
+     * stepper mode if admin clicks "Re-run wizard."
+     */
+    function goToConsole() {
+        MODE = 'console';
+        SELECTED_SECTION = 'overview';
+        RAIL_VISIBLE = true;
+        STATE.console.pendingDeactivateConfirm = false;
+        STATE.console.deactivateError = null;
+        STATE.console.actionError = null;
+        STATE.console.activeModal = null;
+        loadConsole();
+    }
+
+    /**
+     * U1 (Phase 3a): once-per-mount data load for the console. Fetches
+     * snapshot + assignments + preflight in parallel; activity feed is
+     * Phase 3c (U8) so it stays null until that lands.
+     *
+     * Settled-counter pattern (mirrors loadStep5 per U9 race-fix) so
+     * sections never render with half-loaded data.
+     */
+    function loadConsole() {
+        STATE.console.loading = true;
+        STATE.console.snapshot = null;
+        STATE.console.assignments = null;
+        STATE.console.preflight = null;
+        STATE.console.drift = null;
+        rerender();
+
+        var settled = 0;
+        var TARGET = 3; // snapshot + assignments + preflight (activity added in U8)
+        function onSettled() {
+            settled += 1;
+            if (settled >= TARGET) {
+                STATE.console.drift = computeDrift(STATE.console.snapshot,
+                                                   STATE.console.assignments);
+                STATE.console.loading = false;
+                rerender();
+            }
+        }
+
+        wizardCall('wizardSnapshot', {})
+            .then(function (p) { STATE.console.snapshot = p && p.snapshot; })
+            .catch(function () { STATE.console.snapshot = null; })
+            .then(onSettled);
+
+        wizardCall('wizardLoadAssignments', {})
+            .then(function (p) { STATE.console.assignments = (p && p.items) || []; })
+            .catch(function () { STATE.console.assignments = []; })
+            .then(onSettled);
+
+        wizardCall('wizardRunPreflight', {})
+            .then(function (p) { STATE.console.preflight = (p && p.checks) || []; })
+            .catch(function () { STATE.console.preflight = []; })
+            .then(onSettled);
+    }
+
+    /**
+     * U1 (Phase 3a): client-side drift detection. Placeholder for U6 —
+     * full live-Twilio comparison requires snapshot to include voiceUrl,
+     * which is a Phase 3b enhancement to wizardSaveVoice. For now this
+     * returns a coarse shape that the Health section can render against.
+     */
+    function computeDrift(snapshot, assignments) {
+        // Defensive default — if data is missing, no drift can be computed.
+        if (!snapshot) return { phoneNumbers: 'unknown', voiceUrl: 'unknown',
+                                intelService: 'unknown' };
+        // Phone numbers: live comparison happens in U6 when Phones section
+        // also fires wizardListPhoneNumbers. For now mark 'in-sync' so the
+        // section can render; U6 swaps this in for the real check.
+        return {
+            phoneNumbers: 'in-sync',
+            voiceUrl: 'in-sync',
+            intelService: snapshot.intelServiceSid ? 'in-sync' : 'not-configured'
+        };
+    }
+
+    /**
+     * U1 / U6: section navigator. Called from NavigationDrawer's
+     * onSelectedValueChanged. Switches SELECTED_SECTION and triggers
+     * rerender — sections share STATE.console so no additional fetch
+     * is needed unless the section has section-specific data.
+     */
+    function goToSection(sectionName) {
+        SELECTED_SECTION = sectionName;
+        STATE.console.pendingDeactivateConfirm = false; // cancel pending
+        STATE.console.actionError = null;
+        rerender();
+    }
+
+    /**
+     * U6: deactivate handler. Two-click confirm pattern. Unlike U11's
+     * original — does NOT bounce to stepper on success; stays on the
+     * console with isPaused state per R7 (the plan).
+     */
+    function onDeactivateClick() {
+        if (!STATE.console.pendingDeactivateConfirm) {
+            STATE.console.pendingDeactivateConfirm = true;
+            rerender();
+            return;
+        }
+        STATE.console.deactivateError = null;
+        wizardCall('wizardActivate', { deactivate: true })
+            .then(function (payload) {
+                if (payload && payload.deactivated) {
+                    // R7: stay on console; flip snapshot.active so paused
+                    // banner renders. Reload snapshot to confirm server state.
+                    STATE.console.pendingDeactivateConfirm = false;
+                    if (STATE.console.snapshot) {
+                        STATE.console.snapshot.active = false;
+                    }
+                    rerender();
+                } else {
+                    STATE.console.deactivateError =
+                        (payload && payload.error) || 'unknown_error';
+                    rerender();
+                }
+            })
+            .catch(function (e) {
+                STATE.console.deactivateError = 'Network: ' +
+                    (e && e.message ? e.message : String(e));
+                rerender();
+            });
+    }
+
+    /**
+     * U7 (Phase 3b — implemented in U6 stub for now): reactivate from the
+     * paused banner. Same handler runs on first click — no confirm needed
+     * since reactivation is non-destructive.
+     */
+    function onReactivateClick() {
+        STATE.console.actionError = null;
+        wizardCall('wizardActivate', {})
+            .then(function (payload) {
+                if (payload && (payload.activated || payload.alreadyActive)) {
+                    if (STATE.console.snapshot) {
+                        STATE.console.snapshot.active = true;
+                    }
+                    rerender();
+                } else {
+                    STATE.console.actionError =
+                        (payload && payload.error) || 'reactivate_failed';
+                    if (payload && payload.failedChecks) {
+                        STATE.console.preflight = payload.failedChecks;
+                    }
+                    rerender();
+                }
+            })
+            .catch(function (e) {
+                STATE.console.actionError = 'Network: ' +
+                    (e && e.message ? e.message : String(e));
+                rerender();
+            });
     }
 
     /**
@@ -262,6 +499,51 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     }
 
     function buildRoot(d) {
+        // U1.5: rail-visible layout when MODE='console' OR when admin
+        // has previously reached the console and is now in re-run-wizard
+        // stepper mode. Fresh install (never activated) drops the rail
+        // and renders the original full-page stepper.
+        var railVisible = MODE === 'console' ||
+                          (MODE === 'stepper' && RAIL_VISIBLE);
+
+        if (railVisible) {
+            var drawer = buildConsoleNavDrawer(d);
+            var contentPane = buildRailContentPane(d);
+            var rootChildren = [drawer, contentPane]
+                .filter(function (c) { return c != null; });
+
+            if (d.GP && rootChildren.length === 2) {
+                // CSS-grid:
+                //   columns: 'auto 1fr' — rail column auto-sizes to the
+                //     NavigationDrawer's actual rendered width.
+                //   rows: '100%' — fill the SPA's outer container
+                //     completely. Works because we called
+                //     scriptContext.setLayout('application') in run()
+                //     (UIF catalog Integration > SuiteApps > Code tips
+                //     > Layout) — that flips the SPA from default
+                //     'natural' (content-sized) to 'application'
+                //     (viewport-bounded). Without setLayout the SPA
+                //     container is auto-height and 100% collapses to
+                //     content height.
+                //   columnGap: NONE — drawer flush against content.
+                var GP_Gap = d.GP_Gap || (d.GP && d.GP.GapSize) || {};
+                var rootGrid = safeNew(d.GP, {
+                    columns: 'auto 1fr',
+                    rows: '100%',
+                    items: rootChildren,
+                    columnGap: GP_Gap.NONE
+                }, "GridPanel(root-rail)");
+                if (rootGrid) return rootGrid;
+            }
+            // Fallback: vertical stack of [drawer, content] (loses rail
+            // alignment but stays functional).
+            return safeNew(d.SP, {
+                items: rootChildren,
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(root-rail-fallback)") || rootChildren[0];
+        }
+
         // ── Page title (Heading uses `content`, not `text`) ─────────────
         var title = safeNew(d.H, {
             content: "Click-to-Call Setup Wizard",
@@ -367,6 +649,824 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             catch (e) { return null; }
         }
         return null;
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* U11 — Admin Console (post-activation surface)                      */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    /**
+     * U1.5: rail-mode content pane. Renders the right side of the
+     * GridPanel(root-rail) — title + mode-specific content (console
+     * sections OR stepper). Wrapped in a ContentPanel with padding so
+     * content is offset from the drawer's flush-left edge.
+     *
+     * Mode-driven content:
+     *   - MODE='console':  title + paused banner + section content
+     *   - MODE='stepper':  title + subtitle + stepper + step body + nav footer
+     */
+    function buildRailContentPane(d) {
+        if (STATE.console.loading && MODE === 'console') {
+            var loader = safeNew(component.Loader, {
+                label: "Loading console…",
+                indeterminate: true
+            }, "Loader(console)");
+            return wrapContent(d, loader || safeNew(d.T, { text: "Loading…" }, "Text(loading)"));
+        }
+
+        var items = [];
+
+        // ── Title ─────────────────────────────────────────────────────
+        var titleText = MODE === 'console'
+            ? "Click-to-Call Admin Console"
+            : "Click-to-Call Setup Wizard";
+        var title = safeNew(d.H, {
+            content: titleText,
+            type: d.H_Type.PAGE_TITLE
+        }, "Heading(content-title)");
+        if (title) items.push(title);
+
+        // ── Paused banner (console mode only) ─────────────────────────
+        if (MODE === 'console' && STATE.console.snapshot
+            && STATE.console.snapshot.active === false) {
+            var paused = buildPausedBanner(d);
+            if (paused) items.push(paused);
+        }
+
+        // ── Mode-specific body ────────────────────────────────────────
+        if (MODE === 'console') {
+            var section = buildSectionContent(d);
+            if (section) items.push(section);
+        } else {
+            // Stepper mode (re-run flow). Reuse the original stepper
+            // rendering bits: subtitle, stepper widget, step body, nav footer.
+            var subtitle = safeNew(d.T, {
+                text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
+                    STEPS[CURRENT_STEP - 1].label
+            }, "Text(rail-subtitle)");
+            if (subtitle) items.push(subtitle);
+
+            var stepperWidget = buildStepper(d);
+            if (stepperWidget) {
+                var stepperBox = safeNew(d.CP, {
+                    content: stepperWidget,
+                    horizontalAlignment: d.CP_HAlign.STRETCH,
+                    outerGap: d.CP_Gap.M
+                }, "ContentPanel(rail-stepper)") || stepperWidget;
+                items.push(stepperBox);
+            }
+
+            var stepBody = buildStepBodyContainer(d);
+            if (stepBody) items.push(stepBody);
+        }
+
+        if (items.length === 0) {
+            return wrapContent(d, safeNew(d.T, {
+                text: "Admin Console — no content rendered."
+            }, "Text(console-empty)"));
+        }
+
+        var stack = safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, "StackPanel(rail-content)");
+
+        return wrapContent(d, stack || items[0]);
+    }
+
+    /**
+     * U1.5: wrap content in a ScrollPanel(VERTICAL) + ContentPanel
+     * (padding). The ScrollPanel makes content scroll INTERNALLY within
+     * its grid cell so the rail stays fixed in viewport; the
+     * ContentPanel adds padding around the content for breathing room
+     * away from the rail's flush-left edge.
+     */
+    function wrapContent(d, child) {
+        if (!d.CP) return child;
+        var padded = safeNew(d.CP, {
+            content: child,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            outerGap: d.CP_Gap.L
+        }, "ContentPanel(rail-wrapper)") || child;
+
+        // Wrap in ScrollPanel(VERTICAL) so the content pane scrolls
+        // internally — rail stays put in viewport even when content
+        // exceeds the visible area.
+        if (!d.Sp) return padded;
+        var Sp_Orient = (d.Sp && d.Sp.Orientation) || {};
+        return safeNew(d.Sp, {
+            content: padded,
+            orientation: Sp_Orient.VERTICAL
+        }, "ScrollPanel(rail-content)") || padded;
+    }
+
+    /**
+     * U1: NavigationDrawer with grouped items. Per d.ts (component.d.ts:13874+),
+     * ItemOptions supports nested `items`, badges, separators, and a
+     * per-item `action` callback. Our items use `value` for selection
+     * tracking + `action` for the rare "fire-and-forget" item (Re-run
+     * wizard); the section items rely on onSelectedValueChanged at the
+     * drawer level.
+     */
+    function buildConsoleNavDrawer(d) {
+        if (!d.ND) {
+            // No NavigationDrawer — fall back to a vertical button list.
+            return buildNavFallback(d);
+        }
+
+        var assignmentBadge = STATE.console.assignments
+            ? String(STATE.console.assignments.length)
+            : null;
+
+        var SysIcon = d.SysIcon || {};
+        var navItems = [
+            { value: 'overview',    label: 'Overview',          icon: SysIcon.HOME },
+            { value: 'phones',      label: 'Phones & reps',     icon: SysIcon.CALL,
+              badge: assignmentBadge || undefined },
+            { value: 'voice',       label: 'Voice config',      icon: SysIcon.SETTINGS },
+            { value: 'credentials', label: 'Credentials',       icon: SysIcon.LOCK },
+            { value: 'health',      label: 'Health',            icon: SysIcon.HEART_FILLED },
+            { value: 're-run',      label: 'Re-run wizard',     icon: SysIcon.REFRESH,
+              separatorTop: true,
+              action: function () { goToStep(1); } }
+        ];
+
+        // U1.5: in stepper mode (re-run flow), highlight the "Re-run
+        // wizard" item; in console mode, highlight the active section.
+        var selectedVal = MODE === 'stepper' ? 're-run' : SELECTED_SECTION;
+
+        // U1.5-polish: NavigationDrawer's `visualStyle` prop accepts
+        // .DARK to render the rail in NetSuite's classic navy theme
+        // (matches the dark top-bar visual language). Per the catalog's
+        // /navigationdrawer/Background example. The enum lives on
+        // NavigationDrawer.VisualStyle: DEFAULT | LIGHT | DARK.
+        var VisualStyle = (d.ND && d.ND.VisualStyle) || {};
+
+        return safeNew(d.ND, {
+            items: navItems,
+            selectedValue: selectedVal,
+            width: 240,
+            visualStyle: VisualStyle.DARK,
+            onSelectedValueChanged: function (args) {
+                var value = args && args.value;
+                if (!value) return;
+                if (value === 're-run') {
+                    // Re-run wizard click — fire the goToStep action.
+                    goToStep(1);
+                    return;
+                }
+                // Section click — flips MODE='console' and sets the
+                // active section (works whether admin was in console
+                // or stepper mode).
+                goToSection(value);
+            }
+        }, "NavigationDrawer(console)");
+    }
+
+    /**
+     * Fallback nav when NavigationDrawer isn't available — vertical
+     * StackPanel of Buttons. Same routing semantics; ugly but functional.
+     */
+    function buildNavFallback(d) {
+        var ButtonType = (component.Button && component.Button.Type) || {};
+        var navSpecs = [
+            { value: 'overview',    label: 'Overview' },
+            { value: 'phones',      label: 'Phones & reps' },
+            { value: 'voice',       label: 'Voice config' },
+            { value: 'credentials', label: 'Credentials' },
+            { value: 'health',      label: 'Health' },
+            { value: 're-run',      label: '↻ Re-run wizard' }
+        ];
+        var buttons = navSpecs.map(function (spec) {
+            return safeNew(component.Button, {
+                label: spec.label,
+                type: spec.value === SELECTED_SECTION
+                    ? ButtonType.PRIMARY
+                    : ButtonType.DEFAULT,
+                action: function () {
+                    if (spec.value === 're-run') goToStep(1);
+                    else goToSection(spec.value);
+                }
+            }, "Button(nav-" + spec.value + ")");
+        }).filter(function (b) { return b != null; });
+        if (buttons.length === 0) return null;
+        return safeNew(d.SP, {
+            items: buttons,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, "StackPanel(nav-fallback)");
+    }
+
+    /**
+     * U1: dispatch to the appropriate section builder. U2 and U6 fill in
+     * Overview and Health (Phase 3a); U3-U5 stay as informative stubs
+     * until Phase 3b/3c lands.
+     */
+    function buildSectionContent(d) {
+        switch (SELECTED_SECTION) {
+            case 'overview':    return buildOverviewSection(d);
+            case 'phones':      return buildSectionStub(d, 'Phones & reps',
+                                    'Inline DataGrid editing arrives in Phase 3b (U3).');
+            case 'voice':       return buildSectionStub(d, 'Voice config',
+                                    'Inline Field editing arrives in Phase 3b (U4).');
+            case 'credentials': return buildSectionStub(d, 'Credentials',
+                                    'Full credentials view + rotation Modal arrives in Phase 3c (U5).');
+            case 'health':      return buildHealthSection(d);
+            default:            return buildOverviewSection(d);
+        }
+    }
+
+    /**
+     * U1: placeholder section content for the not-yet-implemented sections.
+     * Shows the section name + a "coming in Phase 3b/3c" note so admin
+     * sees something useful instead of a blank pane.
+     */
+    function buildSectionStub(d, title, note) {
+        var heading = safeNew(d.H, {
+            content: title,
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(stub-" + title + ")");
+
+        var body = safeNew(d.T, {
+            text: note,
+            type: d.T_Type.WEAK
+        }, "Text(stub-body-" + title + ")");
+
+        // Until the section ships, offer a stepper deep-link as a fallback
+        // path so admin isn't stranded (this contradicts R3's "no deep
+        // links" but is acceptable as a temporary affordance during the
+        // phased rollout — removed when U3/U4/U5 land).
+        var fallbackBtn = null;
+        if (title === 'Phones & reps' || title === 'Voice config') {
+            var stepTarget = title === 'Phones & reps' ? 4 : 3;
+            fallbackBtn = safeNew(component.Button, {
+                label: 'Open via wizard (temporary)',
+                type: (component.Button && component.Button.Type
+                    && component.Button.Type.DEFAULT) || undefined,
+                action: function () { goToStep(stepTarget); }
+            }, "Button(stub-deeplink-" + title + ")");
+        } else if (title === 'Credentials') {
+            fallbackBtn = safeNew(component.Button, {
+                label: 'Open API Secrets',
+                type: (component.Button && component.Button.Type
+                    && component.Button.Type.DEFAULT) || undefined,
+                action: function () {
+                    try {
+                        window.open('/app/common/scripting/secrets.nl', '_blank');
+                    } catch (e) { /* ignore */ }
+                }
+            }, "Button(stub-secrets)");
+        }
+
+        var items = [heading, body, fallbackBtn]
+            .filter(function (c) { return c != null; });
+        if (items.length === 0) {
+            return safeNew(d.T, { text: title }, "Text(stub-fallback)");
+        }
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(stub-" + title + ")");
+    }
+
+    /**
+     * Configuration summary card — read-only view of the current config
+     * snapshot, mirrored from Step 5's Configuration Review section so
+     * admins can verify what's live without re-running the wizard.
+     */
+    function buildConsoleSummaryCard(d) {
+        var snap = STATE.console.snapshot;
+        if (!snap) return null;
+
+        var assignments = STATE.console.assignments || [];
+        var phoneNumbersWithReps = {};
+        assignments.forEach(function (a) {
+            if (a.phoneSid) phoneNumbersWithReps[a.phoneSid] = true;
+        });
+
+        var lines = [
+            'Account SID:        ' + (snap.accountSid || '(not set)'),
+            'API Key SID:        ' + (snap.apiKeySid || '(not set)'),
+            'API Key Secret:     ' + (snap.apiSecretId || '(not set)'),
+            'TwiML Application:  ' + (snap.twimlAppSid || '(not set)'),
+            'Default caller ID:  ' + (snap.phoneNumber || '(not set)'),
+            'Intel Service:      ' + (snap.intelServiceSid || '(none)'),
+            'Phone assignments:  ' + assignments.length + ' rep(s) across ' +
+                Object.keys(phoneNumbersWithReps).length + ' number(s)'
+        ];
+
+        var heading = safeNew(d.H, {
+            content: "Current configuration",
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(console-summary)");
+
+        var rows = [heading];
+        lines.forEach(function (l) {
+            var t = safeNew(d.T, {
+                text: l,
+                type: d.T_Type.DEFAULT,
+                size: d.T && d.T.Size ? d.T.Size.S : undefined
+            }, "Text(summary-line)");
+            if (t) rows.push(t);
+        });
+
+        return safeNew(d.SP, {
+            items: rows.filter(function (r) { return r != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, "StackPanel(console-summary)");
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* U7-ish (paused-state banner, single-section-only for now)          */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    /**
+     * U1 / U7 partial: when snapshot.active=false, render a persistent
+     * orange Banner above section content with a Reactivate button. R7
+     * says do NOT bounce admin to the stepper on deactivate — admin stays
+     * here, banner-gated. Full U7 fans this across every section; U1
+     * places it ONCE at the page root above the console shell, which
+     * achieves the same visual outcome for less code.
+     */
+    function buildPausedBanner(d) {
+        if (!d.Bn) {
+            // Banner unavailable — fall back to a Text + Button row.
+            var ButtonType = (component.Button && component.Button.Type) || {};
+            return safeNew(d.SP, {
+                items: [
+                    safeNew(d.T, {
+                        text: "⚠ Click-to-Call is paused. Reps cannot place calls.",
+                        type: d.T_Type.STRONG
+                    }, "Text(paused-fallback)"),
+                    safeNew(component.Button, {
+                        label: "Reactivate",
+                        type: ButtonType.PRIMARY,
+                        action: onReactivateClick
+                    }, "Button(paused-reactivate-fallback)")
+                ].filter(function (c) { return c != null; }),
+                orientation: d.SP_Orient.HORIZONTAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(paused-fallback)");
+        }
+        return safeNew(d.Bn, {
+            title: "Click-to-Call is paused",
+            content: "Reps cannot place calls until you reactivate. All " +
+                     "config is preserved.",
+            color: d.Bn_Color.ORANGE,
+            button: {
+                label: "Reactivate",
+                action: onReactivateClick
+            }
+        }, "Banner(paused)");
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* U2 — Overview section (Phase 3a)                                   */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    /**
+     * U2: Overview section — landing page when admin enters console.
+     * 4 stat cards + quick-actions row + recent-activity feed (mocked
+     * until U8 / Phase 3c). Same data sources as the original U11
+     * summary card, just shaped as a dashboard.
+     */
+    function buildOverviewSection(d) {
+        var items = [];
+
+        var heading = safeNew(d.H, {
+            content: "Overview",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(overview)");
+        if (heading) items.push(heading);
+
+        // Stat-card grid (4 cards).
+        var stats = buildOverviewStatCards(d);
+        if (stats) items.push(stats);
+
+        // Quick-actions strip.
+        var quick = buildOverviewQuickActions(d);
+        if (quick) items.push(quick);
+
+        // Recent-activity feed (mock until U8).
+        var activity = buildOverviewActivityFeed(d);
+        if (activity) items.push(activity);
+
+        if (items.length === 0) return safeNew(d.T, { text: "Overview" });
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, "StackPanel(overview)");
+    }
+
+    function buildOverviewStatCards(d) {
+        var snap = STATE.console.snapshot || {};
+        var assignments = STATE.console.assignments || [];
+        var preflight = STATE.console.preflight || [];
+
+        var phoneCount = {};
+        assignments.forEach(function (a) {
+            if (a.phoneSid) phoneCount[a.phoneSid] = true;
+        });
+        var phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
+        var repCount = assignments.length;
+        var preflightPassed = preflight.filter(function (c) {
+            return c.status === 'pass';
+        }).length;
+        var preflightTotal = preflight.length;
+        var statusLabel = snap.active === false ? 'Paused' :
+                          snap.active === true ? 'Active' : 'Unknown';
+
+        var cards = [
+            buildStatCard(d, {
+                title: 'Status',
+                metric: statusLabel,
+                description: snap.active === false ? 'Reps cannot place calls'
+                                                   : 'Reps can place calls'
+            }),
+            buildStatCard(d, {
+                title: 'Phone numbers',
+                metric: String(phonesConfigured),
+                description: phonesConfigured === 0 ? 'No numbers configured'
+                    : snap.phoneNumber || ''
+            }),
+            buildStatCard(d, {
+                title: 'Assigned reps',
+                metric: String(repCount),
+                description: repCount === 0 ? 'No assignments'
+                    : (repCount === 1 ? '1 rep' : repCount + ' reps')
+            }),
+            buildStatCard(d, {
+                title: 'Preflight',
+                metric: preflightTotal > 0
+                    ? preflightPassed + ' of ' + preflightTotal
+                    : '—',
+                description: preflightTotal > 0 ? 'See Health for detail'
+                                                : 'Not yet run'
+            })
+        ].filter(function (c) { return c != null; });
+
+        if (cards.length === 0) return null;
+
+        if (d.GP) {
+            // CSS-grid track string — 4 equal flex columns. Equivalent to
+            // 'repeat(4, 1fr)' but the literal version is more portable
+            // across UIF versions per the catalog GridPanel docs.
+            return safeNew(d.GP, {
+                columns: '1fr 1fr 1fr 1fr',
+                rows: 'auto',
+                items: cards,
+                columnGap: (d.GP_Gap && d.GP_Gap.M) || undefined
+            }, "GridPanel(overview-stats)");
+        }
+        return safeNew(d.SP, {
+            items: cards,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(overview-stats-fallback)");
+    }
+
+    /**
+     * U2-polish: use Card.metric() — the static factory designed for
+     * KPI/stat cards. Per component.d.ts:2478, it accepts
+     * { title, metric, description, action } and returns a Card with the
+     * proper internal layout. This replaces the manual Card+StackPanel
+     * approach that rendered invisible cards.
+     */
+    function buildStatCard(d, spec) {
+        if (d.Cd && typeof d.Cd.metric === 'function') {
+            try {
+                return d.Cd.metric({
+                    title: spec.title,
+                    metric: spec.metric,
+                    description: spec.description
+                });
+            } catch (e) {
+                console.warn("[CTC Setup Wizard] Card.metric threw, " +
+                    "falling back to manual stack:", e);
+            }
+        }
+        // Fallback: manual stack if Card.metric isn't available.
+        var label = safeNew(d.T, {
+            text: spec.title,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, "Text(stat-label)");
+        var value = safeNew(d.H, {
+            content: spec.metric,
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(stat-value)");
+        var sub = spec.description ? safeNew(d.T, {
+            text: spec.description,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, "Text(stat-sub)") : null;
+        return safeNew(d.SP, {
+            items: [label, value, sub].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, "StackPanel(stat-card-" + spec.title + ")");
+    }
+
+    function buildOverviewQuickActions(d) {
+        var ButtonType = (component.Button && component.Button.Type) || {};
+
+        var heading = safeNew(d.H, {
+            content: "Quick actions",
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(quick-actions)");
+
+        var actions = [
+            { label: "Add a phone number",      onClick: function () { goToSection('phones'); } },
+            { label: "Reassign reps",           onClick: function () { goToSection('phones'); } },
+            { label: "Update voice config",     onClick: function () { goToSection('voice'); } },
+            { label: "Rotate API Key Secret",   onClick: function () { goToSection('credentials'); } },
+            { label: "Run health check",        onClick: function () { goToSection('health'); } }
+        ];
+
+        var buttons = actions.map(function (a) {
+            // PURE-type buttons read as text-only links — appropriate for
+            // a row of 5 affordances where DEFAULT (filled outline) would
+            // dominate the page. Per d.ts Button.Type enum.
+            return safeNew(component.Button, {
+                label: a.label,
+                type: ButtonType.PURE || ButtonType.DEFAULT,
+                action: a.onClick
+            }, "Button(qa-" + a.label + ")");
+        }).filter(function (b) { return b != null; });
+
+        if (buttons.length === 0) return heading;
+
+        var row = safeNew(d.SP, {
+            items: buttons,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, "StackPanel(quick-actions-row)");
+
+        return safeNew(d.SP, {
+            items: [heading, row].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, "StackPanel(quick-actions-block)");
+    }
+
+    function buildOverviewActivityFeed(d) {
+        var heading = safeNew(d.H, {
+            content: "Recent activity",
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(activity-feed)");
+
+        // U8 (Phase 3c) wires this to wizardActivity. Until then, show
+        // a stub note so admins know the feed is intentional, not missing.
+        var activity = STATE.console.activity;
+        var rows = [];
+
+        if (!activity) {
+            var stub = safeNew(d.T, {
+                text: "Activity feed arrives in Phase 3c (U8 — wizardActivity). " +
+                      "When live, it shows the last 50 audit-level wizard events.",
+                type: d.T_Type.WEAK
+            }, "Text(activity-stub)");
+            if (stub) rows.push(stub);
+        } else if (activity.length === 0) {
+            var empty = safeNew(d.T, {
+                text: "No recent activity.",
+                type: d.T_Type.WEAK
+            }, "Text(activity-empty)");
+            if (empty) rows.push(empty);
+        } else {
+            activity.slice(0, 5).forEach(function (row) {
+                var line = safeNew(d.T, {
+                    text: row.timestamp + ' — ' + row.title +
+                          (row.user ? ' (' + row.user + ')' : ''),
+                    size: d.T && d.T.Size ? d.T.Size.S : undefined
+                }, "Text(activity-row)");
+                if (line) rows.push(line);
+            });
+        }
+
+        return safeNew(d.SP, {
+            items: [heading].concat(rows).filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, "StackPanel(activity-feed)");
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* U6 — Health section (Phase 3a)                                     */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    /**
+     * U6: Health section — three sub-blocks:
+     *   1. Preflight    — re-run button + 5 check rows
+     *   2. Drift        — 3 detector rows (client-computed)
+     *   3. Danger zone  — Deactivate with two-click confirm
+     */
+    function buildHealthSection(d) {
+        var items = [];
+
+        var heading = safeNew(d.H, {
+            content: "Health",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(health)");
+        if (heading) items.push(heading);
+
+        var preflightBlock = buildHealthPreflightBlock(d);
+        if (preflightBlock) items.push(preflightBlock);
+
+        var driftBlock = buildHealthDriftBlock(d);
+        if (driftBlock) items.push(driftBlock);
+
+        var dangerBlock = buildHealthDangerZone(d);
+        if (dangerBlock) items.push(dangerBlock);
+
+        if (STATE.console.actionError) {
+            var err = safeNew(d.T, {
+                text: "✕ " + STATE.console.actionError,
+                type: d.T_Type.STRONG
+            }, "Text(health-error)");
+            if (err) items.push(err);
+        }
+
+        if (items.length === 0) return safeNew(d.T, { text: "Health" });
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, "StackPanel(health)");
+    }
+
+    function buildHealthPreflightBlock(d) {
+        var ButtonType = (component.Button && component.Button.Type) || {};
+
+        var sectionHeader = safeNew(d.H, {
+            content: "Preflight",
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(health-preflight)");
+
+        var rerunBtn = safeNew(component.Button, {
+            label: "↻ Re-run",
+            type: ButtonType.DEFAULT,
+            action: function () {
+                wizardCall('wizardRunPreflight', {}).then(function (p) {
+                    STATE.console.preflight = (p && p.checks) || [];
+                    rerender();
+                }).catch(function (e) {
+                    STATE.console.actionError = 'Preflight failed: ' +
+                        (e && e.message ? e.message : String(e));
+                    rerender();
+                });
+            }
+        }, "Button(rerun-preflight)");
+
+        var headerRow = safeNew(d.SP, {
+            items: [sectionHeader, rerunBtn].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, "StackPanel(preflight-header-row)");
+
+        var preflight = STATE.console.preflight;
+        var rows = [];
+        if (preflight === null || preflight === undefined) {
+            var loading = safeNew(d.T, {
+                text: "Preflight not yet run. Click Re-run to check.",
+                type: d.T_Type.WEAK
+            }, "Text(preflight-loading)");
+            if (loading) rows.push(loading);
+        } else if (preflight.length === 0) {
+            var empty = safeNew(d.T, {
+                text: "No checks returned.",
+                type: d.T_Type.WEAK
+            }, "Text(preflight-empty)");
+            if (empty) rows.push(empty);
+        } else {
+            preflight.forEach(function (c) {
+                var row = buildCheckRow(c);
+                if (row) rows.push(row);
+            });
+        }
+
+        return safeNew(d.SP, {
+            items: [headerRow].concat(rows).filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(preflight-block)");
+    }
+
+    function buildHealthDriftBlock(d) {
+        var sectionHeader = safeNew(d.H, {
+            content: "Drift detectors",
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(health-drift)");
+
+        var drift = STATE.console.drift || {};
+        var detectors = [
+            { id: 'voiceUrl',     label: 'TwiML VoiceUrl',  status: drift.voiceUrl || 'unknown' },
+            { id: 'phoneNumbers', label: 'Phone number list', status: drift.phoneNumbers || 'unknown' },
+            { id: 'intelService', label: 'Intel Service',   status: drift.intelService || 'unknown' }
+        ];
+        // Map drift status → check-row status so we can reuse buildCheckRow.
+        var statusMap = {
+            'in-sync': { status: 'pass', detail: 'In sync with Twilio' },
+            'drift':   { status: 'warn', detail: 'Drift detected — review section for details' },
+            'not-configured': { status: 'info_disabled', detail: 'Not configured' },
+            'unknown': { status: 'info_disabled', detail: 'Drift detection requires data load' }
+        };
+
+        var rows = detectors.map(function (det) {
+            var mapped = statusMap[det.status] || statusMap.unknown;
+            return buildCheckRow({
+                id: det.id,
+                label: det.label,
+                status: mapped.status,
+                detail: mapped.detail
+            });
+        }).filter(function (r) { return r != null; });
+
+        return safeNew(d.SP, {
+            items: [sectionHeader].concat(rows).filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(drift-block)");
+    }
+
+    function buildHealthDangerZone(d) {
+        var ButtonType = (component.Button && component.Button.Type) || {};
+
+        var sectionHeader = safeNew(d.H, {
+            content: "Danger zone",
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(danger-zone)");
+
+        var description = safeNew(d.T, {
+            text: "Deactivate Click-to-Call: reps lose phone-icon access " +
+                  "across all roles. In-progress calls finish normally; new " +
+                  "calls cannot be placed. Reactivate any time.",
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, "Text(danger-desc)");
+
+        var snap = STATE.console.snapshot || {};
+        var isPaused = snap.active === false;
+
+        var buttons = [];
+        if (isPaused) {
+            // Already paused — show informational text only; reactivation
+            // happens via the top-of-page paused Banner.
+            var pausedText = safeNew(d.T, {
+                text: "Click-to-Call is already paused. Use the banner at " +
+                      "the top of the page to reactivate.",
+                type: d.T_Type.STRONG
+            }, "Text(already-paused)");
+            if (pausedText) buttons.push(pausedText);
+        } else if (STATE.console.pendingDeactivateConfirm) {
+            // Two-click confirm — show Cancel + Confirm
+            var cancelBtn = safeNew(component.Button, {
+                label: "Cancel",
+                type: ButtonType.DEFAULT,
+                action: function () {
+                    STATE.console.pendingDeactivateConfirm = false;
+                    rerender();
+                }
+            }, "Button(cancel-deactivate)");
+            if (cancelBtn) buttons.push(cancelBtn);
+
+            var confirmBtn = safeNew(component.Button, {
+                label: "Confirm deactivate",
+                type: ButtonType.DANGER || ButtonType.DEFAULT,
+                action: onDeactivateClick
+            }, "Button(confirm-deactivate)");
+            if (confirmBtn) buttons.push(confirmBtn);
+        } else {
+            // Default state — just the Deactivate button
+            var deactivateBtn = safeNew(component.Button, {
+                label: "Deactivate",
+                type: ButtonType.DANGER || ButtonType.DEFAULT,
+                action: onDeactivateClick
+            }, "Button(deactivate)");
+            if (deactivateBtn) buttons.push(deactivateBtn);
+        }
+
+        var deactivateErrorText = STATE.console.deactivateError ? safeNew(d.T, {
+            text: "✕ Deactivate failed: " + STATE.console.deactivateError,
+            type: d.T_Type.STRONG
+        }, "Text(deactivate-error)") : null;
+
+        var buttonRow = buttons.length > 0 ? safeNew(d.SP, {
+            items: buttons,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, "StackPanel(danger-buttons)") : null;
+
+        return safeNew(d.SP, {
+            items: [sectionHeader, description, buttonRow, deactivateErrorText]
+                .filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, "StackPanel(danger-zone)");
     }
 
     /**
