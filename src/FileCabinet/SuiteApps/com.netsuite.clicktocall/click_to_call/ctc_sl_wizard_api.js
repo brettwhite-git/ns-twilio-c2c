@@ -826,6 +826,18 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                         type: 'customrecord_ctc_rep_assignment',
                         isDynamic: false
                     });
+                    // U9b fix-3: customrecord_ctc_rep_assignment has
+                    // <includename>T</includename> + no enablenumbering,
+                    // so NetSuite requires the standard `name` field to
+                    // be set on save. Compose a descriptive name so the
+                    // record list (visible to admins under
+                    // Customization > Lists, Records & Fields until U12
+                    // hides it via allowuiaccess=F) shows something
+                    // meaningful like "120 → +18555575596".
+                    const recName = String(empId) + ' → ' +
+                                    (a.phoneNumber || a.phoneSid || 'unknown');
+                    rec.setValue({ fieldId: 'name', value: recName });
+
                     rec.setValue({ fieldId: 'custrecord_ctc_ra_employee', value: Number(empId) });
                     rec.setValue({ fieldId: 'custrecord_ctc_ra_phone_sid', value: a.phoneSid });
                     rec.setValue({ fieldId: 'custrecord_ctc_ra_phone_number', value: a.phoneNumber || '' });
