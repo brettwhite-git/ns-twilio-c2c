@@ -109,8 +109,12 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             loading: false,        // initial-load gate
 
             // Section-specific state surfaces below.
-            // Phones section (U3 — Phase 3b): per-row save state.
-            phonesSaving: {},      // { phoneSid: bool }
+            // Phones section (U3 — Phase 3b): inline-edit DataGrid state.
+            phonesEmployees: null,   // from wizardListEmployees (cached)
+            phonesNumbers: null,     // from wizardListPhoneNumbers (live Twilio list)
+            phonesByPhone: null,     // derived: assignments grouped by phoneSid (one row per phone)
+            phonesLoading: false,    // section-level loader gate
+            phonesSaving: {},        // { phoneSid: bool } — per-row save spinner
             phonesError: null,
             // Voice section (U4 — Phase 3b): which field is in EDIT mode.
             voiceEditing: null,    // null | 'twimlAppSid' | 'phoneNumber' | 'intelServiceSid'
@@ -157,6 +161,13 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             var Tb    = component.ToolBar;
             // U1.5 — ScrollPanel for content-pane internal scrolling.
             var Sp    = component.ScrollPanel;
+            // U3 (Phase 3b) — DataGrid + column types for inline editing.
+            var DG    = component.DataGrid;
+            var TC    = component.TemplatedColumn;
+            var MDC   = component.MultiselectDropdownColumn;
+            var Bdg   = component.Badge;
+            // U3 — ArrayDataSource (from core) for DataGrid rows + dropdown items.
+            var Ads   = core.ArrayDataSource;
 
             var SP_Orient = SP && SP.Orientation || {};
             var SP_Gap    = SP && SP.GapSize || {};
@@ -179,6 +190,7 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                 SP: SP, CP: CP, H: H, T: T, Stp: Stp, SI: SI,
                 ND: ND, GP: GP, Bn: Bn, Cd: Cd, Tb: Tb,
                 Sp: Sp,
+                DG: DG, TC: TC, MDC: MDC, Bdg: Bdg, Ads: Ads,
                 SP_Orient: SP_Orient,
                 SP_Gap: SP_Gap,
                 CP_Gap: CP_Gap,
@@ -324,7 +336,13 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         rerender();
 
         var settled = 0;
-        var TARGET = 3; // snapshot + assignments + preflight (activity added in U8)
+        // U3 fix: preload employees alongside snapshot/assignments/preflight
+        // so the Phones DataGrid has them available on first render. Earlier
+        // lazy-load on goToSection('phones') created a timing race where the
+        // DataGrid's widgetOptions ran BEFORE employees resolved → chips
+        // initialized with selectedItems=[] and never recovered on subsequent
+        // renders.
+        var TARGET = 4;
         function onSettled() {
             settled += 1;
             if (settled >= TARGET) {
@@ -341,13 +359,34 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             .then(onSettled);
 
         wizardCall('wizardLoadAssignments', {})
-            .then(function (p) { STATE.console.assignments = (p && p.items) || []; })
-            .catch(function () { STATE.console.assignments = []; })
+            .then(function (p) {
+                STATE.console.assignments = (p && p.items) || [];
+                STATE.console.phonesByPhone =
+                    groupAssignmentsByPhone(STATE.console.assignments);
+            })
+            .catch(function () {
+                STATE.console.assignments = [];
+                STATE.console.phonesByPhone = [];
+            })
             .then(onSettled);
 
         wizardCall('wizardRunPreflight', {})
             .then(function (p) { STATE.console.preflight = (p && p.checks) || []; })
             .catch(function () { STATE.console.preflight = []; })
+            .then(onSettled);
+
+        wizardCall('wizardListEmployees', {})
+            .then(function (p) {
+                var items = (p && p.items) || [];
+                STATE.console.phonesEmployees = items.map(function (e) {
+                    return {
+                        id: Number(e.id),
+                        name: e.name || '(no name)',
+                        email: e.email || ''
+                    };
+                });
+            })
+            .catch(function () { STATE.console.phonesEmployees = []; })
             .then(onSettled);
     }
 
@@ -379,9 +418,154 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
      */
     function goToSection(sectionName) {
         SELECTED_SECTION = sectionName;
+        // U1.5: if entering console from stepper mode (Re-run → navigate),
+        // also flip MODE back so the rail's onSelectedValueChanged sees
+        // console state.
+        if (MODE === 'stepper') {
+            MODE = 'console';
+        }
         STATE.console.pendingDeactivateConfirm = false; // cancel pending
         STATE.console.actionError = null;
         rerender();
+
+        // U3 (Phase 3b): lazy-load Phones-section's Twilio phone list
+        // when admin first navigates there. Employees are pre-loaded in
+        // loadConsole so the DataGrid has them on first render (avoids
+        // the chip-display timing race).
+        if (sectionName === 'phones' &&
+            STATE.console.phonesNumbers === null) {
+            loadPhonesData();
+        }
+    }
+
+    /**
+     * U3 bugfix: backend wizardLoadAssignments returns FLAT rows — one
+     * per (phone, employee) pair. The DataGrid needs ONE row per phone
+     * with all employeeIds collected. This helper groups by phoneSid.
+     *
+     * Input:  [{phoneSid, phoneNumber, employeeId, isPrimary}, ...]
+     * Output: [{phoneSid, phoneNumber, employeeIds: [...], primaryEmployeeId}]
+     */
+    function groupAssignmentsByPhone(flatRows) {
+        var grouped = {};
+        (flatRows || []).forEach(function (r) {
+            if (!r.phoneSid) return;
+            if (!grouped[r.phoneSid]) {
+                grouped[r.phoneSid] = {
+                    phoneSid: r.phoneSid,
+                    phoneNumber: r.phoneNumber || '',
+                    employeeIds: [],
+                    primaryEmployeeId: null
+                };
+            }
+            var bucket = grouped[r.phoneSid];
+            // Normalize: server may return ID as string OR number; persist
+            // as Number for stable comparison + dedupe.
+            var empId = Number(r.employeeId);
+            if (empId && bucket.employeeIds.indexOf(empId) === -1) {
+                bucket.employeeIds.push(empId);
+            }
+            if (r.isPrimary && !bucket.primaryEmployeeId) {
+                bucket.primaryEmployeeId = empId;
+            }
+        });
+        // Ensure primaryEmployeeId always points at the first employee if
+        // server didn't flag one (defensive — should be set per save).
+        Object.keys(grouped).forEach(function (sid) {
+            var b = grouped[sid];
+            if (!b.primaryEmployeeId && b.employeeIds.length > 0) {
+                b.primaryEmployeeId = b.employeeIds[0];
+            }
+        });
+        return Object.keys(grouped).map(function (sid) { return grouped[sid]; });
+    }
+
+    /**
+     * U3: lazy-load Phones-section's Twilio phone list (used by the
+     * "Add phone number" Modal for unassigned-picker). Employees are
+     * pre-loaded in loadConsole so they're available for the DataGrid
+     * widgetOptions on first render.
+     */
+    function loadPhonesData() {
+        STATE.console.phonesLoading = true;
+        STATE.console.phonesError = null;
+        rerender();
+
+        wizardCall('wizardListPhoneNumbers', {})
+            .then(function (p) {
+                STATE.console.phonesNumbers = (p && p.items) || [];
+            })
+            .catch(function (e) {
+                STATE.console.phonesNumbers = [];
+                STATE.console.phonesError = 'Could not load phone numbers: ' +
+                    (e && e.message ? e.message : String(e));
+            })
+            .then(function () {
+                STATE.console.phonesLoading = false;
+                rerender();
+            });
+    }
+
+    /**
+     * U3: persist a single row's rep-assignment change. Operates on the
+     * grouped STATE.console.phonesByPhone (one row per phone). Optimistic
+     * UI update happens before this fires; we send all rows to the
+     * server (which reconciles by deleting + recreating per phoneSid).
+     *
+     * On failure, reload assignments and re-group to revert.
+     */
+    function onPhonesRowSelectionChanged(phoneSid, newEmployeeIds) {
+        STATE.console.phonesSaving[phoneSid] = true;
+        STATE.console.phonesError = null;
+
+        // Optimistic: mutate the grouped row in place.
+        var grouped = STATE.console.phonesByPhone || [];
+        for (var i = 0; i < grouped.length; i++) {
+            if (grouped[i].phoneSid === phoneSid) {
+                grouped[i].employeeIds = newEmployeeIds;
+                if (!grouped[i].primaryEmployeeId ||
+                    newEmployeeIds.indexOf(grouped[i].primaryEmployeeId) === -1) {
+                    grouped[i].primaryEmployeeId = newEmployeeIds.length > 0
+                        ? newEmployeeIds[0] : null;
+                }
+                break;
+            }
+        }
+        rerender();
+
+        var payload = {
+            assignments: grouped.map(function (g) {
+                return {
+                    phoneSid: g.phoneSid,
+                    phoneNumber: g.phoneNumber || '',
+                    employeeIds: g.employeeIds || [],
+                    primaryEmployeeId: g.primaryEmployeeId || null
+                };
+            })
+        };
+
+        wizardCall('wizardSaveAssignments', payload)
+            .then(function (resp) {
+                STATE.console.phonesSaving[phoneSid] = false;
+                if (!resp || resp.ok === false || resp.error) {
+                    STATE.console.phonesError =
+                        'Save failed: ' + ((resp && resp.error) || 'unknown');
+                    // Revert via fresh load.
+                    wizardCall('wizardLoadAssignments', {}).then(function (p2) {
+                        STATE.console.assignments = (p2 && p2.items) || [];
+                        STATE.console.phonesByPhone =
+                            groupAssignmentsByPhone(STATE.console.assignments);
+                        rerender();
+                    });
+                }
+                rerender();
+            })
+            .catch(function (e) {
+                STATE.console.phonesSaving[phoneSid] = false;
+                STATE.console.phonesError = 'Network: ' +
+                    (e && e.message ? e.message : String(e));
+                rerender();
+            });
     }
 
     /**
@@ -737,17 +921,39 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
 
     /**
      * U1.5: wrap content in a ScrollPanel(VERTICAL) + ContentPanel
-     * (padding). The ScrollPanel makes content scroll INTERNALLY within
-     * its grid cell so the rail stays fixed in viewport; the
-     * ContentPanel adds padding around the content for breathing room
-     * away from the rail's flush-left edge.
+     * (padding).
+     *
+     * ── LAYOUT-WIDE MARGIN RULE (single source of truth) ───────────
+     * Every section's content flows through this function. The
+     * `outerGap` GapSizeObject is the ONE place that defines the
+     * margin between:
+     *   - rail edge ←→ content start  (outerGap.start)
+     *   - content end ←→ browser right (outerGap.end)
+     *   - top / bottom breathing room  (outerGap.vertical)
+     *
+     * Update these values to change layout spacing across EVERY
+     * section uniformly (Overview, Phones, Voice, Credentials,
+     * Health, and stepper re-run mode).
+     *
+     * Per ContentPanel.GapSizeObject (component.d.ts:4069):
+     *   start / end accept any GapSize (M=24px, L=32px, XL=40px).
+     *
+     * Current values:
+     *   start: L (32px)   — modest gap from rail's flush-left edge
+     *   end:   XL (40px)  — extra breathing room from browser right
+     *   vertical: M (24px) — top + bottom inset
      */
     function wrapContent(d, child) {
         if (!d.CP) return child;
+        var Gap = d.CP_Gap || {};
         var padded = safeNew(d.CP, {
             content: child,
             horizontalAlignment: d.CP_HAlign.STRETCH,
-            outerGap: d.CP_Gap.L
+            outerGap: {
+                start: Gap.L,
+                end: Gap.XL,
+                vertical: Gap.M
+            }
         }, "ContentPanel(rail-wrapper)") || child;
 
         // Wrap in ScrollPanel(VERTICAL) so the content pane scrolls
@@ -866,8 +1072,7 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
             case 'overview':    return buildOverviewSection(d);
-            case 'phones':      return buildSectionStub(d, 'Phones & reps',
-                                    'Inline DataGrid editing arrives in Phase 3b (U3).');
+            case 'phones':      return buildPhonesSection(d);
             case 'voice':       return buildSectionStub(d, 'Voice config',
                                     'Inline Field editing arrives in Phase 3b (U4).');
             case 'credentials': return buildSectionStub(d, 'Credentials',
@@ -1329,28 +1534,23 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         }, "StackPanel(preflight-header-row)");
 
         var preflight = STATE.console.preflight;
-        var rows = [];
+        var bodyContent;
         if (preflight === null || preflight === undefined) {
-            var loading = safeNew(d.T, {
+            bodyContent = safeNew(d.T, {
                 text: "Preflight not yet run. Click Re-run to check.",
                 type: d.T_Type.WEAK
             }, "Text(preflight-loading)");
-            if (loading) rows.push(loading);
         } else if (preflight.length === 0) {
-            var empty = safeNew(d.T, {
+            bodyContent = safeNew(d.T, {
                 text: "No checks returned.",
                 type: d.T_Type.WEAK
             }, "Text(preflight-empty)");
-            if (empty) rows.push(empty);
         } else {
-            preflight.forEach(function (c) {
-                var row = buildCheckRow(c);
-                if (row) rows.push(row);
-            });
+            bodyContent = buildHealthChecksDataGrid(d, preflight, 'preflight');
         }
 
         return safeNew(d.SP, {
-            items: [headerRow].concat(rows).filter(function (c) { return c != null; }),
+            items: [headerRow, bodyContent].filter(function (c) { return c != null; }),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.M
         }, "StackPanel(preflight-block)");
@@ -1368,7 +1568,8 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             { id: 'phoneNumbers', label: 'Phone number list', status: drift.phoneNumbers || 'unknown' },
             { id: 'intelService', label: 'Intel Service',   status: drift.intelService || 'unknown' }
         ];
-        // Map drift status → check-row status so we can reuse buildCheckRow.
+        // Map drift status → check-row status so the grid renderer can
+        // reuse the same Badge logic as preflight checks.
         var statusMap = {
             'in-sync': { status: 'pass', detail: 'In sync with Twilio' },
             'drift':   { status: 'warn', detail: 'Drift detected — review section for details' },
@@ -1376,21 +1577,146 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             'unknown': { status: 'info_disabled', detail: 'Drift detection requires data load' }
         };
 
-        var rows = detectors.map(function (det) {
+        var checks = detectors.map(function (det) {
             var mapped = statusMap[det.status] || statusMap.unknown;
-            return buildCheckRow({
+            return {
                 id: det.id,
                 label: det.label,
                 status: mapped.status,
                 detail: mapped.detail
-            });
-        }).filter(function (r) { return r != null; });
+            };
+        });
+
+        var grid = buildHealthChecksDataGrid(d, checks, 'drift');
 
         return safeNew(d.SP, {
-            items: [sectionHeader].concat(rows).filter(function (c) { return c != null; }),
+            items: [sectionHeader, grid].filter(function (c) { return c != null; }),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.M
         }, "StackPanel(drift-block)");
+    }
+
+    /**
+     * U6.5 (Phase 3b): shared DataGrid for both Preflight + Drift blocks
+     * in the Health section. Same UIF DataGrid pattern as Phones — gives
+     * consistent layout, column alignment, and visual treatment.
+     *
+     * Input `checks` shape per buildCheckRow: { id, label, status, detail }
+     * where status is 'pass' | 'fail' | 'warn' | 'info_enabled' | 'info_disabled'
+     *
+     * Two columns:
+     *   1. Status (TEMPLATED, 80px) — Badge with check/cross/warn glyph
+     *   2. Check  (TEMPLATED, flex) — bold label + detail line below
+     */
+    function buildHealthChecksDataGrid(d, checks, gridName) {
+        // Match Phones DataGrid guard: only check DataGrid itself. TC is a
+        // namespace member, not a top-level class — we don't use it for
+        // construction (columns are plain options objects per UIF recipe
+        // §13-14). Earlier guard `!d.TC` forced every render into the
+        // StackPanel fallback because component.TemplatedColumn resolves
+        // to undefined at the top-level grab.
+        if (!d.DG) {
+            console.warn("[CTC] DataGrid component unavailable; health falling back to StackPanel");
+            var fallbackRows = (checks || []).map(function (c) {
+                return buildCheckRow(c);
+            }).filter(function (r) { return r != null; });
+            if (fallbackRows.length === 0) return null;
+            return safeNew(d.SP, {
+                items: fallbackRows,
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(health-checks-fallback-" + gridName + ")");
+        }
+
+        if (!checks || checks.length === 0) return null;
+
+        var rowsDs;
+        try {
+            rowsDs = new d.Ads(checks);
+        } catch (e) {
+            console.error("[CTC] Health checks ArrayDataSource failed:", e);
+            return null;
+        }
+
+        var CT = (d.DG && d.DG.ColumnType) || {};
+
+        var statusColDef = {
+            type: CT.TEMPLATED,
+            name: 'status',
+            label: 'Status',
+            // Per UIF catalog: stretchFactor is the proper proportional-
+            // weight prop when columnStretch:true. width is fixed pixels.
+            stretchFactor: 1,
+            content: function (args) {
+                try {
+                    var row = args && args.cell && args.cell.row &&
+                              args.cell.row.dataItem;
+                    if (!row) return safeNew(d.T, { text: '—' });
+                    return badgeFor(row.status) || safeNew(d.T, { text: row.status });
+                } catch (e) {
+                    console.error("[CTC] Health status column threw:", e);
+                    return safeNew(d.T, { text: '?' });
+                }
+            }
+        };
+
+        var checkColDef = {
+            type: CT.TEMPLATED,
+            name: 'check',
+            label: 'Check',
+            stretchFactor: 3,  // proportional weight — label column
+            content: function (args) {
+                try {
+                    var row = args && args.cell && args.cell.row &&
+                              args.cell.row.dataItem;
+                    if (!row) return safeNew(d.T, { text: '—' });
+                    return safeNew(d.T, {
+                        text: row.label || '',
+                        type: d.T_Type.STRONG
+                    }, "Text(check-label)");
+                } catch (e) {
+                    console.error("[CTC] Health check column threw:", e);
+                    return safeNew(d.T, { text: '(error)' });
+                }
+            }
+        };
+
+        var detailColDef = {
+            type: CT.TEMPLATED,
+            name: 'detail',
+            label: 'Detail',
+            stretchFactor: 6,  // proportional weight — wider for prose
+            content: function (args) {
+                try {
+                    var row = args && args.cell && args.cell.row &&
+                              args.cell.row.dataItem;
+                    if (!row || !row.detail) return safeNew(d.T, {
+                        text: '—',
+                        type: d.T_Type.WEAK
+                    });
+                    return safeNew(d.T, {
+                        text: row.detail,
+                        type: d.T_Type.WEAK
+                    }, "Text(check-detail)");
+                } catch (e) {
+                    console.error("[CTC] Health detail column threw:", e);
+                    return safeNew(d.T, { text: '(error)' });
+                }
+            }
+        };
+
+        var grid = safeNew(d.DG, {
+            dataSource: rowsDs,
+            columns: [statusColDef, checkColDef, detailColDef],
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            stripedRows: true,
+            dataRowHeight: 48,
+            headerRowHeight: 40,
+            rootStyle: { width: '100%' }
+        }, "DataGrid(health-" + gridName + ")");
+
+        return grid;
     }
 
     function buildHealthDangerZone(d) {
@@ -1467,6 +1793,359 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.S
         }, "StackPanel(danger-zone)");
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* U3 — Phones & reps section (Phase 3b)                              */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    /**
+     * U3: Phones & reps — DataGrid with inline MultiselectDropdown
+     * editing. Per row: phone number + assigned reps (multi-select cell,
+     * save-on-change) + status badge + (deferred to U3.b) row actions.
+     *
+     * Data sources:
+     *   - rows: STATE.console.assignments (wizardLoadAssignments)
+     *   - rep options: STATE.console.phonesEmployees (wizardListEmployees)
+     */
+    function buildPhonesSection(d) {
+        var items = [];
+
+        var heading = safeNew(d.H, {
+            content: "Phones & reps",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(phones)");
+        if (heading) items.push(heading);
+
+        // ── Loading state (initial fetch) ─────────────────────────────
+        if (STATE.console.phonesLoading) {
+            var loader = safeNew(component.Loader, {
+                label: "Loading phones & reps…",
+                indeterminate: true
+            }, "Loader(phones)");
+            if (loader) items.push(loader);
+            return safeNew(d.SP, {
+                items: items,
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.L
+            }, "StackPanel(phones-loading)") || heading;
+        }
+
+        // ── Toolbar (refresh + add) ───────────────────────────────────
+        var toolbar = buildPhonesToolbar(d);
+        if (toolbar) items.push(toolbar);
+
+        // ── Error surface ─────────────────────────────────────────────
+        if (STATE.console.phonesError) {
+            var err = safeNew(d.T, {
+                text: "✕ " + STATE.console.phonesError,
+                type: d.T_Type.STRONG
+            }, "Text(phones-error)");
+            if (err) items.push(err);
+        }
+
+        // ── DataGrid ──────────────────────────────────────────────────
+        var grid = buildPhonesDataGrid(d);
+        if (grid) items.push(grid);
+
+        // ── Empty-state hint ──────────────────────────────────────────
+        var grouped = STATE.console.phonesByPhone || [];
+        if (grouped.length === 0) {
+            var emptyText = safeNew(d.T, {
+                text: "No phone numbers configured yet. Click \"Add phone " +
+                      "number\" above to claim a Twilio number and assign reps.",
+                type: d.T_Type.WEAK
+            }, "Text(phones-empty)");
+            if (emptyText) items.push(emptyText);
+        }
+
+        if (items.length === 0) return safeNew(d.T, { text: "Phones & reps" });
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XL  // bumped from L for more vertical breathing room
+        }, "StackPanel(phones)");
+    }
+
+    /**
+     * U3: ToolBar above the DataGrid — Refresh from Twilio + Add phone
+     * number. "Add phone number" deep-links to Step 4 of the wizard
+     * for now (temporary fallback — a dedicated Add Modal is a Phase 3b
+     * stretch goal, tracked separately).
+     */
+    function buildPhonesToolbar(d) {
+        var ButtonType = (component.Button && component.Button.Type) || {};
+
+        var refreshBtn = safeNew(component.Button, {
+            label: "Refresh from Twilio",
+            type: ButtonType.DEFAULT,
+            startIcon: d.SysIcon && d.SysIcon.REFRESH,
+            action: function () { loadPhonesData(); }
+        }, "Button(phones-refresh)");
+
+        var addBtn = safeNew(component.Button, {
+            label: "Add phone number",
+            type: ButtonType.PRIMARY,
+            startIcon: d.SysIcon && d.SysIcon.ADD,
+            action: function () {
+                // Temporary: deep-link to Step 4 for the full add flow.
+                // A dedicated Add Modal lives in a follow-up unit.
+                goToStep(4);
+            }
+        }, "Button(phones-add)");
+
+        var buttons = [refreshBtn, addBtn].filter(function (b) { return b != null; });
+        if (buttons.length === 0) return null;
+
+        return safeNew(d.SP, {
+            items: buttons,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, "StackPanel(phones-toolbar)");
+    }
+
+    /**
+     * U3: DataGrid with three columns:
+     *   1. Phone number       (TEMPLATED — formatted number + PN-SID)
+     *   2. Assigned reps      (MULTISELECT_DROPDOWN — inline edit)
+     *   3. Status             (TEMPLATED — Badge: Live / No reps)
+     *
+     * Per UIF d.ts: MultiselectDropdownColumn accepts `dataSource`,
+     * `displayMember`, `valueMember`, and `widgetOptions` (which can be
+     * a callback returning per-row options). We use the callback to
+     * wire the per-row `onSelectionChanged` to onPhonesRowSelectionChanged.
+     *
+     * `args.values` shape per the U9b learning — NOT `args.items`.
+     */
+    function buildPhonesDataGrid(d) {
+        if (!d.DG) {
+            console.warn("[CTC] DataGrid component unavailable; falling back to text");
+            return buildPhonesFallback(d);
+        }
+
+        var grouped = STATE.console.phonesByPhone || [];
+        var employees = STATE.console.phonesEmployees || [];
+
+        if (grouped.length === 0) return null;
+
+        // ArrayDataSource constructors. Per core.d.ts: new ArrayDataSource(array).
+        var rowsDs, employeesDs;
+        try {
+            rowsDs = new d.Ads(grouped);
+            employeesDs = new d.Ads(employees);
+        } catch (e) {
+            console.error("[CTC] ArrayDataSource construction failed:", e);
+            return buildPhonesFallback(d);
+        }
+
+        // Per d.ts (component.d.ts:4571): DataGrid.columns expects an
+        // ARRAY OF OPTIONS OBJECTS (ColumnDefinition = TemplatedColumn.Options
+        // | MultiselectDropdownColumn.Options | ...), NOT an array of
+        // constructed column instances. My U3-first-attempt wrapped each
+        // column in safeNew() which built instances — DataGrid construction
+        // silently failed because those aren't valid ColumnDefinitions.
+        // Plain plain options objects work.
+        //
+        // GridColumn.Options required fields: `type` (ColumnType enum) +
+        // `name` (string identifier). `valueMember` is NOT on the column
+        // Options; it lives in widgetOptions (MultiselectDropdown.Options).
+        var CT = (d.DG && d.DG.ColumnType) || {};
+        var BdgType = (d.Bdg && d.Bdg.Type) || {};
+
+        // Truncate the PN-SID so it fits the cell without wrapping over
+        // the phone number text above it. Twilio SIDs are 34 chars; show
+        // first 6 + last 4 with ellipsis (e.g., "PN4650…3988e").
+        function truncSid(sid) {
+            if (!sid) return '';
+            if (sid.length <= 14) return sid;
+            return sid.slice(0, 6) + '…' + sid.slice(-4);
+        }
+
+        // Per MEMORY.md DataGrid learning: with columnStretch: true,
+        // `width` on each column acts as a PROPORTIONAL WEIGHT (not a
+        // fixed pixel). Without width on a column, it collapses to
+        // minimum width. So reps column NEEDS a width or it stays
+        // narrow and chips can't render. Widths chosen so reps gets
+        // the most space (it has the largest content — chip list).
+        var phoneColDef = {
+            type: CT.TEMPLATED,
+            name: 'phone',
+            label: 'Phone number',
+            // Per UIF catalog (DataGrid > Columns > Column Sizing):
+            // when columnStretch:true, use `stretchFactor` for the
+            // fraction-of-available-width weight. `width` is a fixed
+            // pixel size and CAPS the grid at sum-of-widths.
+            stretchFactor: 2,
+            content: function (args) {
+                try {
+                    var row = args && args.cell && args.cell.row &&
+                              args.cell.row.dataItem;
+                    if (!row) return safeNew(d.T, { text: '—' });
+                    var top = safeNew(d.T, {
+                        text: row.phoneNumber || '(unknown)',
+                        type: d.T_Type.STRONG
+                    }, "Text(phone-top)");
+                    var sub = safeNew(d.T, {
+                        text: truncSid(row.phoneSid),
+                        type: d.T_Type.WEAK,
+                        size: d.T.Size && d.T.Size.S
+                    }, "Text(phone-sub)");
+                    return safeNew(d.SP, {
+                        items: [top, sub].filter(function (c) { return c != null; }),
+                        orientation: d.SP_Orient.VERTICAL,
+                        itemGap: d.SP_Gap.XXS
+                    }, "StackPanel(phone-cell)") || top || safeNew(d.T, { text: row.phoneNumber || '' });
+                } catch (e) {
+                    console.error("[CTC] phone column template threw:", e);
+                    return safeNew(d.T, { text: '(error)' });
+                }
+            }
+        };
+
+        // U3 fix #3: chips displayed "undefined" because bindToValue
+        // didn't resolve displayMember from raw ID values — the cell
+        // had selected IDs but couldn't look up the corresponding
+        // employee names. Drop bindToValue + binding entirely; instead
+        // resolve selectedItems to full employee OBJECTS per-row in
+        // widgetOptions. The widget then has full objects to read
+        // .name from for chip labels.
+        var IM = (d.DG && d.DG.InputMode) || {};
+
+        // U3 fix #5: chips display "undefined" because column-level
+        // `displayMember: 'name'` (string) only works when bound values
+        // are full objects (it does `value['name']`). With binding:
+        // 'employeeIds', the cell receives Numbers like [120, 124, 131]
+        // and tries `(120)['name']` → undefined. Per d.ts (DisplayMember
+        // = string | DisplayMemberCallback), use a CALLBACK that does
+        // the lookup explicitly: takes an ID, finds the matching
+        // employee, returns the name.
+        function repsDisplayMember(value) {
+            // value is whatever the cell extracted from row.employeeIds —
+            // could be Number, String, or full employee object depending
+            // on how the widget passes it.
+            if (value && typeof value === 'object') {
+                return value.name || '';
+            }
+            var id = Number(value);
+            var emp = (STATE.console.phonesEmployees || []).find(function (e) {
+                return e.id === id;
+            });
+            return emp ? emp.name : '';
+        }
+
+        var repsColDef = {
+            type: CT.MULTI_SELECT_DROPDOWN,
+            name: 'reps',
+            label: 'Assigned reps',
+            // Largest fraction — reps chips need the most horizontal room.
+            stretchFactor: 5,
+            // binding: 'employeeIds' tells the column to read that row
+            // property (without it, the column defaults to row[name] =
+            // row.reps which doesn't exist).
+            binding: 'employeeIds',
+            inputMode: IM.EDIT_ONLY,
+            dataSource: employeesDs,
+            displayMember: repsDisplayMember,
+            editable: true,
+            widgetOptions: function (row) {
+                var dataItem = (row && row.dataItem) || {};
+                var phoneSid = dataItem.phoneSid;
+                return {
+                    dataSource: employeesDs,
+                    valueMember: 'id',
+                    displayMember: 'name',
+                    placeholder: 'Pick reps',
+                    onSelectionChanged: function (args) {
+                        // args.values may be IDs (with valueMember) OR full
+                        // objects depending on UIF version — handle both.
+                        var newIds = ((args && args.values) || []).map(function (v) {
+                            if (v && typeof v === 'object') return Number(v.id);
+                            return Number(v);
+                        });
+                        if (phoneSid) {
+                            onPhonesRowSelectionChanged(phoneSid, newIds);
+                        }
+                    }
+                };
+            }
+        };
+
+        var statusColDef = {
+            type: CT.TEMPLATED,
+            name: 'status',
+            label: 'Status',
+            stretchFactor: 1,
+            content: function (args) {
+                try {
+                    var row = args && args.cell && args.cell.row &&
+                              args.cell.row.dataItem;
+                    if (!row) return safeNew(d.T, { text: '—' });
+                    var saving = STATE.console.phonesSaving[row.phoneSid];
+                    var hasReps = (row.employeeIds || []).length > 0;
+                    if (saving) {
+                        return safeNew(d.Bdg, {
+                            content: 'Saving…',
+                            type: BdgType.SUBTLE
+                        }, "Badge(saving)") || safeNew(d.T, { text: 'Saving…' });
+                    } else if (hasReps) {
+                        return safeNew(d.Bdg, {
+                            content: '✓ Live',
+                            type: BdgType.SOLID
+                        }, "Badge(live)") || safeNew(d.T, { text: '✓ Live' });
+                    }
+                    return safeNew(d.Bdg, {
+                        content: 'No reps',
+                        type: BdgType.SUBTLE
+                    }, "Badge(no-reps)") || safeNew(d.T, { text: 'No reps' });
+                } catch (e) {
+                    console.error("[CTC] status column template threw:", e);
+                    return safeNew(d.T, { text: '(error)' });
+                }
+            }
+        };
+
+        var columns = [phoneColDef, repsColDef, statusColDef];
+
+        var grid = safeNew(d.DG, {
+            dataSource: rowsDs,
+            columns: columns,
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            stripedRows: true,
+            dataRowHeight: 72,        // bumped from 64 for breathing room
+            headerRowHeight: 44,      // taller header for readability
+            editable: true,
+            rootStyle: { width: '100%' }
+        }, "DataGrid(phones)");
+        if (!grid) {
+            console.warn("[CTC] DataGrid construction returned null; using text fallback");
+            return buildPhonesFallback(d);
+        }
+        // Horizontal margins are handled by section-level wrapContent
+        // (single source of truth — see comments there). The section's
+        // own StackPanel itemGap provides vertical breathing room
+        // between toolbar / grid / empty-state hint.
+        return grid;
+    }
+
+    /**
+     * U3: text-only fallback when DataGrid or its column types aren't
+     * available at runtime. Renders rows as a vertical stack of Text
+     * lines so admin still sees the data.
+     */
+    function buildPhonesFallback(d) {
+        var grouped = STATE.console.phonesByPhone || [];
+        var rows = grouped.map(function (g) {
+            var label = (g.phoneNumber || '(unknown)') + ' — ' +
+                        (g.employeeIds || []).length + ' rep(s)';
+            return safeNew(d.T, { text: label }, "Text(phone-row)");
+        }).filter(function (r) { return r != null; });
+        if (rows.length === 0) return null;
+        return safeNew(d.SP, {
+            items: rows,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, "StackPanel(phones-fallback)");
     }
 
     /**
