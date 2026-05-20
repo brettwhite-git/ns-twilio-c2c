@@ -8,10 +8,15 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_workspace_queries', './lib/ctc_entity'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, workspaceQueries, ctcEntity) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity) => {
 
     const loadConfig = ctcConfig.loadConfig;
-    const buildAuthHeader = ctcConfig.buildAuthHeader;
+    // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
+    // SecureString path — buildSecureAuthHeader(cfg) returns a SecureString
+    // built from `apiKeySid + ':{' + apiSecretId + '}'`. The secret VALUE
+    // never enters script scope; NetSuite's HTTP runtime expands the
+    // {custsecret_*} placeholder at the socket write boundary.
+    const buildSecureAuthHeader = twilioAdmin.buildSecureAuthHeader;
 
     const lookupContactCompany = (contactId) => {
         try {
@@ -187,7 +192,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     const checkTranscript = (body) => {
         try {
             const config = loadConfig();
-            const authHeader = buildAuthHeader(config.accountSid, config.authToken);
+            const authHeader = buildSecureAuthHeader(config);
 
             const recording = utils.fetchRecordingForCall(config.accountSid, body.callSid, authHeader);
             if (!recording) {

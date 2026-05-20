@@ -26,12 +26,6 @@
             <ismandatory>T</ismandatory>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
-        <customrecordcustomfield scriptid="custrecord_ctc_auth_token">
-            <label>Auth Token</label>
-            <fieldtype>CLOBTEXT</fieldtype>
-            <ismandatory>T</ismandatory>
-            <displaytype>NORMAL</displaytype>
-        </customrecordcustomfield>
         <customrecordcustomfield scriptid="custrecord_ctc_api_key_sid">
             <label>API Key SID</label>
             <fieldtype>CLOBTEXT</fieldtype>
@@ -59,13 +53,6 @@
         </customrecordcustomfield>
         <customrecordcustomfield scriptid="custrecord_ctc_intel_service_sid">
             <label>Intelligence Service SID</label>
-            <fieldtype>CLOBTEXT</fieldtype>
-            <ismandatory>F</ismandatory>
-            <displaytype>NORMAL</displaytype>
-        </customrecordcustomfield>
-        <customrecordcustomfield scriptid="custrecord_ctc_auth_token_id">
-            <label>Auth Token Secret ID</label>
-            <description>Script ID for the NetSuite Secret holding the Twilio Auth Token (e.g., custsecret_ctc_auth_token). Mirrors the API Key Secret ID pattern. Populated by the v2 Setup Wizard. The legacy custrecord_ctc_auth_token CLOBTEXT field is retained for backwards-compatibility on existing installs; the runtime auth-header builder prefers this secret reference when populated.</description>
             <fieldtype>CLOBTEXT</fieldtype>
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>

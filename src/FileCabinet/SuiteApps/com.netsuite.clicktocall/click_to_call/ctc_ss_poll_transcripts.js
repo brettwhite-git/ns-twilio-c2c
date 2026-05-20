@@ -8,10 +8,11 @@
  * updates Phone Call activity records, and deletes processed recordings.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/ctc_transcript_utils', './lib/ctc_config'], (https, record, search, llm, encode, log, utils, ctcConfig) => {
+define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin'], (https, record, search, llm, encode, log, utils, ctcConfig, twilioAdmin) => {
 
     const loadConfig = ctcConfig.loadConfig;
-    const buildAuthHeader = ctcConfig.buildAuthHeader;
+    // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
+    const buildSecureAuthHeader = twilioAdmin.buildSecureAuthHeader;
 
     const findUnprocessedCalls = () => {
         const results = search.create({
@@ -67,7 +68,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
 
         try {
             const config = loadConfig();
-            const authHeader = buildAuthHeader(config.accountSid, config.authToken);
+            const authHeader = buildSecureAuthHeader(config);
             const hasLlmQuota = llm.getRemainingFreeUsage() >= 10;
 
             if (!hasLlmQuota) {

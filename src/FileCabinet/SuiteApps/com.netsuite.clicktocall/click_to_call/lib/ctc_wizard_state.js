@@ -37,21 +37,18 @@ define([], () => {
         config = config || {};
         const has = (v) => !!(v && String(v).trim().length > 0);
 
-        const hasPublicIds = has(config.accountSid) && has(config.apiKeySid);
-        // The wizard wants the Auth Token stored in NetSuite Secrets — but
-        // legacy installs may have only the raw CLOBTEXT. EITHER counts as
-        // "secret configured" for resumability purposes; U4 will narrow this
-        // once the secret-preferring auth path lands.
-        const hasAuthCredential = has(config.authTokenSecretId) || has(config.authToken);
-        const hasApiKeySecret  = has(config.apiSecretId);
-        const hasVoiceConfig   = has(config.twimlAppSid) && has(config.phoneNumber);
-        const isActive         = config.active === true;
+        const hasPublicIds    = has(config.accountSid) && has(config.apiKeySid);
+        const hasApiKeySecret = has(config.apiSecretId);
+        const hasVoiceConfig  = has(config.twimlAppSid) && has(config.phoneNumber);
+        const isActive        = config.active === true;
 
         return {
             hasPublicIds: hasPublicIds,
-            hasAuthCredential: hasAuthCredential,
             hasApiKeySecret: hasApiKeySecret,
-            hasCredentials: hasPublicIds && hasAuthCredential && hasApiKeySecret,
+            // Phase 2 U10: Auth Token removed entirely. The only credential
+            // path is API Key + Secret. "Credentials configured" means both
+            // public identifiers AND the API Key Secret pointer are set.
+            hasCredentials: hasPublicIds && hasApiKeySecret,
             hasVoiceConfig: hasVoiceConfig,
             isActive: isActive
         };
@@ -71,16 +68,15 @@ define([], () => {
      */
     const determineCurrentStep = (snapshot) => {
         snapshot = snapshot || {};
-        if (!snapshot.hasPublicIds)      return 2; // Step 1 prereqs auto-pass when admin's logged in; Step 2 is where actual input starts
-        if (!snapshot.hasAuthCredential) return 2;
-        if (!snapshot.hasApiKeySecret)   return 2;
-        if (!snapshot.hasVoiceConfig)    return 3;
+        if (!snapshot.hasPublicIds)    return 2; // Step 1 prereqs auto-pass when admin's logged in; Step 2 is where actual input starts
+        if (!snapshot.hasApiKeySecret) return 2;
+        if (!snapshot.hasVoiceConfig)  return 3;
         // Phone-number assignments live in a separate record; the Suitelet
         // queries that count on render. For snapshot purposes we treat
         // hasVoiceConfig + !isActive as "still in Step 4 or 5". The
         // Suitelet refines this by also checking the rep_assignment count.
-        if (!snapshot.isActive)          return 5; // preflight + activate
-        return 5;                                  // activated — re-runnable preflight surface
+        if (!snapshot.isActive)        return 5; // preflight + activate
+        return 5;                                // activated — U11 will introduce the 'console' sentinel
     };
 
     /**

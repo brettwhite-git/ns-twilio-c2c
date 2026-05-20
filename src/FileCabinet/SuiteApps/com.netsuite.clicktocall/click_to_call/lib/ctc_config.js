@@ -2,29 +2,29 @@
  * @NApiVersion 2.1
  * @NModuleScope SameAccount
  *
- * Shared CTC configuration loader + Twilio Basic Auth header builder.
- * Single source of truth so RESTlet / Scheduled Script / future SMS action
- * all read from the same config record with the same field set.
+ * Shared CTC configuration loader. Single source of truth so RESTlet /
+ * Scheduled Script / Suitelet / future SMS action all read from the same
+ * config record with the same field set.
+ *
+ * Phase 2 U10: the Auth Token path was removed entirely. All Twilio REST
+ * Basic Auth now flows through `lib/ctc_twilio_admin.js:buildSecureAuthHeader`
+ * which uses `N/https.createSecureString` with the `{custsecret_*}` placeholder
+ * pointing at `cfg.apiSecretId`. The script never sees the cleartext secret
+ * value — NetSuite's HTTP runtime expands the placeholder at the socket
+ * write boundary.
  */
-define(['N/search', 'N/encode'], (search, encode) => {
+define(['N/search'], (search) => {
 
     /**
      * Load the singleton CTC configuration record.
      * @returns {Object} {
-     *     accountSid, authToken, authTokenSecretId, apiKeySid, apiSecretId,
+     *     accountSid, apiKeySid, apiSecretId,
      *     twimlAppSid, phoneNumber, intelServiceSid, active
      * }
      *
-     * Notes on the auth-token fields:
-     *   - `authToken` is the legacy raw CLOBTEXT (pre-Setup-Wizard-v2 installs).
-     *   - `authTokenSecretId` is the new NetSuite Secret script ID set by the
-     *     wizard. When populated, runtime auth should prefer this over the raw
-     *     value — refactor handled in U4 (`buildAuthHeader` N/secrets migration).
-     *     U1 ships the schema; the runtime path still reads `authToken` until U4.
-     *
-     * `active` defaults to false. Phone-button UE gates on this in U8 — until
+     * `active` defaults to false. Phone-button UE gates on this in U9 — until
      * the wizard flips it, the phone icon stays hidden on fresh customer
-     * installs. Back-compat: U8 treats unset+populated-config as true so
+     * installs. Back-compat: U9 treats unset+populated-config as true so
      * existing installs don't lose the icon at deploy time.
      *
      * @throws {Error} if no active config record exists
@@ -35,8 +35,6 @@ define(['N/search', 'N/encode'], (search, encode) => {
             filters: [['isinactive', 'is', 'F']],
             columns: [
                 'custrecord_ctc_account_sid',
-                'custrecord_ctc_auth_token',
-                'custrecord_ctc_auth_token_id',
                 'custrecord_ctc_api_key_sid',
                 'custrecord_ctc_api_secret_id',
                 'custrecord_ctc_twiml_app_sid',
@@ -53,8 +51,6 @@ define(['N/search', 'N/encode'], (search, encode) => {
         const r = results[0];
         return {
             accountSid:        r.getValue('custrecord_ctc_account_sid'),
-            authToken:         r.getValue('custrecord_ctc_auth_token'),
-            authTokenSecretId: r.getValue('custrecord_ctc_auth_token_id'),
             apiKeySid:         r.getValue('custrecord_ctc_api_key_sid'),
             apiSecretId:       r.getValue('custrecord_ctc_api_secret_id'),
             twimlAppSid:       r.getValue('custrecord_ctc_twiml_app_sid'),
@@ -65,20 +61,5 @@ define(['N/search', 'N/encode'], (search, encode) => {
         };
     };
 
-    /**
-     * Build a Twilio Basic Auth header from Account SID + Auth Token.
-     * @param {string} accountSid
-     * @param {string} authToken
-     * @returns {string} "Basic <base64>"
-     */
-    const buildAuthHeader = (accountSid, authToken) => {
-        const encoded = encode.convert({
-            string: accountSid + ':' + authToken,
-            inputEncoding: encode.Encoding.UTF_8,
-            outputEncoding: encode.Encoding.BASE_64
-        });
-        return 'Basic ' + encoded;
-    };
-
-    return { loadConfig, buildAuthHeader };
+    return { loadConfig };
 });
