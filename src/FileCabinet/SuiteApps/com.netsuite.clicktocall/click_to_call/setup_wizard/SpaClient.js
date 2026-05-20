@@ -132,16 +132,57 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             };
             scriptCtx = scriptContext;
 
+            // U9 fix: previously CURRENT_STEP was always 1 on mount,
+            // dropping returning admins back at the prereqs check.
+            // Now we fetch the config snapshot and route to the right
+            // step via lib/ctc_wizard_state.determineCurrentStep.
+            //
+            // While snapshot is in flight, render Step 1 with a loader
+            // so the admin sees something immediately. When the
+            // snapshot lands, goToStep navigates to the correct step
+            // and fires its per-step loader.
             rerender();
+            loadPrereqs(); // immediate Step 1 affordance during routing
 
-            // Fire the Step 1 prereqs Ajax call now that the shell is
-            // mounted. The body container shows a Loader until the
-            // response arrives and replaces it with the check rows.
-            if (CURRENT_STEP === 1) loadPrereqs();
+            wizardCall('wizardSnapshot', {}).then(function (payload) {
+                var snap = payload && payload.snapshot;
+                if (!snap) return; // fresh install — stay on Step 1
+                var target = determineLandingStep(snap);
+                if (target !== CURRENT_STEP) {
+                    console.log("[CTC Setup Wizard] resumability — routing to step " + target);
+                    goToStep(target);
+                }
+            }).catch(function (e) {
+                console.warn("[CTC Setup Wizard] resumability snapshot " +
+                    "failed; staying on Step 1:", e);
+            });
         } catch (e) {
             console.error("[CTC Setup Wizard] run() threw:", e);
         }
     };
+
+    /**
+     * U9: Determine the right landing step from a snapshot. Mirrors
+     * `lib/ctc_wizard_state.js:determineCurrentStep`. Inlined here
+     * because SPA Client runtime AMD require semantics for cross-folder
+     * libs are uncertain in NetSuite UIF — safer to keep the routing
+     * tiny and local.
+     *
+     * @param {Object} snap — masked snapshot from wizardSnapshot action
+     * @returns {number} 1..5
+     */
+    function determineLandingStep(snap) {
+        var has = function (v) { return !!(v && String(v).trim().length > 0); };
+        if (!has(snap.accountSid) || !has(snap.apiKeySid)) return 2;
+        if (!has(snap.apiSecretId)) return 2;
+        if (!has(snap.twimlAppSid) || !has(snap.phoneNumber)) return 3;
+        // hasVoiceConfig met. Step 4 (phone assignments) or Step 5 (activate).
+        // We don't have the rep-assignment count in the snapshot — Step 4's
+        // loader will reveal it. Land on Step 5 when active; otherwise land
+        // on Step 4 so admin can review/adjust assignments before preflight.
+        if (snap.active) return 5;
+        return 4;
+    }
 
     /**
      * Rebuild and mount the full root tree. Called on initial render
@@ -1073,31 +1114,47 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     function loadStep5() {
         STATE.step5.loading = true;
         STATE.step5.activateError = null;
+        STATE.step5.snapshot = null;
+        STATE.step5.assignments = null;
+        STATE.step5.preflight = null;
         rerender();
 
-        // Fire snapshot + assignments + preflight in parallel
+        // U9 fix: previously these 3 calls fired in parallel and the
+        // preflight callback was the sole rerender trigger. If
+        // wizardLoadAssignments resolved AFTER wizardRunPreflight, the
+        // Configuration Review rendered with `assignments === null`,
+        // showing "0 rep(s) across 0 number(s)" even though saves
+        // succeeded. Now: wait for ALL three to settle, then rerender
+        // once with complete data.
+        var settled = 0;
+        function onSettled() {
+            settled += 1;
+            if (settled >= 3) {
+                STATE.step5.loading = false;
+                rerender();
+            }
+        }
+
         wizardCall('wizardSnapshot', {})
             .then(function (p) { STATE.step5.snapshot = p && p.snapshot; })
-            .catch(function () { STATE.step5.snapshot = null; });
+            .catch(function () { STATE.step5.snapshot = null; })
+            .then(onSettled);
 
         wizardCall('wizardLoadAssignments', {})
             .then(function (p) { STATE.step5.assignments = (p && p.items) || []; })
-            .catch(function () { STATE.step5.assignments = []; });
+            .catch(function () { STATE.step5.assignments = []; })
+            .then(onSettled);
 
         wizardCall('wizardRunPreflight', {})
             .then(function (p) {
                 STATE.step5.preflight = (p && p.checks) || [];
-                STATE.step5.loading = false;
-                rerender();
             }).catch(function (e) {
                 STATE.step5.preflight = [{
                     id: 'network', label: 'Preflight call', status: 'fail',
                     detail: 'Network error: ' +
                         (e && e.message ? e.message : String(e))
                 }];
-                STATE.step5.loading = false;
-                rerender();
-            });
+            }).then(onSettled);
     }
 
     function onActivateClick() {

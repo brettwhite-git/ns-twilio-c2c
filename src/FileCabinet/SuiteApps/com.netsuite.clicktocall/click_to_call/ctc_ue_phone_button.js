@@ -7,9 +7,33 @@
  * Visible in both view and edit mode.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity'], (url, runtime, log, ctcEntity) => {
+define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity', './lib/ctc_config'], (url, runtime, log, ctcEntity, ctcConfig) => {
 
     const resolveEntityName = ctcEntity.resolveEntityName;
+
+    /**
+     * U9 / U8: gate the phone-icon injection on `custrecord_ctc_active`.
+     * On fresh installs the wizard hasn't run, so `cfg.active === false`
+     * and we suppress the button entirely — reps never see a broken icon.
+     * Once the wizard's preflight passes and admin clicks Activate,
+     * `cfg.active` flips to true and the icon appears on the next form load.
+     *
+     * Back-compat: existing installs (pre-Phase 2) had a populated config
+     * but no `active` field; we treat that as "active=true" so legacy
+     * installs don't lose the icon at deploy time.
+     */
+    const isCtcActive = () => {
+        try {
+            const cfg = ctcConfig.loadConfig();
+            if (cfg.active === true) return true;
+            // Back-compat: populated config + unset active → treat as active
+            if (cfg.accountSid && cfg.accountSid.length > 0) return true;
+            return false;
+        } catch (e) {
+            // No config record at all = fresh install before wizard ran
+            return false;
+        }
+    };
 
     /**
      * beforeLoad — add a Call button to the form.
@@ -21,6 +45,11 @@ define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity'], (url, runtime, log, 
     const beforeLoad = (context) => {
         const type = context.type;
         if (type !== context.UserEventType.VIEW && type !== context.UserEventType.EDIT) return;
+
+        // U9: gate on the active flag — wizard must have activated
+        // CTC for the icon to appear. Prevents reps from seeing a
+        // broken phone button on fresh customer installs.
+        if (!isCtcActive()) return;
 
         const rec = context.newRecord;
         const recType = String(rec.type).toLowerCase();
