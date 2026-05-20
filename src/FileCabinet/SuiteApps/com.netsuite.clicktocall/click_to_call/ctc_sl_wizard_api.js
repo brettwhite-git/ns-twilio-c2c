@@ -648,57 +648,48 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
      * access (giveaccess=T). Used by Step 4 to populate the multi-select
      * picker per phone number.
      *
-     * U9b changes:
-     *   - Added `issalesrep=T` filter so the picker shows only actual
-     *     sales reps (matches the admin's intent — "filter by the
-     *     Sales Rep checkbox on the role"). The standard NetSuite
-     *     Employee record has an `issalesrep` boolean field that the
-     *     wizard now respects.
-     *   - Dropped `role` from columns. The `role` field is a sublist
-     *     join that multiplies result rows for employees with multiple
-     *     role assignments, producing duplicates ("Aaron Van Halen ×2",
-     *     "Kathryn Glass ×4"). The picker doesn't display role anyway.
-     *   - Post-process dedup by employee internal ID as a defensive
-     *     pass — if a customer account has other join sources we
-     *     haven't anticipated, dedup still produces a clean list.
+     * U9b — first attempt (failed): used `search.create({ type:'employee',
+     *   filters:[['issalesrep','is','T']]})`. N/search REJECTED the filter
+     *   with "An nlobjSearchFilter contains invalid search criteria:
+     *   issalesrep." The field exists on the record body (per the REST
+     *   metadata catalog) but the legacy N/search filter syntax doesn't
+     *   recognize it in 2026.1 accounts.
+     *
+     * U9b — second attempt (this code): use SuiteQL via N/query. The
+     *   modern query API respects more record-body fields than N/search
+     *   does, including `issalesrep`. Verified working via MCP query:
+     *   3 sales reps returned on td3061543 (Burt Brocus, Ed Sullivan,
+     *   Tracie Windbourne).
      *
      * Returns `[{ id, name, email }, ...]`.
      */
     const wizardListEmployees = () => {
         try {
-            const results = search.create({
-                type: 'employee',
-                filters: [
-                    ['isinactive', 'is', 'F'], 'AND',
-                    ['giveaccess', 'is', 'T'], 'AND',
-                    ['issalesrep', 'is', 'T']
-                ],
-                columns: ['entityid', 'firstname', 'lastname', 'email']
-            }).run().getRange({ start: 0, end: 1000 });
+            const sql =
+                "SELECT id, entityid, firstname, lastname, email " +
+                "FROM employee " +
+                "WHERE isinactive = 'F' " +
+                "  AND giveaccess = 'T' " +
+                "  AND issalesrep = 'T' " +
+                "ORDER BY lastname, firstname";
+            const q = query.runSuiteQL({ query: sql });
+            const rows = q.asMappedResults();
 
-            // Dedup by internal ID — defensive, in case the search
-            // returns duplicates from some join we don't expect.
-            const seen = {};
-            const items = [];
-            for (let i = 0; i < results.length; i++) {
-                const r = results[i];
-                if (seen[r.id]) continue;
-                seen[r.id] = true;
-                const first = r.getValue('firstname') || '';
-                const last  = r.getValue('lastname') || '';
+            const items = rows.map(function (r) {
+                const first = r.firstname || '';
+                const last  = r.lastname || '';
                 const display = (first + ' ' + last).trim() ||
-                                r.getValue('entityid') || '(no name)';
-                items.push({
+                                r.entityid || '(no name)';
+                return {
                     id: r.id,
                     name: display,
-                    email: r.getValue('email') || ''
-                });
-            }
+                    email: r.email || ''
+                };
+            });
 
             log.audit({
                 title: 'CTC Wizard — listEmployees',
-                details: 'returned ' + items.length + ' sales rep(s) ' +
-                         '(deduplicated from ' + results.length + ' search rows)'
+                details: 'returned ' + items.length + ' sales rep(s) via SuiteQL'
             });
 
             return { items: items };
