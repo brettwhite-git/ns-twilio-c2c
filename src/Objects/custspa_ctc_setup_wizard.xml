@@ -16,4 +16,15 @@
     <!-- executeas blank means "run as the calling user's role" — same
          security posture as the retired Suitelet's no-runasrole stance. -->
     <executeas></executeas>
+    <!-- U15: intentionally NO <links> block. The exact subcategory
+         enum (e.g., BASICCENTERSETUPCOMPANY vs. BASICCENTERSETUP)
+         isn't published in Oracle's SDF docs, and shipping the wrong
+         value would land the menu entry in the wrong place. The
+         post-install runbook in docs/install/post-install-checklist
+         documents how the admin adds the menu link via the SPA's
+         own management page (Customization > Scripting > Single
+         Page Applications > Click-to-Call Setup Wizard > Basic Info
+         > add link). Matches the Celigo/Zone & Co pattern — small
+         documented post-install step, full admin control over
+         menu placement. -->
 </singlepageapp>

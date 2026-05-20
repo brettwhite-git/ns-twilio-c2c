@@ -58,25 +58,20 @@ define([], () => {
      * Pick the wizard step the admin should land on, given a snapshot.
      *
      * Step assignment is "first unfinished stage wins" — admin lands on the
-     * earliest step that hasn't been completed. After full activation, the
-     * caller should branch to the admin console (deferred to follow-up work);
-     * we return 6 here so post-activation visits still render *something*
-     * (a "preflight re-run" view) until the console ships.
+     * earliest step that hasn't been completed. Post-activation visits get
+     * the 'console' sentinel so the SPA can render the Admin Console quick-
+     * actions surface instead of dropping the admin back into the stepper.
      *
      * @param {Object} snapshot — produced by snapshotFromConfig
-     * @returns {number} 1..6
+     * @returns {number|string} 1..5 or 'console'
      */
     const determineCurrentStep = (snapshot) => {
         snapshot = snapshot || {};
-        if (!snapshot.hasPublicIds)    return 2; // Step 1 prereqs auto-pass when admin's logged in; Step 2 is where actual input starts
+        if (!snapshot.hasPublicIds)    return 2;
         if (!snapshot.hasApiKeySecret) return 2;
         if (!snapshot.hasVoiceConfig)  return 3;
-        // Phone-number assignments live in a separate record; the Suitelet
-        // queries that count on render. For snapshot purposes we treat
-        // hasVoiceConfig + !isActive as "still in Step 4 or 5". The
-        // Suitelet refines this by also checking the rep_assignment count.
-        if (!snapshot.isActive)        return 5; // preflight + activate
-        return 5;                                // activated — U11 will introduce the 'console' sentinel
+        if (!snapshot.isActive)        return 5;
+        return 'console';
     };
 
     /**

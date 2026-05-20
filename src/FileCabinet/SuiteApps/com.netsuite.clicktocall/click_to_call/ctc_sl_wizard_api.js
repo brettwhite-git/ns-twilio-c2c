@@ -1039,23 +1039,29 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
 
     /**
      * Server re-runs preflight, then if all checks pass, flips
-     * `custrecord_ctc_active` to T on the config singleton. Idempotent
-     * — calling twice returns alreadyActive=true.
+     * `custrecord_ctc_active` to T on the config singleton. Idempotent.
+     *
+     * U11: also handles deactivation via { deactivate: true } payload —
+     * flips active to F so admins can pause CTC during an outage without
+     * re-running the wizard. Skips preflight on deactivate (we always
+     * want to honor a deactivate request).
      */
-    const wizardActivate = () => {
+    const wizardActivate = (payload) => {
+        const deactivate = !!(payload && payload.deactivate === true);
         const id = getConfigRecordId();
         if (!id) return { ok: false, error: 'config_not_found' };
 
-        // Server-side re-validation (don't trust client claim of "all pass")
-        const preflight = wizardRunPreflight();
-        if (!preflight.allPassed) {
-            return {
-                ok: false,
-                error: 'preflight_failed',
-                failedChecks: preflight.checks.filter(function (c) {
-                    return c.status !== 'pass';
-                })
-            };
+        if (!deactivate) {
+            const preflight = wizardRunPreflight();
+            if (!preflight.allPassed) {
+                return {
+                    ok: false,
+                    error: 'preflight_failed',
+                    failedChecks: preflight.checks.filter(function (c) {
+                        return c.status !== 'pass';
+                    })
+                };
+            }
         }
 
         try {
@@ -1064,31 +1070,28 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 id: id,
                 columns: ['custrecord_ctc_active']
             });
-            const alreadyActive = current.custrecord_ctc_active === true ||
-                                  current.custrecord_ctc_active === 'T';
+            const currentlyActive = current.custrecord_ctc_active === true ||
+                                    current.custrecord_ctc_active === 'T';
+            const targetActive = !deactivate;
+            const noop = currentlyActive === targetActive;
 
-            if (!alreadyActive) {
+            if (!noop) {
                 record.submitFields({
                     type: 'customrecord_ctc_config',
                     id: id,
-                    values: { custrecord_ctc_active: true }
+                    values: { custrecord_ctc_active: targetActive }
                 });
 
-                // Count reps + numbers for the audit log
-                const assignmentCount = search.create({
-                    type: 'customrecord_ctc_rep_assignment',
-                    filters: [['isinactive', 'is', 'F']],
-                    columns: ['internalid']
-                }).run().getRange({ start: 0, end: 1000 }).length;
-
                 log.audit({
-                    title: 'CTC Activated',
-                    details: 'user=' + runtime.getCurrentUser().id +
-                             ' assignmentCount=' + assignmentCount
+                    title: deactivate ? 'CTC Deactivated' : 'CTC Activated',
+                    details: 'user=' + runtime.getCurrentUser().id
                 });
             }
 
-            return { activated: true, alreadyActive: alreadyActive };
+            if (deactivate) {
+                return { deactivated: true, alreadyInactive: noop };
+            }
+            return { activated: true, alreadyActive: noop };
         } catch (e) {
             log.error({
                 title: 'CTC Wizard — activate failed',
