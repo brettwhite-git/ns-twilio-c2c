@@ -905,19 +905,26 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             displayMember: 'label',
             selectedItems: selectedItems,
             placeholder: 'Assign reps…',
+            // Per @uif-js/component d.ts, MultiselectDropdown's
+            // SelectionChangedArgs is { values, previousValues, reason }
+            // — NOT { items }. Earlier U5 commit read args.items (which
+            // was undefined), causing the saved payload to always be
+            // empty. `values` is already an array of the value-member
+            // (the employee id) since valueMember is set above.
             onSelectionChanged: function (args) {
-                var items = (args && args.items) || [];
-                var ids = items.map(function (it) {
-                    return (it && (it.value != null ? it.value : it));
-                });
+                var values = (args && args.values) || [];
+                console.log("[CTC Setup Wizard] Step 4 picker — " +
+                    "phoneSid=" + phoneNumber.sid +
+                    " selected values:", values);
+
                 if (!STATE.step4.assignments[phoneNumber.sid]) {
                     STATE.step4.assignments[phoneNumber.sid] = {};
                 }
-                STATE.step4.assignments[phoneNumber.sid].employeeIds = ids;
+                STATE.step4.assignments[phoneNumber.sid].employeeIds = values;
                 // Default primary to first selected if not already set
                 var a = STATE.step4.assignments[phoneNumber.sid];
-                if (!a.primaryEmployeeId || ids.indexOf(a.primaryEmployeeId) === -1) {
-                    a.primaryEmployeeId = ids.length > 0 ? ids[0] : null;
+                if (!a.primaryEmployeeId || values.indexOf(a.primaryEmployeeId) === -1) {
+                    a.primaryEmployeeId = values.length > 0 ? values[0] : null;
                 }
             }
         }, "MultiselectDropdown(emp-" + phoneNumber.sid + ")");
