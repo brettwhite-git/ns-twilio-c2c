@@ -644,11 +644,25 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     /* ------------------------------------------------------------------ */
 
     /**
-     * List active employees that have NetSuite access (giveaccess = T).
-     * Used by Step 4 to populate the multi-select picker per phone
-     * number, and by Step 5 to pick CTC users.
+     * List employees flagged as Sales Reps (issalesrep=T) with NetSuite
+     * access (giveaccess=T). Used by Step 4 to populate the multi-select
+     * picker per phone number.
      *
-     * Returns `[{ id, name, email, role }, ...]`.
+     * U9b changes:
+     *   - Added `issalesrep=T` filter so the picker shows only actual
+     *     sales reps (matches the admin's intent — "filter by the
+     *     Sales Rep checkbox on the role"). The standard NetSuite
+     *     Employee record has an `issalesrep` boolean field that the
+     *     wizard now respects.
+     *   - Dropped `role` from columns. The `role` field is a sublist
+     *     join that multiplies result rows for employees with multiple
+     *     role assignments, producing duplicates ("Aaron Van Halen ×2",
+     *     "Kathryn Glass ×4"). The picker doesn't display role anyway.
+     *   - Post-process dedup by employee internal ID as a defensive
+     *     pass — if a customer account has other join sources we
+     *     haven't anticipated, dedup still produces a clean list.
+     *
+     * Returns `[{ id, name, email }, ...]`.
      */
     const wizardListEmployees = () => {
         try {
@@ -656,26 +670,38 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 type: 'employee',
                 filters: [
                     ['isinactive', 'is', 'F'], 'AND',
-                    ['giveaccess', 'is', 'T']
+                    ['giveaccess', 'is', 'T'], 'AND',
+                    ['issalesrep', 'is', 'T']
                 ],
-                columns: ['entityid', 'firstname', 'lastname', 'email', 'role']
+                columns: ['entityid', 'firstname', 'lastname', 'email']
             }).run().getRange({ start: 0, end: 1000 });
 
-            return {
-                items: results.map(function (r) {
-                    const first = r.getValue('firstname') || '';
-                    const last  = r.getValue('lastname') || '';
-                    const display = (first + ' ' + last).trim() ||
-                                    r.getValue('entityid') || '(no name)';
-                    return {
-                        id: r.id,
-                        name: display,
-                        email: r.getValue('email') || '',
-                        roleId: r.getValue('role') || null,
-                        roleName: r.getText('role') || ''
-                    };
-                })
-            };
+            // Dedup by internal ID — defensive, in case the search
+            // returns duplicates from some join we don't expect.
+            const seen = {};
+            const items = [];
+            for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                if (seen[r.id]) continue;
+                seen[r.id] = true;
+                const first = r.getValue('firstname') || '';
+                const last  = r.getValue('lastname') || '';
+                const display = (first + ' ' + last).trim() ||
+                                r.getValue('entityid') || '(no name)';
+                items.push({
+                    id: r.id,
+                    name: display,
+                    email: r.getValue('email') || ''
+                });
+            }
+
+            log.audit({
+                title: 'CTC Wizard — listEmployees',
+                details: 'returned ' + items.length + ' sales rep(s) ' +
+                         '(deduplicated from ' + results.length + ' search rows)'
+            });
+
+            return { items: items };
         } catch (e) {
             log.error({
                 title: 'CTC Wizard — listEmployees failed',
@@ -710,20 +736,31 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 ]
             }).run().getRange({ start: 0, end: 1000 });
 
-            return {
-                items: results.map(function (r) {
-                    return {
-                        id: r.id,
-                        employeeId: r.getValue('custrecord_ctc_ra_employee'),
-                        employeeName: r.getText('custrecord_ctc_ra_employee') || '',
-                        phoneSid: r.getValue('custrecord_ctc_ra_phone_sid'),
-                        phoneNumber: r.getValue('custrecord_ctc_ra_phone_number'),
-                        label: r.getValue('custrecord_ctc_ra_label') || '',
-                        isPrimary: r.getValue('custrecord_ctc_ra_is_primary') === true ||
-                                   r.getValue('custrecord_ctc_ra_is_primary') === 'T'
-                    };
-                })
-            };
+            const items = results.map(function (r) {
+                return {
+                    id: r.id,
+                    employeeId: r.getValue('custrecord_ctc_ra_employee'),
+                    employeeName: r.getText('custrecord_ctc_ra_employee') || '',
+                    phoneSid: r.getValue('custrecord_ctc_ra_phone_sid'),
+                    phoneNumber: r.getValue('custrecord_ctc_ra_phone_number'),
+                    label: r.getValue('custrecord_ctc_ra_label') || '',
+                    isPrimary: r.getValue('custrecord_ctc_ra_is_primary') === true ||
+                               r.getValue('custrecord_ctc_ra_is_primary') === 'T'
+                };
+            });
+
+            // U9b diagnostic: log the result count + first row's shape so
+            // we can correlate save-PAYLOAD vs load-RESULT in the Script
+            // Execution Log when the "0 rep(s)" bug is reproduced.
+            log.audit({
+                title: 'CTC Wizard — loadAssignments RESULT',
+                details: 'returned ' + items.length + ' rows' +
+                    (items.length > 0
+                        ? ' — first: ' + JSON.stringify(items[0])
+                        : ' (empty)')
+            });
+
+            return { items: items };
         } catch (e) {
             log.error({
                 title: 'CTC Wizard — loadAssignments failed',
@@ -751,6 +788,15 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
      *   ]}
      */
     const wizardSaveAssignments = (payload) => {
+        // U9b diagnostic: log the exact incoming payload so the NS Script
+        // Execution Log shows whether Step 4's MultiselectDropdown actually
+        // captured employee IDs (vs sending empty employeeIds arrays).
+        // SIDs are public per Twilio; employee IDs are non-sensitive.
+        log.audit({
+            title: 'CTC Wizard — saveAssignments PAYLOAD',
+            details: payload ? JSON.stringify(payload) : '(null payload)'
+        });
+
         if (!payload || !Array.isArray(payload.assignments)) {
             return { ok: false, error: 'missing_assignments' };
         }

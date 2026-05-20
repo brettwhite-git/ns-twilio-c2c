@@ -507,8 +507,20 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                     primaryEmployeeId: assignment.primaryEmployeeId || employeeIds[0]
                 });
             }
+            // U9b diagnostic: log the assignment state + outgoing payload
+            // so the browser console shows whether MultiselectDropdown's
+            // onSelectionChanged actually captured the picked employees.
+            // If `rows` is [] here but the UI shows tags in the dropdown,
+            // the bug is in the picker → STATE plumbing. If `rows` is
+            // populated but the server returns 0 on load (next preflight),
+            // the bug is in the save/load field-ID alignment.
+            console.log("[CTC Setup Wizard] Step 4 Continue — STATE.step4.assignments:",
+                STATE.step4.assignments);
+            console.log("[CTC Setup Wizard] Step 4 Continue — payload rows (" +
+                rows.length + "):", rows);
             wizardCall('wizardSaveAssignments', { assignments: rows })
             .then(function (payload) {
+                console.log("[CTC Setup Wizard] saveAssignments response:", payload);
                 if (payload && payload.saved) goToStep(5);
                 else alert("Save failed: " +
                     ((payload && payload.error) || 'unknown'));
