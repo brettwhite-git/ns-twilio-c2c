@@ -20,10 +20,10 @@
  * the handler. Role 3 (Administrator) is portable across customer
  * accounts; custom roles vary per install.
  */
-define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
+define(['N/runtime', 'N/record', 'N/search', 'N/crypto', 'N/query',
         './lib/ctc_config', './lib/ctc_twilio_admin',
         './lib/ctc_twilio_jwt'],
-       (runtime, record, search, log, crypto, query, config, twilio, jwt) => {
+       (runtime, record, search, crypto, query, config, twilio, jwt) => {
 
     /* ------------------------------------------------------------------ */
     /* Suitelet entry point                                               */
