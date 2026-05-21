@@ -103,6 +103,100 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     const MIN_LOG_DURATION_SECONDS = 2;
 
     /**
+     * Look up phone numbers assigned to a user via customrecord_ctc_rep_assignment.
+     * Used by verifyCallOwnership to authorize logCall/checkTranscript on the
+     * Twilio call's `from` value. Returns an array of E.164 strings (empty if no
+     * assignments). Never throws — failed lookup falls back to "no assignments,"
+     * letting the cfg.phoneNumber fallback inside verifyCallOwnership cover the
+     * pre-rep-assignment install state.
+     */
+    const getUserAssignedPhones = (userId) => {
+        try {
+            const s = search.create({
+                type: 'customrecord_ctc_rep_assignment',
+                filters: [
+                    ['custrecord_ctc_ra_employee', 'anyof', userId],
+                    'AND', ['isinactive', 'is', 'F']
+                ],
+                columns: ['custrecord_ctc_ra_phone_number']
+            });
+            const phones = [];
+            s.run().each((row) => {
+                const p = row.getValue('custrecord_ctc_ra_phone_number');
+                if (p) phones.push(String(p));
+                return true;
+            });
+            return phones;
+        } catch (e) {
+            log.error({ title: 'CTC getUserAssignedPhones failed', details: e.message || e });
+            return [];
+        }
+    };
+
+    /**
+     * CRIT-2 / CRIT-3 gate (SAFE review 2026-05-21) — server-side correlate
+     * a body-supplied callSid with the authenticated user before allowing
+     * record mutations against it.
+     *
+     * Authorization model: the Twilio call's `from` (E.164) must match either
+     *   (a) a phone number assigned to userId via customrecord_ctc_rep_assignment
+     *   (b) cfg.phoneNumber — the install-wide caller-ID, used as a fallback
+     *       for installs that haven't set up per-rep assignments yet
+     *
+     * Returns { ok: true } or { ok: false, reason: <CODE>, ... }. Never throws.
+     *
+     * Adds one Twilio HTTPS round-trip per protected action. Acceptable since
+     * logCall and checkTranscript both already do Twilio work downstream.
+     *
+     * Fail-closed posture: if Twilio is unreachable, the gate rejects. Twilio
+     * outages already block call placement upstream (no token = no call), so
+     * the only window where this rejects spuriously is "call placed, then
+     * Twilio API becomes unreachable before logCall arrives" — narrow.
+     */
+    const verifyCallOwnership = (callSid, userId) => {
+        if (!callSid || typeof callSid !== 'string' ||
+            !/^CA[a-zA-Z0-9]{32}$/.test(callSid)) {
+            return { ok: false, reason: 'INVALID_CALLSID_FORMAT' };
+        }
+
+        let cfg;
+        try { cfg = loadConfig(); }
+        catch (e) { return { ok: false, reason: 'CONFIG_LOAD_FAILED' }; }
+        if (!cfg || !cfg.accountSid) return { ok: false, reason: 'CONFIG_MISSING' };
+
+        const twilioResult = twilioAdmin.getCall(cfg, callSid);
+        if (!twilioResult.ok) {
+            log.audit({
+                title: 'CTC verifyCallOwnership — Twilio lookup failed',
+                details: 'callSid=' + callSid + ' userId=' + userId +
+                         ' status=' + twilioResult.status
+            });
+            return {
+                ok: false,
+                reason: twilioResult.status === 404 ? 'CALL_NOT_FOUND' : 'TWILIO_LOOKUP_FAILED',
+                twilioStatus: twilioResult.status
+            };
+        }
+
+        const allowedPhones = getUserAssignedPhones(userId);
+        if (cfg.phoneNumber) allowedPhones.push(cfg.phoneNumber);
+        if (!allowedPhones.length) {
+            return { ok: false, reason: 'NO_CALLER_ID_ASSIGNED' };
+        }
+
+        const callFrom = String((twilioResult.call && twilioResult.call.from) || '');
+        if (allowedPhones.indexOf(callFrom) === -1) {
+            log.audit({
+                title: 'CTC verifyCallOwnership — caller-ID mismatch',
+                details: 'callSid=' + callSid + ' userId=' + userId +
+                         ' callFrom=' + callFrom + ' allowed=' + allowedPhones.length
+            });
+            return { ok: false, reason: 'NOT_CALL_OWNER', callFrom: callFrom };
+        }
+        return { ok: true, call: twilioResult.call };
+    };
+
+    /**
      * Look up an existing Phone Call by Twilio Call SID to support idempotent logCall.
      * sendBeacon on popup unload can race with the in-flight fetch; this prevents duplicates.
      */
@@ -132,6 +226,22 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 if (existingId) {
                     return { success: true, recordId: existingId, duplicate: true };
                 }
+            }
+
+            // CRIT-2 gate (SAFE review 2026-05-21) — verify the body-supplied
+            // callSid was actually placed by the authenticated user before
+            // we create a Phone Call record from it. Pre-fix, any internal
+            // user could POST arbitrary callSid + entityId combinations and
+            // forge activity records against any customer/contact/lead.
+            const userId = runtime.getCurrentUser().id;
+            const auth = verifyCallOwnership(body.callSid, userId);
+            if (!auth.ok) {
+                log.audit({
+                    title: 'CTC logCall — verification rejected',
+                    details: 'reason=' + auth.reason + ' callSid=' + body.callSid +
+                             ' userId=' + userId
+                });
+                return { error: 'forbidden', code: auth.reason };
             }
 
             const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });

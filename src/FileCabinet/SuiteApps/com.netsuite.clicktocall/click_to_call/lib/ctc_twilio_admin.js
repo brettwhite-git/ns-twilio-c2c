@@ -334,6 +334,36 @@ define(['N/https', 'N/encode', 'N/log'],
         return result;
     };
 
+    /**
+     * GET /Accounts/{Sid}/Calls/{CallSid}.json — fetch a specific call's
+     * canonical Twilio-side details (`from`, `to`, `status`, `duration`).
+     *
+     * Used by ctc_rl_token's verifyCallOwnership to confirm a body-supplied
+     * callSid was actually placed by the authenticated user's caller-ID
+     * before allowing logCall / checkTranscript (CRIT-2 / CRIT-3, SAFE
+     * review 2026-05-21).
+     */
+    const getCall = (cfg, callSid) => {
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid +
+                    '/Calls/' + callSid + '.json';
+        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
+
+        if (result.ok) {
+            return {
+                ok: true,
+                status: result.status,
+                call: {
+                    sid:        result.body.sid,
+                    from:       result.body.from,
+                    to:         result.body.to,
+                    callStatus: result.body.status,
+                    duration:   result.body.duration
+                }
+            };
+        }
+        return result;
+    };
+
     return {
         buildSecureAuthHeader: buildSecureAuthHeader,
         maskSid: maskSid,
@@ -343,6 +373,7 @@ define(['N/https', 'N/encode', 'N/log'],
         listPhoneNumbers: listPhoneNumbers,
         getPhoneNumberLookup: getPhoneNumberLookup,
         listIntelServices: listIntelServices,
-        getIntelService: getIntelService
+        getIntelService: getIntelService,
+        getCall: getCall
     };
 });
