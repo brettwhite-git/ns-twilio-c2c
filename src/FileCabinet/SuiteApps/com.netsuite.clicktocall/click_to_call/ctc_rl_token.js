@@ -323,6 +323,63 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
      */
     const checkTranscript = (body) => {
         try {
+            // CRIT-3 gate (SAFE review 2026-05-21) — checkTranscript pre-fix
+            // accepted any body-supplied {callSid, recordId} pair and pulled
+            // the Twilio transcript onto the supplied record, then DELETED
+            // the Twilio-side recording. Three exploit shapes:
+            //   - Corruption: write rep B's transcript onto rep B's record
+            //     by spoofing callSid (overwrite valid data)
+            //   - Exfiltration: pull rep B's transcript onto rep A's own
+            //     record (transcript theft via callSid replay)
+            //   - Evidence destruction: cause Twilio-side recording delete
+            //     for arbitrary callSids regardless of authz
+            //
+            // Three checks gate the action:
+            //   1. recordId is required
+            //   2. phoneCall.custevent_ctc_call_sid MUST equal body.callSid
+            //      (binding check — closes the corruption + exfiltration paths)
+            //   3. verifyCallOwnership(callSid, currentUser) MUST pass
+            //      (ownership check — same Twilio-side gate as CRIT-2/logCall)
+            if (!body.recordId) {
+                return { error: 'forbidden', code: 'RECORD_ID_REQUIRED' };
+            }
+
+            // Load the Phone Call FIRST and verify the callSid binding before
+            // any Twilio work or state mutation.
+            let phoneCallForCheck;
+            try {
+                phoneCallForCheck = record.load({
+                    type: record.Type.PHONE_CALL, id: body.recordId
+                });
+            } catch (e) {
+                return { error: 'forbidden', code: 'RECORD_NOT_FOUND' };
+            }
+            const boundCallSid = String(phoneCallForCheck.getValue({
+                fieldId: 'custevent_ctc_call_sid'
+            }) || '');
+            if (boundCallSid !== String(body.callSid || '')) {
+                log.audit({
+                    title: 'CTC checkTranscript — callSid binding mismatch',
+                    details: 'recordId=' + body.recordId +
+                             ' bodyCallSid=' + body.callSid +
+                             ' recordCallSid=' + boundCallSid +
+                             ' userId=' + runtime.getCurrentUser().id
+                });
+                return { error: 'forbidden', code: 'CALLSID_MISMATCH' };
+            }
+
+            const userId = runtime.getCurrentUser().id;
+            const auth = verifyCallOwnership(body.callSid, userId);
+            if (!auth.ok) {
+                log.audit({
+                    title: 'CTC checkTranscript — verification rejected',
+                    details: 'reason=' + auth.reason +
+                             ' callSid=' + body.callSid +
+                             ' userId=' + userId
+                });
+                return { error: 'forbidden', code: auth.reason };
+            }
+
             const config = loadConfig();
             const authHeader = buildSecureAuthHeader(config);
 
