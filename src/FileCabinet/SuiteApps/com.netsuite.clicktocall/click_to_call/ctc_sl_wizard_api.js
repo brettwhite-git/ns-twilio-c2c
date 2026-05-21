@@ -25,10 +25,6 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         './lib/ctc_twilio_jwt'],
        (runtime, record, search, log, crypto, query, config, twilio, jwt) => {
 
-    // Standard role IDs are portable across NetSuite accounts.
-    // Administrator = 3 (per NetSuite docs); custom roles vary.
-    const ADMIN_ROLE_ID = 3;
-
     /* ------------------------------------------------------------------ */
     /* Suitelet entry point                                               */
     /* ------------------------------------------------------------------ */
@@ -40,16 +36,13 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
 
         response.setHeader({ name: 'Content-Type', value: 'application/json' });
 
-        // Admin gate — first thing, before any action dispatch.
-        if (!isAdmin()) {
-            log.audit({
-                title: 'CTC Wizard API — non-admin reached endpoint',
-                details: 'role=' + runtime.getCurrentUser().role +
-                         ' action=' + action
-            });
-            response.write(JSON.stringify({ ok: false, error: 'forbidden' }));
-            return;
-        }
+        // U13a — admin gating is enforced at the deployment layer via
+        // <audienceallroles>F</audienceallroles> + <audienceroles>
+        // ADMINISTRATOR</audienceroles> on customscript_ctc_sl_wizard_api.
+        // NetSuite returns 403 to non-admins before this script runs.
+        // Per SAFE Guide §5.2 ("DON'T check user roles to control data
+        // access"), the redundant runtime isAdmin() check was removed —
+        // framework enforcement is more reliable than script guards.
 
         try {
             const handler = ACTIONS[action];
@@ -175,9 +168,9 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     /* Internal helpers                                                   */
     /* ------------------------------------------------------------------ */
 
-    const isAdmin = () => {
-        return Number(runtime.getCurrentUser().role) === ADMIN_ROLE_ID;
-    };
+    // U13a: isAdmin() removed — admin gating now enforced at the
+    // deployment layer (see customscript_ctc_sl_wizard_api.xml). Per
+    // SAFE Guide §5.2, scripts shouldn't check user roles for data access.
 
     const parsePayload = (request) => {
         const body = request.body;
@@ -360,14 +353,22 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     const wizardSnapshot = () => {
         try {
             const cfg = config.loadConfig();
+            // U13c — SID passthrough (no masking). Per Twilio's docs,
+            // SIDs (AC..., SK..., AP..., GA..., PN...) are PUBLIC
+            // identifiers — they're equivalent to usernames, safe to
+            // log/display/embed. The actual secret VALUE lives in
+            // NetSuite API Secrets and never enters the snapshot.
+            // Masking was security theater that hurt the admin's
+            // ability to verify they're pointing at the right Twilio
+            // account on the Credentials screen.
             return {
                 snapshot: {
-                    accountSid:        maskOrEmpty(cfg.accountSid),
-                    apiKeySid:         maskOrEmpty(cfg.apiKeySid),
+                    accountSid:        cfg.accountSid || '',
+                    apiKeySid:         cfg.apiKeySid || '',
                     apiSecretId:       cfg.apiSecretId || '',
-                    twimlAppSid:       maskOrEmpty(cfg.twimlAppSid),
+                    twimlAppSid:       cfg.twimlAppSid || '',
                     phoneNumber:       cfg.phoneNumber || '',
-                    intelServiceSid:   maskOrEmpty(cfg.intelServiceSid),
+                    intelServiceSid:   cfg.intelServiceSid || '',
                     active:            cfg.active === true
                 }
             };
@@ -376,11 +377,6 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             // configSingletonCheck will create one.
             return { snapshot: null };
         }
-    };
-
-    const maskOrEmpty = (s) => {
-        if (!s || typeof s !== 'string' || !s.length) return '';
-        return twilio.maskSid(s);
     };
 
     /* ------------------------------------------------------------------ */

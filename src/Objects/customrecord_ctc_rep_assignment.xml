@@ -1,11 +1,14 @@
 <customrecordtype scriptid="customrecord_ctc_rep_assignment">
     <recordname>CTC Rep Phone Assignment</recordname>
-    <includename>T</includename>
+    <description>Rep-to-phone-number assignments for Click-to-Call. Managed exclusively by the Setup Wizard SPA's Phones &amp; reps section. Hidden from admin UI via allowuiaccess=F; edit only via the wizard. Runtime reads remain open so the softphone Suitelet can resolve a rep's caller ID per call.</description>
+    <allowuiaccess>F</allowuiaccess>
+    <includeinsearchmenu>F</includeinsearchmenu>
+    <includename>F</includename>
     <accesstype>NONENEEDED</accesstype>
     <allowattachments>F</allowattachments>
     <allowinlinedeleting>F</allowinlinedeleting>
     <allowquickadd>F</allowquickadd>
-    <allowquicksearch>T</allowquicksearch>
+    <allowquicksearch>F</allowquicksearch>
     <enablemailmerge>F</enablemailmerge>
     <enablenumbering>F</enablenumbering>
     <enablesystemnotes>T</enablesystemnotes>

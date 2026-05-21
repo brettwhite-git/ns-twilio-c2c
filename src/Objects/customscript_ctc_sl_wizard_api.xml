@@ -14,17 +14,16 @@
       user-session bandwidth instead of the RESTlet Web Services Concurrent
       User Limit (which is shared with the softphone token RESTlet).
 
-      Admin-only:
-        - <allroles>T</allroles> at the deployment level lets the URL be
-          *reachable* by any internal role; the Suitelet's onRequest
-          enforces the actual admin gate at runtime (defense in depth).
-          (We can't use <permittedrole>ADMINISTRATOR</permittedrole> on
-          scriptdeployment XML — SDF silently ignores it; that element is
-          only valid on customrecord <permissions> blocks. See the
-          U2-fix lesson in commit 19dc379.)
+      Admin-only — U13a (SAFE Guide §5.2):
+        - <audienceallroles>F</audienceallroles> + <audienceroles>ADMINISTRATOR
+          </audienceroles>: NetSuite returns 403 before the script runs for
+          any non-admin role. Defense moves to the framework layer.
+        - Runtime isAdmin() check REMOVED from ctc_sl_wizard_api.js per
+          SAFE §5.2 ("DON'T check user roles to control data access").
+          Framework-enforced audience replaces it.
         - <isonline>F</isonline> is REQUIRED for data-modifying Suitelets
           (SDF Pitfall #135). The wizard creates the config singleton on
-          fresh installs and will eventually write Twilio credentials.
+          fresh installs and writes Twilio credentials.
         - NO <runasrole> — calling admin already has the privileges;
           avoid privilege-escalation antipattern.
     -->
@@ -34,7 +33,8 @@
             <isdeployed>T</isdeployed>
             <status>RELEASED</status>
             <loglevel>DEBUG</loglevel>
-            <allroles>T</allroles>
+            <audienceallroles>F</audienceallroles>
+            <audienceroles>ADMINISTRATOR</audienceroles>
             <isonline>F</isonline>
         </scriptdeployment>
     </scriptdeployments>

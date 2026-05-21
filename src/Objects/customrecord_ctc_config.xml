@@ -1,6 +1,9 @@
 <customrecordtype scriptid="customrecord_ctc_config">
     <recordname>CTC Configuration</recordname>
-    <includename>T</includename>
+    <description>Configuration for Click-to-Call. Managed exclusively by the Setup Wizard SPA. Hidden from admin UI via allowuiaccess=F; edit only via the wizard. Runtime reads remain open (accesstype=NONENEEDED) so non-admin scripts (poller, softphone, phone-button) can read config without role-checking workarounds (per SAFE Guide §5.2).</description>
+    <allowuiaccess>F</allowuiaccess>
+    <includeinsearchmenu>F</includeinsearchmenu>
+    <includename>F</includename>
     <accesstype>NONENEEDED</accesstype>
     <allowattachments>F</allowattachments>
     <allowinlinedeleting>F</allowinlinedeleting>
