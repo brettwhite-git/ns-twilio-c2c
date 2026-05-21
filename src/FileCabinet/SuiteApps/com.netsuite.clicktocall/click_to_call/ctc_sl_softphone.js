@@ -763,23 +763,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             outline: none;
         }
         .search-bar input::placeholder { color: var(--phone-text-faint); }
-        .search-bar .clear-x {
-            cursor: pointer;
-            color: var(--phone-text-faint);
-            border: none;
-            background: transparent;
-            font-size: 16px;
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            line-height: 1;
-        }
-        .search-bar .clear-x:hover { background: rgba(255, 255, 255, 0.10); color: var(--phone-text); }
-        .search-bar .clear-x.hidden { display: none; }
         .filter-chips {
             display: flex;
             gap: 5px;
@@ -1274,6 +1257,48 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         .view-dial .contact-phone,
         .view-dial .contact-company,
         .view-dial .phone-divider { display: none; }
+        /* When the user types digits with no contact selected (dashboard
+           launch + Dial tab), reveal the contact-phone slot so they can
+           SEE what they are typing. The Selected Card UI was designed
+           for selected-contact display; this fills the in-progress-dial
+           gap. The container gets the .dialing class from setDialedNumber. */
+        .view-dial.dialing .contact-phone,
+        .view-dial.manual-dial .contact-phone {
+            display: block;
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--phone-text-bright, #fff);
+            letter-spacing: 0.5px;
+            margin: 16px 0 8px;
+            text-align: center;
+        }
+        /* In manual-dial mode (record-launch + rep types over the contact),
+           hide the Selected Card, compact-meta strip, and the empty-Dial
+           hint so the typed digits are the only thing in the spotlight. */
+        .view-dial.manual-dial #pickerCard,
+        .view-dial.manual-dial #compactMeta,
+        .view-dial.manual-dial #dialEmptyHint { display: none !important; }
+
+        /* The breadcrumb pill at the top of view-dial — only visible in
+           manual-dial mode. Single-click restores the original contact. */
+        .manual-dial-breadcrumb {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            background: rgba(116, 192, 252, 0.10);
+            border: 1px solid rgba(116, 192, 252, 0.30);
+            color: #B6DCFA;
+            border-radius: 999px;
+            padding: 4px 12px;
+            font-size: 11.5px;
+            font-family: inherit;
+            cursor: pointer;
+            margin: 4px 0 8px;
+            align-self: center;
+        }
+        .view-dial.manual-dial .manual-dial-breadcrumb { display: inline-flex; }
+        .manual-dial-breadcrumb:hover { background: rgba(116, 192, 252, 0.18); }
+        .manual-dial-breadcrumb .crumb-arrow { font-size: 13px; }
         /* ─── Iteration B Phase 5: Recents tab + last-3-dialed shortcut ───── */
         .view-recents {
             display: flex;
@@ -1484,6 +1509,15 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                  takes over in that case. Populated server-side on record launch
                  and client-side after a Search-tab selection (softphoneContacts
                  RESTlet route). -->
+            <!-- Manual-dial breadcrumb: shown when the rep types digits
+                 with a contact pre-loaded. Hides the Selected Card +
+                 compact-meta + dialEmptyHint, surfaces the typed digits,
+                 and offers a one-click path back to the original contact. -->
+            <button class="manual-dial-breadcrumb hidden" id="manualDialBreadcrumb" type="button">
+                <span class="crumb-arrow">&larr;</span>
+                <span class="crumb-text">Use <span id="crumbEntityName">contact</span>'s number</span>
+            </button>
+
             <div class="picker-card hidden" id="pickerCard">
                 <!-- Iteration A/C/D Selected Card header: company swatch +
                      name + type badge. Populated client-side from ENTITY_NAME
@@ -1600,7 +1634,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             <div class="search-bar">
                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.5" y2="16.5"/></svg>
                 <input id="searchInput" type="search" autocomplete="off" placeholder="Customers, contacts, leads&hellip;" aria-label="Search owned entities">
-                <button class="clear-x hidden" id="searchClearX" type="button" title="Clear search" aria-label="Clear">×</button>
             </div>
             <div class="filter-chips" id="searchChips" role="group" aria-label="Filter by entity type within your book">
                 <button class="filter-chip active" type="button" data-filter="" title="All entities where you are on the Sales Team (primary or secondary)">My book <span class="count" id="cnt-all">0</span></button>
@@ -1969,6 +2002,49 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             backspaceGroup.classList.toggle('visible', !activeCall && !!PHONE);
         }
 
+        // Manual-dial breadcrumb wiring. Shown via CSS when view-dial has
+        // the .manual-dial class. One click restores the original pre-
+        // loaded contact: clears typed digits + invokes the picker's
+        // current selection (which is still the original contact since
+        // SELECTED_CONTACT_ID was cleared by the rep's manual typing,
+        // but currentContacts[0] is still the auto-selected one).
+        var manualDialBreadcrumb = document.getElementById('manualDialBreadcrumb');
+        var crumbEntityName      = document.getElementById('crumbEntityName');
+        if (crumbEntityName) {
+            crumbEntityName.textContent = ENTITY_NAME || 'contact';
+        }
+        function restoreEntityContext() {
+            // Re-select the picker's first row (which is either the
+            // synthetic "Company main" entry on Customer launches, or the
+            // first contact otherwise). selectPickerPhone updates PHONE
+            // via setDialedNumber({fromPicker:true}) so the .manual-dial
+            // class is removed cleanly.
+            var first = currentContacts && currentContacts[0];
+            if (first && first.phones && first.phones.length) {
+                var primary = first.phones.find(function (p) { return p.isPrimary; }) || first.phones[0];
+                selectPickerPhone(first.contactId, primary.number, primary.type, first.name);
+            } else {
+                // No contacts to restore — just clear the dialed digits.
+                // resetFresh:true ensures manuallyEdited drops so the
+                // breadcrumb / .manual-dial visuals also clear.
+                setDialedNumber('', { resetFresh: true });
+            }
+        }
+        if (manualDialBreadcrumb) {
+            manualDialBreadcrumb.addEventListener('click', restoreEntityContext);
+        }
+
+        // Tracks whether the current PHONE value was last set by the rep
+        // typing/backspacing digits (true) vs. a context-setter like the
+        // picker, search row, recents row, breadcrumb, or initial load
+        // (false). The .manual-dial CSS class follows this flag — that
+        // way every "loaded a contact phone" path clears manual-dial
+        // uniformly, instead of relying on each caller to pass
+        // opts.fromPicker correctly. Flipped true inside appendDialDigit
+        // and backspaceDigit; flipped false by every context-setter via
+        // opts.resetFresh.
+        var manuallyEdited = false;
+
         function setDialedNumber(next, opts) {
             PHONE = normalizeDigits(next);
             phoneNumberEl.textContent = renderPhoneFallback();
@@ -1978,6 +2054,45 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             // caller — it owns SELECTED_CONTACT_ID via selectPickerPhone.
             if (!(opts && opts.fromPicker)) {
                 SELECTED_CONTACT_ID = '';
+            }
+            // opts.resetFresh marks this call as a context-load (picker,
+            // search, recents, breadcrumb, initial). Three things happen:
+            //   1. freshNumberOnNextDigit flips true so the next typed
+            //      digit REPLACES the loaded phone (matches popup-load
+            //      behavior).
+            //   2. manuallyEdited flips false so .manual-dial drops.
+            //   3. opts.manualEdit (passed by appendDialDigit/backspace)
+            //      flips manuallyEdited true.
+            if (opts && opts.resetFresh) {
+                freshNumberOnNextDigit = true;
+                manuallyEdited = false;
+            }
+            if (opts && opts.manualEdit) {
+                manuallyEdited = true;
+            }
+            // Three view-dial display modes (.view-dial CSS hides the
+            // legacy contact-phone slot by default — these classes
+            // selectively unhide it):
+            //   - default       → Selected Card visible, contact-phone hidden
+            //   - .dialing      → no entity context (dashboard launch),
+            //                     contact-phone shows typed digits
+            //   - .manual-dial  → entity pre-loaded AND rep has typed/
+            //                     backspaced digits; hide Selected Card /
+            //                     compact-meta, show typed digits +
+            //                     restore breadcrumb
+            var viewDialEl = document.getElementById('viewDial');
+            if (viewDialEl) {
+                var dashboardDialing = !!PHONE && !ENTITY_ID && !SELECTED_CONTACT_ID;
+                var manualOverride   = !!PHONE && !!ENTITY_ID && manuallyEdited;
+                viewDialEl.classList.toggle('dialing', dashboardDialing);
+                viewDialEl.classList.toggle('manual-dial', manualOverride);
+                // Keep the breadcrumb's entity name current (ENTITY_NAME
+                // changes when the rep picks a different entity via
+                // Search/Recents).
+                if (manualOverride) {
+                    var crumbNameEl = document.getElementById('crumbEntityName');
+                    if (crumbNameEl) crumbNameEl.textContent = ENTITY_NAME || 'contact';
+                }
             }
             syncBackspaceVisibility();
             if (btnCall) btnCall.disabled = !PHONE;
@@ -1999,16 +2114,26 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             }
             if (freshNumberOnNextDigit) {
                 freshNumberOnNextDigit = false;
-                setDialedNumber(d);
+                setDialedNumber(d, { manualEdit: true });
             } else {
-                setDialedNumber((PHONE || '') + d);
+                setDialedNumber((PHONE || '') + d, { manualEdit: true });
             }
         }
 
         function backspaceDigit() {
             if (activeCall) return;
             freshNumberOnNextDigit = false;
-            setDialedNumber((PHONE || '').slice(0, -1));
+            var next = (PHONE || '').slice(0, -1);
+            // Edge case: backspaced down to empty while in manual-dial
+            // mode (entity pre-loaded) → restore the original contact
+            // automatically instead of leaving a blank dial-empty state
+            // with the breadcrumb still visible. Matches user-stated
+            // expectation that clearing the override snaps back.
+            if (!next && ENTITY_ID && currentContacts && currentContacts.length) {
+                restoreEntityContext();
+                return;
+            }
+            setDialedNumber(next, { manualEdit: !!next });
         }
 
         function onDialKey(e) {
@@ -2435,7 +2560,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var viewDial   = document.getElementById('viewDial');
         var viewSearch = document.getElementById('viewSearch');
         var searchInput   = document.getElementById('searchInput');
-        var searchClearX  = document.getElementById('searchClearX');
         var searchChips   = document.getElementById('searchChips');
         var searchResults = document.getElementById('searchResults');
         var searchEmpty   = document.getElementById('searchEmpty');
@@ -2669,7 +2793,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function onSearchInput() {
             var q = (searchInput.value || '').trim();
-            searchClearX.classList.toggle('hidden', !q);
             if (debounceTimer) clearTimeout(debounceTimer);
             if (!q) {
                 lastQuery = '';
@@ -3609,13 +3732,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         if (typeof loadRecents === 'function') loadRecents();
 
         if (searchInput)  searchInput.addEventListener('input', onSearchInput);
-        if (searchClearX) {
-            searchClearX.addEventListener('click', function () {
-                searchInput.value = '';
-                onSearchInput();
-                searchInput.focus();
-            });
-        }
+        // Native ::-webkit-search-cancel-button handles clearing — it
+        // dispatches an 'input' event so onSearchInput re-renders the
+        // empty state automatically.
         if (searchChips) {
             searchChips.addEventListener('click', function (e) {
                 var chip = e.target.closest('.filter-chip');

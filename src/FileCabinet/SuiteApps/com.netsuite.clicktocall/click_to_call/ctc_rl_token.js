@@ -138,18 +138,34 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
 
-            if (body.entityType === 'contact' && body.entityId) {
-                phoneCall.setValue({ fieldId: 'contact', value: body.entityId });
-                const parentCompany = lookupContactCompany(body.entityId);
-                if (parentCompany) {
-                    phoneCall.setValue({ fieldId: 'company', value: parentCompany });
+            // Numeric-id guard: Phone Call's `company` and `contact` fields
+            // require numeric record IDs. NetSuite sometimes injects sentinel
+            // strings into Customer/Contact record DOM (e.g. `__company_main__`
+            // for the "main contact" placeholder). The softphone scraping the
+            // DOM can capture these. Reject anything non-numeric so we save
+            // the call instead of failing the whole log.
+            const numericId = (v) => {
+                const n = parseInt(v, 10);
+                return (isFinite(n) && n > 0 && String(n) === String(v).trim()) ? n : null;
+            };
+
+            if (body.entityType === 'contact') {
+                const contactNumeric = numericId(body.entityId);
+                if (contactNumeric) {
+                    phoneCall.setValue({ fieldId: 'contact', value: contactNumeric });
+                    const parentCompany = lookupContactCompany(contactNumeric);
+                    if (parentCompany) {
+                        phoneCall.setValue({ fieldId: 'company', value: parentCompany });
+                    }
                 }
             } else {
-                if (body.entityId) {
-                    phoneCall.setValue({ fieldId: 'company', value: body.entityId });
+                const companyNumeric = numericId(body.entityId);
+                if (companyNumeric) {
+                    phoneCall.setValue({ fieldId: 'company', value: companyNumeric });
                 }
-                if (body.contactId) {
-                    phoneCall.setValue({ fieldId: 'contact', value: body.contactId });
+                const contactNumeric = numericId(body.contactId);
+                if (contactNumeric) {
+                    phoneCall.setValue({ fieldId: 'contact', value: contactNumeric });
                 }
             }
 
@@ -473,7 +489,62 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     const softphoneContacts = (body) => {
         const entityId = body.entityId;
         if (!entityId) return { error: 'entityId required', rows: [] };
-        return { rows: ctcEntity.getContactsAtEntity(entityId) };
+
+        const contacts = ctcEntity.getContactsAtEntity(entityId);
+
+        // Mirror the Suitelet's record-launch behavior: when the entity
+        // has a record-level phone (company switchboard / customer main
+        // line), prepend a synthetic "Company main" entry so reps can
+        // reach the switchboard from this picker too. Without this, the
+        // dashboard → search → select-Customer path was missing the
+        // main line that the direct-toolbar-launch path showed.
+        try {
+            const entityType = resolveEntityType(entityId);
+            if (entityType === 'customer' || entityType === 'lead' || entityType === 'prospect') {
+                const r = search.lookupFields({
+                    type: search.Type.CUSTOMER,
+                    id: entityId,
+                    columns: ['phone', 'companyname', 'entityid']
+                });
+                const phone = r.phone || '';
+                const name = r.companyname || r.entityid || '';
+                if (phone && name) {
+                    contacts.forEach((c) => {
+                        (c.phones || []).forEach((p) => { p.isPrimary = false; });
+                    });
+                    contacts.unshift({
+                        contactId: '__company_main__',
+                        name: name + ' (main line)',
+                        title: 'Company switchboard',
+                        email: '',
+                        phones: [{ number: phone, type: 'Main', isPrimary: true }]
+                    });
+                }
+            }
+        } catch (e) {
+            log.error({ title: 'CTC softphoneContacts main-line lookup failed',
+                        details: e.message || String(e) });
+            // Fall through with just the contacts.
+        }
+
+        return { rows: contacts };
+    };
+
+    /**
+     * Best-effort entity-type resolver for softphoneContacts. Tries the
+     * top three entity types — customer record covers lead/prospect/
+     * customer (all share the entity stage). Returns null if not found.
+     */
+    const resolveEntityType = (entityId) => {
+        try {
+            search.lookupFields({
+                type: search.Type.CUSTOMER,
+                id: entityId,
+                columns: ['internalid']
+            });
+            return 'customer';
+        } catch (e) { /* not a customer */ }
+        return null;
     };
 
     /**
