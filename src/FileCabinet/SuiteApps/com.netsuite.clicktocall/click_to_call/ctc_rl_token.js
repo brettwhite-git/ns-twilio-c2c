@@ -244,6 +244,24 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 return { error: 'duration_below_threshold', duration: duration };
             }
 
+            // HIGH-7 (SAFE review 2026-05-21) — phone format validation.
+            // Pre-fix, body.phone was written verbatim to Phone Call's `title`
+            // and `phone` fields with no length cap or character whitelist —
+            // letting a malicious client pollute the activity log with
+            // arbitrary text. Enforce E.164 (7-15 digits, optional leading
+            // '+') at the boundary. NetSuite's `phone` field type provides
+            // storage escaping so this isn't an XSS vector, but unvalidated
+            // text is a data-integrity gap that BFN review will flag.
+            const rawPhone = String(body.phone || '');
+            if (!rawPhone || !/^\+?[0-9]{7,15}$/.test(rawPhone)) {
+                log.audit({
+                    title: 'CTC logCall — invalid phone format',
+                    details: 'callSid=' + body.callSid +
+                             ' phoneLen=' + rawPhone.length
+                });
+                return { error: 'invalid_phone' };
+            }
+
             if (body.callSid) {
                 const existingId = findCallByCallSid(body.callSid);
                 if (existingId) {
