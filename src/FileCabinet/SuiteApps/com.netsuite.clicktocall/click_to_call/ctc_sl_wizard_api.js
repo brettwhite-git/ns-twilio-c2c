@@ -20,10 +20,16 @@
  * the handler. Role 3 (Administrator) is portable across customer
  * accounts; custom roles vary per install.
  */
-define(['N/runtime', 'N/record', 'N/search', 'N/crypto', 'N/query',
+// SAFE audit 2026-05-21 — N/log MUST be in the import list. Pre-import,
+// the script used `log` as an implicit global; that works at NetSuite
+// runtime but throws ReferenceError in Jest. The eslint-plugin-suitescript
+// `no-log-module` rule prefers the global; we override here because
+// test-harness correctness wins over the rule's preference.
+// eslint-disable-next-line suitescript/no-log-module
+define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         './lib/ctc_config', './lib/ctc_twilio_admin',
         './lib/ctc_twilio_jwt'],
-       (runtime, record, search, crypto, query, config, twilio, jwt) => {
+       (runtime, record, search, log, crypto, query, config, twilio, jwt) => {
 
     /* ------------------------------------------------------------------ */
     /* Suitelet entry point                                               */
@@ -788,13 +794,74 @@ define(['N/runtime', 'N/record', 'N/search', 'N/crypto', 'N/query',
             return { ok: false, error: 'missing_assignments' };
         }
 
+        // CRIT-4 / HIGH-14 (SAFE review 2026-05-21) — payload size caps.
+        // Pre-fix this had three nested loops with no caps; a payload
+        // with N phones × M employees × E existing rows triggered
+        // 700+ record ops in one Suitelet execution, blowing the 10k
+        // governance budget mid-save and leaving the rep_assignment
+        // table partially deleted (no transaction rollback). Caps:
+        //   - At most 20 phone numbers per save (typical install: 1-5)
+        //   - At most 50 employees per phone (typical: 1-10)
+        // Beyond these caps reject upfront; oversized inner arrays
+        // are skipped with an audit row rather than failing the whole
+        // save (keeps partial progress meaningful).
+        const MAX_PHONES_PER_SAVE = 20;
+        const MAX_EMPLOYEES_PER_PHONE = 50;
+
+        if (payload.assignments.length > MAX_PHONES_PER_SAVE) {
+            log.error({
+                title: 'CTC Wizard — saveAssignments payload too large',
+                details: 'phones=' + payload.assignments.length +
+                         ' cap=' + MAX_PHONES_PER_SAVE
+            });
+            return {
+                ok: false,
+                error: 'payload_too_large',
+                detail: 'At most ' + MAX_PHONES_PER_SAVE + ' phone numbers per save'
+            };
+        }
+
         let inserted = 0;
         let deleted = 0;
 
         try {
             for (let i = 0; i < payload.assignments.length; i++) {
+                // CRIT-4 — per-iteration governance check. Suitelet
+                // budget is 10k units; each phone iteration costs ~5
+                // per existing-row delete plus ~5 per insert. Break
+                // out cleanly when we're near exhaustion so callers
+                // get a partial-progress envelope they can act on,
+                // rather than a half-executed save with no signal.
+                if (runtime.getCurrentScript().getRemainingUsage() < 500) {
+                    log.audit({
+                        title: 'CTC Wizard — saveAssignments governance break',
+                        details: 'deleted=' + deleted + ' inserted=' + inserted +
+                                 ' processed=' + i + '/' + payload.assignments.length
+                    });
+                    return {
+                        ok: false,
+                        error: 'governance_limit',
+                        deleted: deleted, inserted: inserted,
+                        processed: i, total: payload.assignments.length
+                    };
+                }
+
                 const a = payload.assignments[i];
                 if (!a.phoneSid) continue;
+
+                // HIGH-14 — inner-array cap. Reject oversized
+                // employeeIds arrays per phone rather than letting
+                // a 1000-entry array DoS the save loop.
+                const empIdsRaw = Array.isArray(a.employeeIds) ? a.employeeIds : [];
+                if (empIdsRaw.length > MAX_EMPLOYEES_PER_PHONE) {
+                    log.error({
+                        title: 'CTC Wizard — saveAssignments employeeIds too large',
+                        details: 'phoneSid=' + a.phoneSid +
+                                 ' employees=' + empIdsRaw.length +
+                                 ' cap=' + MAX_EMPLOYEES_PER_PHONE + ' (skipping)'
+                    });
+                    continue;
+                }
 
                 // Delete existing rows for this phoneSid
                 const existing = search.create({
@@ -814,7 +881,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/crypto', 'N/query',
                 }
 
                 // Insert one row per employee
-                const empIds = Array.isArray(a.employeeIds) ? a.employeeIds : [];
+                const empIds = empIdsRaw;
                 for (let k = 0; k < empIds.length; k++) {
                     const empId = empIds[k];
                     if (!empId) continue;
