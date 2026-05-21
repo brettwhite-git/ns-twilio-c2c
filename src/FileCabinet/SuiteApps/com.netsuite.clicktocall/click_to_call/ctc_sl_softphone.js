@@ -163,9 +163,18 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
      */
     const queryContacts = (entityId) => {
         try {
+            // HIGH-8 (SAFE review 2026-05-21) — filter out deactivated
+            // contacts. Pre-fix this legacy query missed the isinactive
+            // filter that the parallel ctcEntity.getContactsAtEntity()
+            // had, so deactivated contacts (former employees, duplicates)
+            // appeared in the softphone's CONTACTS array and reps could
+            // accidentally dial them.
             const results = search.create({
                 type: 'contact',
-                filters: [['company', 'anyof', entityId]],
+                filters: [
+                    ['company', 'anyof', entityId],
+                    'AND', ['isinactive', 'is', 'F']
+                ],
                 columns: ['firstname', 'lastname', 'phone', 'mobilephone', 'email', 'title']
             }).run().getRange({ start: 0, end: 50 });
 
