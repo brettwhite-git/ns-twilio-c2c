@@ -178,22 +178,45 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             };
         }
 
-        const allowedPhones = getUserAssignedPhones(userId);
-        if (cfg.phoneNumber) allowedPhones.push(cfg.phoneNumber);
-        if (!allowedPhones.length) {
-            return { ok: false, reason: 'NO_CALLER_ID_ASSIGNED' };
+        const callFrom = String((twilioResult.call && twilioResult.call.from) || '');
+
+        // For outbound WebRTC calls, Twilio's `from` is the calling
+        // client's JWT identity in the form `client:<identity>` — not
+        // a phone number — unless the TwiML response explicitly set
+        // `callerId="+15551234567"` on its <Dial>. We accept either:
+        //
+        //   (a) call.from === `client:<currentUserId>`
+        //       Strongest binding — CRIT-1 already enforces that the
+        //       JWT identity is the session user's ID, so Twilio
+        //       confirming the call was placed by client:42 + the
+        //       authenticated session being user 42 = end-to-end
+        //       verification with no rep_assignment needed.
+        //
+        //   (b) call.from matches a rep_assignment row, or the
+        //       cfg.phoneNumber fallback. For installs that DO route
+        //       calls through a configured caller-ID phone.
+        //
+        // Either path satisfies the SAFE intent: the caller proves
+        // they were the one who placed the Twilio-side call.
+        const expectedClientIdentity = 'client:' + String(userId);
+        if (callFrom === expectedClientIdentity) {
+            return { ok: true, call: twilioResult.call };
         }
 
-        const callFrom = String((twilioResult.call && twilioResult.call.from) || '');
-        if (allowedPhones.indexOf(callFrom) === -1) {
-            log.audit({
-                title: 'CTC verifyCallOwnership — caller-ID mismatch',
-                details: 'callSid=' + callSid + ' userId=' + userId +
-                         ' callFrom=' + callFrom + ' allowed=' + allowedPhones.length
-            });
-            return { ok: false, reason: 'NOT_CALL_OWNER', callFrom: callFrom };
+        const allowedPhones = getUserAssignedPhones(userId);
+        if (cfg.phoneNumber) allowedPhones.push(cfg.phoneNumber);
+        if (allowedPhones.indexOf(callFrom) !== -1) {
+            return { ok: true, call: twilioResult.call };
         }
-        return { ok: true, call: twilioResult.call };
+
+        log.audit({
+            title: 'CTC verifyCallOwnership — caller-ID mismatch',
+            details: 'callSid=' + callSid + ' userId=' + userId +
+                     ' callFrom=' + callFrom +
+                     ' expectedClient=' + expectedClientIdentity +
+                     ' allowedPhones=' + allowedPhones.length
+        });
+        return { ok: false, reason: 'NOT_CALL_OWNER', callFrom: callFrom };
     };
 
     /**
