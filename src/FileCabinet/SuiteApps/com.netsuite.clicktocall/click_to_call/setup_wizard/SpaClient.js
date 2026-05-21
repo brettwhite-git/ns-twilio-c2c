@@ -116,8 +116,16 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             phonesLoading: false,    // section-level loader gate
             phonesSaving: {},        // { phoneSid: bool } — per-row save spinner
             phonesError: null,
-            // Voice section (U4 — Phase 3b): which field is in EDIT mode.
+            // Voice section (U4 — Phase 3b): per-field VIEW/EDIT toggle.
             voiceEditing: null,    // null | 'twimlAppSid' | 'phoneNumber' | 'intelServiceSid'
+            voicePendingValue: null,   // dropdown's pending value while editing (not committed until Save)
+            voiceLists: {              // lazy-loaded option lists, fetched on first Change-click
+                twimlApps: null,
+                phoneNumbers: null,
+                intelServices: null
+            },
+            voiceListsLoading: false,
+            voiceSaving: false,
             voiceError: null,
             // Credentials section (U5 — Phase 3c): modal state.
             activeModal: null,     // null | 'rotate-secret'
@@ -267,8 +275,12 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
         if (!has(snap.accountSid) || !has(snap.apiKeySid)) return 2;
         if (!has(snap.apiSecretId)) return 2;
         if (!has(snap.twimlAppSid) || !has(snap.phoneNumber)) return 3;
-        if (snap.active) return 'console';
-        return 4;
+        // Once voice config is set, the admin should land on the console
+        // regardless of active state. Refresh-after-deactivate should
+        // return to the console (where the Reactivate banner lives), NOT
+        // the stepper. The active flag only controls rep call placement,
+        // not admin console access.
+        return 'console';
     }
 
     /**
@@ -939,8 +951,8 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
      *   start / end accept any GapSize (M=24px, L=32px, XL=40px).
      *
      * Current values:
-     *   start: L (32px)   — modest gap from rail's flush-left edge
-     *   end:   XL (40px)  — extra breathing room from browser right
+     *   start: XXL (48px) — generous inset from rail's flush-left edge
+     *   end:   XXL (48px) — symmetric inset from browser right
      *   vertical: M (24px) — top + bottom inset
      */
     function wrapContent(d, child) {
@@ -950,8 +962,8 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             content: child,
             horizontalAlignment: d.CP_HAlign.STRETCH,
             outerGap: {
-                start: Gap.L,
-                end: Gap.XL,
+                start: Gap.XXL,
+                end: Gap.XXL,
                 vertical: Gap.M
             }
         }, "ContentPanel(rail-wrapper)") || child;
@@ -1065,18 +1077,17 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     }
 
     /**
-     * U1: dispatch to the appropriate section builder. U2 and U6 fill in
-     * Overview and Health (Phase 3a); U3-U5 stay as informative stubs
-     * until Phase 3b/3c lands.
+     * U1: dispatch to the appropriate section builder. The paused-state
+     * banner is rendered once at the page-shell level (above the title),
+     * NOT here — keeps the banner above every section without per-
+     * section code.
      */
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
             case 'overview':    return buildOverviewSection(d);
             case 'phones':      return buildPhonesSection(d);
-            case 'voice':       return buildSectionStub(d, 'Voice config',
-                                    'Inline Field editing arrives in Phase 3b (U4).');
-            case 'credentials': return buildSectionStub(d, 'Credentials',
-                                    'Full credentials view + rotation Modal arrives in Phase 3c (U5).');
+            case 'voice':       return buildVoiceSection(d);
+            case 'credentials': return buildCredentialsSection(d);
             case 'health':      return buildHealthSection(d);
             default:            return buildOverviewSection(d);
         }
@@ -1118,7 +1129,7 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                     && component.Button.Type.DEFAULT) || undefined,
                 action: function () {
                     try {
-                        window.open('/app/common/scripting/secrets.nl', '_blank');
+                        window.open('/app/common/scripting/secrets/settings.nl', '_blank');
                     } catch (e) { /* ignore */ }
                 }
             }, "Button(stub-secrets)");
@@ -1216,15 +1227,43 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                 itemGap: d.SP_Gap.M
             }, "StackPanel(paused-fallback)");
         }
+        var ButtonType = (component.Button && component.Button.Type) || {};
+
+        // EMPIRICAL: Banner's `button` prop and `showControls` flag share
+        // the same right-side controls region. `showControls: false`
+        // hides BOTH the dontShowAgain checkbox AND the action button.
+        // The catalog docs don't disclose this conflict (their example
+        // shows showControls:false but has no button).
+        //
+        // Workaround: omit Banner.button entirely. Build a horizontal
+        // StackPanel containing the body text and the Reactivate button,
+        // and pass that as Banner.content. Banner.content accepts any
+        // Component, so the button rides inside the content slot —
+        // unaffected by showControls.
+        var bodyText = safeNew(d.T, {
+            text: "Reps cannot place calls until you reactivate. All " +
+                  "config is preserved."
+        }, "Text(paused-banner-body)");
+
+        var reactivateBtn = safeNew(component.Button, {
+            label: "Reactivate",
+            type: ButtonType.PRIMARY,
+            action: onReactivateClick
+        }, "Button(paused-banner-reactivate)");
+
+        var contentRow = safeNew(d.SP, {
+            items: [bodyText, reactivateBtn].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.L,
+            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, "StackPanel(paused-banner-content)") || bodyText;
+
         return safeNew(d.Bn, {
             title: "Click-to-Call is paused",
-            content: "Reps cannot place calls until you reactivate. All " +
-                     "config is preserved.",
+            content: contentRow,
             color: d.Bn_Color.ORANGE,
-            button: {
-                label: "Reactivate",
-                action: onReactivateClick
-            }
+            showControls: false
         }, "Banner(paused)");
     }
 
@@ -1458,6 +1497,522 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XS
         }, "StackPanel(activity-feed)");
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* U4 — Voice config section (Phase 3b)                               */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    /**
+     * Voice config: three fields — TwiML Application, default outbound
+     * caller-ID number, optional Conversational Intelligence service.
+     * Each renders as a VIEW row with a Change button; clicking Change
+     * lazy-loads the option list (cached on first fetch) and swaps that
+     * single row to EDIT mode with a Dropdown + Save / Cancel.
+     *
+     * Per-field editing (not all-at-once) matches the "fix one thing"
+     * pattern admins expect from a management surface — avoids the
+     * stepper-style all-or-nothing form.
+     */
+    function buildVoiceSection(d) {
+        var snap = STATE.console.snapshot || {};
+        var items = [];
+
+        var heading = safeNew(d.H, {
+            content: "Voice config",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(voice)");
+        if (heading) items.push(heading);
+
+        var intro = safeNew(d.T, {
+            text: "Manage TwiML application, default outbound caller-ID " +
+                  "number, and optional Conversational Intelligence " +
+                  "service. Changes save immediately and apply to the " +
+                  "next call placed.",
+            type: d.T_Type.WEAK
+        }, "Text(voice-intro)");
+        if (intro) items.push(intro);
+
+        if (STATE.console.voiceError) {
+            var err = safeNew(d.T, {
+                text: "✕ " + STATE.console.voiceError,
+                type: d.T_Type.STRONG
+            }, "Text(voice-error)");
+            if (err) items.push(err);
+        }
+
+        items.push(buildVoiceFieldRow(d, {
+            field: 'twimlAppSid',
+            label: 'TwiML Application',
+            value: snap.twimlAppSid,
+            helpText: 'Twilio application that handles outbound call routing.'
+        }));
+
+        items.push(buildVoiceFieldRow(d, {
+            field: 'phoneNumber',
+            label: 'Default outbound caller-ID',
+            value: snap.phoneNumber,
+            helpText: 'Number reps see as their outbound caller ID.'
+        }));
+
+        items.push(buildVoiceFieldRow(d, {
+            field: 'intelServiceSid',
+            label: 'Conversational Intelligence (optional)',
+            value: snap.intelServiceSid,
+            helpText: 'Twilio Conversational Intelligence service for AI ' +
+                'call analysis. Leave unset to disable AI analysis.',
+            allowEmpty: true
+        }));
+
+        if (items.length === 0) return safeNew(d.T, { text: "Voice config" });
+        return safeNew(d.SP, {
+            items: items.filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, "StackPanel(voice)");
+    }
+
+    /**
+     * One field row — VIEW mode by default, swaps to EDIT when this
+     * field is the active `voiceEditing` target. Uses a horizontal
+     * StackPanel: label/value on left (grow:1), action button(s) right.
+     */
+    function buildVoiceFieldRow(d, spec) {
+        var isEditing = STATE.console.voiceEditing === spec.field;
+        var ButtonType = (component.Button && component.Button.Type) || {};
+        var ButtonHierarchy = (component.Button && component.Button.Hierarchy) || {};
+
+        var label = safeNew(d.T, {
+            text: spec.label,
+            type: d.T_Type.STRONG
+        }, "Text(voice-label-" + spec.field + ")");
+
+        // Help text — small weak text under the label, always visible.
+        var help = safeNew(d.T, {
+            text: spec.helpText,
+            type: d.T_Type.WEAK,
+            size: d.T.Size && d.T.Size.S
+        }, "Text(voice-help-" + spec.field + ")");
+
+        var labelStack = safeNew(d.SP, {
+            items: [label, help].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, "StackPanel(voice-label-" + spec.field + ")");
+
+        var rightSide;
+        if (isEditing) {
+            rightSide = buildVoiceEditControls(d, spec);
+        } else {
+            rightSide = buildVoiceViewControls(d, spec, ButtonType, ButtonHierarchy);
+        }
+
+        // Card's Options has no `content` prop (only `children` for JSX,
+        // plus title/text/image/tools). Wrapping in Card with `content`
+        // renders an empty card. Use plain ContentPanel for padding and
+        // let the parent StackPanel's itemGap provide row separation.
+        var row = safeNew(d.SP, {
+            items: [labelStack, rightSide].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.L,
+            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined
+        }, "StackPanel(voice-row-" + spec.field + ")");
+
+        if (d.CP) {
+            return safeNew(d.CP, {
+                content: row,
+                outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+                horizontalAlignment: d.CP_HAlign.STRETCH
+            }, "ContentPanel(voice-row-pad-" + spec.field + ")") || row;
+        }
+        return row;
+    }
+
+    function buildVoiceViewControls(d, spec, ButtonType, ButtonHierarchy) {
+        var valueText = spec.value
+            ? safeNew(d.T, {
+                text: spec.value,
+                type: d.T_Type.DEFAULT
+            }, "Text(voice-value-" + spec.field + ")")
+            : safeNew(d.T, {
+                text: '(not configured)',
+                type: d.T_Type.WEAK
+            }, "Text(voice-empty-" + spec.field + ")");
+
+        var changeBtn = safeNew(component.Button, {
+            label: 'Change',
+            type: ButtonType.DEFAULT,
+            action: function () { onVoiceChangeClick(spec.field, spec.allowEmpty); }
+        }, "Button(voice-change-" + spec.field + ")");
+
+        return safeNew(d.SP, {
+            items: [valueText, changeBtn].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M
+        }, "StackPanel(voice-view-" + spec.field + ")");
+    }
+
+    function buildVoiceEditControls(d, spec) {
+        var ButtonType = (component.Button && component.Button.Type) || {};
+
+        // Lists still loading? Show a placeholder.
+        var listKey = voiceListKeyFor(spec.field);
+        var list = STATE.console.voiceLists[listKey];
+        if (list === null || STATE.console.voiceListsLoading) {
+            var loader = safeNew(component.Loader, {
+                label: "Loading from Twilio…",
+                indeterminate: true
+            }, "Loader(voice-list-" + spec.field + ")");
+            return loader || safeNew(d.T, { text: "Loading from Twilio…" });
+        }
+
+        if (list.length === 0) {
+            var emptyText = safeNew(d.T, {
+                text: '(no items found in Twilio for this account)',
+                type: d.T_Type.WEAK
+            }, "Text(voice-empty-list-" + spec.field + ")");
+            var cancelBtnE = safeNew(component.Button, {
+                label: 'Cancel',
+                type: ButtonType.DEFAULT,
+                action: onVoiceCancelClick
+            }, "Button(voice-cancel-empty-" + spec.field + ")");
+            return safeNew(d.SP, {
+                items: [emptyText, cancelBtnE].filter(function (c) { return c != null; }),
+                orientation: d.SP_Orient.HORIZONTAL,
+                itemGap: d.SP_Gap.M
+            }, "StackPanel(voice-empty-edit-" + spec.field + ")");
+        }
+
+        // Normalize list items to { value, label } shape Dropdown expects.
+        var normalized = list.map(function (it) {
+            if (spec.field === 'phoneNumber') {
+                return {
+                    value: it.phoneNumber,
+                    label: it.phoneNumber +
+                        (it.friendlyName ? '  —  ' + it.friendlyName : '')
+                };
+            }
+            // twimlApp / intelService — value=sid
+            return {
+                value: it.sid,
+                label: (it.friendlyName || '(unnamed)') +
+                    (it.sid ? '  [' + it.sid + ']' : '')
+            };
+        });
+
+        var ds = new core.ArrayDataSource(normalized);
+        var pending = STATE.console.voicePendingValue;
+
+        var dropdown = safeNew(component.Dropdown, {
+            dataSource: ds,
+            valueMember: 'value',
+            displayMember: 'label',
+            selectedValue: pending || (spec.allowEmpty ? null : normalized[0].value),
+            allowEmpty: !!spec.allowEmpty,
+            placeholder: spec.allowEmpty ? '(none)' : 'Select…',
+            onSelectionChanged: function (args) {
+                STATE.console.voicePendingValue = (args && args.value) || null;
+            }
+        }, "Dropdown(voice-edit-" + spec.field + ")");
+
+        var saving = !!STATE.console.voiceSaving;
+        var saveBtn = safeNew(component.Button, {
+            label: saving ? 'Saving…' : 'Save',
+            type: ButtonType.PRIMARY,
+            enabled: !saving,
+            action: function () { onVoiceSaveClick(spec.field); }
+        }, "Button(voice-save-" + spec.field + ")");
+
+        var cancelBtn = safeNew(component.Button, {
+            label: 'Cancel',
+            type: ButtonType.DEFAULT,
+            enabled: !saving,
+            action: onVoiceCancelClick
+        }, "Button(voice-cancel-" + spec.field + ")");
+
+        return safeNew(d.SP, {
+            items: [dropdown, saveBtn, cancelBtn].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, "StackPanel(voice-edit-" + spec.field + ")");
+    }
+
+    function voiceListKeyFor(field) {
+        if (field === 'twimlAppSid')     return 'twimlApps';
+        if (field === 'phoneNumber')     return 'phoneNumbers';
+        if (field === 'intelServiceSid') return 'intelServices';
+        return null;
+    }
+
+    function voiceActionFor(field) {
+        if (field === 'twimlAppSid')     return 'wizardListTwiMLApps';
+        if (field === 'phoneNumber')     return 'wizardListPhoneNumbers';
+        if (field === 'intelServiceSid') return 'wizardListIntelServices';
+        return null;
+    }
+
+    function onVoiceChangeClick(field, allowEmpty) {
+        STATE.console.voiceEditing = field;
+        STATE.console.voiceError = null;
+        var snap = STATE.console.snapshot || {};
+        STATE.console.voicePendingValue = snap[field] || null;
+
+        var listKey = voiceListKeyFor(field);
+        // Already cached? Just rerender — Dropdown picks it up immediately.
+        if (STATE.console.voiceLists[listKey] !== null) {
+            rerender();
+            return;
+        }
+
+        STATE.console.voiceListsLoading = true;
+        rerender();
+
+        wizardCall(voiceActionFor(field), {})
+            .then(function (p) {
+                STATE.console.voiceLists[listKey] = (p && p.items) || [];
+                STATE.console.voiceListsLoading = false;
+                rerender();
+            })
+            .catch(function (e) {
+                STATE.console.voiceListsLoading = false;
+                STATE.console.voiceError = 'Could not load list: ' +
+                    (e && e.message ? e.message : String(e));
+                STATE.console.voiceEditing = null;
+                rerender();
+            });
+    }
+
+    function onVoiceCancelClick() {
+        STATE.console.voiceEditing = null;
+        STATE.console.voicePendingValue = null;
+        STATE.console.voiceError = null;
+        rerender();
+    }
+
+    function onVoiceSaveClick(field) {
+        var snap = STATE.console.snapshot || {};
+        var newValue = STATE.console.voicePendingValue;
+
+        // No-op if value didn't change — just exit EDIT mode.
+        if (newValue === snap[field]) {
+            STATE.console.voiceEditing = null;
+            STATE.console.voicePendingValue = null;
+            rerender();
+            return;
+        }
+
+        // wizardSaveVoice takes all three; pass the new value for the
+        // active field and pass-through the snapshot's current values
+        // for the other two so we don't accidentally clear them.
+        var payload = {
+            twimlAppSid:     snap.twimlAppSid     || '',
+            phoneNumber:     snap.phoneNumber     || '',
+            intelServiceSid: snap.intelServiceSid || ''
+        };
+        payload[field] = newValue || '';
+
+        STATE.console.voiceSaving = true;
+        STATE.console.voiceError = null;
+        rerender();
+
+        wizardCall('wizardSaveVoice', payload)
+            .then(function (p) {
+                STATE.console.voiceSaving = false;
+                if (p && p.saved) {
+                    // Refresh snapshot so the new value is reflected on the row.
+                    snap[field] = newValue;
+                    STATE.console.snapshot = snap;
+                    STATE.console.voiceEditing = null;
+                    STATE.console.voicePendingValue = null;
+                    rerender();
+                } else {
+                    STATE.console.voiceError = 'Save failed: ' +
+                        ((p && p.error) || 'unknown');
+                    rerender();
+                }
+            })
+            .catch(function (e) {
+                STATE.console.voiceSaving = false;
+                STATE.console.voiceError = 'Network error saving: ' +
+                    (e && e.message ? e.message : String(e));
+                rerender();
+            });
+    }
+
+    /* ────────────────────────────────────────────────────────────────── */
+    /* U5 — Credentials section (Phase 3c — view-only)                    */
+    /* ────────────────────────────────────────────────────────────────── */
+
+    /**
+     * Credentials section: view-only display of Twilio public identifiers
+     * (Account SID, API Key SID) + NetSuite secret pointer (script ID).
+     *
+     * Why view-only (no inline editing):
+     *   - The API Key Secret VALUE is held in NetSuite API Secrets
+     *     (Setup > Company > Preferences > API Secrets) and CANNOT be
+     *     exposed to SuiteScript at runtime — N/https.createSecureString
+     *     returns an opaque handle, not the plaintext. SuiteScript can't
+     *     read it, so the SPA can't display or rotate it.
+     *   - Rotating the secret requires generating a new API Key in the
+     *     Twilio Console (external) AND updating the value at NetSuite
+     *     API Secrets (external). Neither step is doable from this SPA.
+     *
+     * UX: list the values + give a one-click deep-link to the NetSuite
+     * API Secrets page. Include rotation instructions inline so admins
+     * have a clear runbook.
+     */
+    function buildCredentialsSection(d) {
+        var snap = STATE.console.snapshot || {};
+        var items = [];
+
+        var heading = safeNew(d.H, {
+            content: "Credentials",
+            type: d.H_Type.MEDIUM_HEADING
+        }, "Heading(credentials)");
+        if (heading) items.push(heading);
+
+        var intro = safeNew(d.T, {
+            text: "Twilio public identifiers and NetSuite secret pointer. " +
+                  "These values are safe to view; the API Key Secret value " +
+                  "itself is held in NetSuite's encrypted vault and is " +
+                  "never exposed to scripts.",
+            type: d.T_Type.WEAK
+        }, "Text(credentials-intro)");
+        if (intro) items.push(intro);
+
+        // The three credential rows.
+        items.push(buildCredentialRow(d, {
+            label: 'Account SID',
+            value: snap.accountSid || '(not set)',
+            help: 'Public identifier for your Twilio account. Safe to view; ' +
+                  'used by SuiteScript to address the Twilio REST API.'
+        }));
+
+        items.push(buildCredentialRow(d, {
+            label: 'API Key SID',
+            value: snap.apiKeySid || '(not set)',
+            help: 'Public identifier for the scoped API Key. Pairs with the ' +
+                  'secret value to authenticate REST calls.'
+        }));
+
+        items.push(buildCredentialRow(d, {
+            label: 'API Key Secret pointer',
+            value: snap.apiSecretId || '(not set)',
+            help: 'Script ID of the NetSuite API Secret holding the secret ' +
+                  'value. The actual secret stays encrypted in NetSuite ' +
+                  "and is never exposed to SuiteScript at runtime."
+        }));
+
+        // Manage button — deep-link to the NetSuite API Secrets page in a
+        // new tab so the admin doesn't lose console context.
+        var ButtonType = (component.Button && component.Button.Type) || {};
+        var manageBtn = safeNew(component.Button, {
+            label: 'Open NetSuite API Secrets ↗',
+            type: ButtonType.DEFAULT,
+            action: function () {
+                try {
+                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
+                } catch (e) { /* ignore */ }
+            }
+        }, "Button(open-api-secrets)");
+        if (manageBtn) items.push(manageBtn);
+
+        // Rotation runbook callout — separate visual block so admins can
+        // find it quickly during a rotation event.
+        items.push(buildSecretRotationRunbook(d));
+
+        return safeNew(d.SP, {
+            items: items.filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, "StackPanel(credentials)");
+    }
+
+    function buildCredentialRow(d, spec) {
+        var labelText = safeNew(d.T, {
+            text: spec.label,
+            type: d.T_Type.STRONG
+        }, "Text(cred-label)");
+
+        var valueText = safeNew(d.T, {
+            text: spec.value,
+            type: d.T_Type.DEFAULT
+        }, "Text(cred-value)");
+
+        var helpText = safeNew(d.T, {
+            text: spec.help,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, "Text(cred-help)");
+
+        var inner = safeNew(d.SP, {
+            items: [labelText, valueText, helpText].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, "StackPanel(cred-row-inner)");
+
+        // Wrap each row in a ContentPanel for consistent padding with
+        // the Voice section rows. (Card.content doesn't exist — recipe §21.)
+        if (!d.CP) return inner;
+        return safeNew(d.CP, {
+            content: inner,
+            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+            horizontalAlignment: d.CP_HAlign.STRETCH
+        }, "ContentPanel(cred-row-" + spec.label + ")") || inner;
+    }
+
+    /**
+     * Rotation runbook — orange-bordered callout block with the 3-step
+     * procedure. Same callout-box pattern as the Health Danger zone
+     * (recipe §21: ContentPanel + rootStyle border).
+     */
+    function buildSecretRotationRunbook(d) {
+        var title = safeNew(d.H, {
+            content: "Rotating the API Key Secret",
+            type: d.H_Type.SMALL_HEADING
+        }, "Heading(rotation-runbook)");
+
+        var intro = safeNew(d.T, {
+            text: "Twilio recommends rotating API Key Secrets every 90 days. " +
+                  "The rotation happens in two external systems:",
+            type: d.T_Type.WEAK
+        }, "Text(rotation-intro)");
+
+        var step1 = safeNew(d.T, {
+            text: "1. In the Twilio Console, generate a new API Key Secret " +
+                  "(Account > API keys & tokens > Create API key). Save the " +
+                  "Secret value — Twilio shows it only once."
+        }, "Text(rotation-step-1)");
+
+        var step2 = safeNew(d.T, {
+            text: "2. In NetSuite, navigate to Setup > Company > Preferences " +
+                  "> API Secrets. Edit the secret with script ID matching " +
+                  "the pointer above. Paste the new Twilio Secret value. Save."
+        }, "Text(rotation-step-2)");
+
+        var step3 = safeNew(d.T, {
+            text: "3. Return to this console's Health section and click " +
+                  "Re-run on Preflight to verify the new secret authenticates."
+        }, "Text(rotation-step-3)");
+
+        var inner = safeNew(d.SP, {
+            items: [title, intro, step1, step2, step3].filter(function (c) { return c != null; }),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, "StackPanel(rotation-inner)");
+
+        if (!d.CP) return inner;
+        return safeNew(d.CP, {
+            content: inner,
+            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            rootStyle: {
+                border: '1px solid #E89C2B',
+                borderRadius: '8px',
+                backgroundColor: '#FDF8EE',
+                padding: '16px 20px'
+            }
+        }, "ContentPanel(rotation-callout)") || inner;
     }
 
     /* ────────────────────────────────────────────────────────────────── */
@@ -1720,6 +2275,15 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
     }
 
     function buildHealthDangerZone(d) {
+        var snap = STATE.console.snapshot || {};
+        var isPaused = snap.active === false;
+
+        // Hide entire Danger zone when CTC is already paused — the top
+        // banner already provides a Reactivate path, so duplicating it
+        // here just adds noise. Render only when there's something to
+        // do (deactivate a live install).
+        if (isPaused) return null;
+
         var ButtonType = (component.Button && component.Button.Type) || {};
 
         var sectionHeader = safeNew(d.H, {
@@ -1735,20 +2299,8 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             size: d.T && d.T.Size ? d.T.Size.S : undefined
         }, "Text(danger-desc)");
 
-        var snap = STATE.console.snapshot || {};
-        var isPaused = snap.active === false;
-
         var buttons = [];
-        if (isPaused) {
-            // Already paused — show informational text only; reactivation
-            // happens via the top-of-page paused Banner.
-            var pausedText = safeNew(d.T, {
-                text: "Click-to-Call is already paused. Use the banner at " +
-                      "the top of the page to reactivate.",
-                type: d.T_Type.STRONG
-            }, "Text(already-paused)");
-            if (pausedText) buttons.push(pausedText);
-        } else if (STATE.console.pendingDeactivateConfirm) {
+        if (STATE.console.pendingDeactivateConfirm) {
             // Two-click confirm — show Cancel + Confirm
             var cancelBtn = safeNew(component.Button, {
                 label: "Cancel",
@@ -1787,12 +2339,29 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             itemGap: d.SP_Gap.S
         }, "StackPanel(danger-buttons)") : null;
 
-        return safeNew(d.SP, {
+        var inner = safeNew(d.SP, {
             items: [sectionHeader, description, buttonRow, deactivateErrorText]
                 .filter(function (c) { return c != null; }),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.S
         }, "StackPanel(danger-zone)");
+
+        // Callout-style border (UIF has no dedicated "danger box" — wrap
+        // in ContentPanel with rootStyle border + inset padding to match
+        // the wireframe). Subtle red border + light tinted background
+        // signals destructiveness without shouting.
+        if (!d.CP) return inner;
+        return safeNew(d.CP, {
+            content: inner,
+            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            rootStyle: {
+                border: '1px solid #D33A2C',
+                borderRadius: '8px',
+                backgroundColor: '#FDF4F3',
+                padding: '16px 20px'
+            }
+        }, "ContentPanel(danger-zone-callout)") || inner;
     }
 
     /* ────────────────────────────────────────────────────────────────── */
@@ -2798,7 +3367,9 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
             type: d.H_Type.MEDIUM_HEADING
         }, "Heading(step5)"));
 
-        // If activated, show success state
+        // If activated, show success state with Continue button to
+        // return to the Admin Console (otherwise the admin gets stranded
+        // on Step 5 with no way back).
         if (STATE.step5.activated) {
             rows.push(safeNew(d.T, {
                 text: "✓ Click-to-Call is active. Sales reps can now use " +
@@ -2806,6 +3377,15 @@ define(["require", "exports", "@uif-js/core", "@uif-js/component"],
                       "records.",
                 type: d.T_Type.STRONG
             }, "Text(activated)"));
+
+            var ButtonType = (component.Button && component.Button.Type) || {};
+            var consoleBtn = safeNew(component.Button, {
+                label: "Go to Admin Console",
+                type: ButtonType.PRIMARY,
+                action: goToConsole
+            }, "Button(step5-to-console)");
+            if (consoleBtn) rows.push(consoleBtn);
+
             return safeNew(d.SP, {
                 items: rows.filter(function (r) { return r != null; }),
                 orientation: d.SP_Orient.VERTICAL,

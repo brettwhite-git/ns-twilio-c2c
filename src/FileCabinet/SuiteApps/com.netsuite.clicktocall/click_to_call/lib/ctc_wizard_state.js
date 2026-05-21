@@ -70,7 +70,11 @@ define([], () => {
         if (!snapshot.hasPublicIds)    return 2;
         if (!snapshot.hasApiKeySecret) return 2;
         if (!snapshot.hasVoiceConfig)  return 3;
-        if (!snapshot.isActive)        return 5;
+        // Once voice config exists, route to console regardless of
+        // active state. Refresh-after-deactivate should land on the
+        // console (where the Reactivate banner lives), NOT back into
+        // the stepper. The active flag gates rep call placement, not
+        // admin console access.
         return 'console';
     };
 
