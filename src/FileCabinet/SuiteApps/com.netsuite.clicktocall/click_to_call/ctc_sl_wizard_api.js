@@ -42,13 +42,25 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
 
         response.setHeader({ name: 'Content-Type', value: 'application/json' });
 
-        // U13a — admin gating is enforced at the deployment layer via
-        // <audienceallroles>F</audienceallroles> + <audienceroles>
-        // ADMINISTRATOR</audienceroles> on customscript_ctc_sl_wizard_api.
-        // NetSuite returns 403 to non-admins before this script runs.
-        // Per SAFE Guide §5.2 ("DON'T check user roles to control data
-        // access"), the redundant runtime isAdmin() check was removed —
-        // framework enforcement is more reliable than script guards.
+        // U13a-corrected (deploy verification 2026-05-21) — admin gating
+        // is enforced at RUNTIME. The original U13a intent was to move
+        // gating to the deployment layer via <audienceallroles> +
+        // <audienceroles>, but SDF emits "field is not supported and
+        // will be ignored" for those fields on scriptdeployment
+        // subrecords (no framework-layer audience exists for Suitelets
+        // beyond <allroles>T/F</allroles>). Reverted to the dual-layer
+        // pattern documented in CLAUDE.md "Multi-Role Support":
+        // deployment is reachable to any internal role (allroles=T) and
+        // this runtime check is the actual gate. Matches SpaServer.js.
+        if (Number(runtime.getCurrentUser().role) !== 3) {
+            log.audit({
+                title: 'CTC Wizard API — non-admin reached endpoint',
+                details: 'role=' + runtime.getCurrentUser().role +
+                         ' action=' + action
+            });
+            response.write(JSON.stringify({ ok: false, error: 'forbidden' }));
+            return;
+        }
 
         try {
             const handler = ACTIONS[action];
@@ -174,9 +186,12 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     /* Internal helpers                                                   */
     /* ------------------------------------------------------------------ */
 
-    // U13a: isAdmin() removed — admin gating now enforced at the
-    // deployment layer (see customscript_ctc_sl_wizard_api.xml). Per
-    // SAFE Guide §5.2, scripts shouldn't check user roles for data access.
+    // U13a-corrected: isAdmin() is inlined in onRequest above (deploy
+    // verification 2026-05-21 showed deployment-layer audience syntax
+    // isn't supported at scriptdeployment level — SDF silently drops
+    // <audienceroles>). The CLAUDE.md "Multi-Role Support" dual-layer
+    // pattern is the right shape here: framework gate is best-effort,
+    // runtime gate is the actual enforcement.
 
     const parsePayload = (request) => {
         const body = request.body;
