@@ -558,23 +558,23 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             return r;
         });
 
-        log.audit({
+        // HIGH-9 (SAFE review 2026-05-21) — breakdown remains at debug
+        // level only. Pre-fix this fired at log.audit on every softphone
+        // search keypress, filling the Script Execution Log with traffic
+        // proportional to typing rate. Audit-log noise + minor data-min
+        // concern (stage/role distribution by user). Demoted to debug so
+        // it's still available for troubleshooting without the audit-log
+        // pollution. The per-row dump (id, companyname, stage, role)
+        // was REMOVED entirely — it pushed customer/lead names (including
+        // personal names from Lead records) into the audit log on every
+        // search and BFN reviewers consistently flag that pattern.
+        log.debug({
             title: 'CTC runBookEntityQuery breakdown',
             details:
                 'rowCount=' + mapped.length +
                 ' | stages=' + JSON.stringify(stageCounts) +
                 ' | roles=' + JSON.stringify(roleCounts)
         });
-        // Per-row dump — id · companyname · stage · role tag. Trimmed to
-        // 50 names so the audit detail doesn't overflow NetSuite's column.
-        const rowDump = rows.slice(0, 50).map((r) => {
-            const role = (String(r.isprimary) === '1' && String(r.isteammember) === '1') ? 'P+S'
-                       : String(r.isprimary)    === '1' ? 'P'
-                       : String(r.isteammember) === '1' ? 'S'
-                       : '?';
-            return r.id + ':' + (r.companyname || '') + ':' + (r.stage || '') + ':' + role;
-        }).join(' | ');
-        log.audit({ title: 'CTC runBookEntityQuery rows', details: rowDump });
 
         return rows.map(packEntityRowSql);
     };
