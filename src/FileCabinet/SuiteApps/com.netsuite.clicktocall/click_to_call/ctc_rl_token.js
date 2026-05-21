@@ -71,9 +71,15 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     const generateToken = (body) => {
         try {
             const config = loadConfig();
-            const identity = body.employeeId
-                ? String(body.employeeId)
-                : String(runtime.getCurrentUser().id);
+            // CRIT-1 (SAFE review 2026-05-21) — identity MUST come from the
+            // authenticated session, never from the request body. The previous
+            // `body.employeeId ? ... : runtime.getCurrentUser().id` pattern
+            // let any authenticated internal user mint a JWT bound to another
+            // rep's identity (Twilio attributes the call/recording/transcript
+            // to that identity). Once Step 4's rep_assignment lookup is wired
+            // into caller-ID resolution, the same bug becomes "rep A places
+            // calls displaying rep B's caller ID."
+            const identity = String(runtime.getCurrentUser().id);
 
             const token = twilioJwt.generateAccessToken({
                 accountSid:  config.accountSid,
