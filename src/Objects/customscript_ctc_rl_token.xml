@@ -13,7 +13,14 @@
             <title>CTC Token Generator</title>
             <isdeployed>T</isdeployed>
             <status>RELEASED</status>
-            <loglevel>DEBUG</loglevel>
+            <!-- HIGH-10 (SAFE review 2026-05-21) — production deployment
+                 must run at ERROR. Script-level loglevel above remains
+                 DEBUG as the max-level cap for local dev. BFN reviewers
+                 consistently flag DEBUG in production: every user
+                 interaction would write log.debug entries containing
+                 entityId, callSid, found counts, etc. to a 30-day-
+                 retained log with no automatic PII scrubbing. -->
+            <loglevel>ERROR</loglevel>
             <allroles>T</allroles>
         </scriptdeployment>
     </scriptdeployments>

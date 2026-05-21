@@ -13,7 +13,11 @@
             <title>CTC Softphone</title>
             <isdeployed>T</isdeployed>
             <status>RELEASED</status>
-            <loglevel>DEBUG</loglevel>
+            <!-- HIGH-10 (SAFE review 2026-05-21) — see ctc_rl_token.xml
+                 for full rationale. Script-level loglevel above remains
+                 DEBUG as the max-level cap for local dev; deployment
+                 runs at ERROR in production. -->
+            <loglevel>ERROR</loglevel>
             <allroles>T</allroles>
             <isonline>F</isonline>
         </scriptdeployment>
