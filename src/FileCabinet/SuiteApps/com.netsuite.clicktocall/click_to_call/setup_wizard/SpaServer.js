@@ -1,3 +1,4 @@
+// @ts-check
 /* eslint-disable suitescript/script-type, suitescript/no-log-module */
 /**
  * @NApiVersion 2.1
