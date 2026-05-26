@@ -271,6 +271,37 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
         }
     };
 
+    /**
+     * Sprint 2 U4 (HIGH-4) — return shape upgraded so callers can
+     * distinguish "deleted" from "already gone" from "transient
+     * failure, retry next cycle." Pre-fix this was fire-and-forget:
+     * 5xx on DELETE meant the recording lived in Twilio storage
+     * forever (cost + privacy concern) and nothing scanned for stale
+     * recording SIDs. Post-fix: callers set
+     * custevent_ctc_recording_cleanup_pending=T on TRANSIENT_ERROR
+     * and the scheduled poll re-attempts on the next cycle.
+     *
+     * Return contract:
+     *   - true             → DELETE succeeded (204/200)
+     *   - null             → Twilio confirms the recording is gone
+     *                        (404). Treat as deleted out of band —
+     *                        clear the cleanup-pending flag.
+     *   - TRANSIENT_ERROR  → network / timeout / 5xx / 401 / 403 —
+     *                        caller should set cleanup_pending flag
+     *                        so the next cycle retries.
+     *   - false            → 4xx other than 401/403/404 (malformed
+     *                        request, unknown account, etc.) — log
+     *                        and move on; retrying won't fix it.
+     *
+     * Sprint 2 review #6: 401/403 are TREATED AS TRANSIENT (not
+     * false) because they are admin-fixable (rotated API key,
+     * revoked Twilio creds). Without this distinction, a persistent
+     * auth misconfig would silently clear cleanup_pending flags and
+     * the recording would stay in Twilio storage forever. Once admin
+     * restores credentials, the next cycle's retry succeeds.
+     *
+     * @returns {true|null|false|object} status sentinel — see contract
+     */
     const deleteRecording = (accountSid, recordingSid, authHeader) => {
         const url = `${TWILIO_API_BASE}/${accountSid}/Recordings/${recordingSid}.json`;
 
@@ -279,12 +310,31 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
             response = https.delete({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
         } catch (e) {
             log.error({ title: 'CTC Delete Recording — network error', details: (e && e.message) || String(e) });
-            return;
+            return TRANSIENT_ERROR;
         }
 
-        if (response.code !== 204 && response.code !== 200) {
-            log.error({ title: 'CTC Delete Recording Failed', details: `HTTP ${response.code}: ${response.body}` });
+        if (response.code === 204 || response.code === 200) {
+            return true;
         }
+        if (response.code === 404) {
+            // Recording already gone — treat as success path so the
+            // cleanup_pending flag clears.
+            return null;
+        }
+        if (response.code === 401 || response.code === 403) {
+            // Sprint 2 review #6 — auth failures are admin-fixable
+            // and therefore transient from the script's perspective.
+            // Keep the flag set so retry resumes once admin rotates
+            // the credential.
+            log.error({ title: 'CTC Delete Recording — auth failure (admin-fixable, transient)', details: `HTTP ${response.code}: ${response.body}` });
+            return TRANSIENT_ERROR;
+        }
+        if (response.code >= 500 && response.code < 600) {
+            log.error({ title: 'CTC Delete Recording — 5xx (transient)', details: `HTTP ${response.code}: ${response.body}` });
+            return TRANSIENT_ERROR;
+        }
+        log.error({ title: 'CTC Delete Recording Failed', details: `HTTP ${response.code}: ${response.body}` });
+        return false;
     };
 
     return {

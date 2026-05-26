@@ -2315,6 +2315,30 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function pollForTranscript(callSid, recordId) {
             var attempts = 0;
 
+            // Sprint 2 U3 (HIGH-11) — surface non-network failures so
+            // the rep can tell genuine pending state apart from a
+            // broken request. Pre-fix: any RESTlet 200-with-error or
+            // 5xx was rescheduled silently; the rep saw an ambiguous
+            // "transcript will be processed" message for 12 polls.
+            // Post-fix: HTTP non-2xx + any data.error short-circuits
+            // to a distinct error message and stops polling.
+            // (Backticks intentionally avoided in this comment per
+            // CLAUDE.md template-literal gotcha — the entire HTML
+            // body is a template literal.)
+            function surfaceTerminalError() {
+                logStatusEl.textContent = 'Transcript check failed \\u2014 admin will retry';
+                logStatusEl.className = 'log-status error';
+            }
+
+            function surfacePollCapPending() {
+                // Distinct from in-flight pending — admin/scheduled-poll
+                // will pick this up on next cycle. Not styled as error
+                // because no failure occurred; the transcript may still
+                // be processing on Twilio's side.
+                logStatusEl.textContent = 'Transcript still pending \\u2014 check back later';
+                logStatusEl.className = 'log-status';
+            }
+
             function poll() {
                 attempts++;
                 console.log('[CTC] Checking transcript (' + attempts + '/' + POLL_MAX_ATTEMPTS + ')');
@@ -2328,8 +2352,36 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         recordId: recordId
                     })
                 })
-                .then(function (res) { return res.json(); })
+                .then(function (res) {
+                    if (!res.ok) {
+                        // HTTP 4xx/5xx — RESTlet rejected the request
+                        // (auth, governance, bad params). Treat as
+                        // terminal — retrying won't fix it client-side.
+                        //
+                        // Sprint 2 review #11 — use a sentinel property
+                        // (ctcHttpStatus) instead of string-prefix
+                        // sniffing on err.message. A future refactor
+                        // that renames the thrown error string can't
+                        // silently revert this terminal path.
+                        var httpErr = new Error('Transcript check returned HTTP ' + res.status);
+                        httpErr.ctcHttpStatus = res.status;
+                        throw httpErr;
+                    }
+                    return res.json();
+                })
                 .then(function (data) {
+                    // Sprint 2 U3 (HIGH-11) — explicit error check before
+                    // the status switches. The RESTlet returns 200 with
+                    // { error: '...' } for application-level errors
+                    // (call ownership rejected, transcript fetch threw,
+                    // etc.); without this check, the next 3 status
+                    // branches all fall through to setTimeout and the
+                    // failure stays invisible for 12 polls.
+                    if (data && data.error) {
+                        console.warn('[CTC] Transcript check error:', data.error);
+                        surfaceTerminalError();
+                        return;
+                    }
                     if (data.status === 'completed') {
                         logStatusEl.textContent = 'Transcript saved \\u2714';
                         logStatusEl.className = 'log-status';
@@ -2343,16 +2395,24 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         return;
                     }
                     if (attempts >= POLL_MAX_ATTEMPTS) {
-                        logStatusEl.textContent = 'Transcript will be processed shortly';
-                        logStatusEl.className = 'log-status';
+                        surfacePollCapPending();
                         return;
                     }
                     setTimeout(poll, POLL_INTERVAL_MS);
                 })
-                .catch(function () {
+                .catch(function (err) {
+                    console.warn('[CTC] Transcript fetch failed:', err && err.message);
+                    // Sprint 2 review #11 — sentinel-property check
+                    // replaces the fragile err.message prefix sniff.
+                    // ctcHttpStatus is only set by the !res.ok throw
+                    // above; genuine network/transient errors don't
+                    // carry it and fall through to the retry-cap path.
+                    if (err && typeof err.ctcHttpStatus === 'number') {
+                        surfaceTerminalError();
+                        return;
+                    }
                     if (attempts >= POLL_MAX_ATTEMPTS) {
-                        logStatusEl.textContent = 'Transcript will be processed shortly';
-                        logStatusEl.className = 'log-status';
+                        surfacePollCapPending();
                         return;
                     }
                     setTimeout(poll, POLL_INTERVAL_MS);
