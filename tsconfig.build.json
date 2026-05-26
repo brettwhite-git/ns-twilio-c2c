@@ -1,0 +1,65 @@
+// Path B (added 2026-05-26) — build-mode tsconfig for the SPA TypeScript
+// source/output split.
+//
+// Extends the Path A type-check-only tsconfig (./tsconfig.json) with:
+//   - noEmit: false (we actually emit JS now)
+//   - module: ES2022 (ESM source; gulp's rollup task converts to AMD)
+//   - outDir: build/ (ESM intermediate; gulp bundle reads from here)
+//   - include: only src/SuiteApps/**/*.ts (the new TS source tree)
+//
+// Why two tsconfigs? Our SuiteApp is hybrid — the existing hand-written
+// AMD modules in src/FileCabinet/.../click_to_call/ stay where they are
+// (per the Oracle docs, gulp only converts the SPA folder under
+// src/SuiteApps/). Path A's tsconfig.json still type-checks those
+// hand-written modules via // @ts-check. This tsconfig.build.json
+// only sees the new TS sources.
+//
+// `target: ES2022` and `jsx: react-jsx` + `jsxImportSource: @uif-js/core`
+// match the canonical Oracle 2025.1+ SPA samples. NetSuite's hosted
+// UIF runtime supports ES2022 (V8/JSC-grade engine in the SPA iframe).
+//
+// gulp bundle pipeline (gulpfile.mjs):
+//   1. tsc reads this config, emits ESM to build/
+//   2. rollup bundles each entry point, converts ESM to AMD
+//   3. result written to src/FileCabinet/.../setup_wizard/ for deploy
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "module": "ES2022",
+    "target": "ES2022",
+    "moduleResolution": "node",
+    "outDir": "build",
+    "rootDir": "src/SuiteApps",
+    "declaration": false,
+    "sourceMap": false,
+    "esModuleInterop": true,
+    "newLine": "LF",
+
+    // JSX configuration for future TSX files (e.g., if we use UIF's
+    // JSX support in section files). Matches Oracle samples.
+    "jsx": "react-jsx",
+    "jsxImportSource": "@uif-js/core",
+
+    // Required so the UIF type packages resolve at compile time.
+    // The runtime resolves these via NetSuite's hosted UIF bundle
+    // (the externals declared in rollup config).
+    "typeRoots": [
+      "node_modules/@types",
+      "node_modules/@oracle/netsuite-uif-types"
+    ]
+  },
+  "include": [
+    "src/SuiteApps/**/*.ts",
+    "src/SuiteApps/**/*.tsx",
+    "node_modules/@oracle/netsuite-uif-types/uif/*.d.ts",
+    "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "build",
+    "dist",
+    "**/__tests__/**",
+    "**/__mocks__/**"
+  ]
+}
