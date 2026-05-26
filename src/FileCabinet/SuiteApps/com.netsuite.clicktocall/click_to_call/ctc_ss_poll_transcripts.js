@@ -76,6 +76,44 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
         }));
     };
 
+    /**
+     * Sprint 2 U4 (HIGH-4) — find Phone Call records where the
+     * Twilio Recording DELETE failed transiently on a prior cycle.
+     * The cleanup-retry pass runs after the main loop and retries
+     * the DELETE for each row; on success or confirmed 404 (already
+     * gone), the flag clears. Cap at 50 rows to match the main-loop
+     * batch size and stay within governance budget.
+     */
+    const findCleanupPendingCalls = () => {
+        const results = search.create({
+            type: search.Type.PHONE_CALL,
+            filters: [
+                ['custevent_ctc_recording_cleanup_pending', 'is', 'T'],
+                'AND',
+                ['custevent_ctc_recording_sid', 'isnotempty', '']
+            ],
+            columns: ['internalid', 'custevent_ctc_recording_sid']
+        }).run().getRange({ start: 0, end: 50 });
+
+        return results.map((r) => ({
+            recordId: r.id,
+            recordingSid: r.getValue('custevent_ctc_recording_sid')
+        }));
+    };
+
+    const markCleanupPending = (recordId, pending) => {
+        try {
+            record.submitFields({
+                type: record.Type.PHONE_CALL,
+                id: recordId,
+                values: { custevent_ctc_recording_cleanup_pending: !!pending },
+                options: { enableSourcing: false, ignoreMandatoryFields: true }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Mark Cleanup Pending Failed', details: `${recordId}: ${(e && e.message) || e}` });
+        }
+    };
+
     const updatePhoneCallRecord = (recordId, recording, config, transcriptText, analysis) => {
         const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: recordId, isDynamic: true });
         utils.writePhoneCallEnrichmentFields(phoneCall, {
@@ -240,12 +278,56 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                     }
 
                     updatePhoneCallRecord(call.recordId, recording, config, transcriptText, analysis);
-                    utils.deleteRecording(config.accountSid, recording.sid, authHeader);
+
+                    // Sprint 2 U4 (HIGH-4) — handle the new deleteRecording
+                    // return shape. TRANSIENT_ERROR means we couldn't reach
+                    // Twilio to confirm the delete; set the cleanup_pending
+                    // flag so the next cycle's retry pass picks it up.
+                    // Any other return (true / null / false) means we have
+                    // an authoritative answer from Twilio — nothing to retry.
+                    const deleteResult = utils.deleteRecording(config.accountSid, recording.sid, authHeader);
+                    if (utils.isTransientError(deleteResult)) {
+                        markCleanupPending(call.recordId, true);
+                    }
                     processed++;
                 } catch (e) {
                     log.error({ title: 'CTC Call Processing Error', details: `${call.callSid}: ${e.message || e}` });
                     markCallStatus(call.recordId, utils.CALL_STATUS.FAILED, false);
                     errors++;
+                }
+            }
+
+            // Sprint 2 U4 (HIGH-4) — cleanup-retry pass. Walk Phone
+            // Call rows where a prior cycle hit a transient DELETE
+            // failure (recording_cleanup_pending=T) and retry. Honors
+            // shouldYield() so we don't blow governance on the retry
+            // batch. Authoritative results from Twilio (true/null)
+            // clear the flag; transient again leaves it set for the
+            // next cycle.
+            const cleanupPendingCalls = findCleanupPendingCalls();
+            for (const pending of cleanupPendingCalls) {
+                if (shouldYield()) {
+                    enqueueResume();
+                    break;
+                }
+                try {
+                    const retryResult = utils.deleteRecording(config.accountSid, pending.recordingSid, authHeader);
+                    if (utils.isTransientError(retryResult)) {
+                        // Still transient — leave flag set for next cycle
+                        continue;
+                    }
+                    // true (deleted) or null (already gone) or false
+                    // (4xx auth/malformed) — clear the flag in all
+                    // three cases. A 4xx is "Twilio gave an
+                    // authoritative non-200 answer"; retrying won't
+                    // help, so we stop retrying.
+                    markCleanupPending(pending.recordId, false);
+                    log.audit({
+                        title: 'CTC Recording Cleanup Resolved',
+                        details: `${pending.recordId} recording=${pending.recordingSid} result=${retryResult === true ? 'deleted' : retryResult === null ? 'gone' : '4xx'}`
+                    });
+                } catch (e) {
+                    log.error({ title: 'CTC Cleanup Retry Error', details: `${pending.recordingSid}: ${(e && e.message) || e}` });
                 }
             }
         } catch (e) {

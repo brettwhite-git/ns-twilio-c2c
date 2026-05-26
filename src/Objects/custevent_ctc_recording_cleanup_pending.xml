@@ -1,0 +1,10 @@
+<crmcustomfield scriptid="custevent_ctc_recording_cleanup_pending">
+    <label>Recording Cleanup Pending</label>
+    <fieldtype>CHECKBOX</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>HIDDEN</displaytype>
+    <ismandatory>F</ismandatory>
+    <defaultchecked>F</defaultchecked>
+    <searchlevel>2</searchlevel>
+    <description>Sprint 2 U4 (HIGH-4) — set to T when the Twilio Recording DELETE fails transiently after a transcript is successfully saved. The scheduled poll runs a cleanup-retry pass over rows with this flag set and clears the flag on successful re-delete or confirmed 404. HIDDEN displaytype keeps this off the rep-facing UI; it's an operational diagnostic.</description>
+</crmcustomfield>
