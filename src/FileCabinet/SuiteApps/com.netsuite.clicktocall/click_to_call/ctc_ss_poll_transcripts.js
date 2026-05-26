@@ -77,8 +77,53 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
 
             const unprocessedCalls = findUnprocessedCalls();
 
+            // Sprint 2 U1 (HIGH-5) — idempotency guard against the
+            // browser-poll vs scheduled-poll race. The browser-side
+            // pollForTranscript can complete enrichment + delete the
+            // Twilio recording at minute 3; this scheduled pass started
+            // at minute 0 reaches the same call at minute 4 and would
+            // otherwise see an empty Twilio recording response, flip
+            // call_status to PROCESSING, and re-queue a call that is
+            // already TRANSCRIBED. findUnprocessedCalls() filters by
+            // processed=F at search time, but cannot close the TOCTOU
+            // window between search execution and per-call processing.
+            // Re-check the authoritative state immediately before any
+            // mutation.
+            //
+            // TERMINAL_STATUSES excludes FAILED on purpose — a FAILED
+            // call with processed=false should remain retry-eligible so
+            // transient root causes can self-heal on a subsequent cycle.
+            const TERMINAL_STATUSES = [
+                utils.CALL_STATUS.TRANSCRIBED,
+                utils.CALL_STATUS.NO_TRANSCRIPT
+            ];
+
             for (const call of unprocessedCalls) {
                 try {
+                    const currentState = search.lookupFields({
+                        type: record.Type.PHONE_CALL,
+                        id: call.recordId,
+                        columns: ['custevent_ctc_processed', 'custevent_ctc_call_status']
+                    });
+                    const alreadyProcessed = currentState && currentState.custevent_ctc_processed === true;
+                    const callStatusRaw = currentState && currentState.custevent_ctc_call_status;
+                    // lookupFields returns LIST values as [{ value, text }];
+                    // FREEFORMTEXT/CHECKBOX returns the scalar directly. The
+                    // call_status field is a CLOBTEXT/FREEFORMTEXT free-text
+                    // value mirroring CALL_STATUS, so the scalar shape is
+                    // what we expect — but coerce defensively.
+                    const callStatus = Array.isArray(callStatusRaw)
+                        ? (callStatusRaw[0] && (callStatusRaw[0].text || callStatusRaw[0].value)) || ''
+                        : (callStatusRaw || '');
+                    if (alreadyProcessed || TERMINAL_STATUSES.indexOf(callStatus) !== -1) {
+                        log.debug({
+                            title: 'CTC Skip — already terminal',
+                            details: `${call.recordId} processed=${alreadyProcessed} status=${callStatus}`
+                        });
+                        skipped++;
+                        continue;
+                    }
+
                     const recording = utils.fetchRecordingForCall(config.accountSid, call.callSid, authHeader);
                     // Sprint 2b (HIGH-1) — distinguish transient Twilio errors
                     // (5xx / network / timeout / malformed JSON) from "no
