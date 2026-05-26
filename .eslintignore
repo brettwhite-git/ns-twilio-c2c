@@ -1,0 +1,14 @@
+# Path B (added 2026-05-26) — exclude gulp-generated AMD output from
+# lint. The TS source under src/SuiteApps/ is the source of truth;
+# linting the regenerated output would re-flag rules that the source
+# already controls (and which `removeComments: true` strips from the
+# AMD anyway). The setup_wizard/ subdir under FileCabinet/ is fully
+# owned by `gulp bundle` after Path B.2.
+src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/
+
+# Bundled vendor (existed pre-Path-B).
+src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/lib/twilio.min.js
+
+# Build intermediates.
+build/
+node_modules/

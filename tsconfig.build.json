@@ -29,12 +29,24 @@
     "module": "ES2022",
     "target": "ES2022",
     "moduleResolution": "node",
+    // outDir: build/ + rootDir: project root → tsc emits to
+    // build/src/SuiteApps/... (preserves the source path under
+    // build/). This matches Oracle's 2025.1+ helloworld-ts sample
+    // and the gulpfile's buildSuiteAppDir = build/src/SuiteApps.
+    // Setting rootDir to src/SuiteApps would emit to build/... directly
+    // (stripping the prefix), which breaks the mirrored layout.
     "outDir": "build",
-    "rootDir": "src/SuiteApps",
+    "rootDir": "./",
     "declaration": false,
     "sourceMap": false,
     "esModuleInterop": true,
     "newLine": "LF",
+
+    // Path B (2026-05-26) — strip JSDoc from tsc emit so it doesn't
+    // duplicate the @NScriptType banner that gulp's rollup task
+    // re-injects via the `banner` option. The TS source remains the
+    // canonical comment site; the AMD output stays clean.
+    "removeComments": true,
 
     // JSX configuration for future TSX files (e.g., if we use UIF's
     // JSX support in section files). Matches Oracle samples.

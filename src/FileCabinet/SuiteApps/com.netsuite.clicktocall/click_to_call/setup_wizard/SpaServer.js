@@ -1,18 +1,16 @@
-// @ts-check
-/* eslint-disable suitescript/script-type, suitescript/no-log-module */
 /**
  * @NApiVersion 2.1
  * @NScriptType SpaServerScript
  *
- * Setup Wizard v2 — server-side initialization.
+ * Setup Wizard v2 — server-side initialization (TypeScript).
  *
- * (ESLint disables above: the suitescript-plugin script-type rule predates
- * NetSuite's SpaServerScript type. The no-log-module rule also doesn't apply
- * to SPA server scripts — UIF runtime doesn't expose `log` as a global.)
+ * Path B (2026-05-26) — migrated from hand-written AMD (the previous
+ * src/FileCabinet/.../setup_wizard/SpaServer.js, 69 lines). Gulp now
+ * owns the AMD output; only edit this TS source.
  *
  * SpaServerScript is intentionally minimal per NetSuite SAFE Guide
  * leading practices: this runs once at SPA load time to set up the
- * client environment. Business logic lives in the client (SpaClient.js)
+ * client environment. Business logic lives in the client (SpaClient)
  * which calls back into server actions via UIF data services or a
  * separate RESTlet when needed.
  *
@@ -26,45 +24,27 @@
  *      for the unlikely case that the deployment audience was
  *      misconfigured on a customer install.
  */
-define(["require", "exports", "N/runtime", "N/log"],
-       function (require, exports, runtime, log) {
-    "use strict";
-    Object.defineProperty(exports, "__esModule", { value: true });
-    exports.initializeSpa = void 0;
 
-    // Standard role IDs are portable across NetSuite accounts (only custom
-    // roles vary per install). Administrator = 3 per NetSuite docs.
-    var ADMIN_ROLE_ID = 3;
+define(['exports', 'N/runtime', 'N/log'], (function (exports, runtime, log) { 'use strict';
 
-    /**
-     * Required SpaServerScript entry point. Runs once per SPA session.
-     * @param {Object} scriptContext — NetSuite SPA framework context
-     */
-    var initializeSpa = function (scriptContext) {
-        var role = Number(runtime.getCurrentUser().role);
+    const ADMIN_ROLE_ID = 3;
+    const initializeSpa = (scriptContext) => {
+        const role = Number(runtime.getCurrentUser().role);
         if (role !== ADMIN_ROLE_ID) {
-            // Defense-in-depth: the deployment audience should have
-            // already rejected this user, but never trust a single
-            // security layer.
             log.error({
-                title: "CTC Setup Wizard — non-admin reached initializeSpa",
-                details: "role=" + role + " userId=" + runtime.getCurrentUser().id +
-                         " — deployment audience may be misconfigured on this account"
+                title: 'CTC Setup Wizard — non-admin reached initializeSpa',
+                details: 'role=' + role + ' userId=' + runtime.getCurrentUser().id +
+                    ' — deployment audience may be misconfigured on this account'
             });
-            // SPA framework treats a thrown error as a hard fail and shows
-            // the user a generic error page (no leak of internal details).
-            throw new Error("Administrator role required");
+            throw new Error('Administrator role required');
         }
-
         log.audit({
-            title: "CTC Setup Wizard initialized",
-            details: "user=" + runtime.getCurrentUser().id +
-                     " accountId=" + runtime.accountId
+            title: 'CTC Setup Wizard initialized',
+            details: 'user=' + runtime.getCurrentUser().id +
+                ' accountId=' + runtime.accountId
         });
-
-        // Future: scriptContext.addStyleSheet({ relativePath: '/assets/wizard.css' })
-        // once we ship a custom stylesheet. For now UIF defaults are sufficient.
     };
 
     exports.initializeSpa = initializeSpa;
-});
+
+}));
