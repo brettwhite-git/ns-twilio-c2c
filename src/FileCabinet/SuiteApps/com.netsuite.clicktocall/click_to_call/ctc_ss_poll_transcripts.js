@@ -8,11 +8,56 @@
  * updates Phone Call activity records, and deletes processed recordings.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin'], (https, record, search, llm, encode, log, utils, ctcConfig, twilioAdmin) => {
+define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin'], (https, record, search, llm, encode, log, runtime, task, utils, ctcConfig, twilioAdmin) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
     const buildSecureAuthHeader = twilioAdmin.buildSecureAuthHeader;
+
+    // Sprint 2 U2 (HIGH-6) — governance ceiling guard.
+    //
+    // Per-call cost ≈ 1 record.load + 1 record.save + 1-3 https.get +
+    // 1 https.delete + 1 llm.generateText + N record.create for
+    // proposed tasks ≈ 200-600 governance units. 50-call batch can
+    // easily blow the 10,000-unit ceiling under load; mid-execution
+    // death leaves the last in-flight call in whatever partial state
+    // was last written.
+    //
+    // 1,000 units leaves headroom for the loop's final iteration plus
+    // the task.create call itself. NetSuite's scheduled-script
+    // governance unit is the standard ceiling — see SAFE Guide §2.
+    const GOVERNANCE_THRESHOLD = 1000;
+    const SCRIPT_ID = 'customscript_ctc_ss_poll';
+    const DEPLOY_ID = 'customdeploy_ctc_ss_poll';
+
+    const shouldYield = () => {
+        const script = runtime.getCurrentScript();
+        return script.getRemainingUsage() < GOVERNANCE_THRESHOLD;
+    };
+
+    const enqueueResume = () => {
+        try {
+            task.create({
+                taskType: task.TaskType.SCHEDULED_SCRIPT,
+                scriptId: SCRIPT_ID,
+                deploymentId: DEPLOY_ID
+            }).submit();
+            log.audit({
+                title: 'CTC Governance Yield',
+                details: 'Approaching governance ceiling — enqueued immediate resume via task.create'
+            });
+        } catch (e) {
+            // Concurrent SCHEDULED_SCRIPT enqueue may collide
+            // (NetSuite allows only one pending instance per
+            // deployment). Falling through is fine — the next
+            // scheduled cycle (15 min) will pick up the remaining
+            // unprocessed calls naturally.
+            log.error({
+                title: 'CTC Governance Resume Failed',
+                details: `${e.name || ''}: ${e.message || e} — relying on next scheduled cycle`
+            });
+        }
+    };
 
     const findUnprocessedCalls = () => {
         const results = search.create({
@@ -99,6 +144,15 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
             ];
 
             for (const call of unprocessedCalls) {
+                // Sprint 2 U2 (HIGH-6) — yield before the next call to
+                // protect the in-flight Phone Call from mid-write
+                // governance death. Resume via task.create so the
+                // remaining slice processes within ~1 minute instead
+                // of waiting for the next 15-minute interval.
+                if (shouldYield()) {
+                    enqueueResume();
+                    break;
+                }
                 try {
                     const currentState = search.lookupFields({
                         type: record.Type.PHONE_CALL,
