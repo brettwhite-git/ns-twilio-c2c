@@ -7,7 +7,8 @@
  * and the RESTlet checkTranscript action.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/llm', 'N/log', 'N/record'], (https, llm, log, record) => {
+define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
+       (https, llm, log, record, llmAnalysis) => {
 
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
@@ -55,25 +56,13 @@ define(['N/https', 'N/llm', 'N/log', 'N/record'], (https, llm, log, record) => {
         return !!(transcript && transcript.status === 'completed');
     };
 
-    const ANALYSIS_PROMPT_PREFIX = `You are a sales call analyst. Analyze this call transcript and return ONLY valid JSON — no markdown, no explanation, no code fences.
-
-{
-  "title": "Brief headline (NOT a full sentence), max 60 chars (e.g. 'Product demo — strong buying signals', 'Pricing objection — needs manager approval')",
-  "brief": "Action-oriented one-liner under 100 chars — what happened and what's next. Examples: 'Demo went well, sending pricing Tuesday', 'Quote rejected on price, no follow-up', 'Tech issue — escalated to support'. Avoid generic phrasing like 'Discussed product'.",
-  "summary": "2-3 sentence summary of call purpose, key points, and outcome",
-  "satisfaction_score": <integer 1-10>,
-  "tone_keywords": ["keyword1", "keyword2", "keyword3"],
-  "action_items": ["item1", "item2"]
-}
-
-SCORING GUIDE:
-- 1-3: Hostile, complaint, churn risk, unresolved issues
-- 4-5: Neutral, informational, no clear engagement
-- 6-7: Positive, engaged, follow-up likely
-- 8-10: Highly positive, strong buying signals, deal progression
-
-TRANSCRIPT:
-`;
+    // Sprint 2c — LLM concerns extracted to lib/ctc_llm_analysis.js
+    // (prompt template, model params, schema, fallback shape, quota guard,
+    // try/catch around llm.generateText). This module re-exports
+    // ANALYSIS_PROMPT_PREFIX + analyzeTranscript for backward compatibility
+    // with existing callers (ctc_rl_token.js, ctc_ss_poll_transcripts.js).
+    // New callers should import from ctc_llm_analysis.js directly.
+    const ANALYSIS_PROMPT_PREFIX = llmAnalysis.ANALYSIS_PROMPT_PREFIX;
 
     /**
      * Sprint 2b — return contract:
@@ -186,33 +175,10 @@ TRANSCRIPT:
         }).join('\n');
     };
 
-    const analyzeTranscript = (transcriptText) => {
-        const response = llm.generateText({
-            prompt: ANALYSIS_PROMPT_PREFIX + transcriptText,
-            modelFamily: llm.ModelFamily.COHERE_COMMAND,
-            modelParameters: {
-                temperature: 0.2,
-                maxTokens: 800
-            }
-        });
-
-        let text = response.text
-            .replace(/```json\n?/g, '')
-            .replace(/```\n?/g, '')
-            .trim();
-
-        try {
-            return JSON.parse(text);
-        } catch (e) {
-            log.audit({ title: 'CTC LLM JSON Parse Failed', details: text });
-            return {
-                summary: response.text.substring(0, 500),
-                satisfaction_score: 5,
-                tone_keywords: [],
-                action_items: []
-            };
-        }
-    };
+    // Sprint 2c — analyzeTranscript now delegates to lib/ctc_llm_analysis.
+    // The new module owns the HIGH-3 try/catch + quota guard, plus the
+    // fallback-shape merge so downstream field writes never see undefined.
+    const analyzeTranscript = llmAnalysis.analyzeTranscript;
 
     /**
      * Spawn one customrecord_ctc_proposed_task per non-empty action item.
