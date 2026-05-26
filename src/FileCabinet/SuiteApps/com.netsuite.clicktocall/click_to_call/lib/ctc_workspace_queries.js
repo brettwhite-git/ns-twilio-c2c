@@ -1,12 +1,9 @@
+// @ts-check
 /**
  * @NApiVersion 2.1
  * @NModuleScope SameAccount
  *
  * Shared workspace queries — used by the Portlet (server-side at render time)
- *
- * NOT yet under // @ts-check — tsc surfaces 13 real type-safety issues
- * (JSDoc @param annotations that don't match actual call sites). Worth
- * fixing as a focused follow-up; see CHANGELOG / task #22.
  * and by the RESTlet (`getWorkspaceHistory` / `getWorkspaceTasks` actions for
  * the future Workspace Suitelet). Centralizing the search logic here avoids
  * an HTTP roundtrip from the portlet, and keeps row shape consistent across
@@ -89,14 +86,12 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      * N/search via `['company', 'anyof', <ids>]` — no changes to date /
      * status / formula filters required.
      *
-     * @param {Object} params
-     * @param {string|number} params.userId
+     * @param {{userId?: string|number}} [params]
      * @returns {Array<string>} customer internal IDs (may be empty)
      */
     const getBookCustomerIds = (params) => {
         try {
-            params = params || {};
-            const userId = parseInt(params.userId, 10);
+            const userId = parseInt(String((params && params.userId) || ''), 10);
             if (!userId) return [];
 
             const sql =
@@ -132,23 +127,21 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
     /**
      * Load recent Phone Call rows assigned to a user, with optional filters.
      *
-     * @param {Object} params
-     * @param {string|number} params.userId
-     * @param {Object} [params.filters]
-     * @param {string} [params.filters.dateFrom]
-     * @param {string} [params.filters.dateTo]
-     * @param {number} [params.filters.satMin]
-     * @param {string} [params.filters.status]
-     * @param {boolean} [params.todayOnly]
-     * @param {number} [params.limit=30]
-     * @returns {{ rows: Array<Object>, total: number }} — `{ error }` on failure
+     * @param {{
+     *   userId?: string|number,
+     *   filters?: {dateFrom?: string, dateTo?: string, satMin?: number, status?: string},
+     *   todayOnly?: boolean,
+     *   dateRange?: string,
+     *   limit?: number
+     * }} [params]
+     * @returns {{rows: Array<Object>, total: number, error?: string}} `{error}` on failure
      */
     const loadHistoryRows = (params) => {
         try {
-            params = params || {};
-            const filters = params.filters || {};
-            const limit = parseInt(params.limit, 10) || 30;
-            const userId = params.userId;
+            const p = params || {};
+            const filters = p.filters || {};
+            const limit = parseInt(String(p.limit || ''), 10) || 30;
+            const userId = p.userId;
 
             // Scope to calls whose customer is in the rep's book (primary OR
             // Sales Team member). `assigned` on Phone Call is unreliable (not
@@ -177,7 +170,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             // explicit dateFrom/dateTo. `todayOnly` is the legacy shortcut kept
             // for back-compat. `last7days` was added for the softphone Recents
             // tab (Iteration B Phase 5).
-            const dateRange = params.dateRange;
+            const dateRange = p.dateRange;
             if (dateRange === 'yesterday') {
                 searchFilters.push('AND', ['startdate', 'on', 'yesterday']);
             } else if (dateRange === 'thisweek') {
@@ -188,13 +181,13 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                 searchFilters.push('AND', ['startdate', 'within', 'lastweektodate']);
             } else if (dateRange === 'last30days') {
                 searchFilters.push('AND', ['startdate', 'within', 'lastthirtydays']);
-            } else if (dateRange === 'today' || params.todayOnly) {
+            } else if (dateRange === 'today' || p.todayOnly) {
                 searchFilters.push('AND', ['startdate', 'on', 'today']);
             } else {
                 if (filters.dateFrom) searchFilters.push('AND', ['startdate', 'onorafter', filters.dateFrom]);
                 if (filters.dateTo)   searchFilters.push('AND', ['startdate', 'onorbefore', filters.dateTo]);
             }
-            if (filters.satMin) searchFilters.push('AND', ['custevent_ctc_satisfaction', 'greaterthanorequalto', filters.satMin]);
+            if (filters.satMin) searchFilters.push('AND', ['custevent_ctc_satisfaction', 'greaterthanorequalto', String(filters.satMin)]);
             if (filters.status) searchFilters.push('AND', ['custevent_ctc_call_status', 'is', filters.status]);
 
             const results = search.create({
@@ -253,19 +246,20 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
     /**
      * Load proposed_task rows for a user, grouped by source phone call.
      *
-     * @param {Object} params
-     * @param {string|number} params.userId
-     * @param {string} [params.tab='pending'] — 'pending' | 'awaiting' | 'completed' | 'rejected' | 'all'
-     * @param {string|number} [params.phoneCallId] — optional scope to one call
-     * @param {number} [params.limit=50]
-     * @returns {{ groups: Array<{ call: Object, tasks: Array<Object> }>, totalTasks: number }}
+     * @param {{
+     *   userId?: string|number,
+     *   tab?: string,
+     *   phoneCallId?: string|number,
+     *   limit?: number
+     * }} [params]
+     * @returns {{groups: Array<{call: Object, tasks: Array<Object>}>, totalTasks: number, error?: string}}
      */
     const loadTaskGroups = (params) => {
         try {
-            params = params || {};
-            const tab = params.tab || 'pending';
-            const limit = parseInt(params.limit, 10) || 50;
-            const userId = params.userId;
+            const p = params || {};
+            const tab = p.tab || 'pending';
+            const limit = parseInt(String(p.limit || ''), 10) || 50;
+            const userId = p.userId;
 
             const filterParts = [];
             if (tab === 'pending') {
@@ -285,8 +279,8 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             }
             // 'all' = no status filter
 
-            if (params.phoneCallId) {
-                filterParts.push([['custrecord_ctc_pt_phone_call', 'anyof', params.phoneCallId]]);
+            if (p.phoneCallId) {
+                filterParts.push([['custrecord_ctc_pt_phone_call', 'anyof', String(p.phoneCallId)]]);
             } else {
                 // Two-step query: NetSuite search doesn't support the 3-hop join
                 // (proposed_task → phone_call → company → salesteam). So first
@@ -459,20 +453,20 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      * (`customerSalesTeam.employee`). Replaces a pair of N/search-based
      * paths whose join name (`salesteam.employee`) silently returned zero.
      *
-     * @param {Object} opts
-     * @param {string|number} opts.userId
-     * @param {Array<string>} opts.stages — e.g. ['LEAD','PROSPECT','CUSTOMER']
-     * @param {string} [opts.matchQuery] — case-insensitive contains filter
-     *                                     against companyname/first/last/phone/email
-     * @param {number} opts.limit — capped 1..50
+     * @param {{
+     *   userId: string|number,
+     *   stages?: Array<string>,
+     *   matchQuery?: string,
+     *   limit?: number
+     * }} opts - stages defaults to all three; limit capped 1..50
      * @returns {Array<Object>} packed entity rows
      */
     const runBookEntityQuery = (opts) => {
-        const userId = parseInt(opts.userId, 10);
+        const userId = parseInt(String(opts.userId), 10);
         const stages = (opts.stages && opts.stages.length)
             ? opts.stages
             : ['LEAD', 'PROSPECT', 'CUSTOMER'];
-        const limit  = Math.min(Math.max(parseInt(opts.limit, 10) || 20, 1), 50);
+        const limit  = Math.min(Math.max(parseInt(String(opts.limit || ''), 10) || 20, 1), 50);
         const matchQ = String(opts.matchQuery || '').trim();
         const hasMatch = matchQ.length > 0;
 
@@ -513,6 +507,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             '  AND c.isInactive = \'F\' ' +
             '  AND c.stage IN (' + stageLits + ') ';
 
+        /** @type {Array<string|number>} */
         const params = [userId, userId];
 
         if (hasMatch) {
@@ -600,15 +595,13 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      * the displayed-slice counts. Single COUNT(DISTINCT) query — cheap
      * relative to the row-fetch.
      *
-     * @param {Object} params
-     * @param {string|number} params.userId
-     * @returns {{ total: number, customer: number, prospect: number, lead: number }}
-     *          or `{ error, total: 0, ... }` on failure.
+     * @param {{userId?: string|number}} [params]
+     * @returns {{total: number, customer: number, prospect: number, lead: number, error?: string}}
      */
     const getBookCounts = (params) => {
         try {
-            params = params || {};
-            const userId = parseInt(params.userId, 10);
+            const p = params || {};
+            const userId = parseInt(String(p.userId || ''), 10);
             if (!userId) {
                 return { error: 'userId required', total: 0, customer: 0, prospect: 0, lead: 0 };
             }
@@ -645,14 +638,18 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         }
     };
 
+    /**
+     * @param {{userId?: string|number, limit?: number}} [params]
+     * @returns {{rows: Array<Object>, total: number, error?: string}}
+     */
     const getSuggestedContacts = (params) => {
         try {
-            params = params || {};
-            const userId = params.userId;
-            // Default 30 (up from 20) — Burt's book is 112, so a 30-row
+            const p = params || {};
+            const userId = p.userId;
+            // Default 30 (up from 20) - Burt's book is 112, so a 30-row
             // most-recent slice gives reps better coverage in the empty-state
             // pre-fill. Hard cap stays at 50.
-            const limit = Math.min(parseInt(params.limit, 10) || 30, 50);
+            const limit = Math.min(parseInt(String(p.limit || ''), 10) || 30, 50);
             if (!userId) {
                 return { error: 'userId required', rows: [], total: 0 };
             }
@@ -676,20 +673,21 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      * name, first name, last name, primary phone, and email. Optional
      * `typeFilter` narrows to a single stage. Returns at most `limit` rows.
      *
-     * @param {Object} params
-     * @param {string|number} params.userId
-     * @param {string} params.query — non-empty user-typed query
-     * @param {'customer'|'prospect'|'lead'|''} [params.typeFilter]
-     * @param {number} [params.limit=20]
-     * @returns {{ rows: Array<Object>, total: number }} — `{ error }` on failure
+     * @param {{
+     *   userId?: string|number,
+     *   query?: string,
+     *   typeFilter?: 'customer'|'prospect'|'lead'|'',
+     *   limit?: number
+     * }} [params]
+     * @returns {{rows: Array<Object>, total: number, error?: string}}
      */
     const searchOwnedEntities = (params) => {
         try {
-            params = params || {};
-            const userId = params.userId;
-            const userQuery = String(params.query || '').trim();
-            const limit = Math.min(parseInt(params.limit, 10) || 20, 50);
-            const typeFilter = String(params.typeFilter || '').toLowerCase();
+            const p = params || {};
+            const userId = p.userId;
+            const userQuery = String(p.query || '').trim();
+            const limit = Math.min(parseInt(String(p.limit || ''), 10) || 20, 50);
+            const typeFilter = String(p.typeFilter || '').toLowerCase();
             if (!userId) {
                 return { error: 'userId required', rows: [], total: 0 };
             }
@@ -741,20 +739,18 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      * opportunities, and activity history; combined into the wire shape
      * the softphone client renders into the 4-tile grid.
      *
-     * @param {Object} params
-     * @param {string|number} params.entityId
+     * @param {{entityId?: string|number}} [params]
      * @returns {{
-     *   outstanding: { sum, count, avgAgeDays },
-     *   openOpps:    { count, sum },
-     *   lastInvoice: { docNumber, amount, ageDays } | null,
-     *   lastActivity:{ type, ageDays, date } | null,
+     *   outstanding: { sum: any, count: any, avgAgeDays: any },
+     *   openOpps:    { count: any, sum: any },
+     *   lastInvoice: { docNumber: any, amount: any, ageDays: any } | null,
+     *   lastActivity:{ type: any, ageDays: any, date: any } | null,
      *   error?: string
      * }}
      */
     const getAccountSnapshot = (params) => {
-        params = params || {};
-        const entityId = params.entityId;
-        if (!entityId) return { error: 'entityId required' };
+        const p = params || {};
+        const entityId = p.entityId;
 
         const empty = {
             outstanding:  { sum: 0, count: 0, avgAgeDays: null },
@@ -762,6 +758,8 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             lastInvoice:  null,
             lastActivity: null
         };
+
+        if (!entityId) return Object.assign({}, empty, { error: 'entityId required' });
 
         try {
             // ── Outstanding invoices: open + partially-paid balances ──
