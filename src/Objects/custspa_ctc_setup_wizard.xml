@@ -1,0 +1,30 @@
+<singlepageapp scriptid="custspa_ctc_setup_wizard">
+    <name>Click-to-Call Setup Wizard</name>
+    <description>Six-step admin setup for the Click-to-Call SuiteApp. Connects Twilio credentials, configures voice settings, assigns phone numbers to reps, and runs preflight validation before activating the softphone for sales reps.</description>
+    <!-- url slug must be globally unique account-wide; collisions cause
+         cryptic "Items deleted" errors per SDF Pitfall #57. "ctc-setup"
+         is specific enough to avoid collisions across customer accounts. -->
+    <url>ctc-setup</url>
+    <folder>[/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/]</folder>
+    <clientscriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/SpaClient.js]</clientscriptfile>
+    <serverscriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/SpaServer.js]</serverscriptfile>
+    <loglevel>DEBUG</loglevel>
+    <!-- audienceallroles=T fails on 2025.1+ accounts referencing deleted
+         roles (SDF Pitfall #57); use F + explicit audienceroles. -->
+    <audienceallroles>F</audienceallroles>
+    <audienceroles>ADMINISTRATOR</audienceroles>
+    <!-- executeas blank means "run as the calling user's role" — same
+         security posture as the retired Suitelet's no-runasrole stance. -->
+    <executeas></executeas>
+    <!-- U15: intentionally NO <links> block. The exact subcategory
+         enum (e.g., BASICCENTERSETUPCOMPANY vs. BASICCENTERSETUP)
+         isn't published in Oracle's SDF docs, and shipping the wrong
+         value would land the menu entry in the wrong place. The
+         post-install runbook in docs/install/post-install-checklist
+         documents how the admin adds the menu link via the SPA's
+         own management page (Customization > Scripting > Single
+         Page Applications > Click-to-Call Setup Wizard > Basic Info
+         > add link). Matches the Celigo/Zone & Co pattern — small
+         documented post-install step, full admin control over
+         menu placement. -->
+</singlepageapp>

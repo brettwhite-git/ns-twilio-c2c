@@ -8,10 +8,11 @@
  * updates Phone Call activity records, and deletes processed recordings.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/ctc_transcript_utils', './lib/ctc_config'], (https, record, search, llm, encode, log, utils, ctcConfig) => {
+define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin'], (https, record, search, llm, encode, log, utils, ctcConfig, twilioAdmin) => {
 
     const loadConfig = ctcConfig.loadConfig;
-    const buildAuthHeader = ctcConfig.buildAuthHeader;
+    // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
+    const buildSecureAuthHeader = twilioAdmin.buildSecureAuthHeader;
 
     const findUnprocessedCalls = () => {
         const results = search.create({
@@ -67,7 +68,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
 
         try {
             const config = loadConfig();
-            const authHeader = buildAuthHeader(config.accountSid, config.authToken);
+            const authHeader = buildSecureAuthHeader(config);
             const hasLlmQuota = llm.getRemainingFreeUsage() >= 10;
 
             if (!hasLlmQuota) {
@@ -79,6 +80,16 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
             for (const call of unprocessedCalls) {
                 try {
                     const recording = utils.fetchRecordingForCall(config.accountSid, call.callSid, authHeader);
+                    // Sprint 2b (HIGH-1) — distinguish transient Twilio errors
+                    // (5xx / network / timeout / malformed JSON) from "no
+                    // recording yet." For transient: leave call_status
+                    // untouched so the next cycle picks it up cleanly,
+                    // instead of churning every call to PROCESSING during
+                    // a sustained Twilio outage.
+                    if (utils.isTransientError(recording)) {
+                        skipped++;
+                        continue;
+                    }
                     if (!recording) {
                         markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;
@@ -92,6 +103,10 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
                     }
 
                     const transcript = utils.fetchTranscript(recording.sid, authHeader);
+                    if (utils.isTransientError(transcript)) {
+                        skipped++;
+                        continue;
+                    }
                     if (!transcript) {
                         markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;

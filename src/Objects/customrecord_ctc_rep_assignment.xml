@@ -1,0 +1,63 @@
+<customrecordtype scriptid="customrecord_ctc_rep_assignment">
+    <recordname>CTC Rep Phone Assignment</recordname>
+    <description>Rep-to-phone-number assignments for Click-to-Call. Managed exclusively by the Setup Wizard SPA's Phones &amp; reps section. Hidden from admin UI via allowuiaccess=F; edit only via the wizard. Runtime reads remain open so the softphone Suitelet can resolve a rep's caller ID per call.</description>
+    <allowuiaccess>F</allowuiaccess>
+    <includeinsearchmenu>F</includeinsearchmenu>
+    <includename>F</includename>
+    <accesstype>NONENEEDED</accesstype>
+    <allowattachments>F</allowattachments>
+    <allowinlinedeleting>F</allowinlinedeleting>
+    <allowquickadd>F</allowquickadd>
+    <allowquicksearch>F</allowquicksearch>
+    <enablemailmerge>F</enablemailmerge>
+    <enablenumbering>F</enablenumbering>
+    <enablesystemnotes>T</enablesystemnotes>
+    <isinactive>F</isinactive>
+    <numberingprefix></numberingprefix>
+    <permissions>
+        <permission>
+            <permittedrole>ADMINISTRATOR</permittedrole>
+            <permittedlevel>FULL</permittedlevel>
+            <restriction>EDIT</restriction>
+        </permission>
+    </permissions>
+    <customrecordcustomfields>
+        <customrecordcustomfield scriptid="custrecord_ctc_ra_employee">
+            <label>Employee</label>
+            <description>Sales rep this phone-number assignment belongs to.</description>
+            <fieldtype>SELECT</fieldtype>
+            <selectrecordtype>-4</selectrecordtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_ra_phone_sid">
+            <label>Twilio Phone Number SID</label>
+            <description>Twilio internal ID for the phone number (starts with PN). Pulled from GET /Accounts/{AccountSid}/IncomingPhoneNumbers.json.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_ra_phone_number">
+            <label>Phone Number</label>
+            <description>E.164 phone number (e.g., +15551234567). The rep's outbound caller ID for calls placed via this assignment.</description>
+            <fieldtype>PHONE</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_ra_label">
+            <label>Label</label>
+            <description>Admin-friendly label for the number (e.g., "Main Sales Line"). Optional. CLOBTEXT (FREEFORMTEXT not supported by SDF validation on this customrecordtype — matches the pattern used across CTC custom records).</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_ra_is_primary">
+            <label>Primary Caller ID</label>
+            <description>If checked, the softphone uses this assignment as the rep's outbound caller ID by default when they have multiple assignments.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultvalue>F</defaultvalue>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+    </customrecordcustomfields>
+</customrecordtype>

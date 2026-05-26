@@ -8,10 +8,15 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_workspace_queries', './lib/ctc_entity'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, workspaceQueries, ctcEntity) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity) => {
 
     const loadConfig = ctcConfig.loadConfig;
-    const buildAuthHeader = ctcConfig.buildAuthHeader;
+    // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
+    // SecureString path — buildSecureAuthHeader(cfg) returns a SecureString
+    // built from `apiKeySid + ':{' + apiSecretId + '}'`. The secret VALUE
+    // never enters script scope; NetSuite's HTTP runtime expands the
+    // {custsecret_*} placeholder at the socket write boundary.
+    const buildSecureAuthHeader = twilioAdmin.buildSecureAuthHeader;
 
     const lookupContactCompany = (contactId) => {
         try {
@@ -66,9 +71,15 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     const generateToken = (body) => {
         try {
             const config = loadConfig();
-            const identity = body.employeeId
-                ? String(body.employeeId)
-                : String(runtime.getCurrentUser().id);
+            // CRIT-1 (SAFE review 2026-05-21) — identity MUST come from the
+            // authenticated session, never from the request body. The previous
+            // `body.employeeId ? ... : runtime.getCurrentUser().id` pattern
+            // let any authenticated internal user mint a JWT bound to another
+            // rep's identity (Twilio attributes the call/recording/transcript
+            // to that identity). Once Step 4's rep_assignment lookup is wired
+            // into caller-ID resolution, the same bug becomes "rep A places
+            // calls displaying rep B's caller ID."
+            const identity = String(runtime.getCurrentUser().id);
 
             const token = twilioJwt.generateAccessToken({
                 accountSid:  config.accountSid,
@@ -90,6 +101,123 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     // sub-2s calls produces empty activity records. Server-side defense-in-depth — the
     // softphone client enforces a higher 3s threshold for UX.
     const MIN_LOG_DURATION_SECONDS = 2;
+
+    /**
+     * Look up phone numbers assigned to a user via customrecord_ctc_rep_assignment.
+     * Used by verifyCallOwnership to authorize logCall/checkTranscript on the
+     * Twilio call's `from` value. Returns an array of E.164 strings (empty if no
+     * assignments). Never throws — failed lookup falls back to "no assignments,"
+     * letting the cfg.phoneNumber fallback inside verifyCallOwnership cover the
+     * pre-rep-assignment install state.
+     */
+    const getUserAssignedPhones = (userId) => {
+        try {
+            const s = search.create({
+                type: 'customrecord_ctc_rep_assignment',
+                filters: [
+                    ['custrecord_ctc_ra_employee', 'anyof', userId],
+                    'AND', ['isinactive', 'is', 'F']
+                ],
+                columns: ['custrecord_ctc_ra_phone_number']
+            });
+            const phones = [];
+            s.run().each((row) => {
+                const p = row.getValue('custrecord_ctc_ra_phone_number');
+                if (p) phones.push(String(p));
+                return true;
+            });
+            return phones;
+        } catch (e) {
+            log.error({ title: 'CTC getUserAssignedPhones failed', details: e.message || e });
+            return [];
+        }
+    };
+
+    /**
+     * CRIT-2 / CRIT-3 gate (SAFE review 2026-05-21) — server-side correlate
+     * a body-supplied callSid with the authenticated user before allowing
+     * record mutations against it.
+     *
+     * Authorization model: the Twilio call's `from` (E.164) must match either
+     *   (a) a phone number assigned to userId via customrecord_ctc_rep_assignment
+     *   (b) cfg.phoneNumber — the install-wide caller-ID, used as a fallback
+     *       for installs that haven't set up per-rep assignments yet
+     *
+     * Returns { ok: true } or { ok: false, reason: <CODE>, ... }. Never throws.
+     *
+     * Adds one Twilio HTTPS round-trip per protected action. Acceptable since
+     * logCall and checkTranscript both already do Twilio work downstream.
+     *
+     * Fail-closed posture: if Twilio is unreachable, the gate rejects. Twilio
+     * outages already block call placement upstream (no token = no call), so
+     * the only window where this rejects spuriously is "call placed, then
+     * Twilio API becomes unreachable before logCall arrives" — narrow.
+     */
+    const verifyCallOwnership = (callSid, userId) => {
+        if (!callSid || typeof callSid !== 'string' ||
+            !/^CA[a-zA-Z0-9]{32}$/.test(callSid)) {
+            return { ok: false, reason: 'INVALID_CALLSID_FORMAT' };
+        }
+
+        let cfg;
+        try { cfg = loadConfig(); }
+        catch (e) { return { ok: false, reason: 'CONFIG_LOAD_FAILED' }; }
+        if (!cfg || !cfg.accountSid) return { ok: false, reason: 'CONFIG_MISSING' };
+
+        const twilioResult = twilioAdmin.getCall(cfg, callSid);
+        if (!twilioResult.ok) {
+            log.audit({
+                title: 'CTC verifyCallOwnership — Twilio lookup failed',
+                details: 'callSid=' + callSid + ' userId=' + userId +
+                         ' status=' + twilioResult.status
+            });
+            return {
+                ok: false,
+                reason: twilioResult.status === 404 ? 'CALL_NOT_FOUND' : 'TWILIO_LOOKUP_FAILED',
+                twilioStatus: twilioResult.status
+            };
+        }
+
+        const callFrom = String((twilioResult.call && twilioResult.call.from) || '');
+
+        // For outbound WebRTC calls, Twilio's `from` is the calling
+        // client's JWT identity in the form `client:<identity>` — not
+        // a phone number — unless the TwiML response explicitly set
+        // `callerId="+15551234567"` on its <Dial>. We accept either:
+        //
+        //   (a) call.from === `client:<currentUserId>`
+        //       Strongest binding — CRIT-1 already enforces that the
+        //       JWT identity is the session user's ID, so Twilio
+        //       confirming the call was placed by client:42 + the
+        //       authenticated session being user 42 = end-to-end
+        //       verification with no rep_assignment needed.
+        //
+        //   (b) call.from matches a rep_assignment row, or the
+        //       cfg.phoneNumber fallback. For installs that DO route
+        //       calls through a configured caller-ID phone.
+        //
+        // Either path satisfies the SAFE intent: the caller proves
+        // they were the one who placed the Twilio-side call.
+        const expectedClientIdentity = 'client:' + String(userId);
+        if (callFrom === expectedClientIdentity) {
+            return { ok: true, call: twilioResult.call };
+        }
+
+        const allowedPhones = getUserAssignedPhones(userId);
+        if (cfg.phoneNumber) allowedPhones.push(cfg.phoneNumber);
+        if (allowedPhones.indexOf(callFrom) !== -1) {
+            return { ok: true, call: twilioResult.call };
+        }
+
+        log.audit({
+            title: 'CTC verifyCallOwnership — caller-ID mismatch',
+            details: 'callSid=' + callSid + ' userId=' + userId +
+                     ' callFrom=' + callFrom +
+                     ' expectedClient=' + expectedClientIdentity +
+                     ' allowedPhones=' + allowedPhones.length
+        });
+        return { ok: false, reason: 'NOT_CALL_OWNER', callFrom: callFrom };
+    };
 
     /**
      * Look up an existing Phone Call by Twilio Call SID to support idempotent logCall.
@@ -116,11 +244,45 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 return { error: 'duration_below_threshold', duration: duration };
             }
 
+            // HIGH-7 (SAFE review 2026-05-21) — phone format validation.
+            // Pre-fix, body.phone was written verbatim to Phone Call's `title`
+            // and `phone` fields with no length cap or character whitelist —
+            // letting a malicious client pollute the activity log with
+            // arbitrary text. Enforce E.164 (7-15 digits, optional leading
+            // '+') at the boundary. NetSuite's `phone` field type provides
+            // storage escaping so this isn't an XSS vector, but unvalidated
+            // text is a data-integrity gap that BFN review will flag.
+            const rawPhone = String(body.phone || '');
+            if (!rawPhone || !/^\+?[0-9]{7,15}$/.test(rawPhone)) {
+                log.audit({
+                    title: 'CTC logCall — invalid phone format',
+                    details: 'callSid=' + body.callSid +
+                             ' phoneLen=' + rawPhone.length
+                });
+                return { error: 'invalid_phone' };
+            }
+
             if (body.callSid) {
                 const existingId = findCallByCallSid(body.callSid);
                 if (existingId) {
                     return { success: true, recordId: existingId, duplicate: true };
                 }
+            }
+
+            // CRIT-2 gate (SAFE review 2026-05-21) — verify the body-supplied
+            // callSid was actually placed by the authenticated user before
+            // we create a Phone Call record from it. Pre-fix, any internal
+            // user could POST arbitrary callSid + entityId combinations and
+            // forge activity records against any customer/contact/lead.
+            const userId = runtime.getCurrentUser().id;
+            const auth = verifyCallOwnership(body.callSid, userId);
+            if (!auth.ok) {
+                log.audit({
+                    title: 'CTC logCall — verification rejected',
+                    details: 'reason=' + auth.reason + ' callSid=' + body.callSid +
+                             ' userId=' + userId
+                });
+                return { error: 'forbidden', code: auth.reason };
             }
 
             const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
@@ -133,18 +295,34 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
 
-            if (body.entityType === 'contact' && body.entityId) {
-                phoneCall.setValue({ fieldId: 'contact', value: body.entityId });
-                const parentCompany = lookupContactCompany(body.entityId);
-                if (parentCompany) {
-                    phoneCall.setValue({ fieldId: 'company', value: parentCompany });
+            // Numeric-id guard: Phone Call's `company` and `contact` fields
+            // require numeric record IDs. NetSuite sometimes injects sentinel
+            // strings into Customer/Contact record DOM (e.g. `__company_main__`
+            // for the "main contact" placeholder). The softphone scraping the
+            // DOM can capture these. Reject anything non-numeric so we save
+            // the call instead of failing the whole log.
+            const numericId = (v) => {
+                const n = parseInt(v, 10);
+                return (isFinite(n) && n > 0 && String(n) === String(v).trim()) ? n : null;
+            };
+
+            if (body.entityType === 'contact') {
+                const contactNumeric = numericId(body.entityId);
+                if (contactNumeric) {
+                    phoneCall.setValue({ fieldId: 'contact', value: contactNumeric });
+                    const parentCompany = lookupContactCompany(contactNumeric);
+                    if (parentCompany) {
+                        phoneCall.setValue({ fieldId: 'company', value: parentCompany });
+                    }
                 }
             } else {
-                if (body.entityId) {
-                    phoneCall.setValue({ fieldId: 'company', value: body.entityId });
+                const companyNumeric = numericId(body.entityId);
+                if (companyNumeric) {
+                    phoneCall.setValue({ fieldId: 'company', value: companyNumeric });
                 }
-                if (body.contactId) {
-                    phoneCall.setValue({ fieldId: 'contact', value: body.contactId });
+                const contactNumeric = numericId(body.contactId);
+                if (contactNumeric) {
+                    phoneCall.setValue({ fieldId: 'contact', value: contactNumeric });
                 }
             }
 
@@ -186,10 +364,74 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
      */
     const checkTranscript = (body) => {
         try {
+            // CRIT-3 gate (SAFE review 2026-05-21) — checkTranscript pre-fix
+            // accepted any body-supplied {callSid, recordId} pair and pulled
+            // the Twilio transcript onto the supplied record, then DELETED
+            // the Twilio-side recording. Three exploit shapes:
+            //   - Corruption: write rep B's transcript onto rep B's record
+            //     by spoofing callSid (overwrite valid data)
+            //   - Exfiltration: pull rep B's transcript onto rep A's own
+            //     record (transcript theft via callSid replay)
+            //   - Evidence destruction: cause Twilio-side recording delete
+            //     for arbitrary callSids regardless of authz
+            //
+            // Three checks gate the action:
+            //   1. recordId is required
+            //   2. phoneCall.custevent_ctc_call_sid MUST equal body.callSid
+            //      (binding check — closes the corruption + exfiltration paths)
+            //   3. verifyCallOwnership(callSid, currentUser) MUST pass
+            //      (ownership check — same Twilio-side gate as CRIT-2/logCall)
+            if (!body.recordId) {
+                return { error: 'forbidden', code: 'RECORD_ID_REQUIRED' };
+            }
+
+            // Load the Phone Call FIRST and verify the callSid binding before
+            // any Twilio work or state mutation.
+            let phoneCallForCheck;
+            try {
+                phoneCallForCheck = record.load({
+                    type: record.Type.PHONE_CALL, id: body.recordId
+                });
+            } catch (e) {
+                return { error: 'forbidden', code: 'RECORD_NOT_FOUND' };
+            }
+            const boundCallSid = String(phoneCallForCheck.getValue({
+                fieldId: 'custevent_ctc_call_sid'
+            }) || '');
+            if (boundCallSid !== String(body.callSid || '')) {
+                log.audit({
+                    title: 'CTC checkTranscript — callSid binding mismatch',
+                    details: 'recordId=' + body.recordId +
+                             ' bodyCallSid=' + body.callSid +
+                             ' recordCallSid=' + boundCallSid +
+                             ' userId=' + runtime.getCurrentUser().id
+                });
+                return { error: 'forbidden', code: 'CALLSID_MISMATCH' };
+            }
+
+            const userId = runtime.getCurrentUser().id;
+            const auth = verifyCallOwnership(body.callSid, userId);
+            if (!auth.ok) {
+                log.audit({
+                    title: 'CTC checkTranscript — verification rejected',
+                    details: 'reason=' + auth.reason +
+                             ' callSid=' + body.callSid +
+                             ' userId=' + userId
+                });
+                return { error: 'forbidden', code: auth.reason };
+            }
+
             const config = loadConfig();
-            const authHeader = buildAuthHeader(config.accountSid, config.authToken);
+            const authHeader = buildSecureAuthHeader(config);
 
             const recording = utils.fetchRecordingForCall(config.accountSid, body.callSid, authHeader);
+            // Sprint 2b (HIGH-1) — transient Twilio failure: tell the
+            // browser to retry, don't flip call_status. The browser poll
+            // retries every 15s for up to 3 minutes; the scheduled script
+            // backfills any calls still pending after that.
+            if (utils.isTransientError(recording)) {
+                return { status: 'transient', reason: 'twilio_unreachable' };
+            }
             if (!recording) {
                 return { status: 'no_recording' };
             }
@@ -200,6 +442,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             }
 
             const transcript = utils.fetchTranscript(recording.sid, authHeader);
+            if (utils.isTransientError(transcript)) {
+                return { status: 'transient', reason: 'twilio_unreachable' };
+            }
             if (!transcript) {
                 if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
                 return { status: 'pending' };
@@ -468,7 +713,62 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     const softphoneContacts = (body) => {
         const entityId = body.entityId;
         if (!entityId) return { error: 'entityId required', rows: [] };
-        return { rows: ctcEntity.getContactsAtEntity(entityId) };
+
+        const contacts = ctcEntity.getContactsAtEntity(entityId);
+
+        // Mirror the Suitelet's record-launch behavior: when the entity
+        // has a record-level phone (company switchboard / customer main
+        // line), prepend a synthetic "Company main" entry so reps can
+        // reach the switchboard from this picker too. Without this, the
+        // dashboard → search → select-Customer path was missing the
+        // main line that the direct-toolbar-launch path showed.
+        try {
+            const entityType = resolveEntityType(entityId);
+            if (entityType === 'customer' || entityType === 'lead' || entityType === 'prospect') {
+                const r = search.lookupFields({
+                    type: search.Type.CUSTOMER,
+                    id: entityId,
+                    columns: ['phone', 'companyname', 'entityid']
+                });
+                const phone = r.phone || '';
+                const name = r.companyname || r.entityid || '';
+                if (phone && name) {
+                    contacts.forEach((c) => {
+                        (c.phones || []).forEach((p) => { p.isPrimary = false; });
+                    });
+                    contacts.unshift({
+                        contactId: '__company_main__',
+                        name: name + ' (main line)',
+                        title: 'Company switchboard',
+                        email: '',
+                        phones: [{ number: phone, type: 'Main', isPrimary: true }]
+                    });
+                }
+            }
+        } catch (e) {
+            log.error({ title: 'CTC softphoneContacts main-line lookup failed',
+                        details: e.message || String(e) });
+            // Fall through with just the contacts.
+        }
+
+        return { rows: contacts };
+    };
+
+    /**
+     * Best-effort entity-type resolver for softphoneContacts. Tries the
+     * top three entity types — customer record covers lead/prospect/
+     * customer (all share the entity stage). Returns null if not found.
+     */
+    const resolveEntityType = (entityId) => {
+        try {
+            search.lookupFields({
+                type: search.Type.CUSTOMER,
+                id: entityId,
+                columns: ['internalid']
+            });
+            return 'customer';
+        } catch (e) { /* not a customer */ }
+        return null;
     };
 
     /**

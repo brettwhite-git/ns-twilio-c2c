@@ -1,6 +1,9 @@
 <customrecordtype scriptid="customrecord_ctc_config">
     <recordname>CTC Configuration</recordname>
-    <includename>T</includename>
+    <description>Configuration for Click-to-Call. Managed exclusively by the Setup Wizard SPA. Hidden from admin UI via allowuiaccess=F; edit only via the wizard. Runtime reads remain open (accesstype=NONENEEDED) so non-admin scripts (poller, softphone, phone-button) can read config without role-checking workarounds (per SAFE Guide §5.2).</description>
+    <allowuiaccess>F</allowuiaccess>
+    <includeinsearchmenu>F</includeinsearchmenu>
+    <includename>F</includename>
     <accesstype>NONENEEDED</accesstype>
     <allowattachments>F</allowattachments>
     <allowinlinedeleting>F</allowinlinedeleting>
@@ -22,12 +25,6 @@
     <customrecordcustomfields>
         <customrecordcustomfield scriptid="custrecord_ctc_account_sid">
             <label>Account SID</label>
-            <fieldtype>CLOBTEXT</fieldtype>
-            <ismandatory>T</ismandatory>
-            <displaytype>NORMAL</displaytype>
-        </customrecordcustomfield>
-        <customrecordcustomfield scriptid="custrecord_ctc_auth_token">
-            <label>Auth Token</label>
             <fieldtype>CLOBTEXT</fieldtype>
             <ismandatory>T</ismandatory>
             <displaytype>NORMAL</displaytype>
@@ -61,6 +58,14 @@
             <label>Intelligence Service SID</label>
             <fieldtype>CLOBTEXT</fieldtype>
             <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_active">
+            <label>CTC Activated</label>
+            <description>Flipped to T by the v2 Setup Wizard when all preflight checks pass. The phone-icon User Event script reads this flag and stays hidden until activation succeeds, so reps never see a half-configured icon. Default F on fresh installs.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultvalue>F</defaultvalue>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
     </customrecordcustomfields>

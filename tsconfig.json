@@ -1,0 +1,48 @@
+// Path A scaffolding (added 2026-05-21) — type-check-only configuration.
+//
+// We're not transpiling TypeScript; we're letting tsc validate our hand-
+// written AMD JS against the canonical @oracle/netsuite-uif-types catalog
+// so the IDE (VS Code) can autocomplete UIF component APIs and so we can
+// opt-in to per-file type checking via // @ts-check.
+//
+// Path B (future) will introduce a gulpfile that bundles src/SuiteApps/
+// TypeScript sources into src/FileCabinet/ AMD outputs. When that lands,
+// this tsconfig becomes the build's source-of-truth instead of a side
+// tool. Plan: docs/plans/2026-05-22-001-spa-canonical-scaffolding-migration.md
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "AMD",
+    "moduleResolution": "node",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+
+    // Map the @uif-js/* AMD module specifiers used in SpaClient.js +
+    // SpaServer.js to the Oracle type-only package. NetSuite's runtime
+    // resolves these to its hosted UIF bundle; locally these are types-only.
+    "baseUrl": ".",
+    "paths": {
+      "@uif-js/core": ["node_modules/@oracle/netsuite-uif-types/uif/core"],
+      "@uif-js/component": ["node_modules/@oracle/netsuite-uif-types/uif/component"]
+    }
+  },
+  "include": [
+    "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/**/*.js",
+    "node_modules/@oracle/netsuite-uif-types/uif/*.d.ts",
+    "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/lib/twilio.min.js",
+    "**/__tests__/**",
+    "**/__mocks__/**",
+    "build",
+    "dist"
+  ]
+}
