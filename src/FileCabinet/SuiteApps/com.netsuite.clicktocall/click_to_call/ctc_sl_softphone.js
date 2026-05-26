@@ -2357,7 +2357,15 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         // HTTP 4xx/5xx — RESTlet rejected the request
                         // (auth, governance, bad params). Treat as
                         // terminal — retrying won't fix it client-side.
-                        throw new Error('HTTP_' + res.status);
+                        //
+                        // Sprint 2 review #11 — use a sentinel property
+                        // (ctcHttpStatus) instead of string-prefix
+                        // sniffing on err.message. A future refactor
+                        // that renames the thrown error string can't
+                        // silently revert this terminal path.
+                        var httpErr = new Error('Transcript check returned HTTP ' + res.status);
+                        httpErr.ctcHttpStatus = res.status;
+                        throw httpErr;
                     }
                     return res.json();
                 })
@@ -2394,11 +2402,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 })
                 .catch(function (err) {
                     console.warn('[CTC] Transcript fetch failed:', err && err.message);
-                    // HTTP_-prefixed errors are the terminal HTTP path
-                    // thrown above. Any other catch path is a genuine
-                    // transient (network blip, DNS, TLS, timeout) and
-                    // gets the existing retry-until-cap behavior.
-                    if (err && err.message && err.message.indexOf('HTTP_') === 0) {
+                    // Sprint 2 review #11 — sentinel-property check
+                    // replaces the fragile err.message prefix sniff.
+                    // ctcHttpStatus is only set by the !res.ok throw
+                    // above; genuine network/transient errors don't
+                    // carry it and fall through to the retry-cap path.
+                    if (err && typeof err.ctcHttpStatus === 'number') {
                         surfaceTerminalError();
                         return;
                     }

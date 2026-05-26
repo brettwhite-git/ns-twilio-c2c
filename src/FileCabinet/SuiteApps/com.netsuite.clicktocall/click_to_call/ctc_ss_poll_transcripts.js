@@ -30,6 +30,16 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
     const SCRIPT_ID = 'customscript_ctc_ss_poll';
     const DEPLOY_ID = 'customdeploy_ctc_ss_poll';
 
+    // Sprint 2 review #12 — lifted to module scope. Pre-fix this
+    // was redeclared on every execute() invocation. TERMINAL_STATUSES
+    // excludes FAILED on purpose: a FAILED call with processed=false
+    // remains retry-eligible so transient root causes can self-heal
+    // on a subsequent cycle.
+    const TERMINAL_STATUSES = () => [
+        utils.CALL_STATUS.TRANSCRIBED,
+        utils.CALL_STATUS.NO_TRANSCRIPT
+    ];
+
     const shouldYield = () => {
         const script = runtime.getCurrentScript();
         return script.getRemainingUsage() < GOVERNANCE_THRESHOLD;
@@ -486,13 +496,10 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
             // ─────────────────────────────────────────────────────
             const unprocessedCalls = findUnprocessedCalls();
 
-            // TERMINAL_STATUSES excludes FAILED on purpose — a FAILED
-            // call with processed=false should remain retry-eligible so
-            // transient root causes can self-heal on a subsequent cycle.
-            const TERMINAL_STATUSES = [
-                utils.CALL_STATUS.TRANSCRIBED,
-                utils.CALL_STATUS.NO_TRANSCRIPT
-            ];
+            // Sprint 2 review #12 — lifted to module scope as a
+            // factory function (so utils mock-time injection works
+            // in tests).
+            const terminalStatuses = TERMINAL_STATUSES();
 
             for (const call of unprocessedCalls) {
                 // Sprint 2 U2 (HIGH-6) — yield before the next call to
@@ -520,7 +527,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                     const callStatus = Array.isArray(callStatusRaw)
                         ? (callStatusRaw[0] && (callStatusRaw[0].text || callStatusRaw[0].value)) || ''
                         : (callStatusRaw || '');
-                    if (alreadyProcessed || TERMINAL_STATUSES.indexOf(callStatus) !== -1) {
+                    if (alreadyProcessed || terminalStatuses.indexOf(callStatus) !== -1) {
                         log.debug({
                             title: 'CTC Skip — already terminal',
                             details: `${call.recordId} processed=${alreadyProcessed} status=${callStatus}`
