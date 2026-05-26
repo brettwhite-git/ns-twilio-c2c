@@ -80,6 +80,16 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
             for (const call of unprocessedCalls) {
                 try {
                     const recording = utils.fetchRecordingForCall(config.accountSid, call.callSid, authHeader);
+                    // Sprint 2b (HIGH-1) — distinguish transient Twilio errors
+                    // (5xx / network / timeout / malformed JSON) from "no
+                    // recording yet." For transient: leave call_status
+                    // untouched so the next cycle picks it up cleanly,
+                    // instead of churning every call to PROCESSING during
+                    // a sustained Twilio outage.
+                    if (utils.isTransientError(recording)) {
+                        skipped++;
+                        continue;
+                    }
                     if (!recording) {
                         markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;
@@ -93,6 +103,10 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', './lib/
                     }
 
                     const transcript = utils.fetchTranscript(recording.sid, authHeader);
+                    if (utils.isTransientError(transcript)) {
+                        skipped++;
+                        continue;
+                    }
                     if (!transcript) {
                         markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;

@@ -27,6 +27,22 @@ define(['N/https', 'N/llm', 'N/log', 'N/record'], (https, llm, log, record) => {
     // Twilio Transcript.status values that mean "no transcript will ever be ready"
     const TRANSCRIPT_TERMINAL_STATUSES = ['failed', 'canceled', 'error'];
 
+    // Sprint 2b (SAFE review HIGH-1) — sentinel returned by the four Twilio
+    // fetchers on TRANSIENT failure (network error, timeout, 5xx, malformed
+    // JSON body). Distinct from `null` (= "not yet ready, retry on next
+    // cycle without status flip is OK") so callers can leave call_status
+    // untouched during sustained Twilio outages rather than churning every
+    // call to PROCESSING repeatedly. Frozen so tests can use === identity.
+    const TRANSIENT_ERROR = Object.freeze({ __ctc_transient: true });
+
+    const isTransientError = (result) => result === TRANSIENT_ERROR;
+
+    // HIGH-2: 30s timeout on every Twilio HTTPS call. NetSuite https module
+    // takes timeout in milliseconds. Without this a slow Twilio edge stalls
+    // the whole batch until NetSuite's 1-hour scheduled-script ceiling kicks
+    // in. One slow call can starve the other 49 in the batch.
+    const HTTPS_TIMEOUT_MS = 30000;
+
     const isRecordingTerminal = (recording) => {
         return !!(recording && RECORDING_TERMINAL_STATUSES.indexOf(recording.status) !== -1);
     };
@@ -59,20 +75,41 @@ SCORING GUIDE:
 TRANSCRIPT:
 `;
 
+    /**
+     * Sprint 2b — return contract:
+     *   - {sid, ...}      → recording resource found
+     *   - null            → call exists but has no recording yet (TERMINAL
+     *                       "not yet ready", caller marks PROCESSING)
+     *   - TRANSIENT_ERROR → network error / timeout / 5xx / malformed JSON;
+     *                       caller should NOT flip call_status (retry next cycle)
+     */
     const fetchRecordingForCall = (accountSid, callSid, authHeader) => {
         const url = `${TWILIO_API_BASE}/${accountSid}/Calls/${callSid}/Recordings.json`;
 
-        const response = https.get({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
+        let response;
+        try {
+            response = https.get({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
+        } catch (e) {
+            log.error({ title: 'CTC Fetch Call Recordings — network error', details: (e && e.message) || String(e) });
+            return TRANSIENT_ERROR;
+        }
 
+        if (response.code >= 500 && response.code < 600) {
+            log.error({ title: 'CTC Fetch Call Recordings — Twilio 5xx', details: `HTTP ${response.code}` });
+            return TRANSIENT_ERROR;
+        }
         if (response.code !== 200) {
             log.error({ title: 'CTC Fetch Call Recordings Failed', details: `HTTP ${response.code}: ${response.body}` });
             return null;
         }
 
-        const body = JSON.parse(response.body);
+        let body;
+        try {
+            body = JSON.parse(response.body);
+        } catch (e) {
+            log.error({ title: 'CTC Fetch Call Recordings — JSON parse', details: (e && e.message) || String(e) });
+            return TRANSIENT_ERROR;
+        }
         const recordings = body.recordings || [];
         return recordings.length > 0 ? recordings[0] : null;
     };
@@ -88,17 +125,30 @@ TRANSCRIPT:
     const fetchTranscript = (recordingSid, authHeader) => {
         const url = `${TWILIO_INTEL_BASE}/Transcripts?SourceSid=${recordingSid}`;
 
-        const response = https.get({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
+        let response;
+        try {
+            response = https.get({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
+        } catch (e) {
+            log.error({ title: 'CTC Fetch Transcript — network error', details: (e && e.message) || String(e) });
+            return TRANSIENT_ERROR;
+        }
 
+        if (response.code >= 500 && response.code < 600) {
+            log.error({ title: 'CTC Fetch Transcript — Twilio 5xx', details: `HTTP ${response.code}` });
+            return TRANSIENT_ERROR;
+        }
         if (response.code !== 200) {
             log.error({ title: 'CTC Fetch Transcript Failed', details: `HTTP ${response.code}: ${response.body}` });
             return null;
         }
 
-        const body = JSON.parse(response.body);
+        let body;
+        try {
+            body = JSON.parse(response.body);
+        } catch (e) {
+            log.error({ title: 'CTC Fetch Transcript — JSON parse', details: (e && e.message) || String(e) });
+            return TRANSIENT_ERROR;
+        }
         const transcripts = body.transcripts || [];
         return transcripts.length ? transcripts[0] : null;
     };
@@ -106,17 +156,26 @@ TRANSCRIPT:
     const fetchSentences = (transcriptSid, authHeader) => {
         const url = `${TWILIO_INTEL_BASE}/Transcripts/${transcriptSid}/Sentences`;
 
-        const response = https.get({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
+        let response;
+        try {
+            response = https.get({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
+        } catch (e) {
+            log.error({ title: 'CTC Fetch Sentences — network error', details: (e && e.message) || String(e) });
+            return [];
+        }
 
         if (response.code !== 200) {
             log.error({ title: 'CTC Fetch Sentences Failed', details: `HTTP ${response.code}: ${response.body}` });
             return [];
         }
 
-        const body = JSON.parse(response.body);
+        let body;
+        try {
+            body = JSON.parse(response.body);
+        } catch (e) {
+            log.error({ title: 'CTC Fetch Sentences — JSON parse', details: (e && e.message) || String(e) });
+            return [];
+        }
         return body.sentences || [];
     };
 
@@ -249,10 +308,13 @@ TRANSCRIPT:
     const deleteRecording = (accountSid, recordingSid, authHeader) => {
         const url = `${TWILIO_API_BASE}/${accountSid}/Recordings/${recordingSid}.json`;
 
-        const response = https.delete({
-            url: url,
-            headers: { Authorization: authHeader }
-        });
+        let response;
+        try {
+            response = https.delete({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
+        } catch (e) {
+            log.error({ title: 'CTC Delete Recording — network error', details: (e && e.message) || String(e) });
+            return;
+        }
 
         if (response.code !== 204 && response.code !== 200) {
             log.error({ title: 'CTC Delete Recording Failed', details: `HTTP ${response.code}: ${response.body}` });
@@ -266,6 +328,8 @@ TRANSCRIPT:
         CALL_STATUS,
         RECORDING_TERMINAL_STATUSES,
         TRANSCRIPT_TERMINAL_STATUSES,
+        TRANSIENT_ERROR,
+        isTransientError,
         isRecordingTerminal,
         isTranscriptTerminal,
         isTranscriptComplete,

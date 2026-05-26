@@ -425,6 +425,13 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             const authHeader = buildSecureAuthHeader(config);
 
             const recording = utils.fetchRecordingForCall(config.accountSid, body.callSid, authHeader);
+            // Sprint 2b (HIGH-1) — transient Twilio failure: tell the
+            // browser to retry, don't flip call_status. The browser poll
+            // retries every 15s for up to 3 minutes; the scheduled script
+            // backfills any calls still pending after that.
+            if (utils.isTransientError(recording)) {
+                return { status: 'transient', reason: 'twilio_unreachable' };
+            }
             if (!recording) {
                 return { status: 'no_recording' };
             }
@@ -435,6 +442,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             }
 
             const transcript = utils.fetchTranscript(recording.sid, authHeader);
+            if (utils.isTransientError(transcript)) {
+                return { status: 'transient', reason: 'twilio_unreachable' };
+            }
             if (!transcript) {
                 if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
                 return { status: 'pending' };
