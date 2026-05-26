@@ -3,6 +3,10 @@
  * @NModuleScope SameAccount
  *
  * Shared workspace queries — used by the Portlet (server-side at render time)
+ *
+ * NOT yet under // @ts-check — tsc surfaces 13 real type-safety issues
+ * (JSDoc @param annotations that don't match actual call sites). Worth
+ * fixing as a focused follow-up; see CHANGELOG / task #22.
  * and by the RESTlet (`getWorkspaceHistory` / `getWorkspaceTasks` actions for
  * the future Workspace Suitelet). Centralizing the search logic here avoids
  * an HTTP roundtrip from the portlet, and keeps row shape consistent across
