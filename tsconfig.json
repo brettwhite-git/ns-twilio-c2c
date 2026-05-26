@@ -18,8 +18,13 @@
 {
   "compilerOptions": {
     "target": "ES2020",
-    "module": "AMD",
-    "moduleResolution": "node",
+    // Path B (2026-05-26) — switched from deprecated `AMD` to
+    // `ESNext`. Our hand-written files use `define([...])` as an
+    // ambient global (declared in types/netsuite-globals.d.ts), so
+    // TS's module-emit format doesn't actually matter for type-check.
+    // ESNext + Bundler resolution avoids the TS 7.0 deprecations.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "allowJs": true,
     "checkJs": false,
     "noEmit": true,
@@ -32,10 +37,13 @@
     // Map the @uif-js/* AMD module specifiers used in SpaClient.js +
     // SpaServer.js to the Oracle type-only package. NetSuite's runtime
     // resolves these to its hosted UIF bundle; locally these are types-only.
-    "baseUrl": ".",
+    //
+    // Path B (2026-05-26) — removed `baseUrl` (deprecated in TS 7.0)
+    // and switched paths to ./-prefixed relative form, which is the
+    // modern equivalent and matches Oracle's 2025.1+ sample tsconfigs.
     "paths": {
-      "@uif-js/core": ["node_modules/@oracle/netsuite-uif-types/uif/core"],
-      "@uif-js/component": ["node_modules/@oracle/netsuite-uif-types/uif/component"]
+      "@uif-js/core": ["./node_modules/@oracle/netsuite-uif-types/uif/core"],
+      "@uif-js/component": ["./node_modules/@oracle/netsuite-uif-types/uif/component"]
     }
   },
   "include": [
