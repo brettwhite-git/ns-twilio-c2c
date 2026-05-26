@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -102,122 +102,12 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     // softphone client enforces a higher 3s threshold for UX.
     const MIN_LOG_DURATION_SECONDS = 2;
 
-    /**
-     * Look up phone numbers assigned to a user via customrecord_ctc_rep_assignment.
-     * Used by verifyCallOwnership to authorize logCall/checkTranscript on the
-     * Twilio call's `from` value. Returns an array of E.164 strings (empty if no
-     * assignments). Never throws — failed lookup falls back to "no assignments,"
-     * letting the cfg.phoneNumber fallback inside verifyCallOwnership cover the
-     * pre-rep-assignment install state.
-     */
-    const getUserAssignedPhones = (userId) => {
-        try {
-            const s = search.create({
-                type: 'customrecord_ctc_rep_assignment',
-                filters: [
-                    ['custrecord_ctc_ra_employee', 'anyof', userId],
-                    'AND', ['isinactive', 'is', 'F']
-                ],
-                columns: ['custrecord_ctc_ra_phone_number']
-            });
-            const phones = [];
-            s.run().each((row) => {
-                const p = row.getValue('custrecord_ctc_ra_phone_number');
-                if (p) phones.push(String(p));
-                return true;
-            });
-            return phones;
-        } catch (e) {
-            log.error({ title: 'CTC getUserAssignedPhones failed', details: e.message || e });
-            return [];
-        }
-    };
-
-    /**
-     * CRIT-2 / CRIT-3 gate (SAFE review 2026-05-21) — server-side correlate
-     * a body-supplied callSid with the authenticated user before allowing
-     * record mutations against it.
-     *
-     * Authorization model: the Twilio call's `from` (E.164) must match either
-     *   (a) a phone number assigned to userId via customrecord_ctc_rep_assignment
-     *   (b) cfg.phoneNumber — the install-wide caller-ID, used as a fallback
-     *       for installs that haven't set up per-rep assignments yet
-     *
-     * Returns { ok: true } or { ok: false, reason: <CODE>, ... }. Never throws.
-     *
-     * Adds one Twilio HTTPS round-trip per protected action. Acceptable since
-     * logCall and checkTranscript both already do Twilio work downstream.
-     *
-     * Fail-closed posture: if Twilio is unreachable, the gate rejects. Twilio
-     * outages already block call placement upstream (no token = no call), so
-     * the only window where this rejects spuriously is "call placed, then
-     * Twilio API becomes unreachable before logCall arrives" — narrow.
-     */
-    const verifyCallOwnership = (callSid, userId) => {
-        if (!callSid || typeof callSid !== 'string' ||
-            !/^CA[a-zA-Z0-9]{32}$/.test(callSid)) {
-            return { ok: false, reason: 'INVALID_CALLSID_FORMAT' };
-        }
-
-        let cfg;
-        try { cfg = loadConfig(); }
-        catch (e) { return { ok: false, reason: 'CONFIG_LOAD_FAILED' }; }
-        if (!cfg || !cfg.accountSid) return { ok: false, reason: 'CONFIG_MISSING' };
-
-        const twilioResult = twilioAdmin.getCall(cfg, callSid);
-        if (!twilioResult.ok) {
-            log.audit({
-                title: 'CTC verifyCallOwnership — Twilio lookup failed',
-                details: 'callSid=' + callSid + ' userId=' + userId +
-                         ' status=' + twilioResult.status
-            });
-            return {
-                ok: false,
-                reason: twilioResult.status === 404 ? 'CALL_NOT_FOUND' : 'TWILIO_LOOKUP_FAILED',
-                twilioStatus: twilioResult.status
-            };
-        }
-
-        const callFrom = String((twilioResult.call && twilioResult.call.from) || '');
-
-        // For outbound WebRTC calls, Twilio's `from` is the calling
-        // client's JWT identity in the form `client:<identity>` — not
-        // a phone number — unless the TwiML response explicitly set
-        // `callerId="+15551234567"` on its <Dial>. We accept either:
-        //
-        //   (a) call.from === `client:<currentUserId>`
-        //       Strongest binding — CRIT-1 already enforces that the
-        //       JWT identity is the session user's ID, so Twilio
-        //       confirming the call was placed by client:42 + the
-        //       authenticated session being user 42 = end-to-end
-        //       verification with no rep_assignment needed.
-        //
-        //   (b) call.from matches a rep_assignment row, or the
-        //       cfg.phoneNumber fallback. For installs that DO route
-        //       calls through a configured caller-ID phone.
-        //
-        // Either path satisfies the SAFE intent: the caller proves
-        // they were the one who placed the Twilio-side call.
-        const expectedClientIdentity = 'client:' + String(userId);
-        if (callFrom === expectedClientIdentity) {
-            return { ok: true, call: twilioResult.call };
-        }
-
-        const allowedPhones = getUserAssignedPhones(userId);
-        if (cfg.phoneNumber) allowedPhones.push(cfg.phoneNumber);
-        if (allowedPhones.indexOf(callFrom) !== -1) {
-            return { ok: true, call: twilioResult.call };
-        }
-
-        log.audit({
-            title: 'CTC verifyCallOwnership — caller-ID mismatch',
-            details: 'callSid=' + callSid + ' userId=' + userId +
-                     ' callFrom=' + callFrom +
-                     ' expectedClient=' + expectedClientIdentity +
-                     ' allowedPhones=' + allowedPhones.length
-        });
-        return { ok: false, reason: 'NOT_CALL_OWNER', callFrom: callFrom };
-    };
+    // Sprint 2 review P0 #1 (Option B) — verifyCallOwnership +
+    // getUserAssignedPhones extracted to lib/ctc_call_ownership.js so
+    // the scheduled-script orphan-retry pass can re-verify ownership
+    // before recreating a Phone Call from a persisted orphan row.
+    // Same auth model, same behavior — pure mechanical extraction.
+    const verifyCallOwnership = callOwnership.verifyCallOwnership;
 
     /**
      * Look up an existing Phone Call by Twilio Call SID to support idempotent logCall.
@@ -233,22 +123,61 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     };
 
     /**
+     * Sprint 2 review ORPHAN-A — discriminate exception types so the
+     * orphan queue only catches genuinely transient/retriable failures.
+     *
+     * Pre-fix, ANY phoneCall.save() throw triggered an orphan row.
+     * In practice, most save failures are programming/config bugs
+     * (mandatory field missing, INSUFFICIENT_PERMISSION, role
+     * misconfiguration) — retry hits the same failure forever,
+     * spamming logs until retryCount=3 makes the row stuck.
+     *
+     * Post-fix: classify by exception name. Only transient-shaped
+     * errors (DB lock, deadlock, governance edges) enter the queue.
+     * Programming bugs bubble up to the rep as a hard error so admin
+     * fixes the root cause.
+     *
+     * Returns true if the orphan was persisted (and should be retried
+     * by the scheduled pass), false otherwise (either non-transient
+     * exception class, or the orphan write itself threw).
+     */
+    const TRANSIENT_SAVE_ERROR_NAMES = [
+        'SSS_RECORD_TYPE_REQ_FIELD_MISSING', // mandatory-field race
+        'RCRD_HAS_BEEN_CHANGED',             // optimistic lock failure (NetSuite concurrent edit)
+        'SSS_REQUEST_LIMIT_EXCEEDED',        // transient governance edge
+        'CONCURRENT_REQUEST_LIMIT_EXCEEDED', // transient concurrency limit
+        'UNEXPECTED_ERROR'                   // catch-all NetSuite emits for transient backend issues
+    ];
+
+    const isTransientSaveError = (err) => {
+        if (!err) return false;
+        const name = (err.name || '').toUpperCase();
+        if (TRANSIENT_SAVE_ERROR_NAMES.indexOf(name) !== -1) return true;
+        // Some NetSuite errors expose the code on err.id (User Error
+        // Object pattern); check that too.
+        const id = (err.id || '').toUpperCase();
+        if (TRANSIENT_SAVE_ERROR_NAMES.indexOf(id) !== -1) return true;
+        return false;
+    };
+
+    /**
      * Sprint 2 U5 (HIGH-13) — persist call metadata to a lightweight
-     * orphan row when phoneCall.save() throws. The scheduled poller
-     * picks these up on its next cycle and retries the Phone Call
-     * create. Pre-fix, save failures returned { error: 'Failed to
-     * log call' } and the Twilio recording sat in storage forever
-     * with no NetSuite record to attach the transcript to.
+     * orphan row when phoneCall.save() throws TRANSIENTLY. The
+     * scheduled poller picks these up on its next cycle and retries
+     * the Phone Call create.
      *
      * Synchronous inline retry is NOT an option here — the RESTlet
      * has a hard timeout and the rep's popup is waiting on the
      * response. The fallback queue lets the scheduled pass own the
      * retry.
      *
-     * Returns true on success, false on failure (orphan write itself
-     * threw — log.error already fired). The caller still returns a
-     * generic error to the rep either way; orphanCreated is purely
-     * an observability hint.
+     * Sprint 2 review #3 — additionally persists contactId + duration
+     * so the recreate path can reconstruct the full Phone Call shape
+     * (not a degraded recovery).
+     *
+     * Returns true on success, false on failure. The caller still
+     * returns a generic error to the rep either way; orphanCreated
+     * is purely an observability hint.
      */
     const createOrphanCall = (body, userId) => {
         try {
@@ -260,6 +189,11 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             orphan.setValue({ fieldId: 'custrecord_ctc_orphan_userid', value: parseInt(userId, 10) || 0 });
             orphan.setValue({ fieldId: 'custrecord_ctc_orphan_phone', value: String(body.phone || '') });
             orphan.setValue({ fieldId: 'custrecord_ctc_orphan_direction', value: String(body.direction || 'outbound') });
+            // Sprint 2 review #3 — preserve contactId + duration so
+            // recreatePhoneCallFromOrphan can build a complete record
+            // (not a degraded one missing rollup data).
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_contactid', value: parseInt(body.contactId, 10) || 0 });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_duration', value: parseInt(body.duration, 10) || 0 });
             orphan.setValue({ fieldId: 'custrecord_ctc_orphan_retrycount', value: 0 });
             orphan.save();
             return true;
@@ -332,6 +266,14 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             phoneCall.setValue({ fieldId: 'title', value: 'Call to ' + (body.phone || 'unknown') });
             phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
             phoneCall.setValue({ fieldId: 'phone', value: body.phone || '' });
+            // Sprint 2 review ORPHAN-B — set assigned=userId. Without
+            // this, accounts where Phone Call's assigned is mandatory
+            // (common in mature NetSuite installs) cause save() to
+            // throw → every call enters the orphan queue → wasted
+            // retries until retryCount=3. This is the #1 most likely
+            // orphan trigger; closing it makes the safety-net actually
+            // a safety-net (transient-only) rather than a noise source.
+            phoneCall.setValue({ fieldId: 'assigned', value: userId });
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_sid', value: body.callSid || '' });
             phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: duration });
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
@@ -374,14 +316,32 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             // or setValue) is a programming bug, not a transient — let
             // the outer catch handle it without polluting the orphan
             // queue with retry candidates that will keep failing.
+            //
+            // Sprint 2 review ORPHAN-A — classify the exception type.
+            // Only transient-shaped errors (DB lock, deadlock,
+            // governance edges) enter the orphan queue. Programming
+            // bugs (mandatory field missing, INSUFFICIENT_PERMISSION,
+            // etc.) surface as hard errors so admin fixes the root
+            // cause instead of the orphan retry pass spamming logs
+            // until retryCount=3.
             let recordId;
             try {
                 recordId = phoneCall.save();
             } catch (saveErr) {
+                const transient = isTransientSaveError(saveErr);
                 log.error({
                     title: 'CTC logCall — phoneCall.save() failed',
-                    details: 'callSid=' + body.callSid + ' err=' + ((saveErr && saveErr.message) || String(saveErr))
+                    details: 'callSid=' + body.callSid +
+                             ' transient=' + transient +
+                             ' err.name=' + (saveErr && saveErr.name) +
+                             ' err=' + ((saveErr && saveErr.message) || String(saveErr))
                 });
+                if (!transient) {
+                    // Non-transient — return hard error WITHOUT queueing.
+                    // Admin will see the log.error and fix the root cause
+                    // (missing required field, role permission, etc.).
+                    return { error: 'Failed to log call', code: 'NON_TRANSIENT_SAVE' };
+                }
                 const orphanCreated = createOrphanCall(body, userId);
                 return { error: 'Failed to log call — admin will retry', orphanCreated: orphanCreated };
             }

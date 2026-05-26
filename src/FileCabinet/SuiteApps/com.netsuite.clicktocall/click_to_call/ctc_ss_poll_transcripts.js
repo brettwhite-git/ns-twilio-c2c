@@ -8,7 +8,7 @@
  * updates Phone Call activity records, and deletes processed recordings.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin'], (https, record, search, llm, encode, log, runtime, task, utils, ctcConfig, twilioAdmin) => {
+define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership'], (https, record, search, llm, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
@@ -134,7 +134,11 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                 'custrecord_ctc_orphan_userid',
                 'custrecord_ctc_orphan_phone',
                 'custrecord_ctc_orphan_direction',
-                'custrecord_ctc_orphan_retrycount'
+                'custrecord_ctc_orphan_retrycount',
+                // Sprint 2 review #3 — additional fields for full
+                // Phone Call reconstruction during retry.
+                'custrecord_ctc_orphan_contactid',
+                'custrecord_ctc_orphan_duration'
             ]
         }).run().getRange({ start: 0, end: 50 });
 
@@ -147,8 +151,34 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
             userId: r.getValue('custrecord_ctc_orphan_userid'),
             phone: r.getValue('custrecord_ctc_orphan_phone'),
             direction: r.getValue('custrecord_ctc_orphan_direction'),
-            retryCount: parseInt(r.getValue('custrecord_ctc_orphan_retrycount'), 10) || 0
+            retryCount: parseInt(r.getValue('custrecord_ctc_orphan_retrycount'), 10) || 0,
+            contactId: parseInt(r.getValue('custrecord_ctc_orphan_contactid'), 10) || 0,
+            duration: parseInt(r.getValue('custrecord_ctc_orphan_duration'), 10) || 0
         }));
+    };
+
+    /**
+     * Sprint 2 review #3 — restore the parent-company lookup that
+     * the RESTlet's logCall does for contact-entityType calls. Without
+     * this, recreated Phone Calls for contact entities lose the
+     * `company` link (sales rollups attribute to the contact only,
+     * not the parent customer).
+     */
+    const lookupContactCompany = (contactId) => {
+        try {
+            const result = search.lookupFields({
+                type: 'contact',
+                id: contactId,
+                columns: ['company']
+            });
+            if (result && result.company && result.company.length) {
+                return result.company[0].value;
+            }
+            return null;
+        } catch (e) {
+            log.error({ title: 'CTC lookupContactCompany failed', details: (e && e.message) || String(e) });
+            return null;
+        }
     };
 
     /**
@@ -175,16 +205,40 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
         phoneCall.setValue({ fieldId: 'custevent_ctc_call_sid', value: orphan.callSid });
         phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
         phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
+
+        // Sprint 2 review #3 — wire userId → assigned + restore
+        // duration. Without these, recreated Phone Calls have no rep
+        // owner (sales activity rollups misattribute) and no duration
+        // (breaks duration-based reporting). Mirrors RESTlet logCall.
+        // Sprint 2 review ORPHAN-B — assigned is also frequently
+        // mandatory on Phone Call; setting it here closes the gap.
+        const userIdNumeric = parseInt(orphan.userId, 10);
+        if (userIdNumeric && userIdNumeric > 0) {
+            phoneCall.setValue({ fieldId: 'assigned', value: userIdNumeric });
+        }
+        if (orphan.duration > 0) {
+            phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: orphan.duration });
+        }
         if (orphan.recordingSid) {
             phoneCall.setValue({ fieldId: 'custevent_ctc_recording_sid', value: orphan.recordingSid });
         }
-        // Entity link — same numeric-id guard logic as the RESTlet
+        // Entity link — same numeric-id guard logic as the RESTlet.
+        // Sprint 2 review #3 — for contact-entityType, ALSO look up
+        // and set the parent company (sales rollups need both links).
+        // For non-contact, ALSO set the secondary contact if persisted.
         const entityId = parseInt(orphan.entityId, 10);
         if (entityId && entityId > 0) {
             if (orphan.entityType === 'contact') {
                 phoneCall.setValue({ fieldId: 'contact', value: entityId });
+                const parentCompany = lookupContactCompany(entityId);
+                if (parentCompany) {
+                    phoneCall.setValue({ fieldId: 'company', value: parentCompany });
+                }
             } else {
                 phoneCall.setValue({ fieldId: 'company', value: entityId });
+                if (orphan.contactId > 0) {
+                    phoneCall.setValue({ fieldId: 'contact', value: orphan.contactId });
+                }
             }
         }
         return phoneCall.save();
@@ -433,27 +487,81 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                     enqueueResume();
                     break;
                 }
+                // Dedup: skip + delete orphan if a Phone Call already
+                // exists for this callSid (the original save succeeded
+                // despite the exception). Out of the inner try/catch
+                // so the dedup branch's delete failures don't
+                // misclassify as retry failures.
                 try {
                     const existingId = findPhoneCallByCallSid(orphan.callSid);
                     if (existingId) {
-                        // Phone Call already exists for this callSid —
-                        // the original save did succeed despite the
-                        // exception. Delete the orphan row.
-                        record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+                        try {
+                            record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+                        } catch (delErr) {
+                            log.error({ title: 'CTC Orphan dedup delete failed', details: (delErr && delErr.message) || String(delErr) });
+                        }
                         log.audit({
                             title: 'CTC Orphan Resolved — duplicate',
                             details: `orphan=${orphan.recordId} existingPhoneCall=${existingId}`
                         });
                         continue;
                     }
+                } catch (lookupErr) {
+                    log.error({ title: 'CTC Orphan dedup lookup failed', details: (lookupErr && lookupErr.message) || String(lookupErr) });
+                    // Fall through to retry — recreate's own
+                    // idempotency layer (NetSuite's unique
+                    // call_sid filter won't help, but failing-loud
+                    // is better than skipping a real orphan).
+                }
 
-                    recreatePhoneCallFromOrphan(orphan);
-                    record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+                // Sprint 2 review P0 #1 (Option B) — re-verify call
+                // ownership on the retry path. Without this gate,
+                // anyone with NONENEEDED write access to the orphan
+                // record (forced by SuiteApp + custom-role constraint)
+                // could forge a row with stolen callSid + attacker
+                // userId + target entityId, and we would obligingly
+                // create a Phone Call from it — reopening Sprint 1's
+                // CRIT-2 exploit.
+                const auth = callOwnership.verifyCallOwnership(orphan.callSid, orphan.userId);
+                if (!auth.ok) {
                     log.audit({
-                        title: 'CTC Orphan Resolved — recreated',
-                        details: `orphan=${orphan.recordId} callSid=${orphan.callSid}`
+                        title: 'CTC Orphan rejected — verifyCallOwnership failed',
+                        details: `orphan=${orphan.recordId} callSid=${orphan.callSid} userId=${orphan.userId} reason=${auth.reason}`
                     });
-                } catch (e) {
+                    // Increment retryCount — same admin-triage path
+                    // as a save failure. After 3 attempts the row
+                    // stays for human review. If this is a forged
+                    // row, retryCount=3 surfaces it to the admin.
+                    const newRetryCount = orphan.retryCount + 1;
+                    try {
+                        record.submitFields({
+                            type: 'customrecord_ctc_orphan_call',
+                            id: orphan.recordId,
+                            values: { custrecord_ctc_orphan_retrycount: newRetryCount },
+                            options: { enableSourcing: false, ignoreMandatoryFields: true }
+                        });
+                    } catch (incErr) {
+                        log.error({ title: 'CTC Orphan retryCount inc failed', details: (incErr && incErr.message) || String(incErr) });
+                    }
+                    if (newRetryCount >= 3) {
+                        log.error({
+                            title: 'CTC Orphan rejected (cap reached) — admin triage',
+                            details: `orphan=${orphan.recordId} callSid=${orphan.callSid} reason=${auth.reason}`
+                        });
+                    }
+                    continue;
+                }
+
+                // Sprint 2 review #4 — narrowed try/catch. Recreate
+                // (retriable) is one try; subsequent orphan-row delete
+                // (log-only) is a separate try. A delete failure must
+                // NOT increment retryCount on a row whose recreate
+                // already succeeded — dedup will self-heal next cycle,
+                // but the counter would be poisoned for this cycle.
+                let recreatedId;
+                try {
+                    recreatedId = recreatePhoneCallFromOrphan(orphan);
+                } catch (recreateErr) {
                     const newRetryCount = orphan.retryCount + 1;
                     try {
                         record.submitFields({
@@ -468,15 +576,31 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                     if (newRetryCount >= 3) {
                         log.error({
                             title: 'CTC Orphan retry cap reached — admin triage',
-                            details: `orphan=${orphan.recordId} callSid=${orphan.callSid} err=${(e && e.message) || e}`
+                            details: `orphan=${orphan.recordId} callSid=${orphan.callSid} err=${(recreateErr && recreateErr.message) || recreateErr}`
                         });
                     } else {
                         log.error({
                             title: 'CTC Orphan retry failed',
-                            details: `orphan=${orphan.recordId} retryCount=${newRetryCount} err=${(e && e.message) || e}`
+                            details: `orphan=${orphan.recordId} retryCount=${newRetryCount} err=${(recreateErr && recreateErr.message) || recreateErr}`
                         });
                     }
+                    continue;
                 }
+
+                // Recreate succeeded. Now delete the orphan row in
+                // its own try — failures here log-only.
+                try {
+                    record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+                } catch (delErr) {
+                    log.error({
+                        title: 'CTC Orphan delete failed (Phone Call recreated, dedup will self-heal next cycle)',
+                        details: `orphan=${orphan.recordId} phoneCall=${recreatedId} err=${(delErr && delErr.message) || delErr}`
+                    });
+                }
+                log.audit({
+                    title: 'CTC Orphan Resolved — recreated',
+                    details: `orphan=${orphan.recordId} callSid=${orphan.callSid} phoneCall=${recreatedId}`
+                });
             }
         } catch (e) {
             log.error({ title: 'CTC Poll Execute Error', details: e.message || e });
