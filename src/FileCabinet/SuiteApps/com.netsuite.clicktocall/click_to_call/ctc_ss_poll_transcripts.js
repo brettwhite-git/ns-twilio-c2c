@@ -101,6 +101,84 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
         }));
     };
 
+    /**
+     * Sprint 2 U5 (HIGH-13) — find orphan-call rows where the
+     * RESTlet's logCall failed to save the Phone Call record. The
+     * orphan-retry pass re-attempts the create with the persisted
+     * metadata. Cap at 50 rows + retryCount<3 (admin triage above
+     * the cap). Honors shouldYield from U2.
+     */
+    const findOrphanCalls = () => {
+        const results = search.create({
+            type: 'customrecord_ctc_orphan_call',
+            filters: [
+                ['custrecord_ctc_orphan_retrycount', 'lessthan', 3]
+            ],
+            columns: [
+                'internalid',
+                'custrecord_ctc_orphan_callsid',
+                'custrecord_ctc_orphan_recordingsid',
+                'custrecord_ctc_orphan_entityid',
+                'custrecord_ctc_orphan_entitytype',
+                'custrecord_ctc_orphan_userid',
+                'custrecord_ctc_orphan_phone',
+                'custrecord_ctc_orphan_direction',
+                'custrecord_ctc_orphan_retrycount'
+            ]
+        }).run().getRange({ start: 0, end: 50 });
+
+        return results.map((r) => ({
+            recordId: r.id,
+            callSid: r.getValue('custrecord_ctc_orphan_callsid'),
+            recordingSid: r.getValue('custrecord_ctc_orphan_recordingsid'),
+            entityId: r.getValue('custrecord_ctc_orphan_entityid'),
+            entityType: r.getValue('custrecord_ctc_orphan_entitytype'),
+            userId: r.getValue('custrecord_ctc_orphan_userid'),
+            phone: r.getValue('custrecord_ctc_orphan_phone'),
+            direction: r.getValue('custrecord_ctc_orphan_direction'),
+            retryCount: parseInt(r.getValue('custrecord_ctc_orphan_retrycount'), 10) || 0
+        }));
+    };
+
+    /**
+     * Idempotency check before recreating a Phone Call from an
+     * orphan row — the in-flight save might have actually succeeded
+     * (e.g., the save returned but a network error stole the
+     * recordId from the RESTlet's response). Skip the orphan if a
+     * Phone Call with this callSid already exists.
+     */
+    const findPhoneCallByCallSid = (callSid) => {
+        const results = search.create({
+            type: search.Type.PHONE_CALL,
+            filters: [['custevent_ctc_call_sid', 'is', callSid]],
+            columns: ['internalid']
+        }).run().getRange({ start: 0, end: 1 });
+        return results.length ? results[0].id : null;
+    };
+
+    const recreatePhoneCallFromOrphan = (orphan) => {
+        const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
+        phoneCall.setValue({ fieldId: 'title', value: 'Call to ' + (orphan.phone || 'unknown') });
+        phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
+        phoneCall.setValue({ fieldId: 'phone', value: orphan.phone || '' });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_call_sid', value: orphan.callSid });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
+        if (orphan.recordingSid) {
+            phoneCall.setValue({ fieldId: 'custevent_ctc_recording_sid', value: orphan.recordingSid });
+        }
+        // Entity link — same numeric-id guard logic as the RESTlet
+        const entityId = parseInt(orphan.entityId, 10);
+        if (entityId && entityId > 0) {
+            if (orphan.entityType === 'contact') {
+                phoneCall.setValue({ fieldId: 'contact', value: entityId });
+            } else {
+                phoneCall.setValue({ fieldId: 'company', value: entityId });
+            }
+        }
+        return phoneCall.save();
+    };
+
     const markCleanupPending = (recordId, pending) => {
         try {
             record.submitFields({
@@ -328,6 +406,65 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                     });
                 } catch (e) {
                     log.error({ title: 'CTC Cleanup Retry Error', details: `${pending.recordingSid}: ${(e && e.message) || e}` });
+                }
+            }
+
+            // Sprint 2 U5 (HIGH-13) — orphan retry pass. Re-attempt
+            // Phone Call create for rows where the RESTlet's
+            // phoneCall.save() failed previously. Idempotency check:
+            // skip if a Phone Call with this callSid already exists
+            // (rare but possible if the save succeeded but the RESTlet
+            // response was lost in transit, prompting the rep's popup
+            // to retry via sendBeacon and create the same orphan).
+            const orphans = findOrphanCalls();
+            for (const orphan of orphans) {
+                if (shouldYield()) {
+                    enqueueResume();
+                    break;
+                }
+                try {
+                    const existingId = findPhoneCallByCallSid(orphan.callSid);
+                    if (existingId) {
+                        // Phone Call already exists for this callSid —
+                        // the original save did succeed despite the
+                        // exception. Delete the orphan row.
+                        record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+                        log.audit({
+                            title: 'CTC Orphan Resolved — duplicate',
+                            details: `orphan=${orphan.recordId} existingPhoneCall=${existingId}`
+                        });
+                        continue;
+                    }
+
+                    recreatePhoneCallFromOrphan(orphan);
+                    record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+                    log.audit({
+                        title: 'CTC Orphan Resolved — recreated',
+                        details: `orphan=${orphan.recordId} callSid=${orphan.callSid}`
+                    });
+                } catch (e) {
+                    const newRetryCount = orphan.retryCount + 1;
+                    try {
+                        record.submitFields({
+                            type: 'customrecord_ctc_orphan_call',
+                            id: orphan.recordId,
+                            values: { custrecord_ctc_orphan_retrycount: newRetryCount },
+                            options: { enableSourcing: false, ignoreMandatoryFields: true }
+                        });
+                    } catch (incErr) {
+                        log.error({ title: 'CTC Orphan retryCount inc failed', details: (incErr && incErr.message) || String(incErr) });
+                    }
+                    if (newRetryCount >= 3) {
+                        log.error({
+                            title: 'CTC Orphan retry cap reached — admin triage',
+                            details: `orphan=${orphan.recordId} callSid=${orphan.callSid} err=${(e && e.message) || e}`
+                        });
+                    } else {
+                        log.error({
+                            title: 'CTC Orphan retry failed',
+                            details: `orphan=${orphan.recordId} retryCount=${newRetryCount} err=${(e && e.message) || e}`
+                        });
+                    }
                 }
             }
         } catch (e) {

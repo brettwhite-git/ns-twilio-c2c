@@ -233,6 +233,48 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     };
 
     /**
+     * Sprint 2 U5 (HIGH-13) — persist call metadata to a lightweight
+     * orphan row when phoneCall.save() throws. The scheduled poller
+     * picks these up on its next cycle and retries the Phone Call
+     * create. Pre-fix, save failures returned { error: 'Failed to
+     * log call' } and the Twilio recording sat in storage forever
+     * with no NetSuite record to attach the transcript to.
+     *
+     * Synchronous inline retry is NOT an option here — the RESTlet
+     * has a hard timeout and the rep's popup is waiting on the
+     * response. The fallback queue lets the scheduled pass own the
+     * retry.
+     *
+     * Returns true on success, false on failure (orphan write itself
+     * threw — log.error already fired). The caller still returns a
+     * generic error to the rep either way; orphanCreated is purely
+     * an observability hint.
+     */
+    const createOrphanCall = (body, userId) => {
+        try {
+            const orphan = record.create({ type: 'customrecord_ctc_orphan_call' });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_callsid', value: String(body.callSid || '') });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_recordingsid', value: String(body.recordingSid || '') });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_entityid', value: parseInt(body.entityId, 10) || 0 });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_entitytype', value: String(body.entityType || '') });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_userid', value: parseInt(userId, 10) || 0 });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_phone', value: String(body.phone || '') });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_direction', value: String(body.direction || 'outbound') });
+            orphan.setValue({ fieldId: 'custrecord_ctc_orphan_retrycount', value: 0 });
+            orphan.save();
+            return true;
+        } catch (e) {
+            // If the orphan write itself fails (e.g., the custom
+            // record isn't deployed yet, or a quota issue), log
+            // loudly — admin needs to know the safety-net is
+            // broken. Do NOT throw — the rep gets a generic error
+            // either way.
+            log.error({ title: 'CTC createOrphanCall failed', details: (e && e.message) || String(e) });
+            return false;
+        }
+    };
+
+    /**
      * Create a Phone Call record immediately after call ends.
      * @param {Object} body
      * @returns {Object} { success, recordId, duplicate? } or { error }
@@ -326,7 +368,23 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 }
             }
 
-            const recordId = phoneCall.save();
+            // Sprint 2 U5 (HIGH-13) — inner try/catch around save so
+            // a save failure specifically triggers orphan-row creation.
+            // Anything that throws before save (record.create itself
+            // or setValue) is a programming bug, not a transient — let
+            // the outer catch handle it without polluting the orphan
+            // queue with retry candidates that will keep failing.
+            let recordId;
+            try {
+                recordId = phoneCall.save();
+            } catch (saveErr) {
+                log.error({
+                    title: 'CTC logCall — phoneCall.save() failed',
+                    details: 'callSid=' + body.callSid + ' err=' + ((saveErr && saveErr.message) || String(saveErr))
+                });
+                const orphanCreated = createOrphanCall(body, userId);
+                return { error: 'Failed to log call — admin will retry', orphanCreated: orphanCreated };
+            }
             return { success: true, recordId: recordId };
         } catch (e) {
             log.error({ title: 'CTC Log Call Failed', details: e.message || e });
