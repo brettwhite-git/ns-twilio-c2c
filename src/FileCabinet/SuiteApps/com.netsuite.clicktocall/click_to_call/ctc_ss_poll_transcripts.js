@@ -244,6 +244,118 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
         return phoneCall.save();
     };
 
+    /**
+     * Sprint 2 review #5 — extracted orphan-row processing so the
+     * reordered Phase B pass and the test surface share one
+     * implementation. Returns one of: 'resolved' (recreate succeeded),
+     * 'rejected' (verifyCallOwnership failed), 'failed' (recreate
+     * threw), 'duplicate' (dedup branch).
+     */
+    const processOrphanRow = (orphan) => {
+        // Dedup: skip + delete orphan if a Phone Call already
+        // exists for this callSid (the original save succeeded
+        // despite the exception).
+        try {
+            const existingId = findPhoneCallByCallSid(orphan.callSid);
+            if (existingId) {
+                try {
+                    record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+                } catch (delErr) {
+                    log.error({ title: 'CTC Orphan dedup delete failed', details: (delErr && delErr.message) || String(delErr) });
+                }
+                log.audit({
+                    title: 'CTC Orphan Resolved — duplicate',
+                    details: `orphan=${orphan.recordId} existingPhoneCall=${existingId}`
+                });
+                return 'duplicate';
+            }
+        } catch (lookupErr) {
+            log.error({ title: 'CTC Orphan dedup lookup failed', details: (lookupErr && lookupErr.message) || String(lookupErr) });
+            // Fall through to retry — failing-loud beats skipping
+            // a real orphan.
+        }
+
+        // Sprint 2 review P0 #1 (Option B) — re-verify call
+        // ownership on the retry path. Without this gate, anyone
+        // with NONENEEDED write access to the orphan record
+        // (forced by SuiteApp + custom-role constraint) could
+        // forge a row with stolen callSid + attacker userId +
+        // target entityId, and we would obligingly create a
+        // Phone Call from it — reopening Sprint 1's CRIT-2.
+        const auth = callOwnership.verifyCallOwnership(orphan.callSid, orphan.userId);
+        if (!auth.ok) {
+            log.audit({
+                title: 'CTC Orphan rejected — verifyCallOwnership failed',
+                details: `orphan=${orphan.recordId} callSid=${orphan.callSid} userId=${orphan.userId} reason=${auth.reason}`
+            });
+            const newRetryCount = orphan.retryCount + 1;
+            try {
+                record.submitFields({
+                    type: 'customrecord_ctc_orphan_call',
+                    id: orphan.recordId,
+                    values: { custrecord_ctc_orphan_retrycount: newRetryCount },
+                    options: { enableSourcing: false, ignoreMandatoryFields: true }
+                });
+            } catch (incErr) {
+                log.error({ title: 'CTC Orphan retryCount inc failed', details: (incErr && incErr.message) || String(incErr) });
+            }
+            if (newRetryCount >= 3) {
+                log.error({
+                    title: 'CTC Orphan rejected (cap reached) — admin triage',
+                    details: `orphan=${orphan.recordId} callSid=${orphan.callSid} reason=${auth.reason}`
+                });
+            }
+            return 'rejected';
+        }
+
+        // Sprint 2 review #4 — narrowed try/catch. Recreate is one
+        // try; delete is a separate try. Delete failure must NOT
+        // increment retryCount on a row whose recreate succeeded.
+        let recreatedId;
+        try {
+            recreatedId = recreatePhoneCallFromOrphan(orphan);
+        } catch (recreateErr) {
+            const newRetryCount = orphan.retryCount + 1;
+            try {
+                record.submitFields({
+                    type: 'customrecord_ctc_orphan_call',
+                    id: orphan.recordId,
+                    values: { custrecord_ctc_orphan_retrycount: newRetryCount },
+                    options: { enableSourcing: false, ignoreMandatoryFields: true }
+                });
+            } catch (incErr) {
+                log.error({ title: 'CTC Orphan retryCount inc failed', details: (incErr && incErr.message) || String(incErr) });
+            }
+            if (newRetryCount >= 3) {
+                log.error({
+                    title: 'CTC Orphan retry cap reached — admin triage',
+                    details: `orphan=${orphan.recordId} callSid=${orphan.callSid} err=${(recreateErr && recreateErr.message) || recreateErr}`
+                });
+            } else {
+                log.error({
+                    title: 'CTC Orphan retry failed',
+                    details: `orphan=${orphan.recordId} retryCount=${newRetryCount} err=${(recreateErr && recreateErr.message) || recreateErr}`
+                });
+            }
+            return 'failed';
+        }
+
+        // Recreate succeeded. Delete the orphan row in its own try.
+        try {
+            record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
+        } catch (delErr) {
+            log.error({
+                title: 'CTC Orphan delete failed (Phone Call recreated, dedup will self-heal next cycle)',
+                details: `orphan=${orphan.recordId} phoneCall=${recreatedId} err=${(delErr && delErr.message) || delErr}`
+            });
+        }
+        log.audit({
+            title: 'CTC Orphan Resolved — recreated',
+            details: `orphan=${orphan.recordId} callSid=${orphan.callSid} phoneCall=${recreatedId}`
+        });
+        return 'resolved';
+    };
+
     const markCleanupPending = (recordId, pending) => {
         try {
             record.submitFields({
@@ -288,9 +400,17 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
     };
 
     const execute = () => {
+        // Sprint 2 review #7 — counters for all three passes, exposed
+        // in the final audit message so admins can see when retry
+        // passes are doing work or stuck.
         let processed = 0;
         let skipped = 0;
         let errors = 0;
+        let cleanupResolved = 0;
+        let cleanupTransient = 0;
+        let orphanResolved = 0;
+        let orphanFailed = 0;
+        let orphanRejected = 0;
 
         try {
             const config = loadConfig();
@@ -301,21 +421,71 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                 log.audit({ title: 'CTC LLM Quota Low', details: 'AI analysis will be skipped this cycle' });
             }
 
+            // Sprint 2 review #5 — REORDERED execute() passes.
+            //
+            // Old order: main loop → cleanup → orphan. When main
+            // loop yielded mid-batch (governance pressure), cleanup
+            // and orphan passes were starved because they sit AFTER
+            // it in the execution order.
+            //
+            // New order: cleanup → orphan → main. Retry passes are
+            // bounded (max 50 rows each), tend to be empty in
+            // healthy steady state (especially after ORPHAN-A/B
+            // discriminate which save failures are queued), and
+            // when non-empty represent operational backlog that
+            // benefits from prompt drain. Main loop runs last with
+            // whatever budget remains; unprocessed calls re-queue
+            // naturally for the next cycle if main is starved.
+
+            // ─────────────────────────────────────────────────────
+            // Phase A — cleanup-pending retry pass
+            // (Sprint 2 U4 / HIGH-4)
+            // ─────────────────────────────────────────────────────
+            const cleanupPendingCalls = findCleanupPendingCalls();
+            for (const pending of cleanupPendingCalls) {
+                if (shouldYield()) {
+                    enqueueResume();
+                    break;
+                }
+                try {
+                    const retryResult = utils.deleteRecording(config.accountSid, pending.recordingSid, authHeader);
+                    if (utils.isTransientError(retryResult)) {
+                        cleanupTransient++;
+                        continue;
+                    }
+                    markCleanupPending(pending.recordId, false);
+                    cleanupResolved++;
+                    log.audit({
+                        title: 'CTC Recording Cleanup Resolved',
+                        details: `${pending.recordId} recording=${pending.recordingSid} result=${retryResult === true ? 'deleted' : retryResult === null ? 'gone' : '4xx'}`
+                    });
+                } catch (e) {
+                    log.error({ title: 'CTC Cleanup Retry Error', details: `${pending.recordingSid}: ${(e && e.message) || e}` });
+                }
+            }
+
+            // ─────────────────────────────────────────────────────
+            // Phase B — orphan Phone Call retry pass
+            // (Sprint 2 U5 / HIGH-13)
+            // ─────────────────────────────────────────────────────
+            const orphans = findOrphanCalls();
+            for (const orphan of orphans) {
+                if (shouldYield()) {
+                    enqueueResume();
+                    break;
+                }
+                const retryResult = processOrphanRow(orphan);
+                if (retryResult === 'resolved') orphanResolved++;
+                else if (retryResult === 'rejected') orphanRejected++;
+                else if (retryResult === 'failed') orphanFailed++;
+            }
+
+            // ─────────────────────────────────────────────────────
+            // Phase C — main unprocessed-call processing
+            // (U1 race-window guard + U2 governance yield)
+            // ─────────────────────────────────────────────────────
             const unprocessedCalls = findUnprocessedCalls();
 
-            // Sprint 2 U1 (HIGH-5) — idempotency guard against the
-            // browser-poll vs scheduled-poll race. The browser-side
-            // pollForTranscript can complete enrichment + delete the
-            // Twilio recording at minute 3; this scheduled pass started
-            // at minute 0 reaches the same call at minute 4 and would
-            // otherwise see an empty Twilio recording response, flip
-            // call_status to PROCESSING, and re-queue a call that is
-            // already TRANSCRIBED. findUnprocessedCalls() filters by
-            // processed=F at search time, but cannot close the TOCTOU
-            // window between search execution and per-call processing.
-            // Re-check the authoritative state immediately before any
-            // mutation.
-            //
             // TERMINAL_STATUSES excludes FAILED on purpose — a FAILED
             // call with processed=false should remain retry-eligible so
             // transient root causes can self-heal on a subsequent cycle.
@@ -439,174 +609,21 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                     errors++;
                 }
             }
-
-            // Sprint 2 U4 (HIGH-4) — cleanup-retry pass. Walk Phone
-            // Call rows where a prior cycle hit a transient DELETE
-            // failure (recording_cleanup_pending=T) and retry. Honors
-            // shouldYield() so we don't blow governance on the retry
-            // batch. Authoritative results from Twilio (true/null)
-            // clear the flag; transient again leaves it set for the
-            // next cycle.
-            const cleanupPendingCalls = findCleanupPendingCalls();
-            for (const pending of cleanupPendingCalls) {
-                if (shouldYield()) {
-                    enqueueResume();
-                    break;
-                }
-                try {
-                    const retryResult = utils.deleteRecording(config.accountSid, pending.recordingSid, authHeader);
-                    if (utils.isTransientError(retryResult)) {
-                        // Still transient — leave flag set for next cycle
-                        continue;
-                    }
-                    // true (deleted) or null (already gone) or false
-                    // (4xx auth/malformed) — clear the flag in all
-                    // three cases. A 4xx is "Twilio gave an
-                    // authoritative non-200 answer"; retrying won't
-                    // help, so we stop retrying.
-                    markCleanupPending(pending.recordId, false);
-                    log.audit({
-                        title: 'CTC Recording Cleanup Resolved',
-                        details: `${pending.recordId} recording=${pending.recordingSid} result=${retryResult === true ? 'deleted' : retryResult === null ? 'gone' : '4xx'}`
-                    });
-                } catch (e) {
-                    log.error({ title: 'CTC Cleanup Retry Error', details: `${pending.recordingSid}: ${(e && e.message) || e}` });
-                }
-            }
-
-            // Sprint 2 U5 (HIGH-13) — orphan retry pass. Re-attempt
-            // Phone Call create for rows where the RESTlet's
-            // phoneCall.save() failed previously. Idempotency check:
-            // skip if a Phone Call with this callSid already exists
-            // (rare but possible if the save succeeded but the RESTlet
-            // response was lost in transit, prompting the rep's popup
-            // to retry via sendBeacon and create the same orphan).
-            const orphans = findOrphanCalls();
-            for (const orphan of orphans) {
-                if (shouldYield()) {
-                    enqueueResume();
-                    break;
-                }
-                // Dedup: skip + delete orphan if a Phone Call already
-                // exists for this callSid (the original save succeeded
-                // despite the exception). Out of the inner try/catch
-                // so the dedup branch's delete failures don't
-                // misclassify as retry failures.
-                try {
-                    const existingId = findPhoneCallByCallSid(orphan.callSid);
-                    if (existingId) {
-                        try {
-                            record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
-                        } catch (delErr) {
-                            log.error({ title: 'CTC Orphan dedup delete failed', details: (delErr && delErr.message) || String(delErr) });
-                        }
-                        log.audit({
-                            title: 'CTC Orphan Resolved — duplicate',
-                            details: `orphan=${orphan.recordId} existingPhoneCall=${existingId}`
-                        });
-                        continue;
-                    }
-                } catch (lookupErr) {
-                    log.error({ title: 'CTC Orphan dedup lookup failed', details: (lookupErr && lookupErr.message) || String(lookupErr) });
-                    // Fall through to retry — recreate's own
-                    // idempotency layer (NetSuite's unique
-                    // call_sid filter won't help, but failing-loud
-                    // is better than skipping a real orphan).
-                }
-
-                // Sprint 2 review P0 #1 (Option B) — re-verify call
-                // ownership on the retry path. Without this gate,
-                // anyone with NONENEEDED write access to the orphan
-                // record (forced by SuiteApp + custom-role constraint)
-                // could forge a row with stolen callSid + attacker
-                // userId + target entityId, and we would obligingly
-                // create a Phone Call from it — reopening Sprint 1's
-                // CRIT-2 exploit.
-                const auth = callOwnership.verifyCallOwnership(orphan.callSid, orphan.userId);
-                if (!auth.ok) {
-                    log.audit({
-                        title: 'CTC Orphan rejected — verifyCallOwnership failed',
-                        details: `orphan=${orphan.recordId} callSid=${orphan.callSid} userId=${orphan.userId} reason=${auth.reason}`
-                    });
-                    // Increment retryCount — same admin-triage path
-                    // as a save failure. After 3 attempts the row
-                    // stays for human review. If this is a forged
-                    // row, retryCount=3 surfaces it to the admin.
-                    const newRetryCount = orphan.retryCount + 1;
-                    try {
-                        record.submitFields({
-                            type: 'customrecord_ctc_orphan_call',
-                            id: orphan.recordId,
-                            values: { custrecord_ctc_orphan_retrycount: newRetryCount },
-                            options: { enableSourcing: false, ignoreMandatoryFields: true }
-                        });
-                    } catch (incErr) {
-                        log.error({ title: 'CTC Orphan retryCount inc failed', details: (incErr && incErr.message) || String(incErr) });
-                    }
-                    if (newRetryCount >= 3) {
-                        log.error({
-                            title: 'CTC Orphan rejected (cap reached) — admin triage',
-                            details: `orphan=${orphan.recordId} callSid=${orphan.callSid} reason=${auth.reason}`
-                        });
-                    }
-                    continue;
-                }
-
-                // Sprint 2 review #4 — narrowed try/catch. Recreate
-                // (retriable) is one try; subsequent orphan-row delete
-                // (log-only) is a separate try. A delete failure must
-                // NOT increment retryCount on a row whose recreate
-                // already succeeded — dedup will self-heal next cycle,
-                // but the counter would be poisoned for this cycle.
-                let recreatedId;
-                try {
-                    recreatedId = recreatePhoneCallFromOrphan(orphan);
-                } catch (recreateErr) {
-                    const newRetryCount = orphan.retryCount + 1;
-                    try {
-                        record.submitFields({
-                            type: 'customrecord_ctc_orphan_call',
-                            id: orphan.recordId,
-                            values: { custrecord_ctc_orphan_retrycount: newRetryCount },
-                            options: { enableSourcing: false, ignoreMandatoryFields: true }
-                        });
-                    } catch (incErr) {
-                        log.error({ title: 'CTC Orphan retryCount inc failed', details: (incErr && incErr.message) || String(incErr) });
-                    }
-                    if (newRetryCount >= 3) {
-                        log.error({
-                            title: 'CTC Orphan retry cap reached — admin triage',
-                            details: `orphan=${orphan.recordId} callSid=${orphan.callSid} err=${(recreateErr && recreateErr.message) || recreateErr}`
-                        });
-                    } else {
-                        log.error({
-                            title: 'CTC Orphan retry failed',
-                            details: `orphan=${orphan.recordId} retryCount=${newRetryCount} err=${(recreateErr && recreateErr.message) || recreateErr}`
-                        });
-                    }
-                    continue;
-                }
-
-                // Recreate succeeded. Now delete the orphan row in
-                // its own try — failures here log-only.
-                try {
-                    record.delete({ type: 'customrecord_ctc_orphan_call', id: orphan.recordId });
-                } catch (delErr) {
-                    log.error({
-                        title: 'CTC Orphan delete failed (Phone Call recreated, dedup will self-heal next cycle)',
-                        details: `orphan=${orphan.recordId} phoneCall=${recreatedId} err=${(delErr && delErr.message) || delErr}`
-                    });
-                }
-                log.audit({
-                    title: 'CTC Orphan Resolved — recreated',
-                    details: `orphan=${orphan.recordId} callSid=${orphan.callSid} phoneCall=${recreatedId}`
-                });
-            }
         } catch (e) {
             log.error({ title: 'CTC Poll Execute Error', details: e.message || e });
         }
 
-        log.audit({ title: 'CTC Poll Complete', details: `Processed: ${processed}, Skipped: ${skipped}, Errors: ${errors}` });
+        // Sprint 2 review #7 — audit summary now includes ALL three
+        // passes. Admins see at a glance whether retry passes did
+        // work this cycle, vs only the main loop. Pre-fix, the
+        // summary only reported the main loop's counters, masking
+        // silent retry failures.
+        log.audit({
+            title: 'CTC Poll Complete',
+            details: `main(processed=${processed}, skipped=${skipped}, errors=${errors}) ` +
+                     `cleanup(resolved=${cleanupResolved}, transient=${cleanupTransient}) ` +
+                     `orphan(resolved=${orphanResolved}, failed=${orphanFailed}, rejected=${orphanRejected})`
+        });
     };
 
     return { execute };

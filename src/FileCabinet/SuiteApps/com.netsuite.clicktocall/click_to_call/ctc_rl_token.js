@@ -502,9 +502,27 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 includeBrief: true,
                 includeDuration: false
             });
-            phoneCall.save();
+            const savedRecordId = phoneCall.save();
 
-            utils.deleteRecording(config.accountSid, recording.sid, authHeader);
+            // Sprint 2 review #8 — mirror the scheduled-script's
+            // cleanup_pending flag-set on transient DELETE failure.
+            // Pre-fix, this user-path ignored the deleteRecording
+            // return value, so a Twilio 5xx during browser-triggered
+            // transcript fetch silently lost the cleanup retry.
+            // Recording would linger in Twilio storage forever.
+            const deleteResult = utils.deleteRecording(config.accountSid, recording.sid, authHeader);
+            if (utils.isTransientError(deleteResult)) {
+                try {
+                    record.submitFields({
+                        type: record.Type.PHONE_CALL,
+                        id: savedRecordId,
+                        values: { custevent_ctc_recording_cleanup_pending: true },
+                        options: { enableSourcing: false, ignoreMandatoryFields: true }
+                    });
+                } catch (flagErr) {
+                    log.error({ title: 'CTC checkTranscript — cleanup_pending flag-set failed', details: (flagErr && flagErr.message) || String(flagErr) });
+                }
+            }
 
             return { status: 'completed' };
         } catch (e) {
