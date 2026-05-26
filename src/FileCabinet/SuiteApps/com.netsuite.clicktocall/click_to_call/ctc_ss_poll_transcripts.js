@@ -90,7 +90,18 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
             filters: [
                 ['custevent_ctc_recording_cleanup_pending', 'is', 'T'],
                 'AND',
-                ['custevent_ctc_recording_sid', 'isnotempty', '']
+                ['custevent_ctc_recording_sid', 'isnotempty', ''],
+                'AND',
+                // Sprint 2 review P0 #2 — guard against destructive
+                // flag-flip exploit. Without this filter, any internal
+                // script with Phone Call edit access could set
+                // cleanup_pending=T on an in-flight call (processed=F)
+                // and trigger the cleanup pass to DELETE the Twilio
+                // recording before transcription completes. Recording
+                // is unrecoverable. The cleanup-retry path only makes
+                // sense AFTER enrichment is complete (processed=T) —
+                // before that, the main loop should still own deletion.
+                ['custevent_ctc_processed', 'is', 'T']
             ],
             columns: ['internalid', 'custevent_ctc_recording_sid']
         }).run().getRange({ start: 0, end: 50 });
