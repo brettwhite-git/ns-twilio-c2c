@@ -209,8 +209,9 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
     // GridColumn.Options required fields: `type` (ColumnType enum) +
     // `name` (string identifier). `valueMember` is NOT on the column
     // Options; it lives in widgetOptions (MultiselectDropdown.Options).
-    const CT = (d.DG && d.DG.ColumnType) || {};
-    const BdgType = (d.Bdg && d.Bdg.Type) || {};
+    // UIF v9.0.0 guarantees DataGrid.ColumnType + Badge.Type.
+    const CT = d.DG.ColumnType;
+    const BdgType = d.Bdg.Type;
 
     // Truncate the PN-SID so it fits the cell without wrapping over
     // the phone number text above it. Twilio SIDs are 34 chars; show
@@ -269,7 +270,8 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
     // resolve selectedItems to full employee OBJECTS per-row in
     // widgetOptions. The widget then has full objects to read
     // .name from for chip labels.
-    const IM = (d.DG && d.DG.InputMode) || {};
+    // UIF v9.0.0 guarantees DataGrid.InputMode.
+    const IM = d.DG.InputMode;
 
     // U3 fix #5: chips display "undefined" because column-level
     // `displayMember: 'name'` (string) only works when bound values

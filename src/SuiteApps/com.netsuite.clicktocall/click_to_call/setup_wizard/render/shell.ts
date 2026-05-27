@@ -111,26 +111,23 @@ export type ReactivateHandler = () => void;
  *   vertical: M (24px) — top + bottom inset
  */
 export const wrapContent = (d: EnumsBag, child: unknown): unknown => {
-    if (!d.CP) return child;
-    const Gap = d.CP_Gap || {};
+    // UIF v9.0.0 guarantees ContentPanel + ScrollPanel + their enums.
     const padded = safeNew(d.CP, {
         content: child,
         horizontalAlignment: d.CP_HAlign.STRETCH,
         outerGap: {
-            start: Gap.XXL,
-            end: Gap.XXL,
-            vertical: Gap.M
+            start: d.CP_Gap.XXL,
+            end: d.CP_Gap.XXL,
+            vertical: d.CP_Gap.M
         }
     }, 'ContentPanel(rail-wrapper)') || child;
 
     // Wrap in ScrollPanel(VERTICAL) so the content pane scrolls
     // internally — rail stays put in viewport even when content
     // exceeds the visible area.
-    if (!d.Sp) return padded;
-    const Sp_Orient = (d.Sp && d.Sp.Orientation) || {};
     return safeNew(d.Sp, {
         content: padded,
-        orientation: Sp_Orient.VERTICAL
+        orientation: d.Sp.Orientation.VERTICAL
     }, 'ScrollPanel(rail-content)') || padded;
 };
 

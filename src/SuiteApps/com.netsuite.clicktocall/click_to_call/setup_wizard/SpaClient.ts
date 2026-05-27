@@ -165,47 +165,40 @@ interface SaveResponse {
 
     var run = function (scriptContext) {
         try {
-            console.log("[CTC Setup Wizard] === REAL API PASS ===");
-
             // Resolve enums from the actual classes (verified against d.ts).
+            // UIF v9.0.0 type catalog guarantees all of these — the
+            // pre-catalog `&& || {}` defensive pattern is dead defense.
             var SP    = component.StackPanel;
             var CP    = component.ContentPanel;
             var H     = component.Heading;
             var T     = component.Text;
             var Stp   = component.Stepper;
             var SI    = component.StepperItem;
-            // U1 (Phase 3a) — console-specific components.
             var ND    = component.NavigationDrawer;
             var GP    = component.GridPanel;
             var Bn    = component.Banner;
             var Cd    = component.Card;
             var Tb    = component.ToolBar;
-            // U1.5 — ScrollPanel for content-pane internal scrolling.
             var Sp    = component.ScrollPanel;
-            // U3 (Phase 3b) — DataGrid + column types for inline editing.
             var DG    = component.DataGrid;
             var TC    = component.TemplatedColumn;
             var MDC   = component.MultiselectDropdownColumn;
             var Bdg   = component.Badge;
-            // U3 — ArrayDataSource (from core) for DataGrid rows + dropdown items.
             var Ads   = core.ArrayDataSource;
 
-            var SP_Orient = SP && SP.Orientation || {};
-            var SP_Gap    = SP && SP.GapSize || {};
-            var CP_Gap    = CP && CP.GapSize || {};
-            var CP_HAlign = CP && CP.HorizontalAlignment || {};
-            var H_Type    = H && H.Type || {};
-            var T_Type    = T && T.Type || {};
-            // Stepper.Orientation aliases StepperItem.Orientation per d.ts
-            var Stp_Orient = (Stp && Stp.Orientation) ||
-                             (SI && SI.Orientation) || {};
-            var Bn_Color  = Bn && Bn.Color || {};
-            var GP_Gap    = GP && GP.GapSize || {};
-
-            // U1-polish: SystemIcon for NavigationDrawer item icons.
-            // Without these, NavigationDrawer falls back to a first-
-            // letter monogram per the catalog docs — works but ugly.
-            var SysIcon = (core && core.SystemIcon) || {};
+            var SP_Orient = SP.Orientation;
+            var SP_Gap    = SP.GapSize;
+            var CP_Gap    = CP.GapSize;
+            var CP_HAlign = CP.HorizontalAlignment;
+            var H_Type    = H.Type;
+            var T_Type    = T.Type;
+            // Stepper.Orientation aliases StepperItem.Orientation per d.ts.
+            var Stp_Orient = Stp.Orientation;
+            var Bn_Color  = Bn.Color;
+            var GP_Gap    = GP.GapSize;
+            // SystemIcon for NavigationDrawer item icons. Without these
+            // the drawer falls back to a first-letter monogram.
+            var SysIcon = core.SystemIcon;
 
             enums = {
                 SP: SP, CP: CP, H: H, T: T, Stp: Stp, SI: SI,
@@ -947,8 +940,6 @@ interface SaveResponse {
         return wrapContent(d, stack || items[0]);
     }
 
-    // wrapContent moved to render/shell.ts (Path B.3e-3).
-
     /**
      * U1: NavigationDrawer with grouped items. Per d.ts (component.d.ts:13874+),
      * ItemOptions supports nested `items`, badges, separators, and a
@@ -1173,28 +1164,6 @@ interface SaveResponse {
         }, "StackPanel(console-summary)");
     }
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /* U7-ish (paused-state banner, single-section-only for now)          */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    /**
-     * U1 / U7 partial: when snapshot.active=false, render a persistent
-     * orange Banner above section content with a Reactivate button. R7
-     * says do NOT bounce admin to the stepper on deactivate — admin stays
-     * here, banner-gated. Full U7 fans this across every section; U1
-     * places it ONCE at the page root above the console shell, which
-     * achieves the same visual outcome for less code.
-     */
-    // buildPausedBanner moved to render/shell.ts (Path B.3e-3).
-    // It now takes onReactivate as a callback parameter instead of
-    // referencing the SpaClient-scoped onReactivateClick directly.
-
-    // U2 — Overview section moved to sections/overview.ts (Path B.3h).
-    // U3 — Phones section moved to sections/phones.ts (Path B.3j).
-    // U4 — Voice config section moved to sections/voice.ts (Path B.3i).
-    // U5 — Credentials section moved to sections/credentials.ts (Path B.3f).
-    // U6 — Health section moved to sections/health.ts (Path B.3g).
-
 
     /**
      * Step-router for the body content. Dispatches on CURRENT_STEP and
@@ -1373,33 +1342,10 @@ interface SaveResponse {
         }
         goToStep(CURRENT_STEP + 1);
     }
-
-
-
-
-    /* ────────────────────────────────────────────────────────────────── */
-    /* Shared form helper                                                 */
-    /* Path B.3e-2 — buildTextField/buildCheckRow/badgeFor/buildErrorBox  */
-    /* moved to render/shared.ts (imported at module top).                */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    // buildPrereqsList moved to render/shared.ts (Path B.4-1).
-
-    // buildCheckRow / badgeFor / buildErrorBox moved to render/shared.ts
-    // (Path B.3e-2). The original implementations were lifted verbatim
-    // into named exports there.
-
     function buildStepper(d) {
-        if (!d.SP || !d.T || !d.SI) {
-            // Note: d.SI here is just used as a presence check (StepperItem
-            // class) — we still want the badge if the rest fail.
-        }
-
-        // UIF type catalog v9.0.0 guarantees these classes + nested
-        // enums exist. The original `|| {}` defensive pattern (from
-        // pre-catalog days when SP/Bn/etc. were optional at runtime)
-        // produced unsafe empty-object types that swallowed enum-
-        // member access errors.
+        // UIF v9.0.0 type catalog guarantees these classes + nested
+        // enums exist; the pre-catalog `|| {}` fallbacks have been
+        // removed. Pull enums directly from the typed catalog.
         var Badge = component.Badge;
         var BadgeType = Badge.Type;
         var BadgeSize = Badge.Size;

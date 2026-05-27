@@ -282,24 +282,18 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     };
 
     const wrapContent = (d, child) => {
-        if (!d.CP)
-            return child;
-        const Gap = d.CP_Gap || {};
         const padded = safeNew(d.CP, {
             content: child,
             horizontalAlignment: d.CP_HAlign.STRETCH,
             outerGap: {
-                start: Gap.XXL,
-                end: Gap.XXL,
-                vertical: Gap.M
+                start: d.CP_Gap.XXL,
+                end: d.CP_Gap.XXL,
+                vertical: d.CP_Gap.M
             }
         }, 'ContentPanel(rail-wrapper)') || child;
-        if (!d.Sp)
-            return padded;
-        const Sp_Orient = (d.Sp && d.Sp.Orientation) || {};
         return safeNew(d.Sp, {
             content: padded,
-            orientation: Sp_Orient.VERTICAL
+            orientation: d.Sp.Orientation.VERTICAL
         }, 'ScrollPanel(rail-content)') || padded;
     };
     const buildPausedBanner = (d, onReactivate) => {
@@ -627,7 +621,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             console.error('[CTC] Health checks ArrayDataSource failed:', e);
             return null;
         }
-        const CT = (d.DG && d.DG.ColumnType) || {};
+        const CT = d.DG.ColumnType;
         const statusColDef = {
             type: CT.TEMPLATED,
             name: 'status',
@@ -1307,8 +1301,8 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             console.error('[CTC] ArrayDataSource construction failed:', e);
             return buildPhonesFallback(d);
         }
-        const CT = (d.DG && d.DG.ColumnType) || {};
-        const BdgType = (d.Bdg && d.Bdg.Type) || {};
+        const CT = d.DG.ColumnType;
+        const BdgType = d.Bdg.Type;
         const truncSid = (sid) => {
             if (!sid)
                 return '';
@@ -1348,7 +1342,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 }
             }
         };
-        const IM = (d.DG && d.DG.InputMode) || {};
+        const IM = d.DG.InputMode;
         const repsDisplayMember = (value) => {
             if (value && typeof value === 'object') {
                 return value.name || '';
@@ -2035,7 +2029,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     var enums = null;
     var run = function (scriptContext) {
         try {
-            console.log("[CTC Setup Wizard] === REAL API PASS ===");
             var SP = component__namespace.StackPanel;
             var CP = component__namespace.ContentPanel;
             var H = component__namespace.Heading;
@@ -2053,17 +2046,16 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             var MDC = component__namespace.MultiselectDropdownColumn;
             var Bdg = component__namespace.Badge;
             var Ads = core__namespace.ArrayDataSource;
-            var SP_Orient = SP && SP.Orientation || {};
-            var SP_Gap = SP && SP.GapSize || {};
-            var CP_Gap = CP && CP.GapSize || {};
-            var CP_HAlign = CP && CP.HorizontalAlignment || {};
-            var H_Type = H && H.Type || {};
-            var T_Type = T && T.Type || {};
-            var Stp_Orient = (Stp && Stp.Orientation) ||
-                (SI && SI.Orientation) || {};
-            var Bn_Color = Bn && Bn.Color || {};
-            var GP_Gap = GP && GP.GapSize || {};
-            var SysIcon = (core__namespace && core__namespace.SystemIcon) || {};
+            var SP_Orient = SP.Orientation;
+            var SP_Gap = SP.GapSize;
+            var CP_Gap = CP.GapSize;
+            var CP_HAlign = CP.HorizontalAlignment;
+            var H_Type = H.Type;
+            var T_Type = T.Type;
+            var Stp_Orient = Stp.Orientation;
+            var Bn_Color = Bn.Color;
+            var GP_Gap = GP.GapSize;
+            var SysIcon = core__namespace.SystemIcon;
             enums = {
                 SP: SP, CP: CP, H: H, T: T, Stp: Stp, SI: SI,
                 ND: ND, GP: GP, Bn: Bn, Cd: Cd, Tb: Tb,
@@ -2793,7 +2785,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         goToStep(CURRENT_STEP + 1);
     }
     function buildStepper(d) {
-        if (!d.SP || !d.T || !d.SI) ;
         var Badge = component__namespace.Badge;
         var BadgeType = Badge.Type;
         var BadgeSize = Badge.Size;

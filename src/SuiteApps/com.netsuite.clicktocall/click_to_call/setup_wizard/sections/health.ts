@@ -242,7 +242,8 @@ const buildHealthChecksDataGrid = (
         return null;
     }
 
-    const CT = (d.DG && d.DG.ColumnType) || {};
+    // UIF v9.0.0 guarantees DataGrid.ColumnType.
+    const CT = d.DG.ColumnType;
 
     const statusColDef = {
         type: CT.TEMPLATED,
