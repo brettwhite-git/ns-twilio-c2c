@@ -322,6 +322,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'BannerMessage(paused)');
     };
     const buildStatCard = (d, spec) => {
+        if (spec.icon) {
+            return buildStatCardWithIcon(d, spec);
+        }
         try {
             return d.Cd.metric({
                 title: spec.title,
@@ -333,6 +336,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             console.warn('[CTC Setup Wizard] Card.metric threw, ' +
                 'falling back to manual stack:', e);
         }
+        return buildStatCardManualStack(d, spec);
+    };
+    const buildStatCardManualStack = (d, spec) => {
         const label = safeNew(d.T, {
             text: spec.title,
             type: d.T_Type.WEAK,
@@ -352,6 +358,52 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XXS
         }, 'StackPanel(stat-card-' + spec.title + ')');
+    };
+    const buildStatCardWithIcon = (d, spec) => {
+        const label = safeNew(d.T, {
+            text: spec.title,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(stat-label-' + spec.title + ')');
+        const iconColor = toneToImageColor(spec.tone);
+        const ImageCtor = component__namespace.Image;
+        const icon = safeNew(ImageCtor, {
+            image: spec.icon,
+            size: component__namespace.Image.Size.M,
+            color: iconColor,
+            presentation: true
+        }, 'Image(stat-icon-' + spec.title + ')');
+        const value = safeNew(d.H, {
+            content: spec.metric,
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(stat-value-' + spec.title + ')');
+        const valueRow = safeNew(d.SP, {
+            items: [icon, value].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(stat-value-row-' + spec.title + ')') || value;
+        const sub = spec.description ? safeNew(d.T, {
+            text: spec.description,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(stat-sub-' + spec.title + ')') : null;
+        return safeNew(d.SP, {
+            items: [label, valueRow, sub].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, 'StackPanel(stat-card-icon-' + spec.title + ')');
+    };
+    const toneToImageColor = (tone) => {
+        if (!tone)
+            return undefined;
+        switch (tone) {
+            case 'success': return core__namespace.ImageConstant.Color.SUCCESS;
+            case 'warning': return core__namespace.ImageConstant.Color.WARNING;
+            case 'info': return core__namespace.ImageConstant.Color.INFO;
+            case 'neutral': return core__namespace.ImageConstant.Color.NEUTRAL;
+            default: return undefined;
+        }
     };
 
     const buildCredentialsSection = (d) => {
@@ -815,12 +867,20 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         const preflightTotal = preflight.length;
         const statusLabel = snap.active === false ? 'Paused' :
             snap.active === true ? 'Active' : 'Unknown';
+        const statusIcon = snap.active === true ? core__namespace.SystemIcon.STATUS_SUCCESS_FILLED :
+            snap.active === false ? core__namespace.SystemIcon.STATUS_WARNING_FILLED :
+                core__namespace.SystemIcon.STATUS_INFO_FILLED;
+        const statusTone = snap.active === true ? 'success' :
+            snap.active === false ? 'warning' :
+                'info';
         const cards = [
             buildStatCard(d, {
                 title: 'Status',
                 metric: statusLabel,
                 description: snap.active === false ? 'Reps cannot place calls'
-                    : 'Reps can place calls'
+                    : 'Reps can place calls',
+                icon: statusIcon,
+                tone: statusTone
             }),
             buildStatCard(d, {
                 title: 'Phone numbers',

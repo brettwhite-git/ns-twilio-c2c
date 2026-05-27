@@ -14,11 +14,12 @@
  * OverviewSectionDeps carries that callback explicitly.
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from '../render/primitives';
 import { STATE } from '../state';
 import { buildStatCard } from '../render/shell';
-import type { EnumsBag } from '../render/shell';
+import type { EnumsBag, StatCardTone } from '../render/shell';
 import type { SectionName } from '../dispatch';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -106,15 +107,27 @@ const buildOverviewStatCards = (d: EnumsBag): unknown => {
     const repCount = assignments.length;
     const preflightPassed = preflight.filter((c) => c.status === 'pass').length;
     const preflightTotal = preflight.length;
+    // Path C-2: Status card gets a semantic SystemIcon + color so admins
+    // can scan Active/Paused state at a glance. The other 3 cards stay
+    // text-only because their metric values are numeric and don't have
+    // a binary good/bad semantic.
     const statusLabel = snap.active === false ? 'Paused' :
                         snap.active === true ? 'Active' : 'Unknown';
+    const statusIcon = snap.active === true  ? core.SystemIcon.STATUS_SUCCESS_FILLED :
+                       snap.active === false ? core.SystemIcon.STATUS_WARNING_FILLED :
+                                                core.SystemIcon.STATUS_INFO_FILLED;
+    const statusTone: StatCardTone = snap.active === true  ? 'success' :
+                                     snap.active === false ? 'warning' :
+                                                              'info';
 
     const cards = [
         buildStatCard(d, {
             title: 'Status',
             metric: statusLabel,
             description: snap.active === false ? 'Reps cannot place calls'
-                                               : 'Reps can place calls'
+                                               : 'Reps can place calls',
+            icon: statusIcon,
+            tone: statusTone
         }),
         buildStatCard(d, {
             title: 'Phone numbers',
