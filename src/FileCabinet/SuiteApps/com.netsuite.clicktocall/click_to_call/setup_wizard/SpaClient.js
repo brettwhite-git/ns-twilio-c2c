@@ -1232,7 +1232,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     const TWILIO_DOCS = {
         twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
-        phoneNumber: 'https://www.twilio.com/docs/phone-numbers',
+        phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
         intelService: 'https://www.twilio.com/docs/voice/intelligence'
     };
     const buildVoiceSection = (d, deps) => {

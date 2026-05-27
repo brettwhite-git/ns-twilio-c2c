@@ -66,13 +66,25 @@ interface VoiceFieldSpec {
 
 /**
  * Path C-5: Twilio docs URLs for each voice config field. Public docs,
- * no auth required. URLs point at the canonical landing for each
- * resource type so admins can verify field semantics before changing
- * production config.
+ * no auth required. All three verified via WebFetch (200 OK + content
+ * relevance check) on 2026-05-27 — these point at the most specific
+ * canonical doc for each wizard field rather than generic landings:
+ *
+ *   - twimlApp:     REST API: Applications — documents the TwiML
+ *                   Application resource the wizard configures
+ *                   (the dropdown lists Application SIDs from this API)
+ *   - phoneNumber:  IncomingPhoneNumber resource — documents the exact
+ *                   resource the wizard's caller-ID dropdown queries
+ *                   (Twilio-owned numbers in the account, the set you
+ *                   can use as outbound caller IDs)
+ *   - intelService: Conversation Intelligence — the current canonical
+ *                   Voice Intelligence landing (URL still says "voice/
+ *                   intelligence" and page is labelled "classic" but
+ *                   this is where the product docs live)
  */
 const TWILIO_DOCS = {
     twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
-    phoneNumber: 'https://www.twilio.com/docs/phone-numbers',
+    phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
     intelService: 'https://www.twilio.com/docs/voice/intelligence'
 };
 
