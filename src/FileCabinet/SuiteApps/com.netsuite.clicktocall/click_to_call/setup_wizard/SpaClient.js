@@ -1196,6 +1196,255 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         });
     };
 
+    const buildPhonesSection = (d, deps) => {
+        const items = [];
+        const heading = safeNew(d.H, {
+            content: 'Phones & reps',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(phones)');
+        if (heading)
+            items.push(heading);
+        if (STATE.console.phonesLoading) {
+            const loader = safeNew(component__namespace.Loader, {
+                label: 'Loading phones & reps…',
+                indeterminate: true
+            }, 'Loader(phones)');
+            if (loader)
+                items.push(loader);
+            return safeNew(d.SP, {
+                items: items,
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.L
+            }, 'StackPanel(phones-loading)') || heading;
+        }
+        const toolbar = buildPhonesToolbar(d, deps);
+        if (toolbar)
+            items.push(toolbar);
+        if (STATE.console.phonesError) {
+            const err = safeNew(d.T, {
+                text: '✕ ' + STATE.console.phonesError,
+                type: d.T_Type.STRONG
+            }, 'Text(phones-error)');
+            if (err)
+                items.push(err);
+        }
+        const grid = buildPhonesDataGrid(d, deps);
+        if (grid)
+            items.push(grid);
+        const grouped = (STATE.console.phonesByPhone || []);
+        if (grouped.length === 0) {
+            const emptyText = safeNew(d.T, {
+                text: 'No phone numbers configured yet. Click "Add phone ' +
+                    'number" above to claim a Twilio number and assign reps.',
+                type: d.T_Type.WEAK
+            }, 'Text(phones-empty)');
+            if (emptyText)
+                items.push(emptyText);
+        }
+        if (items.length === 0)
+            return safeNew(d.T, { text: 'Phones & reps' }, 'Text(phones-section-empty)');
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XL
+        }, 'StackPanel(phones)');
+    };
+    const buildPhonesToolbar = (d, deps) => {
+        const ButtonType = component__namespace.Button.Type;
+        const refreshBtn = safeNew(component__namespace.Button, {
+            label: 'Refresh from Twilio',
+            type: ButtonType.DEFAULT,
+            startIcon: d.SysIcon && d.SysIcon.REFRESH,
+            action: () => { deps.loadPhonesData(); }
+        }, 'Button(phones-refresh)');
+        const addBtn = safeNew(component__namespace.Button, {
+            label: 'Add phone number',
+            type: ButtonType.PRIMARY,
+            startIcon: d.SysIcon && d.SysIcon.ADD,
+            action: () => {
+                deps.goToStep(4);
+            }
+        }, 'Button(phones-add)');
+        const buttons = [refreshBtn, addBtn].filter((b) => b != null);
+        if (buttons.length === 0)
+            return null;
+        return safeNew(d.SP, {
+            items: buttons,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(phones-toolbar)');
+    };
+    const buildPhonesDataGrid = (d, deps) => {
+        if (!d.DG) {
+            console.warn('[CTC] DataGrid component unavailable; falling back to text');
+            return buildPhonesFallback(d);
+        }
+        const grouped = (STATE.console.phonesByPhone || []);
+        const employees = (STATE.console.phonesEmployees || []);
+        if (grouped.length === 0)
+            return null;
+        let rowsDs;
+        let employeesDs;
+        try {
+            rowsDs = new d.Ads(grouped);
+            employeesDs = new d.Ads(employees);
+        }
+        catch (e) {
+            console.error('[CTC] ArrayDataSource construction failed:', e);
+            return buildPhonesFallback(d);
+        }
+        const CT = (d.DG && d.DG.ColumnType) || {};
+        const BdgType = (d.Bdg && d.Bdg.Type) || {};
+        const truncSid = (sid) => {
+            if (!sid)
+                return '';
+            if (sid.length <= 14)
+                return sid;
+            return sid.slice(0, 6) + '…' + sid.slice(-4);
+        };
+        const phoneColDef = {
+            type: CT.TEMPLATED,
+            name: 'phone',
+            label: 'Phone number',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(phone-empty)');
+                    const top = safeNew(d.T, {
+                        text: row.phoneNumber || '(unknown)',
+                        type: d.T_Type.STRONG
+                    }, 'Text(phone-top)');
+                    const sub = safeNew(d.T, {
+                        text: truncSid(row.phoneSid),
+                        type: d.T_Type.WEAK,
+                        size: d.T.Size && d.T.Size.S
+                    }, 'Text(phone-sub)');
+                    return safeNew(d.SP, {
+                        items: [top, sub].filter((c) => c != null),
+                        orientation: d.SP_Orient.VERTICAL,
+                        itemGap: d.SP_Gap.XXS
+                    }, 'StackPanel(phone-cell)') || top || safeNew(d.T, { text: row.phoneNumber || '' }, 'Text(phone-fallback)');
+                }
+                catch (e) {
+                    console.error('[CTC] phone column template threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(phone-error)');
+                }
+            }
+        };
+        const IM = (d.DG && d.DG.InputMode) || {};
+        const repsDisplayMember = (value) => {
+            if (value && typeof value === 'object') {
+                return value.name || '';
+            }
+            const id = Number(value);
+            const emp = (STATE.console.phonesEmployees || [])
+                .find((e) => e.id === id);
+            return emp ? (emp.name || '') : '';
+        };
+        const repsColDef = {
+            type: CT.MULTI_SELECT_DROPDOWN,
+            name: 'reps',
+            label: 'Assigned reps',
+            stretchFactor: 5,
+            binding: 'employeeIds',
+            inputMode: IM.EDIT_ONLY,
+            dataSource: employeesDs,
+            displayMember: repsDisplayMember,
+            editable: true,
+            widgetOptions: (row) => {
+                const dataItem = (row && row.dataItem) || {};
+                const phoneSid = dataItem.phoneSid;
+                return {
+                    dataSource: employeesDs,
+                    valueMember: 'id',
+                    displayMember: 'name',
+                    placeholder: 'Pick reps',
+                    onSelectionChanged: (args) => {
+                        const newIds = ((args && args.values) || []).map((v) => {
+                            if (v && typeof v === 'object')
+                                return Number(v.id);
+                            return Number(v);
+                        });
+                        if (phoneSid) {
+                            deps.onPhonesRowSelectionChanged(phoneSid, newIds);
+                        }
+                    }
+                };
+            }
+        };
+        const statusColDef = {
+            type: CT.TEMPLATED,
+            name: 'status',
+            label: 'Status',
+            stretchFactor: 1,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
+                    const saving = STATE.console.phonesSaving[row.phoneSid || ''];
+                    const hasReps = (row.employeeIds || []).length > 0;
+                    if (saving) {
+                        return safeNew(d.Bdg, {
+                            content: 'Saving…',
+                            type: BdgType.SUBTLE
+                        }, 'Badge(saving)') || safeNew(d.T, { text: 'Saving…' }, 'Text(saving-fallback)');
+                    }
+                    else if (hasReps) {
+                        return safeNew(d.Bdg, {
+                            content: '✓ Live',
+                            type: BdgType.SOLID
+                        }, 'Badge(live)') || safeNew(d.T, { text: '✓ Live' }, 'Text(live-fallback)');
+                    }
+                    return safeNew(d.Bdg, {
+                        content: 'No reps',
+                        type: BdgType.SUBTLE
+                    }, 'Badge(no-reps)') || safeNew(d.T, { text: 'No reps' }, 'Text(no-reps-fallback)');
+                }
+                catch (e) {
+                    console.error('[CTC] status column template threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
+                }
+            }
+        };
+        const columns = [phoneColDef, repsColDef, statusColDef];
+        const grid = safeNew(d.DG, {
+            dataSource: rowsDs,
+            columns: columns,
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            stripedRows: true,
+            dataRowHeight: 72,
+            headerRowHeight: 44,
+            editable: true,
+            rootStyle: { width: '100%' }
+        }, 'DataGrid(phones)');
+        if (!grid) {
+            console.warn('[CTC] DataGrid construction returned null; using text fallback');
+            return buildPhonesFallback(d);
+        }
+        return grid;
+    };
+    const buildPhonesFallback = (d) => {
+        const grouped = (STATE.console.phonesByPhone || []);
+        const rows = grouped.map((g) => {
+            const label = (g.phoneNumber || '(unknown)') + ' — ' +
+                (g.employeeIds || []).length + ' rep(s)';
+            return safeNew(d.T, { text: label }, 'Text(phone-row)');
+        }).filter((r) => r != null);
+        if (rows.length === 0)
+            return null;
+        return safeNew(d.SP, {
+            items: rows,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, 'StackPanel(phones-fallback)');
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -1788,7 +2037,11 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
             case 'overview': return buildOverviewSection(d, { goToSection: goToSection });
-            case 'phones': return buildPhonesSection(d);
+            case 'phones': return buildPhonesSection(d, {
+                loadPhonesData: loadPhonesData,
+                goToStep: goToStep,
+                onPhonesRowSelectionChanged: onPhonesRowSelectionChanged
+            });
             case 'voice': return buildVoiceSection(d, { rerender: rerender });
             case 'credentials': return buildCredentialsSection(d);
             case 'health': return buildHealthSection(d, {
@@ -1797,254 +2050,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             });
             default: return buildOverviewSection(d, { goToSection: goToSection });
         }
-    }
-    function buildPhonesSection(d) {
-        var items = [];
-        var heading = safeNew(d.H, {
-            content: "Phones & reps",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(phones)");
-        if (heading)
-            items.push(heading);
-        if (STATE.console.phonesLoading) {
-            var loader = safeNew(component__namespace.Loader, {
-                label: "Loading phones & reps…",
-                indeterminate: true
-            }, "Loader(phones)");
-            if (loader)
-                items.push(loader);
-            return safeNew(d.SP, {
-                items: items,
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.L
-            }, "StackPanel(phones-loading)") || heading;
-        }
-        var toolbar = buildPhonesToolbar(d);
-        if (toolbar)
-            items.push(toolbar);
-        if (STATE.console.phonesError) {
-            var err = safeNew(d.T, {
-                text: "✕ " + STATE.console.phonesError,
-                type: d.T_Type.STRONG
-            }, "Text(phones-error)");
-            if (err)
-                items.push(err);
-        }
-        var grid = buildPhonesDataGrid(d);
-        if (grid)
-            items.push(grid);
-        var grouped = STATE.console.phonesByPhone || [];
-        if (grouped.length === 0) {
-            var emptyText = safeNew(d.T, {
-                text: "No phone numbers configured yet. Click \"Add phone " +
-                    "number\" above to claim a Twilio number and assign reps.",
-                type: d.T_Type.WEAK
-            }, "Text(phones-empty)");
-            if (emptyText)
-                items.push(emptyText);
-        }
-        if (items.length === 0)
-            return safeNew(d.T, { text: "Phones & reps" });
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XL
-        }, "StackPanel(phones)");
-    }
-    function buildPhonesToolbar(d) {
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        var refreshBtn = safeNew(component__namespace.Button, {
-            label: "Refresh from Twilio",
-            type: ButtonType.DEFAULT,
-            startIcon: d.SysIcon && d.SysIcon.REFRESH,
-            action: function () { loadPhonesData(); }
-        }, "Button(phones-refresh)");
-        var addBtn = safeNew(component__namespace.Button, {
-            label: "Add phone number",
-            type: ButtonType.PRIMARY,
-            startIcon: d.SysIcon && d.SysIcon.ADD,
-            action: function () {
-                goToStep(4);
-            }
-        }, "Button(phones-add)");
-        var buttons = [refreshBtn, addBtn].filter(function (b) { return b != null; });
-        if (buttons.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(phones-toolbar)");
-    }
-    function buildPhonesDataGrid(d) {
-        if (!d.DG) {
-            console.warn("[CTC] DataGrid component unavailable; falling back to text");
-            return buildPhonesFallback(d);
-        }
-        var grouped = STATE.console.phonesByPhone || [];
-        var employees = STATE.console.phonesEmployees || [];
-        if (grouped.length === 0)
-            return null;
-        var rowsDs, employeesDs;
-        try {
-            rowsDs = new d.Ads(grouped);
-            employeesDs = new d.Ads(employees);
-        }
-        catch (e) {
-            console.error("[CTC] ArrayDataSource construction failed:", e);
-            return buildPhonesFallback(d);
-        }
-        var CT = (d.DG && d.DG.ColumnType) || {};
-        var BdgType = (d.Bdg && d.Bdg.Type) || {};
-        function truncSid(sid) {
-            if (!sid)
-                return '';
-            if (sid.length <= 14)
-                return sid;
-            return sid.slice(0, 6) + '…' + sid.slice(-4);
-        }
-        var phoneColDef = {
-            type: CT.TEMPLATED,
-            name: 'phone',
-            label: 'Phone number',
-            stretchFactor: 2,
-            content: function (args) {
-                try {
-                    var row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' });
-                    var top = safeNew(d.T, {
-                        text: row.phoneNumber || '(unknown)',
-                        type: d.T_Type.STRONG
-                    }, "Text(phone-top)");
-                    var sub = safeNew(d.T, {
-                        text: truncSid(row.phoneSid),
-                        type: d.T_Type.WEAK,
-                        size: d.T.Size && d.T.Size.S
-                    }, "Text(phone-sub)");
-                    return safeNew(d.SP, {
-                        items: [top, sub].filter(function (c) { return c != null; }),
-                        orientation: d.SP_Orient.VERTICAL,
-                        itemGap: d.SP_Gap.XXS
-                    }, "StackPanel(phone-cell)") || top || safeNew(d.T, { text: row.phoneNumber || '' });
-                }
-                catch (e) {
-                    console.error("[CTC] phone column template threw:", e);
-                    return safeNew(d.T, { text: '(error)' });
-                }
-            }
-        };
-        var IM = (d.DG && d.DG.InputMode) || {};
-        function repsDisplayMember(value) {
-            if (value && typeof value === 'object') {
-                return value.name || '';
-            }
-            var id = Number(value);
-            var emp = (STATE.console.phonesEmployees || []).find(function (e) {
-                return e.id === id;
-            });
-            return emp ? emp.name : '';
-        }
-        var repsColDef = {
-            type: CT.MULTI_SELECT_DROPDOWN,
-            name: 'reps',
-            label: 'Assigned reps',
-            stretchFactor: 5,
-            binding: 'employeeIds',
-            inputMode: IM.EDIT_ONLY,
-            dataSource: employeesDs,
-            displayMember: repsDisplayMember,
-            editable: true,
-            widgetOptions: function (row) {
-                var dataItem = (row && row.dataItem) || {};
-                var phoneSid = dataItem.phoneSid;
-                return {
-                    dataSource: employeesDs,
-                    valueMember: 'id',
-                    displayMember: 'name',
-                    placeholder: 'Pick reps',
-                    onSelectionChanged: function (args) {
-                        var newIds = ((args && args.values) || []).map(function (v) {
-                            if (v && typeof v === 'object')
-                                return Number(v.id);
-                            return Number(v);
-                        });
-                        if (phoneSid) {
-                            onPhonesRowSelectionChanged(phoneSid, newIds);
-                        }
-                    }
-                };
-            }
-        };
-        var statusColDef = {
-            type: CT.TEMPLATED,
-            name: 'status',
-            label: 'Status',
-            stretchFactor: 1,
-            content: function (args) {
-                try {
-                    var row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' });
-                    var saving = STATE.console.phonesSaving[row.phoneSid];
-                    var hasReps = (row.employeeIds || []).length > 0;
-                    if (saving) {
-                        return safeNew(d.Bdg, {
-                            content: 'Saving…',
-                            type: BdgType.SUBTLE
-                        }, "Badge(saving)") || safeNew(d.T, { text: 'Saving…' });
-                    }
-                    else if (hasReps) {
-                        return safeNew(d.Bdg, {
-                            content: '✓ Live',
-                            type: BdgType.SOLID
-                        }, "Badge(live)") || safeNew(d.T, { text: '✓ Live' });
-                    }
-                    return safeNew(d.Bdg, {
-                        content: 'No reps',
-                        type: BdgType.SUBTLE
-                    }, "Badge(no-reps)") || safeNew(d.T, { text: 'No reps' });
-                }
-                catch (e) {
-                    console.error("[CTC] status column template threw:", e);
-                    return safeNew(d.T, { text: '(error)' });
-                }
-            }
-        };
-        var columns = [phoneColDef, repsColDef, statusColDef];
-        var grid = safeNew(d.DG, {
-            dataSource: rowsDs,
-            columns: columns,
-            columnStretch: true,
-            highlightRowsOnHover: true,
-            stripedRows: true,
-            dataRowHeight: 72,
-            headerRowHeight: 44,
-            editable: true,
-            rootStyle: { width: '100%' }
-        }, "DataGrid(phones)");
-        if (!grid) {
-            console.warn("[CTC] DataGrid construction returned null; using text fallback");
-            return buildPhonesFallback(d);
-        }
-        return grid;
-    }
-    function buildPhonesFallback(d) {
-        var grouped = STATE.console.phonesByPhone || [];
-        var rows = grouped.map(function (g) {
-            var label = (g.phoneNumber || '(unknown)') + ' — ' +
-                (g.employeeIds || []).length + ' rep(s)';
-            return safeNew(d.T, { text: label }, "Text(phone-row)");
-        }).filter(function (r) { return r != null; });
-        if (rows.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: rows,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(phones-fallback)");
     }
     function buildStepBodyContainer(d) {
         var initial;
