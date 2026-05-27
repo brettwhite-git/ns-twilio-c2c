@@ -99,6 +99,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }).then(extractPayload);
     };
 
+    let MODE = 'stepper';
+    let CURRENT_STEP = 1;
+    let SELECTED_SECTION = 'overview';
+    let RAIL_VISIBLE = false;
+    const setMode = (m) => { MODE = m; };
+    const setCurrentStep = (n) => { CURRENT_STEP = n; };
+    const setSelectedSection = (s) => { SELECTED_SECTION = s; };
+    const setRailVisible = (v) => { RAIL_VISIBLE = v; };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -106,10 +115,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
         { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
-    var CURRENT_STEP = 1;
-    var MODE = 'stepper';
-    var SELECTED_SECTION = 'overview';
-    var RAIL_VISIBLE = false;
     var scriptCtx = null;
     var bodyContainer = null;
     var enums = null;
@@ -271,8 +276,8 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
     }
     function goToStep(stepNum) {
-        MODE = 'stepper';
-        CURRENT_STEP = Math.max(1, Math.min(STEPS.length, stepNum));
+        setMode('stepper');
+        setCurrentStep(Math.max(1, Math.min(STEPS.length, stepNum)));
         rerender();
         if (CURRENT_STEP === 1)
             loadPrereqs();
@@ -284,9 +289,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             loadStep5();
     }
     function goToConsole() {
-        MODE = 'console';
-        SELECTED_SECTION = 'overview';
-        RAIL_VISIBLE = true;
+        setMode('console');
+        setSelectedSection('overview');
+        setRailVisible(true);
         STATE.console.pendingDeactivateConfirm = false;
         STATE.console.deactivateError = null;
         STATE.console.actionError = null;
@@ -354,9 +359,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         };
     }
     function goToSection(sectionName) {
-        SELECTED_SECTION = sectionName;
+        setSelectedSection(sectionName);
         if (MODE === 'stepper') {
-            MODE = 'console';
+            setMode('console');
         }
         STATE.console.pendingDeactivateConfirm = false;
         STATE.console.actionError = null;

@@ -39,6 +39,10 @@
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { wizardCall, extractPayload, WIZARD_API_URL } from './wizard_api_client';
+import {
+    MODE, CURRENT_STEP, SELECTED_SECTION, RAIL_VISIBLE,
+    setMode, setCurrentStep, setSelectedSection, setRailVisible
+} from './dispatch';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -51,23 +55,12 @@ import { wizardCall, extractPayload, WIZARD_API_URL } from './wizard_api_client'
         { num: 4, label: 'Phone numbers',   sub: 'Claim & assign' },
         { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
-    var CURRENT_STEP = 1; // 1-based; mutated by Continue/Back
-    // U11: 'stepper' (default — Steps 1-5) vs 'console' (post-activation
-    // Admin Console). Mutated by run() resumability + console actions
-    // ("Re-run wizard from start" flips back to 'stepper').
-    var MODE = 'stepper';
-    // U1 (Phase 3a — multi-section console): active section when
-    // MODE='console'. Routes content via NavigationDrawer onSelectedValueChanged.
-    // 'overview' | 'phones' | 'voice' | 'credentials' | 'health'
-    var SELECTED_SECTION = 'overview';
-    // U1.5: once admin has reached the console (snapshot.active === true),
-    // the left rail stays visible even when they click "Re-run wizard" and
-    // drop back into stepper mode. Only fresh installs (never activated)
-    // see the rail-less full-page stepper.
-    var RAIL_VISIBLE = false;
+    // Path B.3c — CURRENT_STEP / MODE / SELECTED_SECTION / RAIL_VISIBLE
+    // moved to ./dispatch.ts. Imported (top of file). Mutations route
+    // through setMode/setCurrentStep/setSelectedSection/setRailVisible.
 
     // Path B.3b — WIZARD_API_URL, wizardCall, extractPayload moved
-    // to ./wizard_api_client.ts. Still imported (line ~40) so
+    // to ./wizard_api_client.ts. Still imported (top of file) so
     // existing in-file references stay valid.
 
     // Module-level state — populated by mount + form inputs.
@@ -304,8 +297,8 @@ import { wizardCall, extractPayload, WIZARD_API_URL } from './wizard_api_client'
      * AND for jumping out of the Admin Console into a specific step.
      */
     function goToStep(stepNum) {
-        MODE = 'stepper';
-        CURRENT_STEP = Math.max(1, Math.min(STEPS.length, stepNum));
+        setMode('stepper');
+        setCurrentStep(Math.max(1, Math.min(STEPS.length, stepNum)));
         rerender();
         if (CURRENT_STEP === 1) loadPrereqs();
         if (CURRENT_STEP === 3) loadStep3Lists();
@@ -320,9 +313,9 @@ import { wizardCall, extractPayload, WIZARD_API_URL } from './wizard_api_client'
      * stepper mode if admin clicks "Re-run wizard."
      */
     function goToConsole() {
-        MODE = 'console';
-        SELECTED_SECTION = 'overview';
-        RAIL_VISIBLE = true;
+        setMode('console');
+        setSelectedSection('overview');
+        setRailVisible(true);
         STATE.console.pendingDeactivateConfirm = false;
         STATE.console.deactivateError = null;
         STATE.console.actionError = null;
@@ -428,12 +421,12 @@ import { wizardCall, extractPayload, WIZARD_API_URL } from './wizard_api_client'
      * is needed unless the section has section-specific data.
      */
     function goToSection(sectionName) {
-        SELECTED_SECTION = sectionName;
+        setSelectedSection(sectionName);
         // U1.5: if entering console from stepper mode (Re-run → navigate),
         // also flip MODE back so the rail's onSelectedValueChanged sees
         // console state.
         if (MODE === 'stepper') {
-            MODE = 'console';
+            setMode('console');
         }
         STATE.console.pendingDeactivateConfirm = false; // cancel pending
         STATE.console.actionError = null;
