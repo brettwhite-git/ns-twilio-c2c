@@ -53,6 +53,7 @@ import {
 } from './render/shell';
 import { buildCredentialsSection } from './sections/credentials';
 import { buildHealthSection } from './sections/health';
+import { buildOverviewSection } from './sections/overview';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -947,7 +948,7 @@ import { buildHealthSection } from './sections/health';
      */
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
-            case 'overview':    return buildOverviewSection(d);
+            case 'overview':    return buildOverviewSection(d, { goToSection: goToSection });
             case 'phones':      return buildPhonesSection(d);
             case 'voice':       return buildVoiceSection(d);
             case 'credentials': return buildCredentialsSection(d);
@@ -955,7 +956,7 @@ import { buildHealthSection } from './sections/health';
                 rerender: rerender,
                 onDeactivateClick: onDeactivateClick
             });
-            default:            return buildOverviewSection(d);
+            default:            return buildOverviewSection(d, { goToSection: goToSection });
         }
     }
 
@@ -1077,197 +1078,7 @@ import { buildHealthSection } from './sections/health';
     // It now takes onReactivate as a callback parameter instead of
     // referencing the SpaClient-scoped onReactivateClick directly.
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /* U2 — Overview section (Phase 3a)                                   */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    /**
-     * U2: Overview section — landing page when admin enters console.
-     * 4 stat cards + quick-actions row + recent-activity feed (mocked
-     * until U8 / Phase 3c). Same data sources as the original U11
-     * summary card, just shaped as a dashboard.
-     */
-    function buildOverviewSection(d) {
-        var items = [];
-
-        var heading = safeNew(d.H, {
-            content: "Overview",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(overview)");
-        if (heading) items.push(heading);
-
-        // Stat-card grid (4 cards).
-        var stats = buildOverviewStatCards(d);
-        if (stats) items.push(stats);
-
-        // Quick-actions strip.
-        var quick = buildOverviewQuickActions(d);
-        if (quick) items.push(quick);
-
-        // Recent-activity feed (mock until U8).
-        var activity = buildOverviewActivityFeed(d);
-        if (activity) items.push(activity);
-
-        if (items.length === 0) return safeNew(d.T, { text: "Overview" });
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(overview)");
-    }
-
-    function buildOverviewStatCards(d) {
-        var snap = STATE.console.snapshot || {};
-        var assignments = STATE.console.assignments || [];
-        var preflight = STATE.console.preflight || [];
-
-        var phoneCount = {};
-        assignments.forEach(function (a) {
-            if (a.phoneSid) phoneCount[a.phoneSid] = true;
-        });
-        var phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
-        var repCount = assignments.length;
-        var preflightPassed = preflight.filter(function (c) {
-            return c.status === 'pass';
-        }).length;
-        var preflightTotal = preflight.length;
-        var statusLabel = snap.active === false ? 'Paused' :
-                          snap.active === true ? 'Active' : 'Unknown';
-
-        var cards = [
-            buildStatCard(d, {
-                title: 'Status',
-                metric: statusLabel,
-                description: snap.active === false ? 'Reps cannot place calls'
-                                                   : 'Reps can place calls'
-            }),
-            buildStatCard(d, {
-                title: 'Phone numbers',
-                metric: String(phonesConfigured),
-                description: phonesConfigured === 0 ? 'No numbers configured'
-                    : snap.phoneNumber || ''
-            }),
-            buildStatCard(d, {
-                title: 'Assigned reps',
-                metric: String(repCount),
-                description: repCount === 0 ? 'No assignments'
-                    : (repCount === 1 ? '1 rep' : repCount + ' reps')
-            }),
-            buildStatCard(d, {
-                title: 'Preflight',
-                metric: preflightTotal > 0
-                    ? preflightPassed + ' of ' + preflightTotal
-                    : '—',
-                description: preflightTotal > 0 ? 'See Health for detail'
-                                                : 'Not yet run'
-            })
-        ].filter(function (c) { return c != null; });
-
-        if (cards.length === 0) return null;
-
-        if (d.GP) {
-            // CSS-grid track string — 4 equal flex columns. Equivalent to
-            // 'repeat(4, 1fr)' but the literal version is more portable
-            // across UIF versions per the catalog GridPanel docs.
-            return safeNew(d.GP, {
-                columns: '1fr 1fr 1fr 1fr',
-                rows: 'auto',
-                items: cards,
-                columnGap: (d.GP_Gap && d.GP_Gap.M) || undefined
-            }, "GridPanel(overview-stats)");
-        }
-        return safeNew(d.SP, {
-            items: cards,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(overview-stats-fallback)");
-    }
-
-    // buildStatCard moved to render/shell.ts (Path B.3e-3).
-
-    function buildOverviewQuickActions(d) {
-        var ButtonType = (component.Button && component.Button.Type) || {};
-
-        var heading = safeNew(d.H, {
-            content: "Quick actions",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(quick-actions)");
-
-        var actions = [
-            { label: "Add a phone number",      onClick: function () { goToSection('phones'); } },
-            { label: "Reassign reps",           onClick: function () { goToSection('phones'); } },
-            { label: "Update voice config",     onClick: function () { goToSection('voice'); } },
-            { label: "Rotate API Key Secret",   onClick: function () { goToSection('credentials'); } },
-            { label: "Run health check",        onClick: function () { goToSection('health'); } }
-        ];
-
-        var buttons = actions.map(function (a) {
-            // PURE-type buttons read as text-only links — appropriate for
-            // a row of 5 affordances where DEFAULT (filled outline) would
-            // dominate the page. Per d.ts Button.Type enum.
-            return safeNew(component.Button, {
-                label: a.label,
-                type: ButtonType.PURE || ButtonType.DEFAULT,
-                action: a.onClick
-            }, "Button(qa-" + a.label + ")");
-        }).filter(function (b) { return b != null; });
-
-        if (buttons.length === 0) return heading;
-
-        var row = safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(quick-actions-row)");
-
-        return safeNew(d.SP, {
-            items: [heading, row].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(quick-actions-block)");
-    }
-
-    function buildOverviewActivityFeed(d) {
-        var heading = safeNew(d.H, {
-            content: "Recent activity",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(activity-feed)");
-
-        // U8 (Phase 3c) wires this to wizardActivity. Until then, show
-        // a stub note so admins know the feed is intentional, not missing.
-        var activity = STATE.console.activity;
-        var rows = [];
-
-        if (!activity) {
-            var stub = safeNew(d.T, {
-                text: "Activity feed arrives in Phase 3c (U8 — wizardActivity). " +
-                      "When live, it shows the last 50 audit-level wizard events.",
-                type: d.T_Type.WEAK
-            }, "Text(activity-stub)");
-            if (stub) rows.push(stub);
-        } else if (activity.length === 0) {
-            var empty = safeNew(d.T, {
-                text: "No recent activity.",
-                type: d.T_Type.WEAK
-            }, "Text(activity-empty)");
-            if (empty) rows.push(empty);
-        } else {
-            activity.slice(0, 5).forEach(function (row) {
-                var line = safeNew(d.T, {
-                    text: row.timestamp + ' — ' + row.title +
-                          (row.user ? ' (' + row.user + ')' : ''),
-                    size: d.T && d.T.Size ? d.T.Size.S : undefined
-                }, "Text(activity-row)");
-                if (line) rows.push(line);
-            });
-        }
-
-        return safeNew(d.SP, {
-            items: [heading].concat(rows).filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(activity-feed)");
-    }
+    // U2 — Overview section moved to sections/overview.ts (Path B.3h).
 
     /* ────────────────────────────────────────────────────────────────── */
     /* U4 — Voice config section (Phase 3b)                               */

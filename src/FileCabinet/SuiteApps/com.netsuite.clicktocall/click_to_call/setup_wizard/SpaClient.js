@@ -767,6 +767,145 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'ContentPanel(danger-zone-callout)') || inner;
     };
 
+    const buildOverviewSection = (d, deps) => {
+        const items = [];
+        const heading = safeNew(d.H, {
+            content: 'Overview',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(overview)');
+        if (heading)
+            items.push(heading);
+        const stats = buildOverviewStatCards(d);
+        if (stats)
+            items.push(stats);
+        const quick = buildOverviewQuickActions(d, deps);
+        if (quick)
+            items.push(quick);
+        const activity = buildOverviewActivityFeed(d);
+        if (activity)
+            items.push(activity);
+        if (items.length === 0)
+            return safeNew(d.T, { text: 'Overview' }, 'Text(overview-empty)');
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, 'StackPanel(overview)');
+    };
+    const buildOverviewStatCards = (d) => {
+        const snap = (STATE.console.snapshot || {});
+        const assignments = (STATE.console.assignments || []);
+        const preflight = (STATE.console.preflight || []);
+        const phoneCount = {};
+        assignments.forEach((a) => {
+            if (a.phoneSid)
+                phoneCount[a.phoneSid] = true;
+        });
+        const phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
+        const repCount = assignments.length;
+        const preflightPassed = preflight.filter((c) => c.status === 'pass').length;
+        const preflightTotal = preflight.length;
+        const statusLabel = snap.active === false ? 'Paused' :
+            snap.active === true ? 'Active' : 'Unknown';
+        const cards = [
+            buildStatCard(d, {
+                title: 'Status',
+                metric: statusLabel,
+                description: snap.active === false ? 'Reps cannot place calls'
+                    : 'Reps can place calls'
+            }),
+            buildStatCard(d, {
+                title: 'Phone numbers',
+                metric: String(phonesConfigured),
+                description: phonesConfigured === 0 ? 'No numbers configured'
+                    : snap.phoneNumber || ''
+            }),
+            buildStatCard(d, {
+                title: 'Assigned reps',
+                metric: String(repCount),
+                description: repCount === 0 ? 'No assignments'
+                    : (repCount === 1 ? '1 rep' : repCount + ' reps')
+            }),
+            buildStatCard(d, {
+                title: 'Preflight',
+                metric: preflightTotal > 0
+                    ? preflightPassed + ' of ' + preflightTotal
+                    : '—',
+                description: preflightTotal > 0 ? 'See Health for detail'
+                    : 'Not yet run'
+            })
+        ].filter((c) => c != null);
+        if (cards.length === 0)
+            return null;
+        if (d.GP) {
+            return safeNew(d.GP, {
+                columns: '1fr 1fr 1fr 1fr',
+                rows: 'auto',
+                items: cards,
+                columnGap: (d.GP_Gap && d.GP_Gap.M) || undefined
+            }, 'GridPanel(overview-stats)');
+        }
+        return safeNew(d.SP, {
+            items: cards,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M
+        }, 'StackPanel(overview-stats-fallback)');
+    };
+    const buildOverviewQuickActions = (d, deps) => {
+        const ButtonType = component__namespace.Button.Type;
+        const heading = safeNew(d.H, {
+            content: 'Quick actions',
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(quick-actions)');
+        const actions = [
+            { label: 'Add a phone number', onClick: () => deps.goToSection('phones') },
+            { label: 'Reassign reps', onClick: () => deps.goToSection('phones') },
+            { label: 'Update voice config', onClick: () => deps.goToSection('voice') },
+            { label: 'Rotate API Key Secret', onClick: () => deps.goToSection('credentials') },
+            { label: 'Run health check', onClick: () => deps.goToSection('health') }
+        ];
+        const buttons = actions.map((a) => {
+            return safeNew(component__namespace.Button, {
+                label: a.label,
+                type: ButtonType.PURE || ButtonType.DEFAULT,
+                action: a.onClick
+            }, 'Button(qa-' + a.label + ')');
+        }).filter((b) => b != null);
+        if (buttons.length === 0)
+            return heading;
+        const row = safeNew(d.SP, {
+            items: buttons,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(quick-actions-row)');
+        return safeNew(d.SP, {
+            items: [heading, row].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, 'StackPanel(quick-actions-block)');
+    };
+    const buildOverviewActivityFeed = (d) => {
+        const heading = safeNew(d.H, {
+            content: 'Recent activity',
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(activity-feed)');
+        const rows = [];
+        {
+            const stub = safeNew(d.T, {
+                text: 'Activity feed arrives in Phase 3c (U8 — wizardActivity). ' +
+                    'When live, it shows the last 50 audit-level wizard events.',
+                type: d.T_Type.WEAK
+            }, 'Text(activity-stub)');
+            if (stub)
+                rows.push(stub);
+        }
+        return safeNew(d.SP, {
+            items: [heading].concat(rows).filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, 'StackPanel(activity-feed)');
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -1358,7 +1497,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     }
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
-            case 'overview': return buildOverviewSection(d);
+            case 'overview': return buildOverviewSection(d, { goToSection: goToSection });
             case 'phones': return buildPhonesSection(d);
             case 'voice': return buildVoiceSection(d);
             case 'credentials': return buildCredentialsSection(d);
@@ -1366,148 +1505,8 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 rerender: rerender,
                 onDeactivateClick: onDeactivateClick
             });
-            default: return buildOverviewSection(d);
+            default: return buildOverviewSection(d, { goToSection: goToSection });
         }
-    }
-    function buildOverviewSection(d) {
-        var items = [];
-        var heading = safeNew(d.H, {
-            content: "Overview",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(overview)");
-        if (heading)
-            items.push(heading);
-        var stats = buildOverviewStatCards(d);
-        if (stats)
-            items.push(stats);
-        var quick = buildOverviewQuickActions(d);
-        if (quick)
-            items.push(quick);
-        var activity = buildOverviewActivityFeed(d);
-        if (activity)
-            items.push(activity);
-        if (items.length === 0)
-            return safeNew(d.T, { text: "Overview" });
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(overview)");
-    }
-    function buildOverviewStatCards(d) {
-        var snap = STATE.console.snapshot || {};
-        var assignments = STATE.console.assignments || [];
-        var preflight = STATE.console.preflight || [];
-        var phoneCount = {};
-        assignments.forEach(function (a) {
-            if (a.phoneSid)
-                phoneCount[a.phoneSid] = true;
-        });
-        var phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
-        var repCount = assignments.length;
-        var preflightPassed = preflight.filter(function (c) {
-            return c.status === 'pass';
-        }).length;
-        var preflightTotal = preflight.length;
-        var statusLabel = snap.active === false ? 'Paused' :
-            snap.active === true ? 'Active' : 'Unknown';
-        var cards = [
-            buildStatCard(d, {
-                title: 'Status',
-                metric: statusLabel,
-                description: snap.active === false ? 'Reps cannot place calls'
-                    : 'Reps can place calls'
-            }),
-            buildStatCard(d, {
-                title: 'Phone numbers',
-                metric: String(phonesConfigured),
-                description: phonesConfigured === 0 ? 'No numbers configured'
-                    : snap.phoneNumber || ''
-            }),
-            buildStatCard(d, {
-                title: 'Assigned reps',
-                metric: String(repCount),
-                description: repCount === 0 ? 'No assignments'
-                    : (repCount === 1 ? '1 rep' : repCount + ' reps')
-            }),
-            buildStatCard(d, {
-                title: 'Preflight',
-                metric: preflightTotal > 0
-                    ? preflightPassed + ' of ' + preflightTotal
-                    : '—',
-                description: preflightTotal > 0 ? 'See Health for detail'
-                    : 'Not yet run'
-            })
-        ].filter(function (c) { return c != null; });
-        if (cards.length === 0)
-            return null;
-        if (d.GP) {
-            return safeNew(d.GP, {
-                columns: '1fr 1fr 1fr 1fr',
-                rows: 'auto',
-                items: cards,
-                columnGap: (d.GP_Gap && d.GP_Gap.M) || undefined
-            }, "GridPanel(overview-stats)");
-        }
-        return safeNew(d.SP, {
-            items: cards,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(overview-stats-fallback)");
-    }
-    function buildOverviewQuickActions(d) {
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        var heading = safeNew(d.H, {
-            content: "Quick actions",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(quick-actions)");
-        var actions = [
-            { label: "Add a phone number", onClick: function () { goToSection('phones'); } },
-            { label: "Reassign reps", onClick: function () { goToSection('phones'); } },
-            { label: "Update voice config", onClick: function () { goToSection('voice'); } },
-            { label: "Rotate API Key Secret", onClick: function () { goToSection('credentials'); } },
-            { label: "Run health check", onClick: function () { goToSection('health'); } }
-        ];
-        var buttons = actions.map(function (a) {
-            return safeNew(component__namespace.Button, {
-                label: a.label,
-                type: ButtonType.PURE || ButtonType.DEFAULT,
-                action: a.onClick
-            }, "Button(qa-" + a.label + ")");
-        }).filter(function (b) { return b != null; });
-        if (buttons.length === 0)
-            return heading;
-        var row = safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(quick-actions-row)");
-        return safeNew(d.SP, {
-            items: [heading, row].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(quick-actions-block)");
-    }
-    function buildOverviewActivityFeed(d) {
-        var heading = safeNew(d.H, {
-            content: "Recent activity",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(activity-feed)");
-        var rows = [];
-        {
-            var stub = safeNew(d.T, {
-                text: "Activity feed arrives in Phase 3c (U8 — wizardActivity). " +
-                    "When live, it shows the last 50 audit-level wizard events.",
-                type: d.T_Type.WEAK
-            }, "Text(activity-stub)");
-            if (stub)
-                rows.push(stub);
-        }
-        return safeNew(d.SP, {
-            items: [heading].concat(rows).filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(activity-feed)");
     }
     function buildVoiceSection(d) {
         var snap = STATE.console.snapshot || {};
