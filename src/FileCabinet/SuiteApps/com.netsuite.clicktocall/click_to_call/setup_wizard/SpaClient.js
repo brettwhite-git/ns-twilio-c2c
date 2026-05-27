@@ -1390,10 +1390,21 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     const buildVoiceFieldRow = (d, deps, spec) => {
         const isEditing = STATE.console.voiceEditing === spec.field;
         const ButtonType = component__namespace.Button.Type;
-        const label = safeNew(d.T, {
+        const labelText = safeNew(d.T, {
             text: spec.label,
             type: d.T_Type.STRONG
         }, 'Text(voice-label-' + spec.field + ')');
+        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
+            content: 'Twilio docs ↗',
+            url: spec.docUrl,
+            target: component__namespace.Link.Target.BLANK
+        }, 'Link(voice-doc-' + spec.field + ')') : null;
+        const labelCell = docLink ? safeNew(d.SP, {
+            items: [labelText, docLink].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS,
+            alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
+        }, 'StackPanel(voice-label-cell-' + spec.field + ')') : labelText;
         const help = safeNew(d.T, {
             text: spec.helpText,
             type: d.T_Type.WEAK,
@@ -1407,14 +1418,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             horizontalAlignment: d.CP_HAlign.END
         }, 'ContentPanel(voice-right-align-' + spec.field + ')') || rightSideRaw
             : rightSideRaw;
-        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
-            content: 'Twilio docs ↗',
-            url: spec.docUrl,
-            target: component__namespace.Link.Target.BLANK
-        }, 'Link(voice-doc-' + spec.field + ')') : null;
-        const cells = [label, help, rightSide, docLink].filter((c) => c != null);
+        const cells = [labelCell, help, rightSide].filter((c) => c != null);
         const grid = safeNew(d.GP, {
-            columns: '1fr 3fr 2fr 1fr',
+            columns: '1fr 3fr 2fr',
             rows: 'auto',
             items: cells,
             columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined

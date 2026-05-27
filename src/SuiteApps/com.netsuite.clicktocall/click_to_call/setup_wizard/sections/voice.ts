@@ -186,10 +186,30 @@ const buildVoiceFieldRow = (d: EnumsBag, deps: VoiceSectionDeps, spec: VoiceFiel
     const isEditing = STATE.console.voiceEditing === spec.field;
     const ButtonType = component.Button.Type;
 
-    const label = safeNew(d.T, {
+    const labelText = safeNew(d.T, {
         text: spec.label,
         type: d.T_Type.STRONG
     }, 'Text(voice-label-' + spec.field + ')');
+
+    // Path C-5 v5: "Twilio docs ↗" moves from the 4th column back to
+    // inline below the label, matching the Credentials section pattern.
+    // Native component.Link with target=BLANK — NetSuite-blue link
+    // color from the UIF theme.
+    const docLink = spec.docUrl ? safeNew(component.Link, {
+        content: 'Twilio docs ↗',
+        url: spec.docUrl,
+        target: component.Link.Target.BLANK
+    }, 'Link(voice-doc-' + spec.field + ')') : null;
+
+    // Label cell stacks [STRONG label, doc link] vertically so the link
+    // sits with the field name at the row start instead of at the row's
+    // far right end.
+    const labelCell = docLink ? safeNew(d.SP, {
+        items: [labelText, docLink].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.XXS,
+        alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
+    }, 'StackPanel(voice-label-cell-' + spec.field + ')') : labelText;
 
     const help = safeNew(d.T, {
         text: spec.helpText,
@@ -204,33 +224,18 @@ const buildVoiceFieldRow = (d: EnumsBag, deps: VoiceSectionDeps, spec: VoiceFiel
     // Path C-5 v3: wrap value+controls in a ContentPanel with
     // horizontalAlignment END so the content (value text + Change button,
     // or Dropdown+Save+Cancel in edit mode) sits flush against the right
-    // edge of its grid cell. Without this, the value+controls hug the
-    // left edge of their 2fr cell, leaving an awkward gap between Change
-    // and the Twilio docs column.
+    // edge of its grid cell.
     const rightSide = d.CP ? safeNew(d.CP, {
         content: rightSideRaw,
         horizontalAlignment: d.CP_HAlign.END
     }, 'ContentPanel(voice-right-align-' + spec.field + ')') || rightSideRaw
                             : rightSideRaw;
 
-    // Path C-5 v2: "Twilio docs ↗" moved to its OWN 4th column at the
-    // far right of the row (was previously nested under help text in
-    // a 3-col grid). Uses native component.Link which inherits the
-    // NetSuite blue link color from the UIF theme — no rootStyle
-    // override needed.
-    const docLink = spec.docUrl ? safeNew(component.Link, {
-        content: 'Twilio docs ↗',
-        url: spec.docUrl,
-        target: component.Link.Target.BLANK
-    }, 'Link(voice-doc-' + spec.field + ')') : null;
-
-    // 4-column GridPanel: label (narrow) | help (wide — wide enough that
-    // the multi-sentence help text fits on 1-2 lines at standard
-    // admin-console widths) | value+controls | doc-link (compact).
+    // 3-column GridPanel: label+doc (narrow) | help (wide) | value+controls.
     // Falls back to a vertical stack if GridPanel construction fails.
-    const cells = [label, help, rightSide, docLink].filter((c) => c != null);
+    const cells = [labelCell, help, rightSide].filter((c) => c != null);
     const grid = safeNew(d.GP, {
-        columns: '1fr 3fr 2fr 1fr',
+        columns: '1fr 3fr 2fr',
         rows: 'auto',
         items: cells,
         columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined
