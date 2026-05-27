@@ -46,7 +46,7 @@ import {
 import { STATE } from './state';
 import { safeNew } from './render/primitives';
 import {
-    buildTextField, buildCheckRow, badgeFor, buildErrorBox
+    buildTextField, buildCheckRow, badgeFor, buildErrorBox, buildPrereqsList
 } from './render/shared';
 import {
     wrapContent, buildPausedBanner, buildStatCard
@@ -1936,26 +1936,7 @@ import { buildPhonesSection } from './sections/phones';
     /* moved to render/shared.ts (imported at module top).                */
     /* ────────────────────────────────────────────────────────────────── */
 
-    /**
-     * Render a vertical list of prerequisite check rows.
-     * Each row: pass/fail icon + label + detail (+ repair hint if any).
-     */
-    function buildPrereqsList(checks) {
-        var rows = checks.map(function (c) { return buildCheckRow(c); })
-                         .filter(function (r) { return r != null; });
-
-        if (rows.length === 0) {
-            return safeNew(component.Text, {
-                text: "No checks returned."
-            }, "Text(empty-checks)");
-        }
-
-        return safeNew(component.StackPanel, {
-            items: rows,
-            orientation: component.StackPanel.Orientation.VERTICAL,
-            itemGap: component.StackPanel.GapSize.M
-        }, "StackPanel(prereqs)");
-    }
+    // buildPrereqsList moved to render/shared.ts (Path B.4-1).
 
     // buildCheckRow / badgeFor / buildErrorBox moved to render/shared.ts
     // (Path B.3e-2). The original implementations were lifted verbatim

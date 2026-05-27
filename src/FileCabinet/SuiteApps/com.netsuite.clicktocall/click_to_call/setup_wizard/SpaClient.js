@@ -266,6 +266,20 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: component__namespace.Text.Type.STRONG
         }, 'Text(error)');
     };
+    const buildPrereqsList = (checks) => {
+        const rows = (checks || []).map((c) => buildCheckRow(c))
+            .filter((r) => r != null);
+        if (rows.length === 0) {
+            return safeNew(component__namespace.Text, {
+                text: 'No checks returned.'
+            }, 'Text(empty-checks)');
+        }
+        return safeNew(component__namespace.StackPanel, {
+            items: rows,
+            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
+            itemGap: component__namespace.StackPanel.GapSize.M
+        }, 'StackPanel(prereqs)');
+    };
 
     const wrapContent = (d, child) => {
         if (!d.CP)
@@ -2710,20 +2724,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 (e && e.message ? e.message : String(e));
             rerender();
         });
-    }
-    function buildPrereqsList(checks) {
-        var rows = checks.map(function (c) { return buildCheckRow(c); })
-            .filter(function (r) { return r != null; });
-        if (rows.length === 0) {
-            return safeNew(component__namespace.Text, {
-                text: "No checks returned."
-            }, "Text(empty-checks)");
-        }
-        return safeNew(component__namespace.StackPanel, {
-            items: rows,
-            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-            itemGap: component__namespace.StackPanel.GapSize.M
-        }, "StackPanel(prereqs)");
     }
     function buildStepper(d) {
         if (!d.SP || !d.T || !d.SI) ;

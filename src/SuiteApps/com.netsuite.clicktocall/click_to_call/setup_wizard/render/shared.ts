@@ -222,3 +222,36 @@ export const buildErrorBox = (errorMessage: string): unknown => {
         type: component.Text.Type.STRONG
     }, 'Text(error)');
 };
+
+// ─────────────────────────────────────────────────────────────────────
+// buildPrereqsList — vertical list of preflight check rows
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Render a vertical list of prerequisite check rows.
+ * Each row: pass/fail icon + label + detail (+ repair hint if any).
+ *
+ * Used by Step 1's loadPrereqs callback and (potentially) Step 5's
+ * preflight section — both consume the same { id, label, status,
+ * detail, repairHint } shape.
+ *
+ * Path B.4-1 (2026-05-27) — moved from SpaClient.ts into shared.ts
+ * since it composes buildCheckRow (already here) and is conceptually
+ * a peer of the other shared check-row renderers.
+ */
+export const buildPrereqsList = (checks: CheckRow[]): unknown => {
+    const rows = (checks || []).map((c) => buildCheckRow(c))
+                                .filter((r) => r != null);
+
+    if (rows.length === 0) {
+        return safeNew(component.Text, {
+            text: 'No checks returned.'
+        }, 'Text(empty-checks)');
+    }
+
+    return safeNew(component.StackPanel, {
+        items: rows,
+        orientation: component.StackPanel.Orientation.VERTICAL,
+        itemGap: component.StackPanel.GapSize.M
+    }, 'StackPanel(prereqs)');
+};
