@@ -227,17 +227,16 @@ const buildOverviewActivityFeed = (d: EnumsBag): unknown => {
         type: d.H_Type.SMALL_HEADING
     }, 'Heading(activity-feed)');
 
-    // U8 (Phase 3c) wires this to wizardActivity. Until then, show
-    // a stub note so admins know the feed is intentional, not missing.
+    // Phase 3c will wire this to a server-side `wizardActivity` action.
+    // Until that endpoint ships, the empty/null branches render a richer
+    // callout pointing admins at NetSuite's native Script Execution Log
+    // as a temporary affordance — same callout-box pattern Credentials
+    // uses for its rotation runbook.
     const activity = STATE.console.activity as ActivityRow[] | null;
     const rows: unknown[] = [];
 
     if (!activity) {
-        const stub = safeNew(d.T, {
-            text: 'Activity feed arrives in Phase 3c (U8 — wizardActivity). ' +
-                  'When live, it shows the last 50 audit-level wizard events.',
-            type: d.T_Type.WEAK
-        }, 'Text(activity-stub)');
+        const stub = buildActivityComingSoonCallout(d);
         if (stub) rows.push(stub);
     } else if (activity.length === 0) {
         const empty = safeNew(d.T, {
@@ -261,4 +260,58 @@ const buildOverviewActivityFeed = (d: EnumsBag): unknown => {
         orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.XS
     }, 'StackPanel(activity-feed)');
+};
+
+/**
+ * Path C-3: callout for the not-yet-implemented activity feed. Shows a
+ * subtle blue-bordered Card with explanatory body text and a deep-link
+ * button to NetSuite's Script Execution Log as a temporary affordance
+ * for admins who need to see what the CTC scripts have been doing.
+ *
+ * Same ContentPanel + rootStyle border pattern as
+ * sections/credentials.ts:buildSecretRotationRunbook — the only
+ * difference is the border tone (blue for "info / coming soon" vs.
+ * orange for "action runbook").
+ */
+const buildActivityComingSoonCallout = (d: EnumsBag): unknown => {
+    const body = safeNew(d.T, {
+        text: 'A live activity feed showing the last 50 wizard events ' +
+              '(saves, activations, rep assignments, secret rotations) ' +
+              'is on the roadmap. In the meantime, NetSuite\'s native ' +
+              'Script Execution Log surfaces every CTC script invocation ' +
+              'with timestamps, user context, and any errors.',
+        type: d.T_Type.WEAK
+    }, 'Text(activity-coming-soon-body)');
+
+    const openLogBtn = safeNew(component.Button, {
+        label: 'Open Script Execution Log ↗',
+        type: component.Button.Type.DEFAULT,
+        action: (): void => {
+            try {
+                window.open(
+                    '/app/common/scripting/scriptexecutionlogsearchresults.nl',
+                    '_blank'
+                );
+            } catch (e) { /* ignore */ }
+        }
+    }, 'Button(open-script-log)');
+
+    const inner = safeNew(d.SP, {
+        items: [body, openLogBtn].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.S
+    }, 'StackPanel(activity-callout-inner)');
+
+    if (!d.CP) return inner;
+    return safeNew(d.CP, {
+        content: inner,
+        outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+        horizontalAlignment: d.CP_HAlign.STRETCH,
+        rootStyle: {
+            border: '1px solid #3A6FB0',
+            borderRadius: '8px',
+            backgroundColor: '#F2F6FB',
+            padding: '16px 20px'
+        }
+    }, 'ContentPanel(activity-callout)') || inner;
 };

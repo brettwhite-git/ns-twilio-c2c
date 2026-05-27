@@ -944,11 +944,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'Heading(activity-feed)');
         const rows = [];
         {
-            const stub = safeNew(d.T, {
-                text: 'Activity feed arrives in Phase 3c (U8 — wizardActivity). ' +
-                    'When live, it shows the last 50 audit-level wizard events.',
-                type: d.T_Type.WEAK
-            }, 'Text(activity-stub)');
+            const stub = buildActivityComingSoonCallout(d);
             if (stub)
                 rows.push(stub);
         }
@@ -957,6 +953,44 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XS
         }, 'StackPanel(activity-feed)');
+    };
+    const buildActivityComingSoonCallout = (d) => {
+        const body = safeNew(d.T, {
+            text: 'A live activity feed showing the last 50 wizard events ' +
+                '(saves, activations, rep assignments, secret rotations) ' +
+                'is on the roadmap. In the meantime, NetSuite\'s native ' +
+                'Script Execution Log surfaces every CTC script invocation ' +
+                'with timestamps, user context, and any errors.',
+            type: d.T_Type.WEAK
+        }, 'Text(activity-coming-soon-body)');
+        const openLogBtn = safeNew(component__namespace.Button, {
+            label: 'Open Script Execution Log ↗',
+            type: component__namespace.Button.Type.DEFAULT,
+            action: () => {
+                try {
+                    window.open('/app/common/scripting/scriptexecutionlogsearchresults.nl', '_blank');
+                }
+                catch (e) { }
+            }
+        }, 'Button(open-script-log)');
+        const inner = safeNew(d.SP, {
+            items: [body, openLogBtn].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(activity-callout-inner)');
+        if (!d.CP)
+            return inner;
+        return safeNew(d.CP, {
+            content: inner,
+            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            rootStyle: {
+                border: '1px solid #3A6FB0',
+                borderRadius: '8px',
+                backgroundColor: '#F2F6FB',
+                padding: '16px 20px'
+            }
+        }, 'ContentPanel(activity-callout)') || inner;
     };
 
     const buildVoiceSection = (d, deps) => {
