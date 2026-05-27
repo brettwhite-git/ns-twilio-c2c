@@ -30,9 +30,16 @@ import type { SectionName } from '../dispatch';
 export interface OverviewSectionDeps {
     /**
      * Navigate to an admin-console section. Mutates SELECTED_SECTION
-     * via dispatch + triggers rerender. Used by every Quick action.
+     * via dispatch + triggers rerender. Used by 4 of 5 Quick actions.
      */
     goToSection: (section: SectionName) => void;
+    /**
+     * Path C-4: Deactivate handler for the 5th Quick action (DANGER
+     * button). Wires to SpaClient's onDeactivateClick, which sets
+     * pendingDeactivateConfirm + routes to Health section for the
+     * two-click confirm flow.
+     */
+    onDeactivateClick: () => void;
 }
 
 interface ConsoleSnapshot {
@@ -189,37 +196,84 @@ const buildOverviewStatCards = (d: EnumsBag): unknown => {
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// Quick actions strip — 5 deep-link buttons
+// Quick actions strip — 5 icon-prefixed buttons (4 DEFAULT + 1 DANGER)
 // ─────────────────────────────────────────────────────────────────────
 
 const buildOverviewQuickActions = (d: EnumsBag, deps: OverviewSectionDeps): unknown => {
     const ButtonType = component.Button.Type as Record<string, unknown>;
 
+    // Header row: title + descriptive subtitle stacked vertically.
+    // Matches the wireframe — title is a SMALL_HEADING, subtitle is WEAK
+    // body Text so it reads as supporting copy rather than another label.
     const heading = safeNew(d.H, {
         content: 'Quick actions',
         type: d.H_Type.SMALL_HEADING
     }, 'Heading(quick-actions)');
 
-    const actions: { label: string; onClick: () => void }[] = [
-        { label: 'Add a phone number',      onClick: () => deps.goToSection('phones') },
-        { label: 'Reassign reps',           onClick: () => deps.goToSection('phones') },
-        { label: 'Update voice config',     onClick: () => deps.goToSection('voice') },
-        { label: 'Rotate API Key Secret',   onClick: () => deps.goToSection('credentials') },
-        { label: 'Run health check',        onClick: () => deps.goToSection('health') }
+    const subtitle = safeNew(d.T, {
+        text: 'Common admin tasks — full screens still available via the left rail.',
+        type: d.T_Type.WEAK,
+        size: d.T && d.T.Size ? d.T.Size.S : undefined
+    }, 'Text(quick-actions-subtitle)');
+
+    const headerStack = safeNew(d.SP, {
+        items: [heading, subtitle].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.XXS
+    }, 'StackPanel(quick-actions-header)');
+
+    // Action specs. Each button: leading SystemIcon, plain DEFAULT type
+    // except the 5th (Deactivate) which uses DANGER for emphasis.
+    // Icons sourced from core.SystemIcon — verified members:
+    //   ADD / REFRESH / PLAY / LOCK / STOP (all in v9.0.0 catalog)
+    const actions: {
+        label: string;
+        icon: unknown;
+        type: unknown;
+        onClick: () => void;
+    }[] = [
+        {
+            label: 'Add a phone number',
+            icon: core.SystemIcon.ADD,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('phones')
+        },
+        {
+            label: 'Reassign reps',
+            icon: core.SystemIcon.REFRESH,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('phones')
+        },
+        {
+            label: 'Update voice config',
+            icon: core.SystemIcon.PLAY,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('voice')
+        },
+        {
+            label: 'Rotate API Key Secret',
+            icon: core.SystemIcon.LOCK,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('credentials')
+        },
+        {
+            label: 'Deactivate',
+            icon: core.SystemIcon.STOP,
+            type: ButtonType.DANGER || ButtonType.DEFAULT,
+            onClick: deps.onDeactivateClick
+        }
     ];
 
     const buttons = actions.map((a) => {
-        // PURE-type buttons read as text-only links — appropriate for
-        // a row of 5 affordances where DEFAULT (filled outline) would
-        // dominate the page. Per d.ts Button.Type enum.
         return safeNew(component.Button, {
             label: a.label,
-            type: ButtonType.PURE || ButtonType.DEFAULT,
+            type: a.type,
+            startIcon: a.icon,
             action: a.onClick
         }, 'Button(qa-' + a.label + ')');
     }).filter((b) => b != null);
 
-    if (buttons.length === 0) return heading;
+    if (buttons.length === 0) return headerStack;
 
     const row = safeNew(d.SP, {
         items: buttons,
@@ -228,9 +282,9 @@ const buildOverviewQuickActions = (d: EnumsBag, deps: OverviewSectionDeps): unkn
     }, 'StackPanel(quick-actions-row)');
 
     return safeNew(d.SP, {
-        items: [heading, row].filter((c) => c != null),
+        items: [headerStack, row].filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.XS
+        itemGap: d.SP_Gap.S
     }, 'StackPanel(quick-actions-block)');
 };
 

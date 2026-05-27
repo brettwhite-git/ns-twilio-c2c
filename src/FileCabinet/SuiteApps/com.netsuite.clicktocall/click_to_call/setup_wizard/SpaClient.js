@@ -911,31 +911,67 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             content: 'Quick actions',
             type: d.H_Type.SMALL_HEADING
         }, 'Heading(quick-actions)');
+        const subtitle = safeNew(d.T, {
+            text: 'Common admin tasks — full screens still available via the left rail.',
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(quick-actions-subtitle)');
+        const headerStack = safeNew(d.SP, {
+            items: [heading, subtitle].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, 'StackPanel(quick-actions-header)');
         const actions = [
-            { label: 'Add a phone number', onClick: () => deps.goToSection('phones') },
-            { label: 'Reassign reps', onClick: () => deps.goToSection('phones') },
-            { label: 'Update voice config', onClick: () => deps.goToSection('voice') },
-            { label: 'Rotate API Key Secret', onClick: () => deps.goToSection('credentials') },
-            { label: 'Run health check', onClick: () => deps.goToSection('health') }
+            {
+                label: 'Add a phone number',
+                icon: core__namespace.SystemIcon.ADD,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('phones')
+            },
+            {
+                label: 'Reassign reps',
+                icon: core__namespace.SystemIcon.REFRESH,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('phones')
+            },
+            {
+                label: 'Update voice config',
+                icon: core__namespace.SystemIcon.PLAY,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('voice')
+            },
+            {
+                label: 'Rotate API Key Secret',
+                icon: core__namespace.SystemIcon.LOCK,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('credentials')
+            },
+            {
+                label: 'Deactivate',
+                icon: core__namespace.SystemIcon.STOP,
+                type: ButtonType.DANGER || ButtonType.DEFAULT,
+                onClick: deps.onDeactivateClick
+            }
         ];
         const buttons = actions.map((a) => {
             return safeNew(component__namespace.Button, {
                 label: a.label,
-                type: ButtonType.PURE || ButtonType.DEFAULT,
+                type: a.type,
+                startIcon: a.icon,
                 action: a.onClick
             }, 'Button(qa-' + a.label + ')');
         }).filter((b) => b != null);
         if (buttons.length === 0)
-            return heading;
+            return headerStack;
         const row = safeNew(d.SP, {
             items: buttons,
             orientation: d.SP_Orient.HORIZONTAL,
             itemGap: d.SP_Gap.S
         }, 'StackPanel(quick-actions-row)');
         return safeNew(d.SP, {
-            items: [heading, row].filter((c) => c != null),
+            items: [headerStack, row].filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
+            itemGap: d.SP_Gap.S
         }, 'StackPanel(quick-actions-block)');
     };
     const buildOverviewActivityFeed = (d) => {
@@ -2916,7 +2952,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     }
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
-            case 'overview': return buildOverviewSection(d, { goToSection: goToSection });
+            case 'overview': return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
             case 'phones': return buildPhonesSection(d, {
                 loadPhonesData: loadPhonesData,
                 goToStep: goToStep,
@@ -2928,7 +2967,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 rerender: rerender,
                 onDeactivateClick: onDeactivateClick
             });
-            default: return buildOverviewSection(d, { goToSection: goToSection });
+            default: return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
         }
     }
     function buildStepBodyContainer(d) {

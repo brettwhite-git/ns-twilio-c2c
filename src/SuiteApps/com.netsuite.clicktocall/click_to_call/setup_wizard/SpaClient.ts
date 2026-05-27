@@ -1072,7 +1072,10 @@ interface SaveResponse {
      */
     function buildSectionContent(d: EnumsBag) {
         switch (SELECTED_SECTION) {
-            case 'overview':    return buildOverviewSection(d, { goToSection: goToSection });
+            case 'overview':    return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
             case 'phones':      return buildPhonesSection(d, {
                 loadPhonesData: loadPhonesData,
                 goToStep: goToStep,
@@ -1084,7 +1087,10 @@ interface SaveResponse {
                 rerender: rerender,
                 onDeactivateClick: onDeactivateClick
             });
-            default:            return buildOverviewSection(d, { goToSection: goToSection });
+            default:            return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
         }
     }
 
