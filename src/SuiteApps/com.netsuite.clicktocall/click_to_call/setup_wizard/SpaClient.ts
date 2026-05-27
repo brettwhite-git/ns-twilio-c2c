@@ -924,15 +924,42 @@ interface SaveResponse {
 
         var items = [];
 
-        // ── Title ─────────────────────────────────────────────────────
+        // ── Title (Path C-8: native ApplicationHeader) ────────────────
+        // Replaces the previous single Heading.PAGE_TITLE block with
+        // component.ApplicationHeader, which natively supports a title
+        // + subtitle pair plus future-proof slots (actions, tools, badge).
+        // The subtitle reflects the active console section OR stepper
+        // step so every screen carries a "where am I" label without
+        // each section having to ship its own header.
+        //
+        // Stepper mode's previous "Text(rail-subtitle)" Text block is
+        // dropped — the same content now rides in ApplicationHeader's
+        // subtitle slot.
         var titleText = MODE === 'console'
             ? "Click-to-Call Admin Console"
             : "Click-to-Call Setup Wizard";
-        var title = safeNew(d.H, {
+
+        var subtitleText: string;
+        if (MODE === 'console') {
+            subtitleText =
+                SELECTED_SECTION === 'phones'      ? 'Phones & reps' :
+                SELECTED_SECTION === 'voice'       ? 'Voice config' :
+                SELECTED_SECTION === 'credentials' ? 'Credentials' :
+                SELECTED_SECTION === 'health'      ? 'Health' :
+                                                     'Overview';
+        } else {
+            subtitleText = 'Step ' + CURRENT_STEP + ' of ' + STEPS.length +
+                ' — ' + STEPS[CURRENT_STEP - 1].label;
+        }
+
+        var appHeader = safeNew(component.ApplicationHeader, {
+            title: titleText,
+            subtitle: subtitleText
+        }, 'ApplicationHeader(page-root)') || safeNew(d.H, {
             content: titleText,
             type: d.H_Type.PAGE_TITLE
-        }, "Heading(content-title)");
-        if (title) items.push(title);
+        }, 'Heading(content-title-fallback)');
+        if (appHeader) items.push(appHeader);
 
         // ── Paused banner (console mode only) ─────────────────────────
         if (MODE === 'console' && STATE.console.snapshot
@@ -946,14 +973,9 @@ interface SaveResponse {
             var section = buildSectionContent(d);
             if (section) items.push(section);
         } else {
-            // Stepper mode (re-run flow). Reuse the original stepper
-            // rendering bits: subtitle, stepper widget, step body, nav footer.
-            var subtitle = safeNew(d.T, {
-                text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
-                    STEPS[CURRENT_STEP - 1].label
-            }, "Text(rail-subtitle)");
-            if (subtitle) items.push(subtitle);
-
+            // Stepper mode (re-run flow). The "Step N of 5 — …"
+            // subtitle is now in ApplicationHeader; render the stepper
+            // widget + step body without re-stating it.
             var stepperWidget = buildStepper(d);
             if (stepperWidget) {
                 var stepperBox = safeNew(d.CP, {

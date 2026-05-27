@@ -3026,12 +3026,28 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         var titleText = MODE === 'console'
             ? "Click-to-Call Admin Console"
             : "Click-to-Call Setup Wizard";
-        var title = safeNew(d.H, {
+        var subtitleText;
+        if (MODE === 'console') {
+            subtitleText =
+                SELECTED_SECTION === 'phones' ? 'Phones & reps' :
+                    SELECTED_SECTION === 'voice' ? 'Voice config' :
+                        SELECTED_SECTION === 'credentials' ? 'Credentials' :
+                            SELECTED_SECTION === 'health' ? 'Health' :
+                                'Overview';
+        }
+        else {
+            subtitleText = 'Step ' + CURRENT_STEP + ' of ' + STEPS.length +
+                ' — ' + STEPS[CURRENT_STEP - 1].label;
+        }
+        var appHeader = safeNew(component__namespace.ApplicationHeader, {
+            title: titleText,
+            subtitle: subtitleText
+        }, 'ApplicationHeader(page-root)') || safeNew(d.H, {
             content: titleText,
             type: d.H_Type.PAGE_TITLE
-        }, "Heading(content-title)");
-        if (title)
-            items.push(title);
+        }, 'Heading(content-title-fallback)');
+        if (appHeader)
+            items.push(appHeader);
         if (MODE === 'console' && STATE.console.snapshot
             && STATE.console.snapshot.active === false) {
             var paused = buildPausedBanner(d, onReactivateClick);
@@ -3044,12 +3060,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 items.push(section);
         }
         else {
-            var subtitle = safeNew(d.T, {
-                text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
-                    STEPS[CURRENT_STEP - 1].label
-            }, "Text(rail-subtitle)");
-            if (subtitle)
-                items.push(subtitle);
             var stepperWidget = buildStepper(d);
             if (stepperWidget) {
                 var stepperBox = safeNew(d.CP, {
