@@ -428,12 +428,19 @@ const buildRecentCallsDataGrid = (d: EnumsBag, calls: RecentCallRow[]): unknown 
                             args.cell.row.dataItem;
                 if (!row) return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
                 const label = formatCallStatus(row.status);
-                const badgeType = row.status === 'transcribed' ? BdgType.SOLID :
-                                   row.status === 'failed' ? BdgType.SOLID :
-                                                              BdgType.SUBTLE;
+                const palette = statusBadgePalette(row.status);
                 return safeNew(d.Bdg, {
                     content: label,
-                    type: badgeType
+                    type: BdgType.SUBTLE,
+                    // UIF Badge has no color prop (SOLID/SUBTLE only) —
+                    // override via rootStyle for semantic tinting. Same
+                    // approach Health's danger zone uses for its red
+                    // callout box.
+                    rootStyle: {
+                        backgroundColor: palette.bg,
+                        color: palette.fg,
+                        border: '1px solid ' + palette.border
+                    }
                 }, 'Badge(call-status)') || safeNew(d.T, { text: label }, 'Text(call-status-fb)');
             } catch (e) {
                 return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
@@ -500,6 +507,38 @@ const formatDuration = (seconds: number): string => {
     const pad = (n: number) => (n < 10 ? '0' + n : String(n));
     if (h > 0) return h + ':' + pad(m) + ':' + pad(s);
     return m + ':' + pad(s);
+};
+
+/**
+ * Map a call status value to a tinted-badge color palette. Bootstrap-
+ * style alert palette: light background + darker readable text + matching
+ * border tint. Falls back to neutral grey for any status not in the
+ * known list (defensive against server adding new status values).
+ *
+ * Status taxonomy (per CLAUDE.md / Sprint 2 status field):
+ *   - logged        → grey   (just created, no transcript yet)
+ *   - processing    → blue   (Twilio Conversational Intelligence in-flight)
+ *   - transcribed   → green  (transcript landed + AI analysis complete)
+ *   - no_transcript → yellow (transcript never produced — short call, etc.)
+ *   - failed        → red    (transcript fetch errored or LLM threw)
+ */
+const statusBadgePalette = (status: string): { bg: string; fg: string; border: string } => {
+    const norm = (status || '').toLowerCase().trim();
+    switch (norm) {
+        case 'transcribed':
+            return { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' };  // green
+        case 'processing':
+            return { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' };  // blue
+        case 'logged':
+            return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };  // grey
+        case 'no_transcript':
+        case 'no transcript':
+            return { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };  // yellow
+        case 'failed':
+            return { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' };  // red
+        default:
+            return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };  // grey fallback
+    }
 };
 
 /** Map custevent_ctc_call_status raw value → human-readable label. */

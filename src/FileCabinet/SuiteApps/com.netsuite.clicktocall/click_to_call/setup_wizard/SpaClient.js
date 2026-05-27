@@ -1099,12 +1099,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     if (!row)
                         return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
                     const label = formatCallStatus(row.status);
-                    const badgeType = row.status === 'transcribed' ? BdgType.SOLID :
-                        row.status === 'failed' ? BdgType.SOLID :
-                            BdgType.SUBTLE;
+                    const palette = statusBadgePalette(row.status);
                     return safeNew(d.Bdg, {
                         content: label,
-                        type: badgeType
+                        type: BdgType.SUBTLE,
+                        rootStyle: {
+                            backgroundColor: palette.bg,
+                            color: palette.fg,
+                            border: '1px solid ' + palette.border
+                        }
                     }, 'Badge(call-status)') || safeNew(d.T, { text: label }, 'Text(call-status-fb)');
                 }
                 catch (e) {
@@ -1163,6 +1166,24 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         if (h > 0)
             return h + ':' + pad(m) + ':' + pad(s);
         return m + ':' + pad(s);
+    };
+    const statusBadgePalette = (status) => {
+        const norm = (status || '').toLowerCase().trim();
+        switch (norm) {
+            case 'transcribed':
+                return { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' };
+            case 'processing':
+                return { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' };
+            case 'logged':
+                return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
+            case 'no_transcript':
+            case 'no transcript':
+                return { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
+            case 'failed':
+                return { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' };
+            default:
+                return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
+        }
     };
     const formatCallStatus = (status) => {
         if (!status)
