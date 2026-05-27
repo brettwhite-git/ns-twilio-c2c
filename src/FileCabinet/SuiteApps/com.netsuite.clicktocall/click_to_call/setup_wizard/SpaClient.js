@@ -906,6 +906,296 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'StackPanel(activity-feed)');
     };
 
+    const buildVoiceSection = (d, deps) => {
+        const snap = (STATE.console.snapshot || {});
+        const items = [];
+        const heading = safeNew(d.H, {
+            content: 'Voice config',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(voice)');
+        if (heading)
+            items.push(heading);
+        const intro = safeNew(d.T, {
+            text: 'Manage TwiML application, default outbound caller-ID ' +
+                'number, and optional Conversational Intelligence ' +
+                'service. Changes save immediately and apply to the ' +
+                'next call placed.',
+            type: d.T_Type.WEAK
+        }, 'Text(voice-intro)');
+        if (intro)
+            items.push(intro);
+        if (STATE.console.voiceError) {
+            const err = safeNew(d.T, {
+                text: '✕ ' + STATE.console.voiceError,
+                type: d.T_Type.STRONG
+            }, 'Text(voice-error)');
+            if (err)
+                items.push(err);
+        }
+        items.push(buildVoiceFieldRow(d, deps, {
+            field: 'twimlAppSid',
+            label: 'TwiML Application',
+            value: snap.twimlAppSid,
+            helpText: 'Twilio application that handles outbound call routing.'
+        }));
+        items.push(buildVoiceFieldRow(d, deps, {
+            field: 'phoneNumber',
+            label: 'Default outbound caller-ID',
+            value: snap.phoneNumber,
+            helpText: 'Number reps see as their outbound caller ID.'
+        }));
+        items.push(buildVoiceFieldRow(d, deps, {
+            field: 'intelServiceSid',
+            label: 'Conversational Intelligence (optional)',
+            value: snap.intelServiceSid,
+            helpText: 'Twilio Conversational Intelligence service for AI ' +
+                'call analysis. Leave unset to disable AI analysis.',
+            allowEmpty: true
+        }));
+        if (items.length === 0)
+            return safeNew(d.T, { text: 'Voice config' }, 'Text(voice-empty)');
+        return safeNew(d.SP, {
+            items: items.filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, 'StackPanel(voice)');
+    };
+    const buildVoiceFieldRow = (d, deps, spec) => {
+        const isEditing = STATE.console.voiceEditing === spec.field;
+        const ButtonType = component__namespace.Button.Type;
+        const label = safeNew(d.T, {
+            text: spec.label,
+            type: d.T_Type.STRONG
+        }, 'Text(voice-label-' + spec.field + ')');
+        const help = safeNew(d.T, {
+            text: spec.helpText,
+            type: d.T_Type.WEAK,
+            size: d.T.Size && d.T.Size.S
+        }, 'Text(voice-help-' + spec.field + ')');
+        const labelStack = safeNew(d.SP, {
+            items: [label, help].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, 'StackPanel(voice-label-' + spec.field + ')');
+        const rightSide = isEditing
+            ? buildVoiceEditControls(d, deps, spec)
+            : buildVoiceViewControls(d, deps, spec, ButtonType);
+        const row = safeNew(d.SP, {
+            items: [labelStack, rightSide].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.L,
+            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined
+        }, 'StackPanel(voice-row-' + spec.field + ')');
+        if (d.CP) {
+            return safeNew(d.CP, {
+                content: row,
+                outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+                horizontalAlignment: d.CP_HAlign.STRETCH
+            }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || row;
+        }
+        return row;
+    };
+    const buildVoiceViewControls = (d, deps, spec, ButtonType) => {
+        const valueText = spec.value
+            ? safeNew(d.T, {
+                text: spec.value,
+                type: d.T_Type.DEFAULT
+            }, 'Text(voice-value-' + spec.field + ')')
+            : safeNew(d.T, {
+                text: '(not configured)',
+                type: d.T_Type.WEAK
+            }, 'Text(voice-empty-' + spec.field + ')');
+        const changeBtn = safeNew(component__namespace.Button, {
+            label: 'Change',
+            type: ButtonType.DEFAULT,
+            action: () => { onVoiceChangeClick(deps, spec.field, !!spec.allowEmpty); }
+        }, 'Button(voice-change-' + spec.field + ')');
+        return safeNew(d.SP, {
+            items: [valueText, changeBtn].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M
+        }, 'StackPanel(voice-view-' + spec.field + ')');
+    };
+    const buildVoiceEditControls = (d, deps, spec) => {
+        const ButtonType = component__namespace.Button.Type;
+        const listKey = voiceListKeyFor(spec.field);
+        const list = listKey ? STATE.console.voiceLists[listKey] : null;
+        if (list === null || STATE.console.voiceListsLoading) {
+            const loader = safeNew(component__namespace.Loader, {
+                label: 'Loading from Twilio…',
+                indeterminate: true
+            }, 'Loader(voice-list-' + spec.field + ')');
+            return loader || safeNew(d.T, { text: 'Loading from Twilio…' }, 'Text(voice-loading)');
+        }
+        if (list.length === 0) {
+            const emptyText = safeNew(d.T, {
+                text: '(no items found in Twilio for this account)',
+                type: d.T_Type.WEAK
+            }, 'Text(voice-empty-list-' + spec.field + ')');
+            const cancelBtnE = safeNew(component__namespace.Button, {
+                label: 'Cancel',
+                type: ButtonType.DEFAULT,
+                action: () => { onVoiceCancelClick(deps); }
+            }, 'Button(voice-cancel-empty-' + spec.field + ')');
+            return safeNew(d.SP, {
+                items: [emptyText, cancelBtnE].filter((c) => c != null),
+                orientation: d.SP_Orient.HORIZONTAL,
+                itemGap: d.SP_Gap.M
+            }, 'StackPanel(voice-empty-edit-' + spec.field + ')');
+        }
+        const normalized = list.map((it) => {
+            if (spec.field === 'phoneNumber') {
+                return {
+                    value: it.phoneNumber || '',
+                    label: (it.phoneNumber || '') +
+                        (it.friendlyName ? '  —  ' + it.friendlyName : '')
+                };
+            }
+            return {
+                value: it.sid || '',
+                label: (it.friendlyName || '(unnamed)') +
+                    (it.sid ? '  [' + it.sid + ']' : '')
+            };
+        });
+        const ds = new core__namespace.ArrayDataSource(normalized);
+        const pending = STATE.console.voicePendingValue;
+        const dropdown = safeNew(component__namespace.Dropdown, {
+            dataSource: ds,
+            valueMember: 'value',
+            displayMember: 'label',
+            selectedValue: pending || (spec.allowEmpty ? null : normalized[0].value),
+            allowEmpty: !!spec.allowEmpty,
+            placeholder: spec.allowEmpty ? '(none)' : 'Select…',
+            onSelectionChanged: (args) => {
+                STATE.console.voicePendingValue = (args && args.value) || null;
+            }
+        }, 'Dropdown(voice-edit-' + spec.field + ')');
+        const saving = !!STATE.console.voiceSaving;
+        const saveBtn = safeNew(component__namespace.Button, {
+            label: saving ? 'Saving…' : 'Save',
+            type: ButtonType.PRIMARY,
+            enabled: !saving,
+            action: () => { onVoiceSaveClick(deps, spec.field); }
+        }, 'Button(voice-save-' + spec.field + ')');
+        const cancelBtn = safeNew(component__namespace.Button, {
+            label: 'Cancel',
+            type: ButtonType.DEFAULT,
+            enabled: !saving,
+            action: () => { onVoiceCancelClick(deps); }
+        }, 'Button(voice-cancel-' + spec.field + ')');
+        return safeNew(d.SP, {
+            items: [dropdown, saveBtn, cancelBtn].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(voice-edit-' + spec.field + ')');
+    };
+    const voiceListKeyFor = (field) => {
+        if (field === 'twimlAppSid')
+            return 'twimlApps';
+        if (field === 'phoneNumber')
+            return 'phoneNumbers';
+        if (field === 'intelServiceSid')
+            return 'intelServices';
+        return null;
+    };
+    const voiceActionFor = (field) => {
+        if (field === 'twimlAppSid')
+            return 'wizardListTwiMLApps';
+        if (field === 'phoneNumber')
+            return 'wizardListPhoneNumbers';
+        if (field === 'intelServiceSid')
+            return 'wizardListIntelServices';
+        return null;
+    };
+    const onVoiceChangeClick = (deps, field, _allowEmpty) => {
+        STATE.console.voiceEditing = field;
+        STATE.console.voiceError = null;
+        const snap = (STATE.console.snapshot || {});
+        STATE.console.voicePendingValue = snap[field] || null;
+        const listKey = voiceListKeyFor(field);
+        if (!listKey) {
+            deps.rerender();
+            return;
+        }
+        if (STATE.console.voiceLists[listKey] !== null) {
+            deps.rerender();
+            return;
+        }
+        STATE.console.voiceListsLoading = true;
+        deps.rerender();
+        const action = voiceActionFor(field);
+        if (!action) {
+            STATE.console.voiceListsLoading = false;
+            STATE.console.voiceEditing = null;
+            deps.rerender();
+            return;
+        }
+        wizardCall(action, {})
+            .then((p) => {
+            const items = (p && p.items) || [];
+            STATE.console.voiceLists[listKey] = items;
+            STATE.console.voiceListsLoading = false;
+            deps.rerender();
+        })
+            .catch((e) => {
+            const err = e;
+            STATE.console.voiceListsLoading = false;
+            STATE.console.voiceError = 'Could not load list: ' +
+                (err && err.message ? err.message : String(e));
+            STATE.console.voiceEditing = null;
+            deps.rerender();
+        });
+    };
+    const onVoiceCancelClick = (deps) => {
+        STATE.console.voiceEditing = null;
+        STATE.console.voicePendingValue = null;
+        STATE.console.voiceError = null;
+        deps.rerender();
+    };
+    const onVoiceSaveClick = (deps, field) => {
+        const snap = (STATE.console.snapshot || {});
+        const newValue = STATE.console.voicePendingValue;
+        if (newValue === snap[field]) {
+            STATE.console.voiceEditing = null;
+            STATE.console.voicePendingValue = null;
+            deps.rerender();
+            return;
+        }
+        const payload = {
+            twimlAppSid: snap.twimlAppSid || '',
+            phoneNumber: snap.phoneNumber || '',
+            intelServiceSid: snap.intelServiceSid || ''
+        };
+        payload[field] = newValue || '';
+        STATE.console.voiceSaving = true;
+        STATE.console.voiceError = null;
+        deps.rerender();
+        wizardCall('wizardSaveVoice', payload)
+            .then((p) => {
+            STATE.console.voiceSaving = false;
+            const resp = p;
+            if (resp && resp.saved) {
+                snap[field] = newValue || undefined;
+                STATE.console.snapshot = snap;
+                STATE.console.voiceEditing = null;
+                STATE.console.voicePendingValue = null;
+                deps.rerender();
+            }
+            else {
+                STATE.console.voiceError = 'Save failed: ' +
+                    ((resp && resp.error) || 'unknown');
+                deps.rerender();
+            }
+        })
+            .catch((e) => {
+            const err = e;
+            STATE.console.voiceSaving = false;
+            STATE.console.voiceError = 'Network error saving: ' +
+                (err && err.message ? err.message : String(e));
+            deps.rerender();
+        });
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -1499,7 +1789,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         switch (SELECTED_SECTION) {
             case 'overview': return buildOverviewSection(d, { goToSection: goToSection });
             case 'phones': return buildPhonesSection(d);
-            case 'voice': return buildVoiceSection(d);
+            case 'voice': return buildVoiceSection(d, { rerender: rerender });
             case 'credentials': return buildCredentialsSection(d);
             case 'health': return buildHealthSection(d, {
                 rerender: rerender,
@@ -1507,285 +1797,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             });
             default: return buildOverviewSection(d, { goToSection: goToSection });
         }
-    }
-    function buildVoiceSection(d) {
-        var snap = STATE.console.snapshot || {};
-        var items = [];
-        var heading = safeNew(d.H, {
-            content: "Voice config",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(voice)");
-        if (heading)
-            items.push(heading);
-        var intro = safeNew(d.T, {
-            text: "Manage TwiML application, default outbound caller-ID " +
-                "number, and optional Conversational Intelligence " +
-                "service. Changes save immediately and apply to the " +
-                "next call placed.",
-            type: d.T_Type.WEAK
-        }, "Text(voice-intro)");
-        if (intro)
-            items.push(intro);
-        if (STATE.console.voiceError) {
-            var err = safeNew(d.T, {
-                text: "✕ " + STATE.console.voiceError,
-                type: d.T_Type.STRONG
-            }, "Text(voice-error)");
-            if (err)
-                items.push(err);
-        }
-        items.push(buildVoiceFieldRow(d, {
-            field: 'twimlAppSid',
-            label: 'TwiML Application',
-            value: snap.twimlAppSid,
-            helpText: 'Twilio application that handles outbound call routing.'
-        }));
-        items.push(buildVoiceFieldRow(d, {
-            field: 'phoneNumber',
-            label: 'Default outbound caller-ID',
-            value: snap.phoneNumber,
-            helpText: 'Number reps see as their outbound caller ID.'
-        }));
-        items.push(buildVoiceFieldRow(d, {
-            field: 'intelServiceSid',
-            label: 'Conversational Intelligence (optional)',
-            value: snap.intelServiceSid,
-            helpText: 'Twilio Conversational Intelligence service for AI ' +
-                'call analysis. Leave unset to disable AI analysis.',
-            allowEmpty: true
-        }));
-        if (items.length === 0)
-            return safeNew(d.T, { text: "Voice config" });
-        return safeNew(d.SP, {
-            items: items.filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(voice)");
-    }
-    function buildVoiceFieldRow(d, spec) {
-        var isEditing = STATE.console.voiceEditing === spec.field;
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        (component__namespace.Button && component__namespace.Button.Hierarchy) || {};
-        var label = safeNew(d.T, {
-            text: spec.label,
-            type: d.T_Type.STRONG
-        }, "Text(voice-label-" + spec.field + ")");
-        var help = safeNew(d.T, {
-            text: spec.helpText,
-            type: d.T_Type.WEAK,
-            size: d.T.Size && d.T.Size.S
-        }, "Text(voice-help-" + spec.field + ")");
-        var labelStack = safeNew(d.SP, {
-            items: [label, help].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, "StackPanel(voice-label-" + spec.field + ")");
-        var rightSide;
-        if (isEditing) {
-            rightSide = buildVoiceEditControls(d, spec);
-        }
-        else {
-            rightSide = buildVoiceViewControls(d, spec, ButtonType);
-        }
-        var row = safeNew(d.SP, {
-            items: [labelStack, rightSide].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.L,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined
-        }, "StackPanel(voice-row-" + spec.field + ")");
-        if (d.CP) {
-            return safeNew(d.CP, {
-                content: row,
-                outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-                horizontalAlignment: d.CP_HAlign.STRETCH
-            }, "ContentPanel(voice-row-pad-" + spec.field + ")") || row;
-        }
-        return row;
-    }
-    function buildVoiceViewControls(d, spec, ButtonType, ButtonHierarchy) {
-        var valueText = spec.value
-            ? safeNew(d.T, {
-                text: spec.value,
-                type: d.T_Type.DEFAULT
-            }, "Text(voice-value-" + spec.field + ")")
-            : safeNew(d.T, {
-                text: '(not configured)',
-                type: d.T_Type.WEAK
-            }, "Text(voice-empty-" + spec.field + ")");
-        var changeBtn = safeNew(component__namespace.Button, {
-            label: 'Change',
-            type: ButtonType.DEFAULT,
-            action: function () { onVoiceChangeClick(spec.field, spec.allowEmpty); }
-        }, "Button(voice-change-" + spec.field + ")");
-        return safeNew(d.SP, {
-            items: [valueText, changeBtn].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(voice-view-" + spec.field + ")");
-    }
-    function buildVoiceEditControls(d, spec) {
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        var listKey = voiceListKeyFor(spec.field);
-        var list = STATE.console.voiceLists[listKey];
-        if (list === null || STATE.console.voiceListsLoading) {
-            var loader = safeNew(component__namespace.Loader, {
-                label: "Loading from Twilio…",
-                indeterminate: true
-            }, "Loader(voice-list-" + spec.field + ")");
-            return loader || safeNew(d.T, { text: "Loading from Twilio…" });
-        }
-        if (list.length === 0) {
-            var emptyText = safeNew(d.T, {
-                text: '(no items found in Twilio for this account)',
-                type: d.T_Type.WEAK
-            }, "Text(voice-empty-list-" + spec.field + ")");
-            var cancelBtnE = safeNew(component__namespace.Button, {
-                label: 'Cancel',
-                type: ButtonType.DEFAULT,
-                action: onVoiceCancelClick
-            }, "Button(voice-cancel-empty-" + spec.field + ")");
-            return safeNew(d.SP, {
-                items: [emptyText, cancelBtnE].filter(function (c) { return c != null; }),
-                orientation: d.SP_Orient.HORIZONTAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(voice-empty-edit-" + spec.field + ")");
-        }
-        var normalized = list.map(function (it) {
-            if (spec.field === 'phoneNumber') {
-                return {
-                    value: it.phoneNumber,
-                    label: it.phoneNumber +
-                        (it.friendlyName ? '  —  ' + it.friendlyName : '')
-                };
-            }
-            return {
-                value: it.sid,
-                label: (it.friendlyName || '(unnamed)') +
-                    (it.sid ? '  [' + it.sid + ']' : '')
-            };
-        });
-        var ds = new core__namespace.ArrayDataSource(normalized);
-        var pending = STATE.console.voicePendingValue;
-        var dropdown = safeNew(component__namespace.Dropdown, {
-            dataSource: ds,
-            valueMember: 'value',
-            displayMember: 'label',
-            selectedValue: pending || (spec.allowEmpty ? null : normalized[0].value),
-            allowEmpty: !!spec.allowEmpty,
-            placeholder: spec.allowEmpty ? '(none)' : 'Select…',
-            onSelectionChanged: function (args) {
-                STATE.console.voicePendingValue = (args && args.value) || null;
-            }
-        }, "Dropdown(voice-edit-" + spec.field + ")");
-        var saving = !!STATE.console.voiceSaving;
-        var saveBtn = safeNew(component__namespace.Button, {
-            label: saving ? 'Saving…' : 'Save',
-            type: ButtonType.PRIMARY,
-            enabled: !saving,
-            action: function () { onVoiceSaveClick(spec.field); }
-        }, "Button(voice-save-" + spec.field + ")");
-        var cancelBtn = safeNew(component__namespace.Button, {
-            label: 'Cancel',
-            type: ButtonType.DEFAULT,
-            enabled: !saving,
-            action: onVoiceCancelClick
-        }, "Button(voice-cancel-" + spec.field + ")");
-        return safeNew(d.SP, {
-            items: [dropdown, saveBtn, cancelBtn].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(voice-edit-" + spec.field + ")");
-    }
-    function voiceListKeyFor(field) {
-        if (field === 'twimlAppSid')
-            return 'twimlApps';
-        if (field === 'phoneNumber')
-            return 'phoneNumbers';
-        if (field === 'intelServiceSid')
-            return 'intelServices';
-        return null;
-    }
-    function voiceActionFor(field) {
-        if (field === 'twimlAppSid')
-            return 'wizardListTwiMLApps';
-        if (field === 'phoneNumber')
-            return 'wizardListPhoneNumbers';
-        if (field === 'intelServiceSid')
-            return 'wizardListIntelServices';
-        return null;
-    }
-    function onVoiceChangeClick(field, allowEmpty) {
-        STATE.console.voiceEditing = field;
-        STATE.console.voiceError = null;
-        var snap = STATE.console.snapshot || {};
-        STATE.console.voicePendingValue = snap[field] || null;
-        var listKey = voiceListKeyFor(field);
-        if (STATE.console.voiceLists[listKey] !== null) {
-            rerender();
-            return;
-        }
-        STATE.console.voiceListsLoading = true;
-        rerender();
-        wizardCall(voiceActionFor(field), {})
-            .then(function (p) {
-            STATE.console.voiceLists[listKey] = (p && p.items) || [];
-            STATE.console.voiceListsLoading = false;
-            rerender();
-        })
-            .catch(function (e) {
-            STATE.console.voiceListsLoading = false;
-            STATE.console.voiceError = 'Could not load list: ' +
-                (e && e.message ? e.message : String(e));
-            STATE.console.voiceEditing = null;
-            rerender();
-        });
-    }
-    function onVoiceCancelClick() {
-        STATE.console.voiceEditing = null;
-        STATE.console.voicePendingValue = null;
-        STATE.console.voiceError = null;
-        rerender();
-    }
-    function onVoiceSaveClick(field) {
-        var snap = STATE.console.snapshot || {};
-        var newValue = STATE.console.voicePendingValue;
-        if (newValue === snap[field]) {
-            STATE.console.voiceEditing = null;
-            STATE.console.voicePendingValue = null;
-            rerender();
-            return;
-        }
-        var payload = {
-            twimlAppSid: snap.twimlAppSid || '',
-            phoneNumber: snap.phoneNumber || '',
-            intelServiceSid: snap.intelServiceSid || ''
-        };
-        payload[field] = newValue || '';
-        STATE.console.voiceSaving = true;
-        STATE.console.voiceError = null;
-        rerender();
-        wizardCall('wizardSaveVoice', payload)
-            .then(function (p) {
-            STATE.console.voiceSaving = false;
-            if (p && p.saved) {
-                snap[field] = newValue;
-                STATE.console.snapshot = snap;
-                STATE.console.voiceEditing = null;
-                STATE.console.voicePendingValue = null;
-                rerender();
-            }
-            else {
-                STATE.console.voiceError = 'Save failed: ' +
-                    ((p && p.error) || 'unknown');
-                rerender();
-            }
-        })
-            .catch(function (e) {
-            STATE.console.voiceSaving = false;
-            STATE.console.voiceError = 'Network error saving: ' +
-                (e && e.message ? e.message : String(e));
-            rerender();
-        });
     }
     function buildPhonesSection(d) {
         var items = [];
