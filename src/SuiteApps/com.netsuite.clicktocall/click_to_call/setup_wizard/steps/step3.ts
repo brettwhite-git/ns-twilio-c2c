@@ -70,11 +70,13 @@ export const buildStep3Form = (d: EnumsBag): unknown => {
 
     rows.push(safeNew(d.T, {
         text: 'Pick the TwiML application, default outbound caller ' +
-              'ID, and (optional) Conversational Intelligence ' +
-              'service from your Twilio account. These are fetched ' +
-              'live from Twilio using the secure API Secret ' +
-              'configured in Step 2 — the secret value never leaves ' +
-              "NetSuite's vault."
+              'ID, and Conversational Intelligence service from your ' +
+              'Twilio account. These are fetched live from Twilio ' +
+              'using the secure API Secret configured in Step 2 — ' +
+              "the secret value never leaves NetSuite's vault. " +
+              'Conversational Intelligence is required: it produces ' +
+              'the call transcripts that drive AI summaries and ' +
+              'tone/satisfaction scoring.'
     }, 'Text(step3-intro)'));
 
     // Loading state — lists not yet fetched.
@@ -134,11 +136,10 @@ export const buildStep3Form = (d: EnumsBag): unknown => {
         { valueIsString: true }));
 
     rows.push(buildDropdownField(d,
-        'Conversational Intelligence Service (optional)',
+        'Conversational Intelligence Service',
         (STATE.step3.intelServices || []) as TwilioItem[],
         STATE.step3.intelServiceSid,
-        (sid) => { STATE.step3.intelServiceSid = sid || ''; },
-        { allowEmpty: true }));
+        (sid) => { STATE.step3.intelServiceSid = sid || ''; }));
 
     return safeNew(d.SP, {
         items: rows.filter((r) => r != null),
@@ -181,8 +182,9 @@ export const loadStep3Lists = (deps: Step3Deps): void => {
                 if (field === 'phoneNumbers' && !STATE.step3.phoneNumber) {
                     STATE.step3.phoneNumber = first.phoneNumber || '';
                 }
-                // intelServiceSid stays empty by default — that field
-                // is optional (allowEmpty: true on the dropdown)
+                if (field === 'intelServices' && !STATE.step3.intelServiceSid) {
+                    STATE.step3.intelServiceSid = first.sid || '';
+                }
             }
         } else {
             STATE.step3[field] = [];

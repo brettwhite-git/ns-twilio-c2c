@@ -140,27 +140,31 @@ export const wrapContent = (d: EnumsBag, child: unknown): unknown => {
 
 /**
  * U7 + U1: when snapshot.active === false, render a top-of-page
- * orange Banner with a Reactivate button. R7 (originally) said do
+ * warning banner with a Reactivate button. R7 (originally) said do
  * NOT bounce admin to the stepper on deactivate — admin stays
  * here, banner-gated. U1 places this banner ONCE at the page root
  * above the console shell.
  *
- * EMPIRICAL: Banner's `button` prop and `showControls` flag share
- * the same right-side controls region. `showControls: false` hides
- * BOTH the dontShowAgain checkbox AND the action button. The
- * catalog docs don't disclose this conflict (the example uses
- * showControls:false but has no button).
+ * Path C polish (2026-05-27) — swapped from `component.Banner`
+ * (a decorative banner with COLOR.ORANGE) to `component.BannerMessage`
+ * (a SEMANTIC notification with Type.WARNING). BannerMessage is the
+ * Oracle-canonical component for status messaging: it renders the
+ * standard warning triangle icon natively and uses the system's
+ * warning-color palette rather than a custom rootStyle.
  *
- * Workaround: omit Banner.button entirely. Build a horizontal
- * StackPanel containing the body text + Reactivate button, and
- * pass that as Banner.content. Banner.content accepts any
- * Component, so the button rides inside the content slot —
- * unaffected by showControls.
+ * The Reactivate button still rides inside `content` as a horizontal
+ * StackPanel — BannerMessage has no built-in action slot (the closest
+ * is `showCloseButton`, which fires CLOSED rather than a custom
+ * action). Putting the button in `content` keeps both action paths
+ * (dismiss + reactivate) clean: we set `showCloseButton: false` so
+ * admins can't dismiss the paused state itself, only reactivate.
  *
- * @param d           UIF enums bundle.
+ * @param d            UIF enums bundle (unused for BannerMessage —
+ *                     kept in the signature for symmetry with other
+ *                     shell helpers and forward compatibility).
  * @param onReactivate Click handler for the Reactivate button. Wires
- *                    back to SpaClient's onReactivateClick (which
- *                    fires wizardActivate then rerender).
+ *                     back to SpaClient's onReactivateClick (which
+ *                     fires wizardActivate then rerender).
  */
 export const buildPausedBanner = (
     d: EnumsBag,
@@ -188,12 +192,12 @@ export const buildPausedBanner = (
         alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
     }, 'StackPanel(paused-banner-content)') || bodyText;
 
-    return safeNew(d.Bn, {
+    return safeNew(component.BannerMessage, {
         title: 'Click-to-Call is paused',
         content: contentRow,
-        color: d.Bn_Color.ORANGE,
-        showControls: false
-    }, 'Banner(paused)');
+        type: component.BannerMessage.Type.WARNING,
+        showCloseButton: false
+    }, 'BannerMessage(paused)');
 };
 
 // ─────────────────────────────────────────────────────────────────────

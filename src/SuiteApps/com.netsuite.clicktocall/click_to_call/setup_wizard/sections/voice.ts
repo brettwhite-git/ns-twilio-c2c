@@ -112,11 +112,11 @@ export const buildVoiceSection = (d: EnumsBag, deps: VoiceSectionDeps): unknown 
 
     items.push(buildVoiceFieldRow(d, deps, {
         field: 'intelServiceSid',
-        label: 'Conversational Intelligence (optional)',
+        label: 'Conversational Intelligence',
         value: snap.intelServiceSid,
-        helpText: 'Twilio Conversational Intelligence service for AI ' +
-            'call analysis. Leave unset to disable AI analysis.',
-        allowEmpty: true
+        helpText: 'Twilio Conversational Intelligence service that ' +
+            'transcribes calls and powers AI summaries, tone keywords, ' +
+            'and satisfaction scoring on logged Phone Call records.'
     }));
 
     if (items.length === 0) return safeNew(d.T, { text: 'Voice config' }, 'Text(voice-empty)');

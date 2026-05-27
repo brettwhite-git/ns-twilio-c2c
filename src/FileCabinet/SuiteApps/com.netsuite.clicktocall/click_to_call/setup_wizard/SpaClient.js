@@ -320,12 +320,12 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
             alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
         }, 'StackPanel(paused-banner-content)') || bodyText;
-        return safeNew(d.Bn, {
+        return safeNew(component__namespace.BannerMessage, {
             title: 'Click-to-Call is paused',
             content: contentRow,
-            color: d.Bn_Color.ORANGE,
-            showControls: false
-        }, 'Banner(paused)');
+            type: component__namespace.BannerMessage.Type.WARNING,
+            showCloseButton: false
+        }, 'BannerMessage(paused)');
     };
     const buildStatCard = (d, spec) => {
         try {
@@ -960,11 +960,11 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }));
         items.push(buildVoiceFieldRow(d, deps, {
             field: 'intelServiceSid',
-            label: 'Conversational Intelligence (optional)',
+            label: 'Conversational Intelligence',
             value: snap.intelServiceSid,
-            helpText: 'Twilio Conversational Intelligence service for AI ' +
-                'call analysis. Leave unset to disable AI analysis.',
-            allowEmpty: true
+            helpText: 'Twilio Conversational Intelligence service that ' +
+                'transcribes calls and powers AI summaries, tone keywords, ' +
+                'and satisfaction scoring on logged Phone Call records.'
         }));
         if (items.length === 0)
             return safeNew(d.T, { text: 'Voice config' }, 'Text(voice-empty)');
@@ -1460,24 +1460,36 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     };
 
     const buildStep2Form = (d) => {
-        const rows = [];
-        rows.push(safeNew(d.H, {
+        const heading = safeNew(d.H, {
             content: 'Connect to your Twilio account',
             type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(step2)'));
-        rows.push(safeNew(d.T, {
+        }, 'Heading(step2)');
+        const intro = safeNew(d.T, {
             text: 'Enter your Twilio Account SID and API Key SID. ' +
                 'The API Key Secret must already exist in NetSuite ' +
                 'API Secrets (Setup > Company > API Secrets) — paste ' +
                 'its script ID below. Live validation against Twilio ' +
-                'runs at Step 6 (Test & activate) using the configured ' +
+                'runs at Step 5 (Test & activate) using the configured ' +
                 'secret pointer — no need to paste the secret value here.'
-        }, 'Text(step2-intro)'));
-        rows.push(buildTextField('Account SID', 'AC...', STATE.step2.accountSid, (v) => { STATE.step2.accountSid = v; }));
-        rows.push(buildTextField('API Key SID', 'SK...', STATE.step2.apiKeySid, (v) => { STATE.step2.apiKeySid = v; }));
-        rows.push(buildTextField('API Key Secret script ID', 'custsecret_...', STATE.step2.apiSecretId, (v) => { STATE.step2.apiSecretId = v; }));
+        }, 'Text(step2-intro)');
+        const fields = [
+            buildTextField('Account SID', 'AC...', STATE.step2.accountSid, (v) => { STATE.step2.accountSid = v; }),
+            buildTextField('API Key SID', 'SK...', STATE.step2.apiKeySid, (v) => { STATE.step2.apiKeySid = v; }),
+            buildTextField('API Key Secret script ID', 'custsecret_...', STATE.step2.apiSecretId, (v) => { STATE.step2.apiSecretId = v; })
+        ].filter((f) => f != null);
+        const fieldsBlock = safeNew(d.GP, {
+            columns: '1fr 1fr 1fr',
+            rows: 'auto',
+            items: fields,
+            columnGap: (d.GP_Gap && d.GP_Gap.M) || undefined
+        }, 'GridPanel(step2-fields)') || safeNew(d.SP, {
+            items: fields,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, 'StackPanel(step2-fields-fallback)');
+        const items = [heading, intro, fieldsBlock].filter((c) => c != null);
         return safeNew(d.SP, {
-            items: rows.filter((r) => r != null),
+            items: items,
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.M
         }, 'StackPanel(step2)');
@@ -1491,11 +1503,13 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'Heading(step3)'));
         rows.push(safeNew(d.T, {
             text: 'Pick the TwiML application, default outbound caller ' +
-                'ID, and (optional) Conversational Intelligence ' +
-                'service from your Twilio account. These are fetched ' +
-                'live from Twilio using the secure API Secret ' +
-                'configured in Step 2 — the secret value never leaves ' +
-                "NetSuite's vault."
+                'ID, and Conversational Intelligence service from your ' +
+                'Twilio account. These are fetched live from Twilio ' +
+                'using the secure API Secret configured in Step 2 — ' +
+                "the secret value never leaves NetSuite's vault. " +
+                'Conversational Intelligence is required: it produces ' +
+                'the call transcripts that drive AI summaries and ' +
+                'tone/satisfaction scoring.'
         }, 'Text(step3-intro)'));
         if (STATE.step3.twimlApps === null ||
             STATE.step3.phoneNumbers === null ||
@@ -1539,7 +1553,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     (n.friendlyName ? ' — ' + n.friendlyName : '')
             };
         }), STATE.step3.phoneNumber, (val) => { STATE.step3.phoneNumber = val || ''; }, { valueIsString: true }));
-        rows.push(buildDropdownField(d, 'Conversational Intelligence Service (optional)', (STATE.step3.intelServices || []), STATE.step3.intelServiceSid, (sid) => { STATE.step3.intelServiceSid = sid || ''; }, { allowEmpty: true }));
+        rows.push(buildDropdownField(d, 'Conversational Intelligence Service', (STATE.step3.intelServices || []), STATE.step3.intelServiceSid, (sid) => { STATE.step3.intelServiceSid = sid || ''; }));
         return safeNew(d.SP, {
             items: rows.filter((r) => r != null),
             orientation: d.SP_Orient.VERTICAL,
@@ -1561,6 +1575,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     }
                     if (field === 'phoneNumbers' && !STATE.step3.phoneNumber) {
                         STATE.step3.phoneNumber = first.phoneNumber || '';
+                    }
+                    if (field === 'intelServices' && !STATE.step3.intelServiceSid) {
+                        STATE.step3.intelServiceSid = first.sid || '';
                     }
                 }
             }
