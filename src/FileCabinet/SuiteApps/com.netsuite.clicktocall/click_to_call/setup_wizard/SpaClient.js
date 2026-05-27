@@ -1680,6 +1680,8 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             name: 'statusIcon',
             label: '',
             stretchFactor: 1,
+            horizontalAlignment: d.DG.HorizontalAlignment.CENTER,
+            headerHorizontalAlignment: d.DG.HorizontalAlignment.CENTER,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
@@ -1689,7 +1691,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     const s = statusForRow(row);
                     return safeNew(ImageCtor, {
                         image: s.icon,
-                        size: component__namespace.Image.Size.S,
+                        size: component__namespace.Image.Size.M,
                         color: s.color,
                         presentation: true
                     }, 'Image(phone-status-icon)') ||

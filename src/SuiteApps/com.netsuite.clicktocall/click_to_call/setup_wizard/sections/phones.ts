@@ -260,11 +260,17 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
     // Stretch factors: 1 | 2 | 2 | 5 | 2
 
     // ── Column 1: status icon ────────────────────────────────────
+    // GridConstants.HorizontalAlignment.CENTER + Image.Size.M renders
+    // the icon centered in the cell at a size comparable to one line
+    // of SMALL_HEADING text (vs. the previous S size which read as a
+    // tiny accent dot next to the row text).
     const statusIconColDef = {
         type: CT.TEMPLATED,
         name: 'statusIcon',
         label: '',
         stretchFactor: 1,
+        horizontalAlignment: d.DG.HorizontalAlignment.CENTER,
+        headerHorizontalAlignment: d.DG.HorizontalAlignment.CENTER,
         content: (args: CellArgs): unknown => {
             try {
                 const row = args && args.cell && args.cell.row &&
@@ -273,7 +279,7 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
                 const s = statusForRow(row);
                 return safeNew(ImageCtor, {
                     image: s.icon,
-                    size: component.Image.Size.S,
+                    size: component.Image.Size.M,
                     color: s.color,
                     presentation: true
                 }, 'Image(phone-status-icon)') ||
