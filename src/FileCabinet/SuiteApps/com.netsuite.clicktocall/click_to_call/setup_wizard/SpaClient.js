@@ -2177,12 +2177,16 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             }
         }
         wizardCall('wizardSnapshot', {})
-            .then(function (p) { STATE.console.snapshot = p && p.snapshot; })
+            .then(function (p) {
+            var resp = p;
+            STATE.console.snapshot = (resp && resp.snapshot) || null;
+        })
             .catch(function () { STATE.console.snapshot = null; })
             .then(onSettled);
         wizardCall('wizardLoadAssignments', {})
             .then(function (p) {
-            STATE.console.assignments = (p && p.items) || [];
+            var resp = p;
+            STATE.console.assignments = (resp && resp.items) || [];
             STATE.console.phonesByPhone =
                 groupAssignmentsByPhone(STATE.console.assignments);
         })
@@ -2192,31 +2196,37 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         })
             .then(onSettled);
         wizardCall('wizardRunPreflight', {})
-            .then(function (p) { STATE.console.preflight = (p && p.checks) || []; })
+            .then(function (p) {
+            var resp = p;
+            STATE.console.preflight = (resp && resp.checks) || [];
+        })
             .catch(function () { STATE.console.preflight = []; })
             .then(onSettled);
         wizardCall('wizardListEmployees', {})
             .then(function (p) {
-            var items = (p && p.items) || [];
+            var resp = p;
+            var items = (resp && resp.items) || [];
             STATE.console.phonesEmployees = items.map(function (e) {
+                var emp = e;
                 return {
-                    id: Number(e.id),
-                    name: e.name || '(no name)',
-                    email: e.email || ''
+                    id: Number(emp.id),
+                    name: emp.name || '(no name)',
+                    email: emp.email || ''
                 };
             });
         })
             .catch(function () { STATE.console.phonesEmployees = []; })
             .then(onSettled);
     }
-    function computeDrift(snapshot, assignments) {
+    function computeDrift(snapshot, _assignments) {
         if (!snapshot)
             return { phoneNumbers: 'unknown', voiceUrl: 'unknown',
                 intelService: 'unknown' };
+        var snap = snapshot;
         return {
             phoneNumbers: 'in-sync',
             voiceUrl: 'in-sync',
-            intelService: snapshot.intelServiceSid ? 'in-sync' : 'not-configured'
+            intelService: snap.intelServiceSid ? 'in-sync' : 'not-configured'
         };
     }
     function goToSection(sectionName) {
@@ -2268,12 +2278,14 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         rerender();
         wizardCall('wizardListPhoneNumbers', {})
             .then(function (p) {
-            STATE.console.phonesNumbers = (p && p.items) || [];
+            var resp = p;
+            STATE.console.phonesNumbers = (resp && resp.items) || [];
         })
             .catch(function (e) {
+            var err = e;
             STATE.console.phonesNumbers = [];
             STATE.console.phonesError = 'Could not load phone numbers: ' +
-                (e && e.message ? e.message : String(e));
+                (err && err.message ? err.message : String(e));
         })
             .then(function () {
             STATE.console.phonesLoading = false;
@@ -2283,12 +2295,12 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     function onPhonesRowSelectionChanged(phoneSid, newEmployeeIds) {
         STATE.console.phonesSaving[phoneSid] = true;
         STATE.console.phonesError = null;
-        var grouped = STATE.console.phonesByPhone || [];
+        var grouped = (STATE.console.phonesByPhone || []);
         for (var i = 0; i < grouped.length; i++) {
             if (grouped[i].phoneSid === phoneSid) {
                 grouped[i].employeeIds = newEmployeeIds;
-                if (!grouped[i].primaryEmployeeId ||
-                    newEmployeeIds.indexOf(grouped[i].primaryEmployeeId) === -1) {
+                var current = grouped[i].primaryEmployeeId;
+                if (!current || newEmployeeIds.indexOf(current) === -1) {
                     grouped[i].primaryEmployeeId = newEmployeeIds.length > 0
                         ? newEmployeeIds[0] : null;
                 }
@@ -2308,12 +2320,14 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         };
         wizardCall('wizardSaveAssignments', payload)
             .then(function (resp) {
+            var r = resp;
             STATE.console.phonesSaving[phoneSid] = false;
-            if (!resp || resp.ok === false || resp.error) {
+            if (!r || r.ok === false || r.error) {
                 STATE.console.phonesError =
-                    'Save failed: ' + ((resp && resp.error) || 'unknown');
+                    'Save failed: ' + ((r && r.error) || 'unknown');
                 wizardCall('wizardLoadAssignments', {}).then(function (p2) {
-                    STATE.console.assignments = (p2 && p2.items) || [];
+                    var r2 = p2;
+                    STATE.console.assignments = (r2 && r2.items) || [];
                     STATE.console.phonesByPhone =
                         groupAssignmentsByPhone(STATE.console.assignments);
                     rerender();
@@ -2322,9 +2336,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             rerender();
         })
             .catch(function (e) {
+            var err = e;
             STATE.console.phonesSaving[phoneSid] = false;
             STATE.console.phonesError = 'Network: ' +
-                (e && e.message ? e.message : String(e));
+                (err && err.message ? err.message : String(e));
             rerender();
         });
     }
@@ -2337,7 +2352,8 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         STATE.console.deactivateError = null;
         wizardCall('wizardActivate', { deactivate: true })
             .then(function (payload) {
-            if (payload && payload.deactivated) {
+            var resp = payload;
+            if (resp && resp.deactivated) {
                 STATE.console.pendingDeactivateConfirm = false;
                 if (STATE.console.snapshot) {
                     STATE.console.snapshot.active = false;
@@ -2346,13 +2362,14 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             }
             else {
                 STATE.console.deactivateError =
-                    (payload && payload.error) || 'unknown_error';
+                    (resp && resp.error) || 'unknown_error';
                 rerender();
             }
         })
             .catch(function (e) {
+            var err = e;
             STATE.console.deactivateError = 'Network: ' +
-                (e && e.message ? e.message : String(e));
+                (err && err.message ? err.message : String(e));
             rerender();
         });
     }
@@ -2360,7 +2377,8 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         STATE.console.actionError = null;
         wizardCall('wizardActivate', {})
             .then(function (payload) {
-            if (payload && (payload.activated || payload.alreadyActive)) {
+            var resp = payload;
+            if (resp && (resp.activated || resp.alreadyActive)) {
                 if (STATE.console.snapshot) {
                     STATE.console.snapshot.active = true;
                 }
@@ -2368,16 +2386,17 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             }
             else {
                 STATE.console.actionError =
-                    (payload && payload.error) || 'reactivate_failed';
-                if (payload && payload.failedChecks) {
-                    STATE.console.preflight = payload.failedChecks;
+                    (resp && resp.error) || 'reactivate_failed';
+                if (resp && resp.failedChecks) {
+                    STATE.console.preflight = resp.failedChecks;
                 }
                 rerender();
             }
         })
             .catch(function (e) {
+            var err = e;
             STATE.console.actionError = 'Network: ' +
-                (e && e.message ? e.message : String(e));
+                (err && err.message ? err.message : String(e));
             rerender();
         });
     }
@@ -2389,12 +2408,13 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
         console.log("[CTC Setup Wizard] Calling wizardPrereqs...");
         wizardCall('wizardPrereqs', {}).then(function (payload) {
+            var resp = payload;
             var body;
-            if (payload && payload.ok && payload.checks) {
-                body = buildPrereqsList(payload.checks);
+            if (resp && resp.ok && resp.checks) {
+                body = buildPrereqsList(resp.checks);
             }
-            else if (payload && payload.error) {
-                body = buildErrorBox(payload.error);
+            else if (resp && resp.error) {
+                body = buildErrorBox(resp.error);
             }
             else {
                 body = buildErrorBox('unexpected response shape — see console');
@@ -2581,7 +2601,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, "NavigationDrawer(console)");
     }
     function buildNavFallback(d) {
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
+        var ButtonType = component__namespace.Button.Type;
         var navSpecs = [
             { value: 'overview', label: 'Overview' },
             { value: 'phones', label: 'Phones & reps' },
@@ -2675,7 +2695,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         return box;
     }
     function buildNavFooter(d) {
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
+        var ButtonType = component__namespace.Button.Type;
         var backBtn = (CURRENT_STEP > 1) ? safeNew(component__namespace.Button, {
             label: "Back",
             type: ButtonType.DEFAULT,
@@ -2737,10 +2757,11 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
         if (CURRENT_STEP === 4) {
             var rows = [];
-            var phoneNumbers = STATE.step4.phoneNumbers || [];
+            var phoneNumbers = (STATE.step4.phoneNumbers || []);
+            var assignmentsMap = STATE.step4.assignments;
             for (var i = 0; i < phoneNumbers.length; i++) {
                 var pn = phoneNumbers[i];
-                var assignment = STATE.step4.assignments[pn.sid] || {};
+                var assignment = assignmentsMap[pn.sid] || {};
                 var employeeIds = assignment.employeeIds || [];
                 if (employeeIds.length === 0)
                     continue;
@@ -2774,12 +2795,12 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     function buildStepper(d) {
         if (!d.SP || !d.T || !d.SI) ;
         var Badge = component__namespace.Badge;
-        var BadgeType = (Badge && Badge.Type) || {};
-        var BadgeSize = (Badge && Badge.Size) || {};
-        var TextType = (d.T && d.T.Type) || {};
-        var TextSize = (d.T && d.T.Size) || {};
-        var SPAlign = (d.SP && d.SP.Alignment) || {};
-        var SPJust = (d.SP && d.SP.Justification) || {};
+        var BadgeType = Badge.Type;
+        var BadgeSize = Badge.Size;
+        var TextType = d.T.Type;
+        var TextSize = d.T.Size;
+        var SPAlign = d.SP.Alignment;
+        var SPJust = d.SP.Justification;
         var pills = STEPS.map(function (s) {
             var isCurrent = (s.num === CURRENT_STEP);
             var isDone = (s.num < CURRENT_STEP);

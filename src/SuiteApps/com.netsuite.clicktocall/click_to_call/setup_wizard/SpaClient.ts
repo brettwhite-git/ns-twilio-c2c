@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-check
 /**
  * @NApiVersion 2.1
  *
@@ -60,6 +60,74 @@ import { buildStep2Form } from './steps/step2';
 import { buildStep3Form, loadStep3Lists } from './steps/step3';
 import { buildStep4Form, loadStep4Lists } from './steps/step4';
 import { buildStep5Activate, loadStep5 } from './steps/step5';
+
+// ─────────────────────────────────────────────────────────────────────
+// Local types — narrow shapes for the STATE.console payloads SpaClient
+// reads. These mirror the same shapes the section + step modules cast
+// to locally (sections/voice.ts VoiceSnapshot, sections/health.ts
+// DriftSnapshot, etc.). State.ts itself keeps `unknown` for the loose
+// server payloads so callers narrow at the boundary.
+//
+// Path B.5 (2026-05-27) — added when dropping `// @ts-nocheck` on
+// SpaClient.ts. Each interface tracks ONE specific access pattern;
+// don't expand them into "everything a snapshot could possibly hold."
+// The right place for a canonical wizardSnapshot type is the server
+// boundary in wizard_api_client.ts when that surface stabilizes.
+// ─────────────────────────────────────────────────────────────────────
+
+interface ConfigSnapshot {
+    active?: boolean;
+    accountSid?: string;
+    apiKeySid?: string;
+    apiSecretId?: string;
+    twimlAppSid?: string;
+    phoneNumber?: string;
+    intelServiceSid?: string;
+}
+
+interface ServerAssignmentRow {
+    phoneSid?: string;
+    phoneNumber?: string;
+    employeeId?: number | string;
+    isPrimary?: boolean;
+    label?: string;
+}
+
+interface GroupedPhoneRow {
+    phoneSid: string;
+    phoneNumber: string;
+    employeeIds: number[];
+    primaryEmployeeId: number | null;
+}
+
+interface EmployeeRow {
+    id: number;
+    name: string;
+    email: string;
+}
+
+interface ListPayload {
+    items?: unknown[];
+    ok?: boolean;
+    error?: string;
+    errorMessage?: string;
+}
+
+interface SnapshotPayload {
+    snapshot?: ConfigSnapshot;
+}
+
+interface PreflightPayload {
+    checks?: unknown[];
+}
+
+interface SaveResponse {
+    ok?: boolean;
+    saved?: boolean;
+    error?: string;
+    activated?: boolean;
+    failedChecks?: unknown[];
+}
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -311,15 +379,19 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
         }
 
         wizardCall('wizardSnapshot', {})
-            .then(function (p) { STATE.console.snapshot = p && p.snapshot; })
+            .then(function (p) {
+                var resp = p as SnapshotPayload | null;
+                STATE.console.snapshot = (resp && resp.snapshot) || null;
+            })
             .catch(function () { STATE.console.snapshot = null; })
             .then(onSettled);
 
         wizardCall('wizardLoadAssignments', {})
             .then(function (p) {
-                STATE.console.assignments = (p && p.items) || [];
+                var resp = p as ListPayload | null;
+                STATE.console.assignments = (resp && resp.items) || [];
                 STATE.console.phonesByPhone =
-                    groupAssignmentsByPhone(STATE.console.assignments);
+                    groupAssignmentsByPhone(STATE.console.assignments as ServerAssignmentRow[]);
             })
             .catch(function () {
                 STATE.console.assignments = [];
@@ -328,19 +400,24 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
             .then(onSettled);
 
         wizardCall('wizardRunPreflight', {})
-            .then(function (p) { STATE.console.preflight = (p && p.checks) || []; })
+            .then(function (p) {
+                var resp = p as PreflightPayload | null;
+                STATE.console.preflight = (resp && resp.checks) || [];
+            })
             .catch(function () { STATE.console.preflight = []; })
             .then(onSettled);
 
         wizardCall('wizardListEmployees', {})
             .then(function (p) {
-                var items = (p && p.items) || [];
+                var resp = p as ListPayload | null;
+                var items = (resp && resp.items) || [];
                 STATE.console.phonesEmployees = items.map(function (e) {
+                    var emp = e as { id?: number | string; name?: string; email?: string };
                     return {
-                        id: Number(e.id),
-                        name: e.name || '(no name)',
-                        email: e.email || ''
-                    };
+                        id: Number(emp.id),
+                        name: emp.name || '(no name)',
+                        email: emp.email || ''
+                    } as EmployeeRow;
                 });
             })
             .catch(function () { STATE.console.phonesEmployees = []; })
@@ -353,17 +430,21 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
      * which is a Phase 3b enhancement to wizardSaveVoice. For now this
      * returns a coarse shape that the Health section can render against.
      */
-    function computeDrift(snapshot, assignments) {
+    function computeDrift(snapshot: ConfigSnapshot | null | unknown,
+                          _assignments: unknown[] | null): {
+        phoneNumbers: string; voiceUrl: string; intelService: string;
+    } {
         // Defensive default — if data is missing, no drift can be computed.
         if (!snapshot) return { phoneNumbers: 'unknown', voiceUrl: 'unknown',
                                 intelService: 'unknown' };
+        var snap = snapshot as ConfigSnapshot;
         // Phone numbers: live comparison happens in U6 when Phones section
         // also fires wizardListPhoneNumbers. For now mark 'in-sync' so the
         // section can render; U6 swaps this in for the real check.
         return {
             phoneNumbers: 'in-sync',
             voiceUrl: 'in-sync',
-            intelService: snapshot.intelServiceSid ? 'in-sync' : 'not-configured'
+            intelService: snap.intelServiceSid ? 'in-sync' : 'not-configured'
         };
     }
 
@@ -403,8 +484,8 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
      * Input:  [{phoneSid, phoneNumber, employeeId, isPrimary}, ...]
      * Output: [{phoneSid, phoneNumber, employeeIds: [...], primaryEmployeeId}]
      */
-    function groupAssignmentsByPhone(flatRows) {
-        var grouped = {};
+    function groupAssignmentsByPhone(flatRows: ServerAssignmentRow[] | null): GroupedPhoneRow[] {
+        var grouped: Record<string, GroupedPhoneRow> = {};
         (flatRows || []).forEach(function (r) {
             if (!r.phoneSid) return;
             if (!grouped[r.phoneSid]) {
@@ -450,12 +531,14 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
 
         wizardCall('wizardListPhoneNumbers', {})
             .then(function (p) {
-                STATE.console.phonesNumbers = (p && p.items) || [];
+                var resp = p as ListPayload | null;
+                STATE.console.phonesNumbers = (resp && resp.items) || [];
             })
-            .catch(function (e) {
+            .catch(function (e: unknown) {
+                var err = e as { message?: string };
                 STATE.console.phonesNumbers = [];
                 STATE.console.phonesError = 'Could not load phone numbers: ' +
-                    (e && e.message ? e.message : String(e));
+                    (err && err.message ? err.message : String(e));
             })
             .then(function () {
                 STATE.console.phonesLoading = false;
@@ -471,17 +554,17 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
      *
      * On failure, reload assignments and re-group to revert.
      */
-    function onPhonesRowSelectionChanged(phoneSid, newEmployeeIds) {
+    function onPhonesRowSelectionChanged(phoneSid: string, newEmployeeIds: number[]) {
         STATE.console.phonesSaving[phoneSid] = true;
         STATE.console.phonesError = null;
 
         // Optimistic: mutate the grouped row in place.
-        var grouped = STATE.console.phonesByPhone || [];
+        var grouped = (STATE.console.phonesByPhone || []) as GroupedPhoneRow[];
         for (var i = 0; i < grouped.length; i++) {
             if (grouped[i].phoneSid === phoneSid) {
                 grouped[i].employeeIds = newEmployeeIds;
-                if (!grouped[i].primaryEmployeeId ||
-                    newEmployeeIds.indexOf(grouped[i].primaryEmployeeId) === -1) {
+                var current = grouped[i].primaryEmployeeId;
+                if (!current || newEmployeeIds.indexOf(current) === -1) {
                     grouped[i].primaryEmployeeId = newEmployeeIds.length > 0
                         ? newEmployeeIds[0] : null;
                 }
@@ -503,24 +586,27 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
 
         wizardCall('wizardSaveAssignments', payload)
             .then(function (resp) {
+                var r = resp as SaveResponse | null;
                 STATE.console.phonesSaving[phoneSid] = false;
-                if (!resp || resp.ok === false || resp.error) {
+                if (!r || r.ok === false || r.error) {
                     STATE.console.phonesError =
-                        'Save failed: ' + ((resp && resp.error) || 'unknown');
+                        'Save failed: ' + ((r && r.error) || 'unknown');
                     // Revert via fresh load.
                     wizardCall('wizardLoadAssignments', {}).then(function (p2) {
-                        STATE.console.assignments = (p2 && p2.items) || [];
+                        var r2 = p2 as ListPayload | null;
+                        STATE.console.assignments = (r2 && r2.items) || [];
                         STATE.console.phonesByPhone =
-                            groupAssignmentsByPhone(STATE.console.assignments);
+                            groupAssignmentsByPhone(STATE.console.assignments as ServerAssignmentRow[]);
                         rerender();
                     });
                 }
                 rerender();
             })
-            .catch(function (e) {
+            .catch(function (e: unknown) {
+                var err = e as { message?: string };
                 STATE.console.phonesSaving[phoneSid] = false;
                 STATE.console.phonesError = 'Network: ' +
-                    (e && e.message ? e.message : String(e));
+                    (err && err.message ? err.message : String(e));
                 rerender();
             });
     }
@@ -539,23 +625,25 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
         STATE.console.deactivateError = null;
         wizardCall('wizardActivate', { deactivate: true })
             .then(function (payload) {
-                if (payload && payload.deactivated) {
+                var resp = payload as { deactivated?: boolean; error?: string } | null;
+                if (resp && resp.deactivated) {
                     // R7: stay on console; flip snapshot.active so paused
                     // banner renders. Reload snapshot to confirm server state.
                     STATE.console.pendingDeactivateConfirm = false;
                     if (STATE.console.snapshot) {
-                        STATE.console.snapshot.active = false;
+                        (STATE.console.snapshot as ConfigSnapshot).active = false;
                     }
                     rerender();
                 } else {
                     STATE.console.deactivateError =
-                        (payload && payload.error) || 'unknown_error';
+                        (resp && resp.error) || 'unknown_error';
                     rerender();
                 }
             })
-            .catch(function (e) {
+            .catch(function (e: unknown) {
+                var err = e as { message?: string };
                 STATE.console.deactivateError = 'Network: ' +
-                    (e && e.message ? e.message : String(e));
+                    (err && err.message ? err.message : String(e));
                 rerender();
             });
     }
@@ -569,23 +657,30 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
         STATE.console.actionError = null;
         wizardCall('wizardActivate', {})
             .then(function (payload) {
-                if (payload && (payload.activated || payload.alreadyActive)) {
+                var resp = payload as {
+                    activated?: boolean;
+                    alreadyActive?: boolean;
+                    error?: string;
+                    failedChecks?: unknown[];
+                } | null;
+                if (resp && (resp.activated || resp.alreadyActive)) {
                     if (STATE.console.snapshot) {
-                        STATE.console.snapshot.active = true;
+                        (STATE.console.snapshot as ConfigSnapshot).active = true;
                     }
                     rerender();
                 } else {
                     STATE.console.actionError =
-                        (payload && payload.error) || 'reactivate_failed';
-                    if (payload && payload.failedChecks) {
-                        STATE.console.preflight = payload.failedChecks;
+                        (resp && resp.error) || 'reactivate_failed';
+                    if (resp && resp.failedChecks) {
+                        STATE.console.preflight = resp.failedChecks;
                     }
                     rerender();
                 }
             })
-            .catch(function (e) {
+            .catch(function (e: unknown) {
+                var err = e as { message?: string };
                 STATE.console.actionError = 'Network: ' +
-                    (e && e.message ? e.message : String(e));
+                    (err && err.message ? err.message : String(e));
                 rerender();
             });
     }
@@ -602,15 +697,20 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
         }
         console.log("[CTC Setup Wizard] Calling wizardPrereqs...");
         wizardCall('wizardPrereqs', {}).then(function (payload) {
+            var resp = payload as {
+                ok?: boolean;
+                checks?: unknown[];
+                error?: string;
+            } | null;
             var body;
-            if (payload && payload.ok && payload.checks) {
+            if (resp && resp.ok && resp.checks) {
                 // Wrap prereqs list with the nav footer so Continue button
                 // sits below the rows. Since loadPrereqs runs ONLY on
                 // initial Step 1 mount, we re-render the whole tree to
                 // pick up the new body.
-                body = buildPrereqsList(payload.checks);
-            } else if (payload && payload.error) {
-                body = buildErrorBox(payload.error);
+                body = buildPrereqsList(resp.checks as Parameters<typeof buildPrereqsList>[0]);
+            } else if (resp && resp.error) {
+                body = buildErrorBox(resp.error);
             } else {
                 body = buildErrorBox('unexpected response shape — see console');
             }
@@ -800,7 +900,7 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
 
         // ── Paused banner (console mode only) ─────────────────────────
         if (MODE === 'console' && STATE.console.snapshot
-            && STATE.console.snapshot.active === false) {
+            && (STATE.console.snapshot as ConfigSnapshot).active === false) {
             var paused = buildPausedBanner(d, onReactivateClick);
             if (paused) items.push(paused);
         }
@@ -917,7 +1017,8 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
      * StackPanel of Buttons. Same routing semantics; ugly but functional.
      */
     function buildNavFallback(d) {
-        var ButtonType = (component.Button && component.Button.Type) || {};
+        // component.Button.Type guaranteed by UIF v9.0.0 type catalog.
+        var ButtonType = component.Button.Type;
         var navSpecs = [
             { value: 'overview',    label: 'Overview' },
             { value: 'phones',      label: 'Phones & reps' },
@@ -1030,11 +1131,11 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
      * admins can verify what's live without re-running the wizard.
      */
     function buildConsoleSummaryCard(d) {
-        var snap = STATE.console.snapshot;
+        var snap = STATE.console.snapshot as ConfigSnapshot | null;
         if (!snap) return null;
 
-        var assignments = STATE.console.assignments || [];
-        var phoneNumbersWithReps = {};
+        var assignments = (STATE.console.assignments || []) as ServerAssignmentRow[];
+        var phoneNumbersWithReps: Record<string, boolean> = {};
         assignments.forEach(function (a) {
             if (a.phoneSid) phoneNumbersWithReps[a.phoneSid] = true;
         });
@@ -1152,7 +1253,7 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
      * (with per-step validation/save in onContinueClick).
      */
     function buildNavFooter(d) {
-        var ButtonType = (component.Button && component.Button.Type) || {};
+        var ButtonType = component.Button.Type;
 
         var backBtn = (CURRENT_STEP > 1) ? safeNew(component.Button, {
             label: "Back",
@@ -1219,11 +1320,22 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
         }
         if (CURRENT_STEP === 4) {
             // Translate STATE.step4.assignments map → API payload shape
-            var rows = [];
-            var phoneNumbers = STATE.step4.phoneNumbers || [];
+            interface Step4PhoneNumber {
+                sid: string;
+                phoneNumber?: string;
+                friendlyName?: string;
+            }
+            interface Step4Assignment {
+                employeeIds?: number[];
+                label?: string;
+                primaryEmployeeId?: number | null;
+            }
+            var rows: unknown[] = [];
+            var phoneNumbers = (STATE.step4.phoneNumbers || []) as Step4PhoneNumber[];
+            var assignmentsMap = STATE.step4.assignments as Record<string, Step4Assignment>;
             for (var i = 0; i < phoneNumbers.length; i++) {
                 var pn = phoneNumbers[i];
-                var assignment = STATE.step4.assignments[pn.sid] || {};
+                var assignment: Step4Assignment = assignmentsMap[pn.sid] || {};
                 var employeeIds = assignment.employeeIds || [];
                 // Only include rows where at least one employee is assigned;
                 // empty rows shouldn't generate noise in the rep_assignment table
@@ -1283,14 +1395,19 @@ import { buildStep5Activate, loadStep5 } from './steps/step5';
             // class) — we still want the badge if the rest fail.
         }
 
+        // UIF type catalog v9.0.0 guarantees these classes + nested
+        // enums exist. The original `|| {}` defensive pattern (from
+        // pre-catalog days when SP/Bn/etc. were optional at runtime)
+        // produced unsafe empty-object types that swallowed enum-
+        // member access errors.
         var Badge = component.Badge;
-        var BadgeType = (Badge && Badge.Type) || {};
-        var BadgeSize = (Badge && Badge.Size) || {};
-        var TextType = (d.T && d.T.Type) || {};
-        var TextSize = (d.T && d.T.Size) || {};
+        var BadgeType = Badge.Type;
+        var BadgeSize = Badge.Size;
+        var TextType = d.T.Type;
+        var TextSize = d.T.Size;
 
-        var SPAlign = (d.SP && d.SP.Alignment) || {};
-        var SPJust = (d.SP && d.SP.Justification) || {};
+        var SPAlign = d.SP.Alignment;
+        var SPJust = d.SP.Justification;
 
         var pills = STEPS.map(function (s) {
             var isCurrent = (s.num === CURRENT_STEP);
