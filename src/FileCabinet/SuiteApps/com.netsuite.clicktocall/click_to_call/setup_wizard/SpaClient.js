@@ -2664,6 +2664,12 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     function onDeactivateClick() {
         if (!STATE.console.pendingDeactivateConfirm) {
             STATE.console.pendingDeactivateConfirm = true;
+            STATE.console.actionError = null;
+            if (SELECTED_SECTION !== 'health') {
+                setSelectedSection('health');
+                if (MODE === 'stepper')
+                    setMode('console');
+            }
             rerender();
             return;
         }

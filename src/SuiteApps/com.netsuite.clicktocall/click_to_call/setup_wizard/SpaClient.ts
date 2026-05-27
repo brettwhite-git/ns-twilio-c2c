@@ -632,10 +632,29 @@ interface SaveResponse {
      * U6: deactivate handler. Two-click confirm pattern. Unlike U11's
      * original — does NOT bounce to stepper on success; stays on the
      * console with isPaused state per R7 (the plan).
+     *
+     * Path C-4 fix: when priming the confirm flag for the first time,
+     * navigate to Health section so the Cancel/Confirm buttons in the
+     * danger zone are visible. Without this, callers from other
+     * sections (Overview's Quick action) hit the priming branch
+     * silently — the flag flips but the user can't see the resulting
+     * UI change, so the button appears to require two clicks before
+     * "doing anything."
+     *
+     * Cannot just call goToSection('health') — that explicitly RESETS
+     * pendingDeactivateConfirm to false as its standard "cancel pending
+     * on nav" behavior. Inline the nav steps in the right order: set
+     * the flag, then setSelectedSection + setMode + rerender (without
+     * touching pendingDeactivateConfirm).
      */
     function onDeactivateClick() {
         if (!STATE.console.pendingDeactivateConfirm) {
             STATE.console.pendingDeactivateConfirm = true;
+            STATE.console.actionError = null;
+            if (SELECTED_SECTION !== 'health') {
+                setSelectedSection('health');
+                if (MODE === 'stepper') setMode('console');
+            }
             rerender();
             return;
         }
