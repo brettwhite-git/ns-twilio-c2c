@@ -253,15 +253,18 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
 
     // Per MEMORY.md DataGrid learning: with columnStretch: true,
     // `stretchFactor` acts as a PROPORTIONAL WEIGHT for the column.
+    // Must be a positive INTEGER — fractional values (0.5, 1.5) cause
+    // DataGrid construction to throw silently and fall through to the
+    // text fallback.
     // 5-column layout (Path C-6): icon | phone | SID | reps | badge
-    // Stretch factors: 0.5 | 2 | 2 | 5 | 1.5
+    // Stretch factors: 1 | 2 | 2 | 5 | 2
 
     // ── Column 1: status icon ────────────────────────────────────
     const statusIconColDef = {
         type: CT.TEMPLATED,
         name: 'statusIcon',
         label: '',
-        stretchFactor: 0.5,
+        stretchFactor: 1,
         content: (args: CellArgs): unknown => {
             try {
                 const row = args && args.cell && args.cell.row &&
@@ -409,7 +412,7 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
         type: CT.TEMPLATED,
         name: 'status',
         label: 'Status',
-        stretchFactor: 1.5,
+        stretchFactor: 2,
         content: (args: CellArgs): unknown => {
             try {
                 const row = args && args.cell && args.cell.row &&

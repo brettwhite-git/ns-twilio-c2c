@@ -1679,7 +1679,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: CT.TEMPLATED,
             name: 'statusIcon',
             label: '',
-            stretchFactor: 0.5,
+            stretchFactor: 1,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
@@ -1791,7 +1791,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: CT.TEMPLATED,
             name: 'status',
             label: 'Status',
-            stretchFactor: 1.5,
+            stretchFactor: 2,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
