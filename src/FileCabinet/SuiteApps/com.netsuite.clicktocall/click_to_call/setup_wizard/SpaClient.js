@@ -108,17 +108,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     const setSelectedSection = (s) => { SELECTED_SECTION = s; };
     const setRailVisible = (v) => { RAIL_VISIBLE = v; };
 
-    var STEPS = [
-        { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
-        { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
-        { num: 3, label: 'Voice config', sub: 'TwiML & caller ID' },
-        { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
-        { num: 5, label: 'Test & activate', sub: 'Review & go live' }
-    ];
-    var scriptCtx = null;
-    var bodyContainer = null;
-    var enums = null;
-    var STATE = {
+    const STATE = {
         step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
         step3: {
             twimlAppSid: '',
@@ -172,6 +162,17 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             actionError: null
         }
     };
+
+    var STEPS = [
+        { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
+        { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
+        { num: 3, label: 'Voice config', sub: 'TwiML & caller ID' },
+        { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
+        { num: 5, label: 'Test & activate', sub: 'Review & go live' }
+    ];
+    var scriptCtx = null;
+    var bodyContainer = null;
+    var enums = null;
     var run = function (scriptContext) {
         try {
             console.log("[CTC Setup Wizard] === REAL API PASS ===");

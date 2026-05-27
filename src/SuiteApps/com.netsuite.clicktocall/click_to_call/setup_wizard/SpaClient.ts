@@ -43,6 +43,7 @@ import {
     MODE, CURRENT_STEP, SELECTED_SECTION, RAIL_VISIBLE,
     setMode, setCurrentStep, setSelectedSection, setRailVisible
 } from './dispatch';
+import { STATE } from './state';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -63,82 +64,18 @@ import {
     // to ./wizard_api_client.ts. Still imported (top of file) so
     // existing in-file references stay valid.
 
-    // Module-level state — populated by mount + form inputs.
+    // Module-level mount state — scriptCtx / bodyContainer / enums
+    // remain here for now. They're tightly coupled with run() + the
+    // rerender helper (still in this file); will extract with the
+    // render-shell module in B.3e.
     var scriptCtx = null;          // for re-render via setContent
     var bodyContainer = null;      // for swapping step body
     var enums = null;              // cached enum bag from run()
-    var STATE = {
-        step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
-        step3: {
-            twimlAppSid: '',
-            phoneNumber: '',
-            intelServiceSid: '',
-            // Auto-populated dropdown source lists. Fetched from the
-            // server via wizardListTwiMLApps / wizardListPhoneNumbers /
-            // wizardListIntelServices on Step 3 mount. Secret VALUE
-            // never travels — server uses SecureString + custsecret
-            // pointer at the N/https socket boundary.
-            twimlApps: null,        // null = not yet fetched
-            phoneNumbers: null,
-            intelServices: null,
-            listLoadError: null
-        },
-        step4: {
-            // Source lists (null = not yet fetched)
-            phoneNumbers: null,    // from Twilio (live)
-            employees:    null,    // from NetSuite
-            // assignments shape: { <phoneSid>: { employeeIds: [n], label: '', primaryEmployeeId: n }, ... }
-            assignments: {},
-            listLoadError: null
-        },
-        step5: {
-            snapshot: null,        // from wizardSnapshot — config record state
-            assignments: null,     // from wizardLoadAssignments — current rep list
-            preflight: null,       // from wizardRunPreflight — check results array
-            activated: false,      // true after successful activate
-            activateError: null,
-            loading: false         // true while preflight is running
-        },
-        // U1 (Phase 3a): multi-section Admin Console state. The 5 sections
-        // share most data — snapshot + assignments + preflight are fetched
-        // once on console mount and reused across sections. Drift is
-        // computed client-side from snapshot vs live wizardList* responses.
-        console: {
-            snapshot: null,        // from wizardSnapshot
-            assignments: null,     // from wizardLoadAssignments
-            preflight: null,       // from wizardRunPreflight (Health + Overview)
-            activity: null,        // from wizardActivity (U8 — Phase 3c); null until then
-            drift: null,           // client-computed {phoneNumbers, voiceUrl, intelService}
-            loading: false,        // initial-load gate
 
-            // Section-specific state surfaces below.
-            // Phones section (U3 — Phase 3b): inline-edit DataGrid state.
-            phonesEmployees: null,   // from wizardListEmployees (cached)
-            phonesNumbers: null,     // from wizardListPhoneNumbers (live Twilio list)
-            phonesByPhone: null,     // derived: assignments grouped by phoneSid (one row per phone)
-            phonesLoading: false,    // section-level loader gate
-            phonesSaving: {},        // { phoneSid: bool } — per-row save spinner
-            phonesError: null,
-            // Voice section (U4 — Phase 3b): per-field VIEW/EDIT toggle.
-            voiceEditing: null,    // null | 'twimlAppSid' | 'phoneNumber' | 'intelServiceSid'
-            voicePendingValue: null,   // dropdown's pending value while editing (not committed until Save)
-            voiceLists: {              // lazy-loaded option lists, fetched on first Change-click
-                twimlApps: null,
-                phoneNumbers: null,
-                intelServices: null
-            },
-            voiceListsLoading: false,
-            voiceSaving: false,
-            voiceError: null,
-            // Credentials section (U5 — Phase 3c): modal state.
-            activeModal: null,     // null | 'rotate-secret'
-            // Health + Deactivate flow (U6 / U11 carry-over).
-            pendingDeactivateConfirm: false,
-            deactivateError: null,
-            // Cross-section error surface.
-            actionError: null
-        }
-    };
+    // Path B.3d — STATE moved to ./state.ts (typed interfaces per
+    // step + console). 235 `STATE.X` references in this file work
+    // unchanged because the import is a `const` binding — we mutate
+    // properties (STATE.console.foo = bar), never the binding itself.
 
     // Path B.3b — wizardCall moved to ./wizard_api_client.ts.
 
