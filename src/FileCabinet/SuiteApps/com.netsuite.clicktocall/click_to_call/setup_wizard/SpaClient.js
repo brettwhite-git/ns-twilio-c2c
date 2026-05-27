@@ -474,6 +474,299 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'ContentPanel(rotation-callout)') || inner;
     };
 
+    const buildHealthSection = (d, deps) => {
+        const items = [];
+        const heading = safeNew(d.H, {
+            content: 'Health',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(health)');
+        if (heading)
+            items.push(heading);
+        const preflightBlock = buildHealthPreflightBlock(d, deps);
+        if (preflightBlock)
+            items.push(preflightBlock);
+        const driftBlock = buildHealthDriftBlock(d);
+        if (driftBlock)
+            items.push(driftBlock);
+        const dangerBlock = buildHealthDangerZone(d, deps);
+        if (dangerBlock)
+            items.push(dangerBlock);
+        if (STATE.console.actionError) {
+            const err = safeNew(d.T, {
+                text: '✕ ' + STATE.console.actionError,
+                type: d.T_Type.STRONG
+            }, 'Text(health-error)');
+            if (err)
+                items.push(err);
+        }
+        if (items.length === 0)
+            return safeNew(d.T, { text: 'Health' }, 'Text(health-empty)');
+        return safeNew(d.SP, {
+            items: items,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, 'StackPanel(health)');
+    };
+    const buildHealthPreflightBlock = (d, deps) => {
+        const ButtonType = component__namespace.Button.Type;
+        const sectionHeader = safeNew(d.H, {
+            content: 'Preflight',
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(health-preflight)');
+        const rerunBtn = safeNew(component__namespace.Button, {
+            label: '↻ Re-run',
+            type: ButtonType.DEFAULT,
+            action: () => {
+                wizardCall('wizardRunPreflight', {}).then((p) => {
+                    const checks = p && p.checks;
+                    STATE.console.preflight = Array.isArray(checks) ? checks : [];
+                    deps.rerender();
+                }).catch((e) => {
+                    const err = e;
+                    STATE.console.actionError = 'Preflight failed: ' +
+                        (err && err.message ? err.message : String(e));
+                    deps.rerender();
+                });
+            }
+        }, 'Button(rerun-preflight)');
+        const headerRow = safeNew(d.SP, {
+            items: [sectionHeader, rerunBtn].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(preflight-header-row)');
+        const preflight = STATE.console.preflight;
+        let bodyContent;
+        if (preflight === null || preflight === undefined) {
+            bodyContent = safeNew(d.T, {
+                text: 'Preflight not yet run. Click Re-run to check.',
+                type: d.T_Type.WEAK
+            }, 'Text(preflight-loading)');
+        }
+        else if (preflight.length === 0) {
+            bodyContent = safeNew(d.T, {
+                text: 'No checks returned.',
+                type: d.T_Type.WEAK
+            }, 'Text(preflight-empty)');
+        }
+        else {
+            bodyContent = buildHealthChecksDataGrid(d, preflight, 'preflight');
+        }
+        return safeNew(d.SP, {
+            items: [headerRow, bodyContent].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, 'StackPanel(preflight-block)');
+    };
+    const buildHealthDriftBlock = (d) => {
+        const sectionHeader = safeNew(d.H, {
+            content: 'Drift detectors',
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(health-drift)');
+        const drift = (STATE.console.drift || {});
+        const detectors = [
+            { id: 'voiceUrl', label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'unknown' },
+            { id: 'phoneNumbers', label: 'Phone number list', status: drift.phoneNumbers || 'unknown' },
+            { id: 'intelService', label: 'Intel Service', status: drift.intelService || 'unknown' }
+        ];
+        const statusMap = {
+            'in-sync': { status: 'pass', detail: 'In sync with Twilio' },
+            'drift': { status: 'warn', detail: 'Drift detected — review section for details' },
+            'not-configured': { status: 'info_disabled', detail: 'Not configured' },
+            'unknown': { status: 'info_disabled', detail: 'Drift detection requires data load' }
+        };
+        const checks = detectors.map((det) => {
+            const mapped = statusMap[det.status] || statusMap.unknown;
+            return {
+                id: det.id,
+                label: det.label,
+                status: mapped.status,
+                detail: mapped.detail
+            };
+        });
+        const grid = buildHealthChecksDataGrid(d, checks, 'drift');
+        return safeNew(d.SP, {
+            items: [sectionHeader, grid].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, 'StackPanel(drift-block)');
+    };
+    const buildHealthChecksDataGrid = (d, checks, gridName) => {
+        if (!d.DG) {
+            console.warn('[CTC] DataGrid component unavailable; health falling back to StackPanel');
+            const fallbackRows = (checks || []).map((c) => buildCheckRow(c))
+                .filter((r) => r != null);
+            if (fallbackRows.length === 0)
+                return null;
+            return safeNew(d.SP, {
+                items: fallbackRows,
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, 'StackPanel(health-checks-fallback-' + gridName + ')');
+        }
+        if (!checks || checks.length === 0)
+            return null;
+        let rowsDs;
+        try {
+            rowsDs = new d.Ads(checks);
+        }
+        catch (e) {
+            console.error('[CTC] Health checks ArrayDataSource failed:', e);
+            return null;
+        }
+        const CT = (d.DG && d.DG.ColumnType) || {};
+        const statusColDef = {
+            type: CT.TEMPLATED,
+            name: 'status',
+            label: 'Status',
+            stretchFactor: 1,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
+                    return badgeFor(row.status || '') || safeNew(d.T, { text: row.status }, 'Text(status-fallback)');
+                }
+                catch (e) {
+                    console.error('[CTC] Health status column threw:', e);
+                    return safeNew(d.T, { text: '?' }, 'Text(status-error)');
+                }
+            }
+        };
+        const checkColDef = {
+            type: CT.TEMPLATED,
+            name: 'check',
+            label: 'Check',
+            stretchFactor: 3,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(check-empty)');
+                    return safeNew(d.T, {
+                        text: row.label || '',
+                        type: d.T_Type.STRONG
+                    }, 'Text(check-label)');
+                }
+                catch (e) {
+                    console.error('[CTC] Health check column threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(check-error)');
+                }
+            }
+        };
+        const detailColDef = {
+            type: CT.TEMPLATED,
+            name: 'detail',
+            label: 'Detail',
+            stretchFactor: 6,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row || !row.detail)
+                        return safeNew(d.T, {
+                            text: '—',
+                            type: d.T_Type.WEAK
+                        }, 'Text(detail-empty)');
+                    return safeNew(d.T, {
+                        text: row.detail,
+                        type: d.T_Type.WEAK
+                    }, 'Text(check-detail)');
+                }
+                catch (e) {
+                    console.error('[CTC] Health detail column threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(detail-error)');
+                }
+            }
+        };
+        return safeNew(d.DG, {
+            dataSource: rowsDs,
+            columns: [statusColDef, checkColDef, detailColDef],
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            stripedRows: true,
+            dataRowHeight: 48,
+            headerRowHeight: 40,
+            rootStyle: { width: '100%' }
+        }, 'DataGrid(health-' + gridName + ')');
+    };
+    const buildHealthDangerZone = (d, deps) => {
+        const snap = (STATE.console.snapshot || {});
+        const isPaused = snap.active === false;
+        if (isPaused)
+            return null;
+        const ButtonType = component__namespace.Button.Type;
+        const sectionHeader = safeNew(d.H, {
+            content: 'Danger zone',
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(danger-zone)');
+        const description = safeNew(d.T, {
+            text: 'Deactivate Click-to-Call: reps lose phone-icon access ' +
+                'across all roles. In-progress calls finish normally; new ' +
+                'calls cannot be placed. Reactivate any time.',
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(danger-desc)');
+        const buttons = [];
+        if (STATE.console.pendingDeactivateConfirm) {
+            const cancelBtn = safeNew(component__namespace.Button, {
+                label: 'Cancel',
+                type: ButtonType.DEFAULT,
+                action: () => {
+                    STATE.console.pendingDeactivateConfirm = false;
+                    deps.rerender();
+                }
+            }, 'Button(cancel-deactivate)');
+            if (cancelBtn)
+                buttons.push(cancelBtn);
+            const confirmBtn = safeNew(component__namespace.Button, {
+                label: 'Confirm deactivate',
+                type: ButtonType.DANGER || ButtonType.DEFAULT,
+                action: deps.onDeactivateClick
+            }, 'Button(confirm-deactivate)');
+            if (confirmBtn)
+                buttons.push(confirmBtn);
+        }
+        else {
+            const deactivateBtn = safeNew(component__namespace.Button, {
+                label: 'Deactivate',
+                type: ButtonType.DANGER || ButtonType.DEFAULT,
+                action: deps.onDeactivateClick
+            }, 'Button(deactivate)');
+            if (deactivateBtn)
+                buttons.push(deactivateBtn);
+        }
+        const deactivateErrorText = STATE.console.deactivateError ? safeNew(d.T, {
+            text: '✕ Deactivate failed: ' + STATE.console.deactivateError,
+            type: d.T_Type.STRONG
+        }, 'Text(deactivate-error)') : null;
+        const buttonRow = buttons.length > 0 ? safeNew(d.SP, {
+            items: buttons,
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(danger-buttons)') : null;
+        const inner = safeNew(d.SP, {
+            items: [sectionHeader, description, buttonRow, deactivateErrorText]
+                .filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(danger-zone)');
+        if (!d.CP)
+            return inner;
+        return safeNew(d.CP, {
+            content: inner,
+            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            rootStyle: {
+                border: '1px solid #D33A2C',
+                borderRadius: '8px',
+                backgroundColor: '#FDF4F3',
+                padding: '16px 20px'
+            }
+        }, 'ContentPanel(danger-zone-callout)') || inner;
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -1069,7 +1362,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             case 'phones': return buildPhonesSection(d);
             case 'voice': return buildVoiceSection(d);
             case 'credentials': return buildCredentialsSection(d);
-            case 'health': return buildHealthSection(d);
+            case 'health': return buildHealthSection(d, {
+                rerender: rerender,
+                onDeactivateClick: onDeactivateClick
+            });
             default: return buildOverviewSection(d);
         }
     }
@@ -1491,298 +1787,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 (e && e.message ? e.message : String(e));
             rerender();
         });
-    }
-    function buildHealthSection(d) {
-        var items = [];
-        var heading = safeNew(d.H, {
-            content: "Health",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(health)");
-        if (heading)
-            items.push(heading);
-        var preflightBlock = buildHealthPreflightBlock(d);
-        if (preflightBlock)
-            items.push(preflightBlock);
-        var driftBlock = buildHealthDriftBlock(d);
-        if (driftBlock)
-            items.push(driftBlock);
-        var dangerBlock = buildHealthDangerZone(d);
-        if (dangerBlock)
-            items.push(dangerBlock);
-        if (STATE.console.actionError) {
-            var err = safeNew(d.T, {
-                text: "✕ " + STATE.console.actionError,
-                type: d.T_Type.STRONG
-            }, "Text(health-error)");
-            if (err)
-                items.push(err);
-        }
-        if (items.length === 0)
-            return safeNew(d.T, { text: "Health" });
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(health)");
-    }
-    function buildHealthPreflightBlock(d) {
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        var sectionHeader = safeNew(d.H, {
-            content: "Preflight",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(health-preflight)");
-        var rerunBtn = safeNew(component__namespace.Button, {
-            label: "↻ Re-run",
-            type: ButtonType.DEFAULT,
-            action: function () {
-                wizardCall('wizardRunPreflight', {}).then(function (p) {
-                    STATE.console.preflight = (p && p.checks) || [];
-                    rerender();
-                }).catch(function (e) {
-                    STATE.console.actionError = 'Preflight failed: ' +
-                        (e && e.message ? e.message : String(e));
-                    rerender();
-                });
-            }
-        }, "Button(rerun-preflight)");
-        var headerRow = safeNew(d.SP, {
-            items: [sectionHeader, rerunBtn].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(preflight-header-row)");
-        var preflight = STATE.console.preflight;
-        var bodyContent;
-        if (preflight === null || preflight === undefined) {
-            bodyContent = safeNew(d.T, {
-                text: "Preflight not yet run. Click Re-run to check.",
-                type: d.T_Type.WEAK
-            }, "Text(preflight-loading)");
-        }
-        else if (preflight.length === 0) {
-            bodyContent = safeNew(d.T, {
-                text: "No checks returned.",
-                type: d.T_Type.WEAK
-            }, "Text(preflight-empty)");
-        }
-        else {
-            bodyContent = buildHealthChecksDataGrid(d, preflight, 'preflight');
-        }
-        return safeNew(d.SP, {
-            items: [headerRow, bodyContent].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(preflight-block)");
-    }
-    function buildHealthDriftBlock(d) {
-        var sectionHeader = safeNew(d.H, {
-            content: "Drift detectors",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(health-drift)");
-        var drift = STATE.console.drift || {};
-        var detectors = [
-            { id: 'voiceUrl', label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'unknown' },
-            { id: 'phoneNumbers', label: 'Phone number list', status: drift.phoneNumbers || 'unknown' },
-            { id: 'intelService', label: 'Intel Service', status: drift.intelService || 'unknown' }
-        ];
-        var statusMap = {
-            'in-sync': { status: 'pass', detail: 'In sync with Twilio' },
-            'drift': { status: 'warn', detail: 'Drift detected — review section for details' },
-            'not-configured': { status: 'info_disabled', detail: 'Not configured' },
-            'unknown': { status: 'info_disabled', detail: 'Drift detection requires data load' }
-        };
-        var checks = detectors.map(function (det) {
-            var mapped = statusMap[det.status] || statusMap.unknown;
-            return {
-                id: det.id,
-                label: det.label,
-                status: mapped.status,
-                detail: mapped.detail
-            };
-        });
-        var grid = buildHealthChecksDataGrid(d, checks, 'drift');
-        return safeNew(d.SP, {
-            items: [sectionHeader, grid].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(drift-block)");
-    }
-    function buildHealthChecksDataGrid(d, checks, gridName) {
-        if (!d.DG) {
-            console.warn("[CTC] DataGrid component unavailable; health falling back to StackPanel");
-            var fallbackRows = (checks || []).map(function (c) {
-                return buildCheckRow(c);
-            }).filter(function (r) { return r != null; });
-            if (fallbackRows.length === 0)
-                return null;
-            return safeNew(d.SP, {
-                items: fallbackRows,
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(health-checks-fallback-" + gridName + ")");
-        }
-        if (!checks || checks.length === 0)
-            return null;
-        var rowsDs;
-        try {
-            rowsDs = new d.Ads(checks);
-        }
-        catch (e) {
-            console.error("[CTC] Health checks ArrayDataSource failed:", e);
-            return null;
-        }
-        var CT = (d.DG && d.DG.ColumnType) || {};
-        var statusColDef = {
-            type: CT.TEMPLATED,
-            name: 'status',
-            label: 'Status',
-            stretchFactor: 1,
-            content: function (args) {
-                try {
-                    var row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' });
-                    return badgeFor(row.status) || safeNew(d.T, { text: row.status });
-                }
-                catch (e) {
-                    console.error("[CTC] Health status column threw:", e);
-                    return safeNew(d.T, { text: '?' });
-                }
-            }
-        };
-        var checkColDef = {
-            type: CT.TEMPLATED,
-            name: 'check',
-            label: 'Check',
-            stretchFactor: 3,
-            content: function (args) {
-                try {
-                    var row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' });
-                    return safeNew(d.T, {
-                        text: row.label || '',
-                        type: d.T_Type.STRONG
-                    }, "Text(check-label)");
-                }
-                catch (e) {
-                    console.error("[CTC] Health check column threw:", e);
-                    return safeNew(d.T, { text: '(error)' });
-                }
-            }
-        };
-        var detailColDef = {
-            type: CT.TEMPLATED,
-            name: 'detail',
-            label: 'Detail',
-            stretchFactor: 6,
-            content: function (args) {
-                try {
-                    var row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row || !row.detail)
-                        return safeNew(d.T, {
-                            text: '—',
-                            type: d.T_Type.WEAK
-                        });
-                    return safeNew(d.T, {
-                        text: row.detail,
-                        type: d.T_Type.WEAK
-                    }, "Text(check-detail)");
-                }
-                catch (e) {
-                    console.error("[CTC] Health detail column threw:", e);
-                    return safeNew(d.T, { text: '(error)' });
-                }
-            }
-        };
-        var grid = safeNew(d.DG, {
-            dataSource: rowsDs,
-            columns: [statusColDef, checkColDef, detailColDef],
-            columnStretch: true,
-            highlightRowsOnHover: true,
-            stripedRows: true,
-            dataRowHeight: 48,
-            headerRowHeight: 40,
-            rootStyle: { width: '100%' }
-        }, "DataGrid(health-" + gridName + ")");
-        return grid;
-    }
-    function buildHealthDangerZone(d) {
-        var snap = STATE.console.snapshot || {};
-        var isPaused = snap.active === false;
-        if (isPaused)
-            return null;
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        var sectionHeader = safeNew(d.H, {
-            content: "Danger zone",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(danger-zone)");
-        var description = safeNew(d.T, {
-            text: "Deactivate Click-to-Call: reps lose phone-icon access " +
-                "across all roles. In-progress calls finish normally; new " +
-                "calls cannot be placed. Reactivate any time.",
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(danger-desc)");
-        var buttons = [];
-        if (STATE.console.pendingDeactivateConfirm) {
-            var cancelBtn = safeNew(component__namespace.Button, {
-                label: "Cancel",
-                type: ButtonType.DEFAULT,
-                action: function () {
-                    STATE.console.pendingDeactivateConfirm = false;
-                    rerender();
-                }
-            }, "Button(cancel-deactivate)");
-            if (cancelBtn)
-                buttons.push(cancelBtn);
-            var confirmBtn = safeNew(component__namespace.Button, {
-                label: "Confirm deactivate",
-                type: ButtonType.DANGER || ButtonType.DEFAULT,
-                action: onDeactivateClick
-            }, "Button(confirm-deactivate)");
-            if (confirmBtn)
-                buttons.push(confirmBtn);
-        }
-        else {
-            var deactivateBtn = safeNew(component__namespace.Button, {
-                label: "Deactivate",
-                type: ButtonType.DANGER || ButtonType.DEFAULT,
-                action: onDeactivateClick
-            }, "Button(deactivate)");
-            if (deactivateBtn)
-                buttons.push(deactivateBtn);
-        }
-        var deactivateErrorText = STATE.console.deactivateError ? safeNew(d.T, {
-            text: "✕ Deactivate failed: " + STATE.console.deactivateError,
-            type: d.T_Type.STRONG
-        }, "Text(deactivate-error)") : null;
-        var buttonRow = buttons.length > 0 ? safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(danger-buttons)") : null;
-        var inner = safeNew(d.SP, {
-            items: [sectionHeader, description, buttonRow, deactivateErrorText]
-                .filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(danger-zone)");
-        if (!d.CP)
-            return inner;
-        return safeNew(d.CP, {
-            content: inner,
-            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            rootStyle: {
-                border: '1px solid #D33A2C',
-                borderRadius: '8px',
-                backgroundColor: '#FDF4F3',
-                padding: '16px 20px'
-            }
-        }, "ContentPanel(danger-zone-callout)") || inner;
     }
     function buildPhonesSection(d) {
         var items = [];
