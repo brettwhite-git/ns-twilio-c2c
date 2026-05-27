@@ -1230,6 +1230,11 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
     };
 
+    const TWILIO_DOCS = {
+        twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
+        phoneNumber: 'https://www.twilio.com/docs/phone-numbers',
+        intelService: 'https://www.twilio.com/docs/voice/intelligence'
+    };
     const buildVoiceSection = (d, deps) => {
         const snap = (STATE.console.snapshot || {});
         const items = [];
@@ -1260,21 +1265,31 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             field: 'twimlAppSid',
             label: 'TwiML Application',
             value: snap.twimlAppSid,
-            helpText: 'Twilio application that handles outbound call routing.'
+            helpText: 'The Twilio application that handles outbound call ' +
+                'routing. The wizard registers this app\'s VoiceUrl with ' +
+                'the CTC Suitelet, so every call a rep places hits ' +
+                'NetSuite first for screening before connecting to Twilio.',
+            docUrl: TWILIO_DOCS.twimlApp
         }));
         items.push(buildVoiceFieldRow(d, deps, {
             field: 'phoneNumber',
             label: 'Default outbound caller-ID',
             value: snap.phoneNumber,
-            helpText: 'Number reps see as their outbound caller ID.'
+            helpText: 'Number reps see as their outbound caller ID. ' +
+                'Specific rep-to-number assignments override this default ' +
+                '— see Phones & reps section to assign different numbers ' +
+                'to individual reps.',
+            docUrl: TWILIO_DOCS.phoneNumber
         }));
         items.push(buildVoiceFieldRow(d, deps, {
             field: 'intelServiceSid',
             label: 'Conversational Intelligence',
             value: snap.intelServiceSid,
             helpText: 'Twilio Conversational Intelligence service that ' +
-                'transcribes calls and powers AI summaries, tone keywords, ' +
-                'and satisfaction scoring on logged Phone Call records.'
+                'transcribes call audio and powers the AI summary, tone ' +
+                'keywords, and satisfaction scoring on Phone Call records. ' +
+                'Required for the AI analysis pipeline.',
+            docUrl: TWILIO_DOCS.intelService
         }));
         if (items.length === 0)
             return safeNew(d.T, { text: 'Voice config' }, 'Text(voice-empty)');
@@ -1296,28 +1311,44 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: d.T_Type.WEAK,
             size: d.T.Size && d.T.Size.S
         }, 'Text(voice-help-' + spec.field + ')');
-        const labelStack = safeNew(d.SP, {
-            items: [label, help].filter((c) => c != null),
+        const docLink = spec.docUrl ? safeNew(component__namespace.Button, {
+            label: 'Twilio docs ↗',
+            type: ButtonType.PURE || ButtonType.DEFAULT,
+            action: ((url) => () => {
+                try {
+                    window.open(url, '_blank');
+                }
+                catch (e) { }
+            })(spec.docUrl)
+        }, 'Button(voice-doc-link-' + spec.field + ')') : null;
+        const helpStack = safeNew(d.SP, {
+            items: [help, docLink].filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, 'StackPanel(voice-label-' + spec.field + ')');
+            itemGap: d.SP_Gap.XXS,
+            alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
+        }, 'StackPanel(voice-help-' + spec.field + ')');
         const rightSide = isEditing
             ? buildVoiceEditControls(d, deps, spec)
             : buildVoiceViewControls(d, deps, spec, ButtonType);
-        const row = safeNew(d.SP, {
-            items: [labelStack, rightSide].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.L,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined
-        }, 'StackPanel(voice-row-' + spec.field + ')');
+        const cells = [label, helpStack, rightSide].filter((c) => c != null);
+        const grid = safeNew(d.GP, {
+            columns: '1fr 2fr 2fr',
+            rows: 'auto',
+            items: cells,
+            columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined
+        }, 'GridPanel(voice-row-' + spec.field + ')') || safeNew(d.SP, {
+            items: cells,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(voice-row-fallback-' + spec.field + ')');
         if (d.CP) {
             return safeNew(d.CP, {
-                content: row,
+                content: grid,
                 outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
                 horizontalAlignment: d.CP_HAlign.STRETCH
-            }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || row;
+            }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || grid;
         }
-        return row;
+        return grid;
     };
     const buildVoiceViewControls = (d, deps, spec, ButtonType) => {
         const valueText = spec.value
