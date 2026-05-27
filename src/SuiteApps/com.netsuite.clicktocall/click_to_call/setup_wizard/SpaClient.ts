@@ -48,6 +48,9 @@ import { safeNew } from './render/primitives';
 import {
     buildTextField, buildCheckRow, badgeFor, buildErrorBox
 } from './render/shared';
+import {
+    wrapContent, buildPausedBanner, buildStatCard
+} from './render/shell';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -789,7 +792,7 @@ import {
         // ── Paused banner (console mode only) ─────────────────────────
         if (MODE === 'console' && STATE.console.snapshot
             && STATE.console.snapshot.active === false) {
-            var paused = buildPausedBanner(d);
+            var paused = buildPausedBanner(d, onReactivateClick);
             if (paused) items.push(paused);
         }
 
@@ -835,53 +838,7 @@ import {
         return wrapContent(d, stack || items[0]);
     }
 
-    /**
-     * U1.5: wrap content in a ScrollPanel(VERTICAL) + ContentPanel
-     * (padding).
-     *
-     * ── LAYOUT-WIDE MARGIN RULE (single source of truth) ───────────
-     * Every section's content flows through this function. The
-     * `outerGap` GapSizeObject is the ONE place that defines the
-     * margin between:
-     *   - rail edge ←→ content start  (outerGap.start)
-     *   - content end ←→ browser right (outerGap.end)
-     *   - top / bottom breathing room  (outerGap.vertical)
-     *
-     * Update these values to change layout spacing across EVERY
-     * section uniformly (Overview, Phones, Voice, Credentials,
-     * Health, and stepper re-run mode).
-     *
-     * Per ContentPanel.GapSizeObject (component.d.ts:4069):
-     *   start / end accept any GapSize (M=24px, L=32px, XL=40px).
-     *
-     * Current values:
-     *   start: XXL (48px) — generous inset from rail's flush-left edge
-     *   end:   XXL (48px) — symmetric inset from browser right
-     *   vertical: M (24px) — top + bottom inset
-     */
-    function wrapContent(d, child) {
-        if (!d.CP) return child;
-        var Gap = d.CP_Gap || {};
-        var padded = safeNew(d.CP, {
-            content: child,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            outerGap: {
-                start: Gap.XXL,
-                end: Gap.XXL,
-                vertical: Gap.M
-            }
-        }, "ContentPanel(rail-wrapper)") || child;
-
-        // Wrap in ScrollPanel(VERTICAL) so the content pane scrolls
-        // internally — rail stays put in viewport even when content
-        // exceeds the visible area.
-        if (!d.Sp) return padded;
-        var Sp_Orient = (d.Sp && d.Sp.Orientation) || {};
-        return safeNew(d.Sp, {
-            content: padded,
-            orientation: Sp_Orient.VERTICAL
-        }, "ScrollPanel(rail-content)") || padded;
-    }
+    // wrapContent moved to render/shell.ts (Path B.3e-3).
 
     /**
      * U1: NavigationDrawer with grouped items. Per d.ts (component.d.ts:13874+),
@@ -1111,65 +1068,9 @@ import {
      * places it ONCE at the page root above the console shell, which
      * achieves the same visual outcome for less code.
      */
-    function buildPausedBanner(d) {
-        if (!d.Bn) {
-            // Banner unavailable — fall back to a Text + Button row.
-            var ButtonType = (component.Button && component.Button.Type) || {};
-            return safeNew(d.SP, {
-                items: [
-                    safeNew(d.T, {
-                        text: "⚠ Click-to-Call is paused. Reps cannot place calls.",
-                        type: d.T_Type.STRONG
-                    }, "Text(paused-fallback)"),
-                    safeNew(component.Button, {
-                        label: "Reactivate",
-                        type: ButtonType.PRIMARY,
-                        action: onReactivateClick
-                    }, "Button(paused-reactivate-fallback)")
-                ].filter(function (c) { return c != null; }),
-                orientation: d.SP_Orient.HORIZONTAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(paused-fallback)");
-        }
-        var ButtonType = (component.Button && component.Button.Type) || {};
-
-        // EMPIRICAL: Banner's `button` prop and `showControls` flag share
-        // the same right-side controls region. `showControls: false`
-        // hides BOTH the dontShowAgain checkbox AND the action button.
-        // The catalog docs don't disclose this conflict (their example
-        // shows showControls:false but has no button).
-        //
-        // Workaround: omit Banner.button entirely. Build a horizontal
-        // StackPanel containing the body text and the Reactivate button,
-        // and pass that as Banner.content. Banner.content accepts any
-        // Component, so the button rides inside the content slot —
-        // unaffected by showControls.
-        var bodyText = safeNew(d.T, {
-            text: "Reps cannot place calls until you reactivate. All " +
-                  "config is preserved."
-        }, "Text(paused-banner-body)");
-
-        var reactivateBtn = safeNew(component.Button, {
-            label: "Reactivate",
-            type: ButtonType.PRIMARY,
-            action: onReactivateClick
-        }, "Button(paused-banner-reactivate)");
-
-        var contentRow = safeNew(d.SP, {
-            items: [bodyText, reactivateBtn].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.L,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
-            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-        }, "StackPanel(paused-banner-content)") || bodyText;
-
-        return safeNew(d.Bn, {
-            title: "Click-to-Call is paused",
-            content: contentRow,
-            color: d.Bn_Color.ORANGE,
-            showControls: false
-        }, "Banner(paused)");
-    }
+    // buildPausedBanner moved to render/shell.ts (Path B.3e-3).
+    // It now takes onReactivate as a callback parameter instead of
+    // referencing the SpaClient-scoped onReactivateClick directly.
 
     /* ────────────────────────────────────────────────────────────────── */
     /* U2 — Overview section (Phase 3a)                                   */
@@ -1277,47 +1178,7 @@ import {
         }, "StackPanel(overview-stats-fallback)");
     }
 
-    /**
-     * U2-polish: use Card.metric() — the static factory designed for
-     * KPI/stat cards. Per component.d.ts:2478, it accepts
-     * { title, metric, description, action } and returns a Card with the
-     * proper internal layout. This replaces the manual Card+StackPanel
-     * approach that rendered invisible cards.
-     */
-    function buildStatCard(d, spec) {
-        if (d.Cd && typeof d.Cd.metric === 'function') {
-            try {
-                return d.Cd.metric({
-                    title: spec.title,
-                    metric: spec.metric,
-                    description: spec.description
-                });
-            } catch (e) {
-                console.warn("[CTC Setup Wizard] Card.metric threw, " +
-                    "falling back to manual stack:", e);
-            }
-        }
-        // Fallback: manual stack if Card.metric isn't available.
-        var label = safeNew(d.T, {
-            text: spec.title,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(stat-label)");
-        var value = safeNew(d.H, {
-            content: spec.metric,
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(stat-value)");
-        var sub = spec.description ? safeNew(d.T, {
-            text: spec.description,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(stat-sub)") : null;
-        return safeNew(d.SP, {
-            items: [label, value, sub].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, "StackPanel(stat-card-" + spec.title + ")");
-    }
+    // buildStatCard moved to render/shell.ts (Path B.3e-3).
 
     function buildOverviewQuickActions(d) {
         var ButtonType = (component.Button && component.Button.Type) || {};

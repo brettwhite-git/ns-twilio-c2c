@@ -267,6 +267,85 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'Text(error)');
     };
 
+    const wrapContent = (d, child) => {
+        if (!d.CP)
+            return child;
+        const Gap = d.CP_Gap || {};
+        const padded = safeNew(d.CP, {
+            content: child,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            outerGap: {
+                start: Gap.XXL,
+                end: Gap.XXL,
+                vertical: Gap.M
+            }
+        }, 'ContentPanel(rail-wrapper)') || child;
+        if (!d.Sp)
+            return padded;
+        const Sp_Orient = (d.Sp && d.Sp.Orientation) || {};
+        return safeNew(d.Sp, {
+            content: padded,
+            orientation: Sp_Orient.VERTICAL
+        }, 'ScrollPanel(rail-content)') || padded;
+    };
+    const buildPausedBanner = (d, onReactivate) => {
+        const ButtonType = component__namespace.Button.Type;
+        const bodyText = safeNew(d.T, {
+            text: 'Reps cannot place calls until you reactivate. All ' +
+                'config is preserved.'
+        }, 'Text(paused-banner-body)');
+        const reactivateBtn = safeNew(component__namespace.Button, {
+            label: 'Reactivate',
+            type: ButtonType.PRIMARY,
+            action: onReactivate
+        }, 'Button(paused-banner-reactivate)');
+        const contentRow = safeNew(d.SP, {
+            items: [bodyText, reactivateBtn].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.L,
+            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(paused-banner-content)') || bodyText;
+        return safeNew(d.Bn, {
+            title: 'Click-to-Call is paused',
+            content: contentRow,
+            color: d.Bn_Color.ORANGE,
+            showControls: false
+        }, 'Banner(paused)');
+    };
+    const buildStatCard = (d, spec) => {
+        try {
+            return d.Cd.metric({
+                title: spec.title,
+                metric: spec.metric,
+                description: spec.description
+            });
+        }
+        catch (e) {
+            console.warn('[CTC Setup Wizard] Card.metric threw, ' +
+                'falling back to manual stack:', e);
+        }
+        const label = safeNew(d.T, {
+            text: spec.title,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(stat-label)');
+        const value = safeNew(d.H, {
+            content: spec.metric,
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(stat-value)');
+        const sub = spec.description ? safeNew(d.T, {
+            text: spec.description,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(stat-sub)') : null;
+        return safeNew(d.SP, {
+            items: [label, value, sub].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, 'StackPanel(stat-card-' + spec.title + ')');
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -745,7 +824,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             items.push(title);
         if (MODE === 'console' && STATE.console.snapshot
             && STATE.console.snapshot.active === false) {
-            var paused = buildPausedBanner(d);
+            var paused = buildPausedBanner(d, onReactivateClick);
             if (paused)
                 items.push(paused);
         }
@@ -785,27 +864,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             itemGap: d.SP_Gap.L
         }, "StackPanel(rail-content)");
         return wrapContent(d, stack || items[0]);
-    }
-    function wrapContent(d, child) {
-        if (!d.CP)
-            return child;
-        var Gap = d.CP_Gap || {};
-        var padded = safeNew(d.CP, {
-            content: child,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            outerGap: {
-                start: Gap.XXL,
-                end: Gap.XXL,
-                vertical: Gap.M
-            }
-        }, "ContentPanel(rail-wrapper)") || child;
-        if (!d.Sp)
-            return padded;
-        var Sp_Orient = (d.Sp && d.Sp.Orientation) || {};
-        return safeNew(d.Sp, {
-            content: padded,
-            orientation: Sp_Orient.VERTICAL
-        }, "ScrollPanel(rail-content)") || padded;
     }
     function buildConsoleNavDrawer(d) {
         if (!d.ND) {
@@ -886,49 +944,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             case 'health': return buildHealthSection(d);
             default: return buildOverviewSection(d);
         }
-    }
-    function buildPausedBanner(d) {
-        if (!d.Bn) {
-            var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-            return safeNew(d.SP, {
-                items: [
-                    safeNew(d.T, {
-                        text: "⚠ Click-to-Call is paused. Reps cannot place calls.",
-                        type: d.T_Type.STRONG
-                    }, "Text(paused-fallback)"),
-                    safeNew(component__namespace.Button, {
-                        label: "Reactivate",
-                        type: ButtonType.PRIMARY,
-                        action: onReactivateClick
-                    }, "Button(paused-reactivate-fallback)")
-                ].filter(function (c) { return c != null; }),
-                orientation: d.SP_Orient.HORIZONTAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(paused-fallback)");
-        }
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        var bodyText = safeNew(d.T, {
-            text: "Reps cannot place calls until you reactivate. All " +
-                "config is preserved."
-        }, "Text(paused-banner-body)");
-        var reactivateBtn = safeNew(component__namespace.Button, {
-            label: "Reactivate",
-            type: ButtonType.PRIMARY,
-            action: onReactivateClick
-        }, "Button(paused-banner-reactivate)");
-        var contentRow = safeNew(d.SP, {
-            items: [bodyText, reactivateBtn].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.L,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
-            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-        }, "StackPanel(paused-banner-content)") || bodyText;
-        return safeNew(d.Bn, {
-            title: "Click-to-Call is paused",
-            content: contentRow,
-            color: d.Bn_Color.ORANGE,
-            showControls: false
-        }, "Banner(paused)");
     }
     function buildOverviewSection(d) {
         var items = [];
@@ -1015,40 +1030,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             orientation: d.SP_Orient.HORIZONTAL,
             itemGap: d.SP_Gap.M
         }, "StackPanel(overview-stats-fallback)");
-    }
-    function buildStatCard(d, spec) {
-        if (d.Cd && typeof d.Cd.metric === 'function') {
-            try {
-                return d.Cd.metric({
-                    title: spec.title,
-                    metric: spec.metric,
-                    description: spec.description
-                });
-            }
-            catch (e) {
-                console.warn("[CTC Setup Wizard] Card.metric threw, " +
-                    "falling back to manual stack:", e);
-            }
-        }
-        var label = safeNew(d.T, {
-            text: spec.title,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(stat-label)");
-        var value = safeNew(d.H, {
-            content: spec.metric,
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(stat-value)");
-        var sub = spec.description ? safeNew(d.T, {
-            text: spec.description,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(stat-sub)") : null;
-        return safeNew(d.SP, {
-            items: [label, value, sub].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, "StackPanel(stat-card-" + spec.title + ")");
     }
     function buildOverviewQuickActions(d) {
         var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
