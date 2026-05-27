@@ -402,8 +402,26 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             content: 'Credentials',
             type: d.H_Type.MEDIUM_HEADING
         }, 'Heading(credentials)');
-        if (heading)
-            items.push(heading);
+        const ButtonType = component__namespace.Button.Type;
+        const manageBtn = safeNew(component__namespace.Button, {
+            label: 'Open NetSuite API Secrets ↗',
+            type: ButtonType.DEFAULT,
+            action: () => {
+                try {
+                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
+                }
+                catch (e) { }
+            }
+        }, 'Button(open-api-secrets)');
+        const headerRow = safeNew(d.SP, {
+            items: [heading, manageBtn].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M,
+            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(credentials-header-row)');
+        if (headerRow)
+            items.push(headerRow);
         const intro = safeNew(d.T, {
             text: 'Twilio public identifiers and NetSuite secret pointer. ' +
                 'These values are safe to view; the API Key Secret value ' +
@@ -432,19 +450,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 'value. The actual secret stays encrypted in NetSuite ' +
                 'and is never exposed to SuiteScript at runtime.'
         }));
-        const ButtonType = component__namespace.Button.Type;
-        const manageBtn = safeNew(component__namespace.Button, {
-            label: 'Open NetSuite API Secrets ↗',
-            type: ButtonType.DEFAULT,
-            action: () => {
-                try {
-                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
-                }
-                catch (e) { }
-            }
-        }, 'Button(open-api-secrets)');
-        if (manageBtn)
-            items.push(manageBtn);
         items.push(buildSecretRotationRunbook(d));
         return safeNew(d.SP, {
             items: items.filter((c) => c != null),

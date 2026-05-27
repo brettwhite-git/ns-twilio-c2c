@@ -60,11 +60,35 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
     const snap = (STATE.console.snapshot || {}) as CredentialsSnapshot;
     const items: unknown[] = [];
 
+    // Path C-7-followup: section header row with primary action button
+    // right-aligned. "Open NetSuite API Secrets ↗" was previously a
+    // full-width button below the 3 credential rows — moved into the
+    // header so it sits next to the section title (common dashboard
+    // pattern + frees up vertical space above the rotation runbook).
     const heading = safeNew(d.H, {
         content: 'Credentials',
         type: d.H_Type.MEDIUM_HEADING
     }, 'Heading(credentials)');
-    if (heading) items.push(heading);
+
+    const ButtonType = component.Button.Type;
+    const manageBtn = safeNew(component.Button, {
+        label: 'Open NetSuite API Secrets ↗',
+        type: ButtonType.DEFAULT,
+        action: (): void => {
+            try {
+                window.open('/app/common/scripting/secrets/settings.nl', '_blank');
+            } catch (e) { /* ignore */ }
+        }
+    }, 'Button(open-api-secrets)');
+
+    const headerRow = safeNew(d.SP, {
+        items: [heading, manageBtn].filter((c) => c != null),
+        orientation: d.SP_Orient.HORIZONTAL,
+        itemGap: d.SP_Gap.M,
+        justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+        alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+    }, 'StackPanel(credentials-header-row)');
+    if (headerRow) items.push(headerRow);
 
     const intro = safeNew(d.T, {
         text: 'Twilio public identifiers and NetSuite secret pointer. ' +
@@ -96,20 +120,6 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
               'value. The actual secret stays encrypted in NetSuite ' +
               'and is never exposed to SuiteScript at runtime.'
     }));
-
-    // Manage button — deep-link to the NetSuite API Secrets page in a
-    // new tab so the admin doesn't lose console context.
-    const ButtonType = component.Button.Type;
-    const manageBtn = safeNew(component.Button, {
-        label: 'Open NetSuite API Secrets ↗',
-        type: ButtonType.DEFAULT,
-        action: (): void => {
-            try {
-                window.open('/app/common/scripting/secrets/settings.nl', '_blank');
-            } catch (e) { /* ignore */ }
-        }
-    }, 'Button(open-api-secrets)');
-    if (manageBtn) items.push(manageBtn);
 
     // Rotation runbook callout — separate visual block so admins can
     // find it quickly during a rotation event.
