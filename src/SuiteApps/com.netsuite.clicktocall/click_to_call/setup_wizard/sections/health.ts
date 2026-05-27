@@ -60,12 +60,8 @@ interface DriftSnapshot {
 export const buildHealthSection = (d: EnumsBag, deps: HealthSectionDeps): unknown => {
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Health',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(health)');
-    if (heading) items.push(heading);
-
+    // Section-level Heading dropped — ApplicationHeader subtitle shows
+    // "Health" at the page chrome.
     const preflightBlock = buildHealthPreflightBlock(d, deps);
     if (preflightBlock) items.push(preflightBlock);
 

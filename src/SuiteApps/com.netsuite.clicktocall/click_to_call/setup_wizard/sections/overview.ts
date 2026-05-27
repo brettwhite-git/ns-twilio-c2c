@@ -91,11 +91,10 @@ interface RecentCallRow {
 export const buildOverviewSection = (d: EnumsBag, deps: OverviewSectionDeps): unknown => {
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Overview',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(overview)');
-    if (heading) items.push(heading);
+    // Path C-9-followup: section-level Heading dropped — the
+    // ApplicationHeader's subtitle slot (SpaClient.buildRailContentPane)
+    // already shows "Overview" at the page chrome. Rendering it again
+    // here was duplicate visual hierarchy.
 
     const stats = buildOverviewStatCards(d);
     if (stats) items.push(stats);

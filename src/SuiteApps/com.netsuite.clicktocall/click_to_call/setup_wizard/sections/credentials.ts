@@ -80,16 +80,10 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
     const snap = (STATE.console.snapshot || {}) as CredentialsSnapshot;
     const items: unknown[] = [];
 
-    // Path C-7-followup: section header row with primary action button
-    // right-aligned. "Open NetSuite API Secrets ↗" was previously a
-    // full-width button below the 3 credential rows — moved into the
-    // header so it sits next to the section title (common dashboard
-    // pattern + frees up vertical space above the rotation runbook).
-    const heading = safeNew(d.H, {
-        content: 'Credentials',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(credentials)');
-
+    // Section-level "Credentials" Heading dropped — ApplicationHeader
+    // subtitle shows the section name at the page chrome. The "Open
+    // NetSuite API Secrets ↗" button still rides at the top of the
+    // section, right-aligned in a header row by itself.
     const ButtonType = component.Button.Type;
     const manageBtn = safeNew(component.Button, {
         label: 'Open NetSuite API Secrets ↗',
@@ -102,10 +96,10 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
     }, 'Button(open-api-secrets)');
 
     const headerRow = safeNew(d.SP, {
-        items: [heading, manageBtn].filter((c) => c != null),
+        items: [manageBtn].filter((c) => c != null),
         orientation: d.SP_Orient.HORIZONTAL,
         itemGap: d.SP_Gap.M,
-        justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+        justification: (d.SP.Justification && d.SP.Justification.END) || undefined,
         alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
     }, 'StackPanel(credentials-header-row)');
     if (headerRow) items.push(headerRow);

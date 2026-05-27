@@ -103,11 +103,8 @@ export const buildVoiceSection = (d: EnumsBag, deps: VoiceSectionDeps): unknown 
     const snap = (STATE.console.snapshot || {}) as VoiceSnapshot;
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Voice config',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(voice)');
-    if (heading) items.push(heading);
+    // Section-level Heading dropped — ApplicationHeader subtitle shows
+    // "Voice config" at the page chrome.
 
     const intro = safeNew(d.T, {
         text: 'Manage TwiML application, default outbound caller-ID ' +

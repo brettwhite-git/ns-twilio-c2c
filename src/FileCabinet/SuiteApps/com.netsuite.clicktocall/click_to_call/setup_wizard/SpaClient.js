@@ -403,10 +403,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     const buildCredentialsSection = (d) => {
         const snap = (STATE.console.snapshot || {});
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Credentials',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(credentials)');
         const ButtonType = component__namespace.Button.Type;
         const manageBtn = safeNew(component__namespace.Button, {
             label: 'Open NetSuite API Secrets ↗',
@@ -419,10 +415,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             }
         }, 'Button(open-api-secrets)');
         const headerRow = safeNew(d.SP, {
-            items: [heading, manageBtn].filter((c) => c != null),
+            items: [manageBtn].filter((c) => c != null),
             orientation: d.SP_Orient.HORIZONTAL,
             itemGap: d.SP_Gap.M,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+            justification: (d.SP.Justification && d.SP.Justification.END) || undefined,
             alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
         }, 'StackPanel(credentials-header-row)');
         if (headerRow)
@@ -549,12 +545,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     const buildHealthSection = (d, deps) => {
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Health',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(health)');
-        if (heading)
-            items.push(heading);
         const preflightBlock = buildHealthPreflightBlock(d, deps);
         if (preflightBlock)
             items.push(preflightBlock);
@@ -903,12 +893,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     const buildOverviewSection = (d, deps) => {
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Overview',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(overview)');
-        if (heading)
-            items.push(heading);
         const stats = buildOverviewStatCards(d);
         if (stats)
             items.push(stats);
@@ -1326,12 +1310,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     const buildVoiceSection = (d, deps) => {
         const snap = (STATE.console.snapshot || {});
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Voice config',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(voice)');
-        if (heading)
-            items.push(heading);
         const intro = safeNew(d.T, {
             text: 'Manage TwiML application, default outbound caller-ID ' +
                 'number, and optional Conversational Intelligence ' +
@@ -1641,12 +1619,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     const buildPhonesSection = (d, deps) => {
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Phones & reps',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(phones)');
-        if (heading)
-            items.push(heading);
         if (STATE.console.phonesLoading) {
             const loader = safeNew(component__namespace.Loader, {
                 label: 'Loading phones & reps…',
@@ -1658,7 +1630,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 items: items,
                 orientation: d.SP_Orient.VERTICAL,
                 itemGap: d.SP_Gap.L
-            }, 'StackPanel(phones-loading)') || heading;
+            }, 'StackPanel(phones-loading)') || loader;
         }
         const toolbar = buildPhonesToolbar(d, deps);
         if (toolbar)

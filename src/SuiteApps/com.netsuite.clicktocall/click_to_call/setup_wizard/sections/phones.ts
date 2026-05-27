@@ -68,11 +68,8 @@ interface CellArgs {
 export const buildPhonesSection = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Phones & reps',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(phones)');
-    if (heading) items.push(heading);
+    // Section-level Heading dropped — ApplicationHeader subtitle in
+    // SpaClient.buildRailContentPane shows the section name.
 
     if (STATE.console.phonesLoading) {
         const loader = safeNew(component.Loader, {
@@ -84,7 +81,7 @@ export const buildPhonesSection = (d: EnumsBag, deps: PhonesSectionDeps): unknow
             items: items,
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.L
-        }, 'StackPanel(phones-loading)') || heading;
+        }, 'StackPanel(phones-loading)') || loader;
     }
 
     const toolbar = buildPhonesToolbar(d, deps);
