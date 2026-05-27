@@ -1651,6 +1651,56 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 return sid;
             return sid.slice(0, 6) + '…' + sid.slice(-4);
         };
+        const ImageCtor = component__namespace.Image;
+        const statusForRow = (row) => {
+            const saving = STATE.console.phonesSaving[row.phoneSid || ''];
+            const hasReps = (row.employeeIds || []).length > 0;
+            if (saving) {
+                return {
+                    icon: core__namespace.SystemIcon.STATUS_INFO_FILLED,
+                    color: core__namespace.ImageConstant.Color.INFO,
+                    label: 'Saving…'
+                };
+            }
+            if (hasReps) {
+                return {
+                    icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED,
+                    color: core__namespace.ImageConstant.Color.SUCCESS,
+                    label: 'Live'
+                };
+            }
+            return {
+                icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED,
+                color: core__namespace.ImageConstant.Color.WARNING,
+                label: 'No reps'
+            };
+        };
+        const statusIconColDef = {
+            type: CT.TEMPLATED,
+            name: 'statusIcon',
+            label: '',
+            stretchFactor: 0.5,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
+                    const s = statusForRow(row);
+                    return safeNew(ImageCtor, {
+                        image: s.icon,
+                        size: component__namespace.Image.Size.S,
+                        color: s.color,
+                        presentation: true
+                    }, 'Image(phone-status-icon)') ||
+                        safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+                }
+                catch (e) {
+                    console.error('[CTC] phone status icon column threw:', e);
+                    return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
+                }
+            }
+        };
         const phoneColDef = {
             type: CT.TEMPLATED,
             name: 'phone',
@@ -1662,24 +1712,37 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                         args.cell.row.dataItem;
                     if (!row)
                         return safeNew(d.T, { text: '—' }, 'Text(phone-empty)');
-                    const top = safeNew(d.T, {
+                    return safeNew(d.T, {
                         text: row.phoneNumber || '(unknown)',
                         type: d.T_Type.STRONG
-                    }, 'Text(phone-top)');
-                    const sub = safeNew(d.T, {
-                        text: truncSid(row.phoneSid),
-                        type: d.T_Type.WEAK,
-                        size: d.T.Size && d.T.Size.S
-                    }, 'Text(phone-sub)');
-                    return safeNew(d.SP, {
-                        items: [top, sub].filter((c) => c != null),
-                        orientation: d.SP_Orient.VERTICAL,
-                        itemGap: d.SP_Gap.XXS
-                    }, 'StackPanel(phone-cell)') || top || safeNew(d.T, { text: row.phoneNumber || '' }, 'Text(phone-fallback)');
+                    }, 'Text(phone-number)');
                 }
                 catch (e) {
                     console.error('[CTC] phone column template threw:', e);
                     return safeNew(d.T, { text: '(error)' }, 'Text(phone-error)');
+                }
+            }
+        };
+        const phoneSidColDef = {
+            type: CT.TEMPLATED,
+            name: 'phoneSid',
+            label: 'Phone SID',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(sid-empty)');
+                    return safeNew(d.T, {
+                        text: truncSid(row.phoneSid),
+                        type: d.T_Type.WEAK,
+                        size: d.T.Size && d.T.Size.S
+                    }, 'Text(phone-sid)');
+                }
+                catch (e) {
+                    console.error('[CTC] phone SID column template threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(sid-error)');
                 }
             }
         };
@@ -1728,31 +1791,27 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: CT.TEMPLATED,
             name: 'status',
             label: 'Status',
-            stretchFactor: 1,
+            stretchFactor: 1.5,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
                         args.cell.row.dataItem;
                     if (!row)
                         return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                    const saving = STATE.console.phonesSaving[row.phoneSid || ''];
-                    const hasReps = (row.employeeIds || []).length > 0;
-                    if (saving) {
-                        return safeNew(d.Bdg, {
-                            content: 'Saving…',
-                            type: BdgType.SUBTLE
-                        }, 'Badge(saving)') || safeNew(d.T, { text: 'Saving…' }, 'Text(saving-fallback)');
-                    }
-                    else if (hasReps) {
-                        return safeNew(d.Bdg, {
-                            content: '✓ Live',
-                            type: BdgType.SOLID
-                        }, 'Badge(live)') || safeNew(d.T, { text: '✓ Live' }, 'Text(live-fallback)');
-                    }
+                    const s = statusForRow(row);
+                    const palette = s.label === 'Live' ? { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } :
+                        s.label === 'Saving…' ? { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } :
+                            { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
                     return safeNew(d.Bdg, {
-                        content: 'No reps',
-                        type: BdgType.SUBTLE
-                    }, 'Badge(no-reps)') || safeNew(d.T, { text: 'No reps' }, 'Text(no-reps-fallback)');
+                        content: s.label,
+                        type: BdgType.SUBTLE,
+                        rootStyle: {
+                            backgroundColor: palette.bg,
+                            color: palette.fg,
+                            border: '1px solid ' + palette.border
+                        }
+                    }, 'Badge(phone-status)') ||
+                        safeNew(d.T, { text: s.label }, 'Text(status-fallback)');
                 }
                 catch (e) {
                     console.error('[CTC] status column template threw:', e);
@@ -1760,7 +1819,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 }
             }
         };
-        const columns = [phoneColDef, repsColDef, statusColDef];
+        const columns = [statusIconColDef, phoneColDef, phoneSidColDef, repsColDef, statusColDef];
         const grid = safeNew(d.DG, {
             dataSource: rowsDs,
             columns: columns,
