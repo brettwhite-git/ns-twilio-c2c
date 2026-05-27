@@ -322,14 +322,13 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'BannerMessage(paused)');
     };
     const buildStatCard = (d, spec) => {
-        if (spec.icon) {
-            return buildStatCardWithIcon(d, spec);
-        }
         try {
             return d.Cd.metric({
                 title: spec.title,
                 metric: spec.metric,
-                description: spec.description
+                description: spec.icon
+                    ? buildIconedDescription(d, spec)
+                    : spec.description
             });
         }
         catch (e) {
@@ -337,6 +336,27 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 'falling back to manual stack:', e);
         }
         return buildStatCardManualStack(d, spec);
+    };
+    const buildIconedDescription = (d, spec) => {
+        const ImageCtor = component__namespace.Image;
+        const iconColor = toneToImageColor(spec.tone);
+        const icon = safeNew(ImageCtor, {
+            image: spec.icon,
+            size: component__namespace.Image.Size.S,
+            color: iconColor,
+            presentation: true
+        }, 'Image(stat-icon-desc-' + spec.title + ')');
+        const descText = spec.description ? safeNew(d.T, {
+            text: spec.description,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(stat-desc-' + spec.title + ')') : null;
+        return safeNew(d.SP, {
+            items: [icon, descText].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.XS,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(stat-iconed-desc-' + spec.title + ')') || icon || descText;
     };
     const buildStatCardManualStack = (d, spec) => {
         const label = safeNew(d.T, {
@@ -358,60 +378,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XXS
         }, 'StackPanel(stat-card-' + spec.title + ')');
-    };
-    const buildStatCardWithIcon = (d, spec) => {
-        const label = safeNew(d.T, {
-            text: spec.title,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(stat-label-' + spec.title + ')');
-        const iconColor = toneToImageColor(spec.tone);
-        const ImageCtor = component__namespace.Image;
-        const icon = safeNew(ImageCtor, {
-            image: spec.icon,
-            size: component__namespace.Image.Size.S,
-            color: iconColor,
-            presentation: true
-        }, 'Image(stat-icon-' + spec.title + ')');
-        const value = safeNew(d.H, {
-            content: spec.metric,
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(stat-value-' + spec.title + ')');
-        const valueRow = safeNew(d.SP, {
-            items: [icon, value].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S,
-            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-        }, 'StackPanel(stat-value-row-' + spec.title + ')') || value;
-        const sub = spec.description ? safeNew(d.T, {
-            text: spec.description,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(stat-sub-' + spec.title + ')') : null;
-        const titleAndValue = safeNew(d.SP, {
-            items: [label, valueRow].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, 'StackPanel(stat-title-value-' + spec.title + ')');
-        const innerStack = safeNew(d.SP, {
-            items: [titleAndValue, sub].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
-            rootStyle: { height: '100%' }
-        }, 'StackPanel(stat-card-icon-inner-' + spec.title + ')');
-        if (!d.CP)
-            return innerStack;
-        return safeNew(d.CP, {
-            content: innerStack,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            rootStyle: {
-                border: '1px solid #DBDDE2',
-                borderRadius: '4px',
-                backgroundColor: '#FFFFFF',
-                padding: '16px 20px'
-            }
-        }, 'ContentPanel(stat-card-icon-' + spec.title + ')') || innerStack;
     };
     const toneToImageColor = (tone) => {
         if (!tone)

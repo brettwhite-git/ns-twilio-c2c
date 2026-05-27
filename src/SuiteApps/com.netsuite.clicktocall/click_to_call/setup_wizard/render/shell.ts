@@ -230,19 +230,22 @@ export const buildPausedBanner = (
  * with empty grid cells.
  */
 export const buildStatCard = (d: EnumsBag, spec: StatCardSpec): unknown => {
-    // Icon-bearing cards (Path C-2) skip Card.metric() entirely because
-    // Card.metric.metric only accepts string-typed values — the icon
-    // can't ride next to the metric in that slot. Use the manual stack
-    // pattern with an extra horizontal row [Image, Heading].
-    if (spec.icon) {
-        return buildStatCardWithIcon(d, spec);
-    }
-
     try {
         return d.Cd.metric({
             title: spec.title,
             metric: spec.metric,
-            description: spec.description
+            // For icon-bearing cards (Path C-2 final iteration), the icon
+            // rides in the description slot as a Component instead of
+            // pushing the metric value right. Card.metric()'s `metric`
+            // field is string-only — trying to mix icon + text in there
+            // either fails or produces off-baseline alignment vs. the
+            // sibling cards' string-only metrics. Putting the icon in
+            // the description preserves Card.metric's full internal CSS
+            // (title/metric layout, padding, border, baseline) so the
+            // Status card sits visually flush with its siblings.
+            description: spec.icon
+                ? buildIconedDescription(d, spec)
+                : spec.description
         });
     } catch (e) {
         console.warn('[CTC Setup Wizard] Card.metric threw, ' +
@@ -251,6 +254,39 @@ export const buildStatCard = (d: EnumsBag, spec: StatCardSpec): unknown => {
 
     // Runtime fallback: hand-rolled stack if Card.metric() threw above.
     return buildStatCardManualStack(d, spec);
+};
+
+/**
+ * Icon-prefixed description component for icon-bearing stat cards
+ * (Path C-2). Returns a horizontal StackPanel [Image, Text] suitable
+ * for use as Card.metric()'s `description` slot. The Image is tinted
+ * via Image.Color enum per the spec's tone.
+ */
+const buildIconedDescription = (d: EnumsBag, spec: StatCardSpec): unknown => {
+    // component.Image's constructor accepts `Options | string | ImageMetadata`,
+    // which is broader than safeNew's AnyCtor (options-object only).
+    // The cast narrows it; we always pass an Options object here.
+    const ImageCtor = component.Image as unknown as new (options?: object) => unknown;
+    const iconColor = toneToImageColor(spec.tone);
+    const icon = safeNew(ImageCtor, {
+        image: spec.icon,
+        size: component.Image.Size.S,
+        color: iconColor,
+        presentation: true
+    }, 'Image(stat-icon-desc-' + spec.title + ')');
+
+    const descText = spec.description ? safeNew(d.T, {
+        text: spec.description,
+        type: d.T_Type.WEAK,
+        size: d.T && d.T.Size ? d.T.Size.S : undefined
+    }, 'Text(stat-desc-' + spec.title + ')') : null;
+
+    return safeNew(d.SP, {
+        items: [icon, descText].filter((c) => c != null),
+        orientation: d.SP_Orient.HORIZONTAL,
+        itemGap: d.SP_Gap.XS,
+        alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+    }, 'StackPanel(stat-iconed-desc-' + spec.title + ')') || icon || descText;
 };
 
 /**
@@ -277,93 +313,6 @@ const buildStatCardManualStack = (d: EnumsBag, spec: StatCardSpec): unknown => {
         orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.XXS
     }, 'StackPanel(stat-card-' + spec.title + ')');
-};
-
-/**
- * Icon-bearing stat card. Replaces the metric Heading with a horizontal
- * [Image(icon), Heading(metric)] row so the icon sits next to the metric
- * value at equal visual weight. Used by the Status card on the Overview
- * dashboard to convey Active/Paused/Unknown semantically.
- */
-const buildStatCardWithIcon = (d: EnumsBag, spec: StatCardSpec): unknown => {
-    const label = safeNew(d.T, {
-        text: spec.title,
-        type: d.T_Type.WEAK,
-        size: d.T && d.T.Size ? d.T.Size.S : undefined
-    }, 'Text(stat-label-' + spec.title + ')');
-
-    const iconColor = toneToImageColor(spec.tone);
-    // component.Image's constructor accepts `Options | string | ImageMetadata`,
-    // which is broader than safeNew's AnyCtor (options-object only). The
-    // cast narrows it to the AnyCtor shape so safeNew accepts it; we
-    // always pass an Options object here.
-    const ImageCtor = component.Image as unknown as new (options?: object) => unknown;
-    const icon = safeNew(ImageCtor, {
-        image: spec.icon,
-        // S sizing keeps the icon proportional to the SMALL_HEADING
-        // metric text — M was visually heavier than the text and
-        // pushed the row taller than the sibling cards' metric rows.
-        size: component.Image.Size.S,
-        color: iconColor,
-        presentation: true
-    }, 'Image(stat-icon-' + spec.title + ')');
-
-    const value = safeNew(d.H, {
-        content: spec.metric,
-        type: d.H_Type.SMALL_HEADING
-    }, 'Heading(stat-value-' + spec.title + ')');
-
-    const valueRow = safeNew(d.SP, {
-        items: [icon, value].filter((c) => c != null),
-        orientation: d.SP_Orient.HORIZONTAL,
-        itemGap: d.SP_Gap.S,
-        alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-    }, 'StackPanel(stat-value-row-' + spec.title + ')') || value;
-
-    const sub = spec.description ? safeNew(d.T, {
-        text: spec.description,
-        type: d.T_Type.WEAK,
-        size: d.T && d.T.Size ? d.T.Size.S : undefined
-    }, 'Text(stat-sub-' + spec.title + ')') : null;
-
-    // Two-stack composition matching Card.metric's spacing rhythm:
-    //   - inner stack: [label, valueRow] with XXS gap (label sits tight
-    //     above the metric)
-    //   - outer stack: [innerStack, sub] with SPACE_BETWEEN justification
-    //     so the description floats to the bottom of the card height,
-    //     matching Card.metric's internal layout where the description
-    //     sits at the card foot regardless of metric-row height.
-    const titleAndValue = safeNew(d.SP, {
-        items: [label, valueRow].filter((c) => c != null),
-        orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.XXS
-    }, 'StackPanel(stat-title-value-' + spec.title + ')');
-
-    const innerStack = safeNew(d.SP, {
-        items: [titleAndValue, sub].filter((c) => c != null),
-        orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.M,
-        justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
-        rootStyle: { height: '100%' }
-    }, 'StackPanel(stat-card-icon-inner-' + spec.title + ')');
-
-    // Wrap in a ContentPanel with rootStyle that mimics Card.metric's
-    // visual chrome (white background + subtle border + rounded corners
-    // + interior padding) so the icon-bearing card sits visually flush
-    // with the Card.metric()-based siblings in the same grid row. Same
-    // pattern as Health's danger-zone + Credentials' rotation-runbook
-    // callout boxes.
-    if (!d.CP) return innerStack;
-    return safeNew(d.CP, {
-        content: innerStack,
-        horizontalAlignment: d.CP_HAlign.STRETCH,
-        rootStyle: {
-            border: '1px solid #DBDDE2',
-            borderRadius: '4px',
-            backgroundColor: '#FFFFFF',
-            padding: '16px 20px'
-        }
-    }, 'ContentPanel(stat-card-icon-' + spec.title + ')') || innerStack;
 };
 
 const toneToImageColor = (tone: StatCardTone | undefined): unknown => {
