@@ -323,10 +323,22 @@ const buildStatCardWithIcon = (d: EnumsBag, spec: StatCardSpec): unknown => {
         size: d.T && d.T.Size ? d.T.Size.S : undefined
     }, 'Text(stat-sub-' + spec.title + ')') : null;
 
-    const innerStack = safeNew(d.SP, {
-        items: [label, valueRow, sub].filter((c) => c != null),
+    // Two-stack composition to match Card.metric's spacing:
+    //   - inner stack: [label, valueRow] with XXS gap (label sits tight
+    //     above the metric)
+    //   - outer stack: [innerStack, sub] with M gap (description sits
+    //     with breathing room below the metric, same as Card.metric's
+    //     internal layout)
+    const titleAndValue = safeNew(d.SP, {
+        items: [label, valueRow].filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.XXS
+    }, 'StackPanel(stat-title-value-' + spec.title + ')');
+
+    const innerStack = safeNew(d.SP, {
+        items: [titleAndValue, sub].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.M
     }, 'StackPanel(stat-card-icon-inner-' + spec.title + ')');
 
     // Wrap in a ContentPanel with rootStyle that mimics Card.metric's

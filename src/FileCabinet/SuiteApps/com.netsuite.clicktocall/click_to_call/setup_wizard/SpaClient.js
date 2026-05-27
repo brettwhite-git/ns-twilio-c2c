@@ -388,10 +388,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: d.T_Type.WEAK,
             size: d.T && d.T.Size ? d.T.Size.S : undefined
         }, 'Text(stat-sub-' + spec.title + ')') : null;
-        const innerStack = safeNew(d.SP, {
-            items: [label, valueRow, sub].filter((c) => c != null),
+        const titleAndValue = safeNew(d.SP, {
+            items: [label, valueRow].filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XXS
+        }, 'StackPanel(stat-title-value-' + spec.title + ')');
+        const innerStack = safeNew(d.SP, {
+            items: [titleAndValue, sub].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
         }, 'StackPanel(stat-card-icon-inner-' + spec.title + ')');
         if (!d.CP)
             return innerStack;
