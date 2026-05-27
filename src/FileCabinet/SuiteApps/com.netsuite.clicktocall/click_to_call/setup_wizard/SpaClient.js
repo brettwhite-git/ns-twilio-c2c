@@ -1658,6 +1658,181 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'StackPanel(field-' + label + ')') || dropdown;
     };
 
+    const buildStep4Form = (d) => {
+        const rows = [];
+        rows.push(safeNew(d.H, {
+            content: 'Phone numbers & rep assignments',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(step4)'));
+        rows.push(safeNew(d.T, {
+            text: 'Assign reps to your Twilio phone numbers. Each rep ' +
+                'with a number assigned will use it as their outbound ' +
+                'caller ID. Reps without an assignment fall back to ' +
+                'the default caller ID set in Step 3.'
+        }, 'Text(step4-intro)'));
+        if (STATE.step4.phoneNumbers === null ||
+            STATE.step4.employees === null) {
+            const loader = safeNew(component__namespace.Loader, {
+                label: 'Loading phone numbers and employees…',
+                indeterminate: true
+            }, 'Loader(step4)');
+            if (loader)
+                rows.push(loader);
+            return safeNew(d.SP, {
+                items: rows.filter((r) => r != null),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, 'StackPanel(step4-loading)');
+        }
+        if (STATE.step4.listLoadError) {
+            rows.push(safeNew(d.T, {
+                text: '✕ ' + STATE.step4.listLoadError,
+                type: d.T_Type.STRONG
+            }, 'Text(step4-error)'));
+            return safeNew(d.SP, {
+                items: rows.filter((r) => r != null),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, 'StackPanel(step4-error)');
+        }
+        const phoneNumbers = (STATE.step4.phoneNumbers || []);
+        if (phoneNumbers.length === 0) {
+            rows.push(safeNew(d.T, {
+                text: '(no phone numbers owned by this Twilio account — ' +
+                    'buy one in Twilio Console before continuing)',
+                type: d.T_Type.WEAK
+            }, 'Text(step4-empty)'));
+            return safeNew(d.SP, {
+                items: rows.filter((r) => r != null),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, 'StackPanel(step4-empty)');
+        }
+        for (const pn of phoneNumbers) {
+            rows.push(buildStep4AssignmentRow(d, pn));
+        }
+        return safeNew(d.SP, {
+            items: rows.filter((r) => r != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, 'StackPanel(step4)');
+    };
+    const buildStep4AssignmentRow = (d, phoneNumber) => {
+        const assignments = STATE.step4.assignments;
+        const current = assignments[phoneNumber.sid] || {};
+        const employees = (STATE.step4.employees || []);
+        const pnLabel = safeNew(d.T, {
+            text: (phoneNumber.phoneNumber || '') +
+                (phoneNumber.friendlyName ? '  —  ' + phoneNumber.friendlyName : ''),
+            type: d.T_Type.STRONG
+        }, 'Text(step4-pn-' + phoneNumber.sid + ')');
+        const dataItems = employees.map((e) => {
+            return {
+                value: e.id,
+                label: (e.name || '') + (e.email ? ' (' + e.email + ')' : '')
+            };
+        });
+        const ds = new core__namespace.ArrayDataSource(dataItems);
+        const selectedItems = (current.employeeIds || []).map((id) => {
+            return { value: id, label: lookupEmployeeName(id) };
+        });
+        const picker = safeNew(component__namespace.MultiselectDropdown, {
+            dataSource: ds,
+            valueMember: 'value',
+            displayMember: 'label',
+            selectedItems: selectedItems,
+            placeholder: 'Assign reps…',
+            onSelectionChanged: (args) => {
+                const values = (args && args.values) || [];
+                console.log('[CTC Setup Wizard] Step 4 picker — ' +
+                    'phoneSid=' + phoneNumber.sid +
+                    ' selected values:', values);
+                if (!assignments[phoneNumber.sid]) {
+                    assignments[phoneNumber.sid] = {};
+                }
+                assignments[phoneNumber.sid].employeeIds = values;
+                const a = assignments[phoneNumber.sid];
+                if (!a.primaryEmployeeId || values.indexOf(a.primaryEmployeeId) === -1) {
+                    a.primaryEmployeeId = values.length > 0 ? values[0] : null;
+                }
+            }
+        }, 'MultiselectDropdown(emp-' + phoneNumber.sid + ')');
+        const children = [pnLabel, picker].filter((c) => c != null);
+        return safeNew(d.SP, {
+            items: children,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XS
+        }, 'StackPanel(step4-row-' + phoneNumber.sid + ')');
+    };
+    const lookupEmployeeName = (id) => {
+        const employees = (STATE.step4.employees || []);
+        for (const emp of employees) {
+            if (Number(emp.id) === Number(id))
+                return emp.name || '';
+        }
+        return '(id ' + id + ')';
+    };
+    const loadStep4Lists = (deps) => {
+        STATE.step4.phoneNumbers = null;
+        STATE.step4.employees = null;
+        STATE.step4.assignments = {};
+        STATE.step4.listLoadError = null;
+        const rerenderIfReady = () => {
+            if (STATE.step4.phoneNumbers !== null &&
+                STATE.step4.employees !== null) {
+                deps.rerender();
+            }
+        };
+        wizardCall('wizardListPhoneNumbers', {})
+            .then((p) => {
+            const resp = p;
+            STATE.step4.phoneNumbers = (resp && resp.items) || [];
+            if (resp && resp.errorMessage)
+                STATE.step4.listLoadError = resp.errorMessage;
+            rerenderIfReady();
+        }).catch((e) => {
+            const err = e;
+            STATE.step4.phoneNumbers = [];
+            STATE.step4.listLoadError = 'Phone numbers: ' +
+                (err && err.message ? err.message : String(e));
+            rerenderIfReady();
+        });
+        wizardCall('wizardListEmployees', {})
+            .then((p) => {
+            const resp = p;
+            STATE.step4.employees = (resp && resp.items) || [];
+            if (resp && resp.errorMessage)
+                STATE.step4.listLoadError = resp.errorMessage;
+            rerenderIfReady();
+        }).catch((e) => {
+            const err = e;
+            STATE.step4.employees = [];
+            STATE.step4.listLoadError = 'Employees: ' +
+                (err && err.message ? err.message : String(e));
+            rerenderIfReady();
+        });
+        wizardCall('wizardLoadAssignments', {})
+            .then((p) => {
+            const resp = p;
+            const items = (resp && resp.items) || [];
+            const map = {};
+            items.forEach((a) => {
+                if (!map[a.phoneSid]) {
+                    map[a.phoneSid] = {
+                        employeeIds: [],
+                        label: a.label || '',
+                        primaryEmployeeId: null
+                    };
+                }
+                const empId = Number(a.employeeId);
+                map[a.phoneSid].employeeIds.push(empId);
+                if (a.isPrimary)
+                    map[a.phoneSid].primaryEmployeeId = empId;
+            });
+            STATE.step4.assignments = map;
+        }).catch(() => { });
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -1780,7 +1955,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         if (CURRENT_STEP === 3)
             loadStep3Lists({ rerender: rerender });
         if (CURRENT_STEP === 4)
-            loadStep4Lists();
+            loadStep4Lists({ rerender: rerender });
         if (CURRENT_STEP === 5)
             loadStep5();
     }
@@ -2402,172 +2577,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             return;
         }
         goToStep(CURRENT_STEP + 1);
-    }
-    function buildStep4Form(d) {
-        var rows = [];
-        rows.push(safeNew(d.H, {
-            content: "Phone numbers & rep assignments",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(step4)"));
-        rows.push(safeNew(d.T, {
-            text: "Assign reps to your Twilio phone numbers. Each rep " +
-                "with a number assigned will use it as their outbound " +
-                "caller ID. Reps without an assignment fall back to " +
-                "the default caller ID set in Step 3."
-        }, "Text(step4-intro)"));
-        if (STATE.step4.phoneNumbers === null ||
-            STATE.step4.employees === null) {
-            var loader = safeNew(component__namespace.Loader, {
-                label: "Loading phone numbers and employees…",
-                indeterminate: true
-            }, "Loader(step4)");
-            if (loader)
-                rows.push(loader);
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step4-loading)");
-        }
-        if (STATE.step4.listLoadError) {
-            rows.push(safeNew(d.T, {
-                text: "✕ " + STATE.step4.listLoadError,
-                type: d.T_Type.STRONG
-            }, "Text(step4-error)"));
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step4-error)");
-        }
-        if (STATE.step4.phoneNumbers.length === 0) {
-            rows.push(safeNew(d.T, {
-                text: "(no phone numbers owned by this Twilio account — " +
-                    "buy one in Twilio Console before continuing)",
-                type: d.T_Type.WEAK
-            }, "Text(step4-empty)"));
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step4-empty)");
-        }
-        for (var i = 0; i < STATE.step4.phoneNumbers.length; i++) {
-            var pn = STATE.step4.phoneNumbers[i];
-            rows.push(buildStep4AssignmentRow(d, pn));
-        }
-        return safeNew(d.SP, {
-            items: rows.filter(function (r) { return r != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(step4)");
-    }
-    function buildStep4AssignmentRow(d, phoneNumber) {
-        var current = STATE.step4.assignments[phoneNumber.sid] || {};
-        var employees = STATE.step4.employees || [];
-        var pnLabel = safeNew(d.T, {
-            text: phoneNumber.phoneNumber +
-                (phoneNumber.friendlyName ? '  —  ' + phoneNumber.friendlyName : ''),
-            type: d.T_Type.STRONG
-        }, "Text(step4-pn-" + phoneNumber.sid + ")");
-        var dataItems = employees.map(function (e) {
-            return { value: e.id, label: e.name +
-                    (e.email ? ' (' + e.email + ')' : '') };
-        });
-        var ds = new core__namespace.ArrayDataSource(dataItems);
-        var selectedItems = (current.employeeIds || []).map(function (id) {
-            return { value: id, label: lookupEmployeeName(id) };
-        });
-        var picker = safeNew(component__namespace.MultiselectDropdown, {
-            dataSource: ds,
-            valueMember: 'value',
-            displayMember: 'label',
-            selectedItems: selectedItems,
-            placeholder: 'Assign reps…',
-            onSelectionChanged: function (args) {
-                var values = (args && args.values) || [];
-                console.log("[CTC Setup Wizard] Step 4 picker — " +
-                    "phoneSid=" + phoneNumber.sid +
-                    " selected values:", values);
-                if (!STATE.step4.assignments[phoneNumber.sid]) {
-                    STATE.step4.assignments[phoneNumber.sid] = {};
-                }
-                STATE.step4.assignments[phoneNumber.sid].employeeIds = values;
-                var a = STATE.step4.assignments[phoneNumber.sid];
-                if (!a.primaryEmployeeId || values.indexOf(a.primaryEmployeeId) === -1) {
-                    a.primaryEmployeeId = values.length > 0 ? values[0] : null;
-                }
-            }
-        }, "MultiselectDropdown(emp-" + phoneNumber.sid + ")");
-        var children = [pnLabel, picker].filter(function (c) { return c != null; });
-        return safeNew(d.SP, {
-            items: children,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(step4-row-" + phoneNumber.sid + ")");
-    }
-    function lookupEmployeeName(id) {
-        var employees = STATE.step4.employees || [];
-        for (var i = 0; i < employees.length; i++) {
-            if (Number(employees[i].id) === Number(id))
-                return employees[i].name;
-        }
-        return '(id ' + id + ')';
-    }
-    function loadStep4Lists() {
-        STATE.step4.phoneNumbers = null;
-        STATE.step4.employees = null;
-        STATE.step4.assignments = {};
-        STATE.step4.listLoadError = null;
-        function rerenderIfReady() {
-            if (STATE.step4.phoneNumbers !== null &&
-                STATE.step4.employees !== null) {
-                rerender();
-            }
-        }
-        wizardCall('wizardListPhoneNumbers', {})
-            .then(function (p) {
-            STATE.step4.phoneNumbers = (p && p.items) || [];
-            if (p && p.errorMessage)
-                STATE.step4.listLoadError = p.errorMessage;
-            rerenderIfReady();
-        }).catch(function (e) {
-            STATE.step4.phoneNumbers = [];
-            STATE.step4.listLoadError = 'Phone numbers: ' +
-                (e && e.message ? e.message : String(e));
-            rerenderIfReady();
-        });
-        wizardCall('wizardListEmployees', {})
-            .then(function (p) {
-            STATE.step4.employees = (p && p.items) || [];
-            if (p && p.errorMessage)
-                STATE.step4.listLoadError = p.errorMessage;
-            rerenderIfReady();
-        }).catch(function (e) {
-            STATE.step4.employees = [];
-            STATE.step4.listLoadError = 'Employees: ' +
-                (e && e.message ? e.message : String(e));
-            rerenderIfReady();
-        });
-        wizardCall('wizardLoadAssignments', {})
-            .then(function (p) {
-            var items = (p && p.items) || [];
-            var map = {};
-            items.forEach(function (a) {
-                if (!map[a.phoneSid]) {
-                    map[a.phoneSid] = {
-                        employeeIds: [],
-                        label: a.label || '',
-                        primaryEmployeeId: null
-                    };
-                }
-                var empId = Number(a.employeeId);
-                map[a.phoneSid].employeeIds.push(empId);
-                if (a.isPrimary)
-                    map[a.phoneSid].primaryEmployeeId = empId;
-            });
-            STATE.step4.assignments = map;
-        }).catch(function () { });
     }
     function buildStep5Activate(d) {
         var rows = [];

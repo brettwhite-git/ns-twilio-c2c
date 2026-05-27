@@ -58,6 +58,7 @@ import { buildVoiceSection } from './sections/voice';
 import { buildPhonesSection } from './sections/phones';
 import { buildStep2Form } from './steps/step2';
 import { buildStep3Form, loadStep3Lists } from './steps/step3';
+import { buildStep4Form, loadStep4Lists } from './steps/step4';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -253,7 +254,7 @@ import { buildStep3Form, loadStep3Lists } from './steps/step3';
         rerender();
         if (CURRENT_STEP === 1) loadPrereqs();
         if (CURRENT_STEP === 3) loadStep3Lists({ rerender: rerender });
-        if (CURRENT_STEP === 4) loadStep4Lists();
+        if (CURRENT_STEP === 4) loadStep4Lists({ rerender: rerender });
         if (CURRENT_STEP === 5) loadStep5();
     }
 
@@ -1258,207 +1259,6 @@ import { buildStep3Form, loadStep3Lists } from './steps/step3';
     }
 
 
-    /* ────────────────────────────────────────────────────────────────── */
-    /* Step 4 — Phone numbers + rep assignments                           */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    function buildStep4Form(d) {
-        var rows = [];
-
-        rows.push(safeNew(d.H, {
-            content: "Phone numbers & rep assignments",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(step4)"));
-
-        rows.push(safeNew(d.T, {
-            text: "Assign reps to your Twilio phone numbers. Each rep " +
-                  "with a number assigned will use it as their outbound " +
-                  "caller ID. Reps without an assignment fall back to " +
-                  "the default caller ID set in Step 3."
-        }, "Text(step4-intro)"));
-
-        // Loading state
-        if (STATE.step4.phoneNumbers === null ||
-            STATE.step4.employees === null) {
-            var loader = safeNew(component.Loader, {
-                label: "Loading phone numbers and employees…",
-                indeterminate: true
-            }, "Loader(step4)");
-            if (loader) rows.push(loader);
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step4-loading)");
-        }
-
-        // Error state
-        if (STATE.step4.listLoadError) {
-            rows.push(safeNew(d.T, {
-                text: "✕ " + STATE.step4.listLoadError,
-                type: d.T_Type.STRONG
-            }, "Text(step4-error)"));
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step4-error)");
-        }
-
-        if (STATE.step4.phoneNumbers.length === 0) {
-            rows.push(safeNew(d.T, {
-                text: "(no phone numbers owned by this Twilio account — " +
-                      "buy one in Twilio Console before continuing)",
-                type: d.T_Type.WEAK
-            }, "Text(step4-empty)"));
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step4-empty)");
-        }
-
-        // One row per phone number
-        for (var i = 0; i < STATE.step4.phoneNumbers.length; i++) {
-            var pn = STATE.step4.phoneNumbers[i];
-            rows.push(buildStep4AssignmentRow(d, pn));
-        }
-
-        return safeNew(d.SP, {
-            items: rows.filter(function (r) { return r != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(step4)");
-    }
-
-    function buildStep4AssignmentRow(d, phoneNumber) {
-        var current = STATE.step4.assignments[phoneNumber.sid] || {};
-        var employees = STATE.step4.employees || [];
-
-        var pnLabel = safeNew(d.T, {
-            text: phoneNumber.phoneNumber +
-                (phoneNumber.friendlyName ? '  —  ' + phoneNumber.friendlyName : ''),
-            type: d.T_Type.STRONG
-        }, "Text(step4-pn-" + phoneNumber.sid + ")");
-
-        // Multi-select employee picker via MultiselectDropdown
-        var dataItems = employees.map(function (e) {
-            return { value: e.id, label: e.name +
-                (e.email ? ' (' + e.email + ')' : '') };
-        });
-
-        var ds = new core.ArrayDataSource(dataItems);
-        var selectedItems = (current.employeeIds || []).map(function (id) {
-            return { value: id, label: lookupEmployeeName(id) };
-        });
-
-        var picker = safeNew(component.MultiselectDropdown, {
-            dataSource: ds,
-            valueMember: 'value',
-            displayMember: 'label',
-            selectedItems: selectedItems,
-            placeholder: 'Assign reps…',
-            // Per @uif-js/component d.ts, MultiselectDropdown's
-            // SelectionChangedArgs is { values, previousValues, reason }
-            // — NOT { items }. Earlier U5 commit read args.items (which
-            // was undefined), causing the saved payload to always be
-            // empty. `values` is already an array of the value-member
-            // (the employee id) since valueMember is set above.
-            onSelectionChanged: function (args) {
-                var values = (args && args.values) || [];
-                console.log("[CTC Setup Wizard] Step 4 picker — " +
-                    "phoneSid=" + phoneNumber.sid +
-                    " selected values:", values);
-
-                if (!STATE.step4.assignments[phoneNumber.sid]) {
-                    STATE.step4.assignments[phoneNumber.sid] = {};
-                }
-                STATE.step4.assignments[phoneNumber.sid].employeeIds = values;
-                // Default primary to first selected if not already set
-                var a = STATE.step4.assignments[phoneNumber.sid];
-                if (!a.primaryEmployeeId || values.indexOf(a.primaryEmployeeId) === -1) {
-                    a.primaryEmployeeId = values.length > 0 ? values[0] : null;
-                }
-            }
-        }, "MultiselectDropdown(emp-" + phoneNumber.sid + ")");
-
-        var children = [pnLabel, picker].filter(function (c) { return c != null; });
-        return safeNew(d.SP, {
-            items: children,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(step4-row-" + phoneNumber.sid + ")");
-    }
-
-    function lookupEmployeeName(id) {
-        var employees = STATE.step4.employees || [];
-        for (var i = 0; i < employees.length; i++) {
-            if (Number(employees[i].id) === Number(id)) return employees[i].name;
-        }
-        return '(id ' + id + ')';
-    }
-
-    function loadStep4Lists() {
-        // Reset
-        STATE.step4.phoneNumbers = null;
-        STATE.step4.employees = null;
-        STATE.step4.assignments = {};
-        STATE.step4.listLoadError = null;
-
-        function rerenderIfReady() {
-            if (STATE.step4.phoneNumbers !== null &&
-                STATE.step4.employees !== null) {
-                rerender();
-            }
-        }
-
-        wizardCall('wizardListPhoneNumbers', {})
-            .then(function (p) {
-                STATE.step4.phoneNumbers = (p && p.items) || [];
-                if (p && p.errorMessage) STATE.step4.listLoadError = p.errorMessage;
-                rerenderIfReady();
-            }).catch(function (e) {
-                STATE.step4.phoneNumbers = [];
-                STATE.step4.listLoadError = 'Phone numbers: ' +
-                    (e && e.message ? e.message : String(e));
-                rerenderIfReady();
-            });
-
-        wizardCall('wizardListEmployees', {})
-            .then(function (p) {
-                STATE.step4.employees = (p && p.items) || [];
-                if (p && p.errorMessage) STATE.step4.listLoadError = p.errorMessage;
-                rerenderIfReady();
-            }).catch(function (e) {
-                STATE.step4.employees = [];
-                STATE.step4.listLoadError = 'Employees: ' +
-                    (e && e.message ? e.message : String(e));
-                rerenderIfReady();
-            });
-
-        // Load existing assignments so revisits show prior state
-        wizardCall('wizardLoadAssignments', {})
-            .then(function (p) {
-                var items = (p && p.items) || [];
-                var map = {};
-                items.forEach(function (a) {
-                    if (!map[a.phoneSid]) {
-                        map[a.phoneSid] = {
-                            employeeIds: [],
-                            label: a.label || '',
-                            primaryEmployeeId: null
-                        };
-                    }
-                    var empId = Number(a.employeeId);
-                    map[a.phoneSid].employeeIds.push(empId);
-                    if (a.isPrimary) map[a.phoneSid].primaryEmployeeId = empId;
-                });
-                STATE.step4.assignments = map;
-                // Don't rerender on this one — phoneNumbers/employees
-                // arrival triggers the render and picks up assignments
-                // synchronously since they're already in STATE.
-            }).catch(function () { /* ignore — non-fatal */ });
-    }
 
     /* ────────────────────────────────────────────────────────────────── */
     /* Step 5 — Test & activate (review + preflight + activate)           */
