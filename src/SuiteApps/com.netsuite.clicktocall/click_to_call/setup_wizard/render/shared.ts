@@ -26,6 +26,7 @@
  *   falls back gracefully to the bare TextBox.
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from './primitives';
 
@@ -159,51 +160,74 @@ export const buildCheckRow = (check: CheckRow): unknown => {
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// badgeFor — status string → Badge with appropriate glyph + style
+// badgeFor — status string → native UIF SystemIcon Image
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Status badge: pass=✓ fail=✕ warn=! info_enabled=ⓘ info_disabled=○
- * Unknown status → "?" with SUBTLE style (won't visually shout but
- * stays parseable in screenshots).
+ * Status icon for a preflight/drift check row. Returns a native UIF
+ * `component.Image` constructed from `core.SystemIcon.STATUS_*_FILLED`
+ * with semantic `Image.Color` tinting.
  *
- * Badge.Type only exposes SOLID + SUBTLE in current UIF, so status
- * differentiation rides on the glyph rather than color. The wizard's
- * own surrounding StackPanel structure carries the visual hierarchy.
+ * Path C-7 (2026-05-27) — swapped from hand-rolled `component.Badge`
+ * with a text glyph (✓ ✕ ! ⓘ ○) to the canonical native icons. Badge
+ * only exposes SOLID + SUBTLE types — color differentiation rides on
+ * the glyph, which is rough. Image.Color enum (SUCCESS / WARNING /
+ * ERROR / INFO / NEUTRAL) maps directly to the check semantics and
+ * matches the visual treatment used by Phones (Path C-6) and the
+ * Status stat card (Path C-2).
+ *
+ * Mapping:
+ *   pass          → STATUS_SUCCESS_FILLED + Color.SUCCESS
+ *   fail          → STATUS_ERROR_FILLED   + Color.ERROR
+ *   warn          → STATUS_WARNING_FILLED + Color.WARNING
+ *   info_enabled  → STATUS_INFO_FILLED    + Color.INFO
+ *   info_disabled → STATUS_INFO           + Color.NEUTRAL  (outlined,
+ *                                                            muted —
+ *                                                            "disabled"
+ *                                                            visual)
+ *   default       → STATUS_INFO           + Color.NEUTRAL  (unknown
+ *                                                            status —
+ *                                                            stays
+ *                                                            parseable)
  */
 export const badgeFor = (status: string): unknown => {
-    let content: string;
-    let type: unknown;
+    let icon: unknown;
+    let color: unknown;
     switch (status) {
         case 'pass':
-            content = '✓';
-            type = component.Badge.Type.SOLID;
+            icon = core.SystemIcon.STATUS_SUCCESS_FILLED;
+            color = core.ImageConstant.Color.SUCCESS;
             break;
         case 'fail':
-            content = '✕';
-            type = component.Badge.Type.SOLID;
+            icon = core.SystemIcon.STATUS_ERROR_FILLED;
+            color = core.ImageConstant.Color.DANGER;
             break;
         case 'warn':
-            content = '!';
-            type = component.Badge.Type.SOLID;
+            icon = core.SystemIcon.STATUS_WARNING_FILLED;
+            color = core.ImageConstant.Color.WARNING;
             break;
         case 'info_enabled':
-            content = 'ⓘ';
-            type = component.Badge.Type.SUBTLE;
+            icon = core.SystemIcon.STATUS_INFO_FILLED;
+            color = core.ImageConstant.Color.INFO;
             break;
         case 'info_disabled':
-            content = '○';
-            type = component.Badge.Type.SUBTLE;
+            icon = core.SystemIcon.STATUS_INFO;
+            color = core.ImageConstant.Color.NEUTRAL;
             break;
         default:
-            content = '?';
-            type = component.Badge.Type.SUBTLE;
+            icon = core.SystemIcon.STATUS_INFO;
+            color = core.ImageConstant.Color.NEUTRAL;
     }
-    return safeNew(component.Badge, {
-        content: content,
-        type: type,
-        size: component.Badge.Size.DEFAULT
-    }, 'Badge(status-' + status + ')');
+    // component.Image's constructor accepts `Options | string |
+    // ImageMetadata`, which is broader than safeNew's AnyCtor — narrow
+    // it via cast so safeNew accepts the call.
+    const ImageCtor = component.Image as unknown as new (options?: object) => unknown;
+    return safeNew(ImageCtor, {
+        image: icon,
+        size: component.Image.Size.M,
+        color: color,
+        presentation: true
+    }, 'Image(status-' + status + ')');
 };
 
 // ─────────────────────────────────────────────────────────────────────

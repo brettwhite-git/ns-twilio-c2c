@@ -160,6 +160,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             activeModal: null,
             pendingDeactivateConfirm: false,
             deactivateError: null,
+            preflightRefreshing: false,
             actionError: null
         }
     };
@@ -228,38 +229,40 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'StackPanel(row)');
     };
     const badgeFor = (status) => {
-        let content;
-        let type;
+        let icon;
+        let color;
         switch (status) {
             case 'pass':
-                content = '✓';
-                type = component__namespace.Badge.Type.SOLID;
+                icon = core__namespace.SystemIcon.STATUS_SUCCESS_FILLED;
+                color = core__namespace.ImageConstant.Color.SUCCESS;
                 break;
             case 'fail':
-                content = '✕';
-                type = component__namespace.Badge.Type.SOLID;
+                icon = core__namespace.SystemIcon.STATUS_ERROR_FILLED;
+                color = core__namespace.ImageConstant.Color.DANGER;
                 break;
             case 'warn':
-                content = '!';
-                type = component__namespace.Badge.Type.SOLID;
+                icon = core__namespace.SystemIcon.STATUS_WARNING_FILLED;
+                color = core__namespace.ImageConstant.Color.WARNING;
                 break;
             case 'info_enabled':
-                content = 'ⓘ';
-                type = component__namespace.Badge.Type.SUBTLE;
+                icon = core__namespace.SystemIcon.STATUS_INFO_FILLED;
+                color = core__namespace.ImageConstant.Color.INFO;
                 break;
             case 'info_disabled':
-                content = '○';
-                type = component__namespace.Badge.Type.SUBTLE;
+                icon = core__namespace.SystemIcon.STATUS_INFO;
+                color = core__namespace.ImageConstant.Color.NEUTRAL;
                 break;
             default:
-                content = '?';
-                type = component__namespace.Badge.Type.SUBTLE;
+                icon = core__namespace.SystemIcon.STATUS_INFO;
+                color = core__namespace.ImageConstant.Color.NEUTRAL;
         }
-        return safeNew(component__namespace.Badge, {
-            content: content,
-            type: type,
-            size: component__namespace.Badge.Size.DEFAULT
-        }, 'Badge(status-' + status + ')');
+        const ImageCtor = component__namespace.Image;
+        return safeNew(ImageCtor, {
+            image: icon,
+            size: component__namespace.Image.Size.M,
+            color: color,
+            presentation: true
+        }, 'Image(status-' + status + ')');
     };
     const buildErrorBox = (errorMessage) => {
         return safeNew(component__namespace.Text, {
@@ -559,18 +562,23 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             content: 'Preflight',
             type: d.H_Type.SMALL_HEADING
         }, 'Heading(health-preflight)');
+        const refreshing = !!STATE.console.preflightRefreshing;
         const rerunBtn = safeNew(component__namespace.Button, {
-            label: '↻ Re-run',
+            label: refreshing ? 'Re-running…' : '↻ Re-run',
             type: ButtonType.DEFAULT,
+            enabled: !refreshing,
             action: () => {
+                STATE.console.preflightRefreshing = true;
+                deps.rerender();
                 wizardCall('wizardRunPreflight', {}).then((p) => {
                     const checks = p && p.checks;
                     STATE.console.preflight = Array.isArray(checks) ? checks : [];
-                    deps.rerender();
                 }).catch((e) => {
                     const err = e;
                     STATE.console.actionError = 'Preflight failed: ' +
                         (err && err.message ? err.message : String(e));
+                }).then(() => {
+                    STATE.console.preflightRefreshing = false;
                     deps.rerender();
                 });
             }
@@ -660,22 +668,50 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             return null;
         }
         const CT = d.DG.ColumnType;
-        const statusColDef = {
+        const statusLabelFor = (status) => {
+            switch (status) {
+                case 'pass':
+                    return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
+                case 'fail':
+                    return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
+                case 'warn':
+                    return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
+                case 'info_enabled':
+                    return { text: 'Info', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
+                case 'info_disabled':
+                    return { text: 'Off', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+                default:
+                    return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            }
+        };
+        const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
+            (component__namespace.DataGrid && component__namespace.DataGrid.HorizontalAlignment);
+        const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
+        const statusIconColDef = {
             type: CT.TEMPLATED,
-            name: 'status',
-            label: 'Status',
+            name: 'statusIcon',
+            label: '',
             stretchFactor: 1,
+            horizontalAlignment: colAlignCenter,
+            headerHorizontalAlignment: colAlignCenter,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
                         args.cell.row.dataItem;
                     if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                    return badgeFor(row.status || '') || safeNew(d.T, { text: row.status }, 'Text(status-fallback)');
+                        return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
+                    const icon = badgeFor(row.status || '') ||
+                        safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+                    if (!d.CP)
+                        return icon;
+                    return safeNew(d.CP, {
+                        content: icon,
+                        horizontalAlignment: d.CP_HAlign.CENTER
+                    }, 'ContentPanel(health-icon-center)') || icon;
                 }
                 catch (e) {
-                    console.error('[CTC] Health status column threw:', e);
-                    return safeNew(d.T, { text: '?' }, 'Text(status-error)');
+                    console.error('[CTC] Health status icon column threw:', e);
+                    return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
                 }
             }
         };
@@ -726,9 +762,37 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 }
             }
         };
+        const statusBadgeColDef = {
+            type: CT.TEMPLATED,
+            name: 'statusBadge',
+            label: 'Status',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(statusbadge-empty)');
+                    const sb = statusLabelFor(row.status || '');
+                    return safeNew(d.Bdg, {
+                        content: sb.text,
+                        type: d.Bdg.Type.SUBTLE,
+                        rootStyle: {
+                            backgroundColor: sb.palette.bg,
+                            color: sb.palette.fg,
+                            border: '1px solid ' + sb.palette.border
+                        }
+                    }, 'Badge(health-status)') || safeNew(d.T, { text: sb.text }, 'Text(statusbadge-fallback)');
+                }
+                catch (e) {
+                    console.error('[CTC] Health status-badge column threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(statusbadge-error)');
+                }
+            }
+        };
         return safeNew(d.DG, {
             dataSource: rowsDs,
-            columns: [statusColDef, checkColDef, detailColDef],
+            columns: [statusIconColDef, checkColDef, detailColDef, statusBadgeColDef],
             columnStretch: true,
             highlightRowsOnHover: true,
             stripedRows: true,

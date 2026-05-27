@@ -130,6 +130,12 @@ export interface ConsoleState {
     pendingDeactivateConfirm: boolean;
     deactivateError: string | null;
 
+    // Path C-7: Health Re-run preflight button loading state.
+    // Set true before wizardCall('wizardRunPreflight'); cleared after
+    // settle (then OR catch). Button reads this to swap label and
+    // enabled state so admins see visible feedback during the refresh.
+    preflightRefreshing: boolean;
+
     // Cross-section error surface.
     actionError: string | null;
 }
@@ -203,6 +209,7 @@ export const STATE: WizardState = {
         activeModal: null,
         pendingDeactivateConfirm: false,
         deactivateError: null,
+        preflightRefreshing: false,
         actionError: null
     }
 };
