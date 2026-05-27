@@ -346,6 +346,134 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'StackPanel(stat-card-' + spec.title + ')');
     };
 
+    const buildCredentialsSection = (d) => {
+        const snap = (STATE.console.snapshot || {});
+        const items = [];
+        const heading = safeNew(d.H, {
+            content: 'Credentials',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(credentials)');
+        if (heading)
+            items.push(heading);
+        const intro = safeNew(d.T, {
+            text: 'Twilio public identifiers and NetSuite secret pointer. ' +
+                'These values are safe to view; the API Key Secret value ' +
+                'itself is held in NetSuite\'s encrypted vault and is ' +
+                'never exposed to scripts.',
+            type: d.T_Type.WEAK
+        }, 'Text(credentials-intro)');
+        if (intro)
+            items.push(intro);
+        items.push(buildCredentialRow(d, {
+            label: 'Account SID',
+            value: snap.accountSid || '(not set)',
+            help: 'Public identifier for your Twilio account. Safe to view; ' +
+                'used by SuiteScript to address the Twilio REST API.'
+        }));
+        items.push(buildCredentialRow(d, {
+            label: 'API Key SID',
+            value: snap.apiKeySid || '(not set)',
+            help: 'Public identifier for the scoped API Key. Pairs with the ' +
+                'secret value to authenticate REST calls.'
+        }));
+        items.push(buildCredentialRow(d, {
+            label: 'API Key Secret pointer',
+            value: snap.apiSecretId || '(not set)',
+            help: 'Script ID of the NetSuite API Secret holding the secret ' +
+                'value. The actual secret stays encrypted in NetSuite ' +
+                'and is never exposed to SuiteScript at runtime.'
+        }));
+        const ButtonType = component__namespace.Button.Type;
+        const manageBtn = safeNew(component__namespace.Button, {
+            label: 'Open NetSuite API Secrets ↗',
+            type: ButtonType.DEFAULT,
+            action: () => {
+                try {
+                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
+                }
+                catch (e) { }
+            }
+        }, 'Button(open-api-secrets)');
+        if (manageBtn)
+            items.push(manageBtn);
+        items.push(buildSecretRotationRunbook(d));
+        return safeNew(d.SP, {
+            items: items.filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.L
+        }, 'StackPanel(credentials)');
+    };
+    const buildCredentialRow = (d, spec) => {
+        const labelText = safeNew(d.T, {
+            text: spec.label,
+            type: d.T_Type.STRONG
+        }, 'Text(cred-label)');
+        const valueText = safeNew(d.T, {
+            text: spec.value,
+            type: d.T_Type.DEFAULT
+        }, 'Text(cred-value)');
+        const helpText = safeNew(d.T, {
+            text: spec.help,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(cred-help)');
+        const inner = safeNew(d.SP, {
+            items: [labelText, valueText, helpText].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, 'StackPanel(cred-row-inner)');
+        if (!d.CP)
+            return inner;
+        return safeNew(d.CP, {
+            content: inner,
+            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+            horizontalAlignment: d.CP_HAlign.STRETCH
+        }, 'ContentPanel(cred-row-' + spec.label + ')') || inner;
+    };
+    const buildSecretRotationRunbook = (d) => {
+        const title = safeNew(d.H, {
+            content: 'Rotating the API Key Secret',
+            type: d.H_Type.SMALL_HEADING
+        }, 'Heading(rotation-runbook)');
+        const intro = safeNew(d.T, {
+            text: 'Twilio recommends rotating API Key Secrets every 90 days. ' +
+                'The rotation happens in two external systems:',
+            type: d.T_Type.WEAK
+        }, 'Text(rotation-intro)');
+        const step1 = safeNew(d.T, {
+            text: '1. In the Twilio Console, generate a new API Key Secret ' +
+                '(Account > API keys & tokens > Create API key). Save the ' +
+                'Secret value — Twilio shows it only once.'
+        }, 'Text(rotation-step-1)');
+        const step2 = safeNew(d.T, {
+            text: '2. In NetSuite, navigate to Setup > Company > Preferences ' +
+                '> API Secrets. Edit the secret with script ID matching ' +
+                'the pointer above. Paste the new Twilio Secret value. Save.'
+        }, 'Text(rotation-step-2)');
+        const step3 = safeNew(d.T, {
+            text: '3. Return to this console\'s Health section and click ' +
+                'Re-run on Preflight to verify the new secret authenticates.'
+        }, 'Text(rotation-step-3)');
+        const inner = safeNew(d.SP, {
+            items: [title, intro, step1, step2, step3].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(rotation-inner)');
+        if (!d.CP)
+            return inner;
+        return safeNew(d.CP, {
+            content: inner,
+            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
+            horizontalAlignment: d.CP_HAlign.STRETCH,
+            rootStyle: {
+                border: '1px solid #E89C2B',
+                borderRadius: '8px',
+                backgroundColor: '#FDF8EE',
+                padding: '16px 20px'
+            }
+        }, 'ContentPanel(rotation-callout)') || inner;
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -1363,133 +1491,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 (e && e.message ? e.message : String(e));
             rerender();
         });
-    }
-    function buildCredentialsSection(d) {
-        var snap = STATE.console.snapshot || {};
-        var items = [];
-        var heading = safeNew(d.H, {
-            content: "Credentials",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(credentials)");
-        if (heading)
-            items.push(heading);
-        var intro = safeNew(d.T, {
-            text: "Twilio public identifiers and NetSuite secret pointer. " +
-                "These values are safe to view; the API Key Secret value " +
-                "itself is held in NetSuite's encrypted vault and is " +
-                "never exposed to scripts.",
-            type: d.T_Type.WEAK
-        }, "Text(credentials-intro)");
-        if (intro)
-            items.push(intro);
-        items.push(buildCredentialRow(d, {
-            label: 'Account SID',
-            value: snap.accountSid || '(not set)',
-            help: 'Public identifier for your Twilio account. Safe to view; ' +
-                'used by SuiteScript to address the Twilio REST API.'
-        }));
-        items.push(buildCredentialRow(d, {
-            label: 'API Key SID',
-            value: snap.apiKeySid || '(not set)',
-            help: 'Public identifier for the scoped API Key. Pairs with the ' +
-                'secret value to authenticate REST calls.'
-        }));
-        items.push(buildCredentialRow(d, {
-            label: 'API Key Secret pointer',
-            value: snap.apiSecretId || '(not set)',
-            help: 'Script ID of the NetSuite API Secret holding the secret ' +
-                'value. The actual secret stays encrypted in NetSuite ' +
-                "and is never exposed to SuiteScript at runtime."
-        }));
-        var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-        var manageBtn = safeNew(component__namespace.Button, {
-            label: 'Open NetSuite API Secrets ↗',
-            type: ButtonType.DEFAULT,
-            action: function () {
-                try {
-                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
-                }
-                catch (e) { }
-            }
-        }, "Button(open-api-secrets)");
-        if (manageBtn)
-            items.push(manageBtn);
-        items.push(buildSecretRotationRunbook(d));
-        return safeNew(d.SP, {
-            items: items.filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(credentials)");
-    }
-    function buildCredentialRow(d, spec) {
-        var labelText = safeNew(d.T, {
-            text: spec.label,
-            type: d.T_Type.STRONG
-        }, "Text(cred-label)");
-        var valueText = safeNew(d.T, {
-            text: spec.value,
-            type: d.T_Type.DEFAULT
-        }, "Text(cred-value)");
-        var helpText = safeNew(d.T, {
-            text: spec.help,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, "Text(cred-help)");
-        var inner = safeNew(d.SP, {
-            items: [labelText, valueText, helpText].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, "StackPanel(cred-row-inner)");
-        if (!d.CP)
-            return inner;
-        return safeNew(d.CP, {
-            content: inner,
-            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-            horizontalAlignment: d.CP_HAlign.STRETCH
-        }, "ContentPanel(cred-row-" + spec.label + ")") || inner;
-    }
-    function buildSecretRotationRunbook(d) {
-        var title = safeNew(d.H, {
-            content: "Rotating the API Key Secret",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(rotation-runbook)");
-        var intro = safeNew(d.T, {
-            text: "Twilio recommends rotating API Key Secrets every 90 days. " +
-                "The rotation happens in two external systems:",
-            type: d.T_Type.WEAK
-        }, "Text(rotation-intro)");
-        var step1 = safeNew(d.T, {
-            text: "1. In the Twilio Console, generate a new API Key Secret " +
-                "(Account > API keys & tokens > Create API key). Save the " +
-                "Secret value — Twilio shows it only once."
-        }, "Text(rotation-step-1)");
-        var step2 = safeNew(d.T, {
-            text: "2. In NetSuite, navigate to Setup > Company > Preferences " +
-                "> API Secrets. Edit the secret with script ID matching " +
-                "the pointer above. Paste the new Twilio Secret value. Save."
-        }, "Text(rotation-step-2)");
-        var step3 = safeNew(d.T, {
-            text: "3. Return to this console's Health section and click " +
-                "Re-run on Preflight to verify the new secret authenticates."
-        }, "Text(rotation-step-3)");
-        var inner = safeNew(d.SP, {
-            items: [title, intro, step1, step2, step3].filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, "StackPanel(rotation-inner)");
-        if (!d.CP)
-            return inner;
-        return safeNew(d.CP, {
-            content: inner,
-            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            rootStyle: {
-                border: '1px solid #E89C2B',
-                borderRadius: '8px',
-                backgroundColor: '#FDF8EE',
-                padding: '16px 20px'
-            }
-        }, "ContentPanel(rotation-callout)") || inner;
     }
     function buildHealthSection(d) {
         var items = [];
