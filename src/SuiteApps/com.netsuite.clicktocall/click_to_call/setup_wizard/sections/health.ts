@@ -15,6 +15,7 @@
  * STATE + UIF + injected callbacks.
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from '../render/primitives';
 import { STATE } from '../state';
@@ -99,16 +100,20 @@ const buildHealthPreflightBlock = (d: EnumsBag, deps: HealthSectionDeps): unknow
         type: d.H_Type.SMALL_HEADING
     }, 'Heading(health-preflight)');
 
-    // Path C-7: re-run button now shows a visible loading state via
-    // STATE.console.preflightRefreshing. Without the flag, the click
-    // fired the wizardCall but admins saw no UI feedback during the
-    // fetch — looked like the button did nothing. Label flips to
-    // "Re-running…" and the button disables while the call is in
-    // flight; settled (then OR catch) clears the flag and re-enables.
+    // Path C-7: re-run button shows a visible loading state via
+    // STATE.console.preflightRefreshing. Label flips to "Re-running…"
+    // and the button disables while the call is in flight; settled
+    // (then OR catch) clears the flag and re-enables.
+    //
+    // C-9-followup: button styled to match the Phones & reps toolbar
+    // (DEFAULT type with leading SystemIcon.REFRESH) and placed in a
+    // left-aligned toolbar row of its own under the section header
+    // (instead of inline-right of the heading).
     const refreshing = !!STATE.console.preflightRefreshing;
     const rerunBtn = safeNew(component.Button, {
-        label: refreshing ? 'Re-running…' : '↻ Re-run',
+        label: refreshing ? 'Re-running…' : 'Re-run',
         type: ButtonType.DEFAULT,
+        startIcon: core.SystemIcon.REFRESH,
         enabled: !refreshing,
         action: (): void => {
             STATE.console.preflightRefreshing = true;
@@ -127,9 +132,15 @@ const buildHealthPreflightBlock = (d: EnumsBag, deps: HealthSectionDeps): unknow
         }
     }, 'Button(rerun-preflight)');
 
-    const headerRow = safeNew(d.SP, {
-        items: [sectionHeader, rerunBtn].filter((c) => c != null),
+    const toolbar = safeNew(d.SP, {
+        items: [rerunBtn].filter((c) => c != null),
         orientation: d.SP_Orient.HORIZONTAL,
+        itemGap: d.SP_Gap.S
+    }, 'StackPanel(preflight-toolbar)');
+
+    const headerRow = safeNew(d.SP, {
+        items: [sectionHeader, toolbar].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.S
     }, 'StackPanel(preflight-header-row)');
 

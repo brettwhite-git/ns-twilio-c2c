@@ -19,6 +19,7 @@
  * The "Open NetSuite API Secrets" button uses `window.open` directly.
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from '../render/primitives';
 import { STATE } from '../state';
@@ -81,13 +82,15 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
     const items: unknown[] = [];
 
     // Section-level "Credentials" Heading dropped — ApplicationHeader
-    // subtitle shows the section name at the page chrome. The "Open
-    // NetSuite API Secrets ↗" button still rides at the top of the
-    // section, right-aligned in a header row by itself.
+    // subtitle shows the section name. The "Open NetSuite API Secrets ↗"
+    // button now sits at the top of the section as a left-aligned
+    // toolbar button (matching the Phones & reps toolbar pattern:
+    // DEFAULT button with leading SystemIcon at section start).
     const ButtonType = component.Button.Type;
     const manageBtn = safeNew(component.Button, {
-        label: 'Open NetSuite API Secrets ↗',
+        label: 'Open NetSuite API Secrets',
         type: ButtonType.DEFAULT,
+        startIcon: core.SystemIcon.LOCK,
         action: (): void => {
             try {
                 window.open('/app/common/scripting/secrets/settings.nl', '_blank');
@@ -98,8 +101,7 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
     const headerRow = safeNew(d.SP, {
         items: [manageBtn].filter((c) => c != null),
         orientation: d.SP_Orient.HORIZONTAL,
-        itemGap: d.SP_Gap.M,
-        justification: (d.SP.Justification && d.SP.Justification.END) || undefined,
+        itemGap: d.SP_Gap.S,
         alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
     }, 'StackPanel(credentials-header-row)');
     if (headerRow) items.push(headerRow);

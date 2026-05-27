@@ -405,8 +405,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         const items = [];
         const ButtonType = component__namespace.Button.Type;
         const manageBtn = safeNew(component__namespace.Button, {
-            label: 'Open NetSuite API Secrets ↗',
+            label: 'Open NetSuite API Secrets',
             type: ButtonType.DEFAULT,
+            startIcon: core__namespace.SystemIcon.LOCK,
             action: () => {
                 try {
                     window.open('/app/common/scripting/secrets/settings.nl', '_blank');
@@ -417,8 +418,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         const headerRow = safeNew(d.SP, {
             items: [manageBtn].filter((c) => c != null),
             orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M,
-            justification: (d.SP.Justification && d.SP.Justification.END) || undefined,
+            itemGap: d.SP_Gap.S,
             alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
         }, 'StackPanel(credentials-header-row)');
         if (headerRow)
@@ -578,8 +578,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'Heading(health-preflight)');
         const refreshing = !!STATE.console.preflightRefreshing;
         const rerunBtn = safeNew(component__namespace.Button, {
-            label: refreshing ? 'Re-running…' : '↻ Re-run',
+            label: refreshing ? 'Re-running…' : 'Re-run',
             type: ButtonType.DEFAULT,
+            startIcon: core__namespace.SystemIcon.REFRESH,
             enabled: !refreshing,
             action: () => {
                 STATE.console.preflightRefreshing = true;
@@ -597,9 +598,14 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 });
             }
         }, 'Button(rerun-preflight)');
-        const headerRow = safeNew(d.SP, {
-            items: [sectionHeader, rerunBtn].filter((c) => c != null),
+        const toolbar = safeNew(d.SP, {
+            items: [rerunBtn].filter((c) => c != null),
             orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(preflight-toolbar)');
+        const headerRow = safeNew(d.SP, {
+            items: [sectionHeader, toolbar].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.S
         }, 'StackPanel(preflight-header-row)');
         const preflight = STATE.console.preflight;
