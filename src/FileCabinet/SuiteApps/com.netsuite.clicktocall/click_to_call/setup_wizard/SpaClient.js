@@ -2107,7 +2107,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
     };
     function determineLandingStep(snap) {
-        var has = function (v) { return !!(v && String(v).trim().length > 0); };
+        var has = function (v) {
+            return !!(v && String(v).trim().length > 0);
+        };
         if (!has(snap.accountSid) || !has(snap.apiKeySid))
             return 2;
         if (!has(snap.apiSecretId))
