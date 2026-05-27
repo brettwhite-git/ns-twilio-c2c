@@ -138,6 +138,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             assignments: null,
             preflight: null,
             activity: null,
+            recentCalls: null,
             drift: null,
             loading: false,
             phonesEmployees: null,
@@ -159,6 +160,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             activeModal: null,
             pendingDeactivateConfirm: false,
             deactivateError: null,
+            preflightRefreshing: false,
             actionError: null
         }
     };
@@ -227,38 +229,40 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'StackPanel(row)');
     };
     const badgeFor = (status) => {
-        let content;
-        let type;
+        let icon;
+        let color;
         switch (status) {
             case 'pass':
-                content = '✓';
-                type = component__namespace.Badge.Type.SOLID;
+                icon = core__namespace.SystemIcon.STATUS_SUCCESS_FILLED;
+                color = core__namespace.ImageConstant.Color.SUCCESS;
                 break;
             case 'fail':
-                content = '✕';
-                type = component__namespace.Badge.Type.SOLID;
+                icon = core__namespace.SystemIcon.STATUS_ERROR_FILLED;
+                color = core__namespace.ImageConstant.Color.DANGER;
                 break;
             case 'warn':
-                content = '!';
-                type = component__namespace.Badge.Type.SOLID;
+                icon = core__namespace.SystemIcon.STATUS_WARNING_FILLED;
+                color = core__namespace.ImageConstant.Color.WARNING;
                 break;
             case 'info_enabled':
-                content = 'ⓘ';
-                type = component__namespace.Badge.Type.SUBTLE;
+                icon = core__namespace.SystemIcon.STATUS_INFO_FILLED;
+                color = core__namespace.ImageConstant.Color.INFO;
                 break;
             case 'info_disabled':
-                content = '○';
-                type = component__namespace.Badge.Type.SUBTLE;
+                icon = core__namespace.SystemIcon.STATUS_INFO;
+                color = core__namespace.ImageConstant.Color.NEUTRAL;
                 break;
             default:
-                content = '?';
-                type = component__namespace.Badge.Type.SUBTLE;
+                icon = core__namespace.SystemIcon.STATUS_INFO;
+                color = core__namespace.ImageConstant.Color.NEUTRAL;
         }
-        return safeNew(component__namespace.Badge, {
-            content: content,
-            type: type,
-            size: component__namespace.Badge.Size.DEFAULT
-        }, 'Badge(status-' + status + ')');
+        const ImageCtor = component__namespace.Image;
+        return safeNew(ImageCtor, {
+            image: icon,
+            size: component__namespace.Image.Size.M,
+            color: color,
+            presentation: true
+        }, 'Image(status-' + status + ')');
     };
     const buildErrorBox = (errorMessage) => {
         return safeNew(component__namespace.Text, {
@@ -326,13 +330,39 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             return d.Cd.metric({
                 title: spec.title,
                 metric: spec.metric,
-                description: spec.description
+                description: spec.icon
+                    ? buildIconedDescription(d, spec)
+                    : spec.description
             });
         }
         catch (e) {
             console.warn('[CTC Setup Wizard] Card.metric threw, ' +
                 'falling back to manual stack:', e);
         }
+        return buildStatCardManualStack(d, spec);
+    };
+    const buildIconedDescription = (d, spec) => {
+        const ImageCtor = component__namespace.Image;
+        const iconColor = toneToImageColor(spec.tone);
+        const icon = safeNew(ImageCtor, {
+            image: spec.icon,
+            size: component__namespace.Image.Size.S,
+            color: iconColor,
+            presentation: true
+        }, 'Image(stat-icon-desc-' + spec.title + ')');
+        const descText = spec.description ? safeNew(d.T, {
+            text: spec.description,
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(stat-desc-' + spec.title + ')') : null;
+        return safeNew(d.SP, {
+            items: [icon, descText].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.XS,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(stat-iconed-desc-' + spec.title + ')') || icon || descText;
+    };
+    const buildStatCardManualStack = (d, spec) => {
         const label = safeNew(d.T, {
             text: spec.title,
             type: d.T_Type.WEAK,
@@ -353,16 +383,46 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             itemGap: d.SP_Gap.XXS
         }, 'StackPanel(stat-card-' + spec.title + ')');
     };
+    const toneToImageColor = (tone) => {
+        if (!tone)
+            return undefined;
+        switch (tone) {
+            case 'success': return core__namespace.ImageConstant.Color.SUCCESS;
+            case 'warning': return core__namespace.ImageConstant.Color.WARNING;
+            case 'info': return core__namespace.ImageConstant.Color.INFO;
+            case 'neutral': return core__namespace.ImageConstant.Color.NEUTRAL;
+            default: return undefined;
+        }
+    };
 
+    const TWILIO_CREDS_DOCS = {
+        accountSid: 'https://www.twilio.com/docs/iam/api/account',
+        apiKeySid: 'https://www.twilio.com/docs/iam/api-keys',
+        apiSecret: 'https://www.twilio.com/docs/iam/api-keys'
+    };
     const buildCredentialsSection = (d) => {
         const snap = (STATE.console.snapshot || {});
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Credentials',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(credentials)');
-        if (heading)
-            items.push(heading);
+        const ButtonType = component__namespace.Button.Type;
+        const manageBtn = safeNew(component__namespace.Button, {
+            label: 'Open NetSuite API Secrets',
+            type: ButtonType.DEFAULT,
+            startIcon: core__namespace.SystemIcon.LOCK,
+            action: () => {
+                try {
+                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
+                }
+                catch (e) { }
+            }
+        }, 'Button(open-api-secrets)');
+        const headerRow = safeNew(d.SP, {
+            items: [manageBtn].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(credentials-header-row)');
+        if (headerRow)
+            items.push(headerRow);
         const intro = safeNew(d.T, {
             text: 'Twilio public identifiers and NetSuite secret pointer. ' +
                 'These values are safe to view; the API Key Secret value ' +
@@ -376,34 +436,24 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             label: 'Account SID',
             value: snap.accountSid || '(not set)',
             help: 'Public identifier for your Twilio account. Safe to view; ' +
-                'used by SuiteScript to address the Twilio REST API.'
+                'used by SuiteScript to address the Twilio REST API.',
+            docUrl: TWILIO_CREDS_DOCS.accountSid
         }));
         items.push(buildCredentialRow(d, {
             label: 'API Key SID',
             value: snap.apiKeySid || '(not set)',
             help: 'Public identifier for the scoped API Key. Pairs with the ' +
-                'secret value to authenticate REST calls.'
+                'secret value to authenticate REST calls.',
+            docUrl: TWILIO_CREDS_DOCS.apiKeySid
         }));
         items.push(buildCredentialRow(d, {
             label: 'API Key Secret pointer',
             value: snap.apiSecretId || '(not set)',
             help: 'Script ID of the NetSuite API Secret holding the secret ' +
                 'value. The actual secret stays encrypted in NetSuite ' +
-                'and is never exposed to SuiteScript at runtime.'
+                'and is never exposed to SuiteScript at runtime.',
+            docUrl: TWILIO_CREDS_DOCS.apiSecret
         }));
-        const ButtonType = component__namespace.Button.Type;
-        const manageBtn = safeNew(component__namespace.Button, {
-            label: 'Open NetSuite API Secrets ↗',
-            type: ButtonType.DEFAULT,
-            action: () => {
-                try {
-                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
-                }
-                catch (e) { }
-            }
-        }, 'Button(open-api-secrets)');
-        if (manageBtn)
-            items.push(manageBtn);
         items.push(buildSecretRotationRunbook(d));
         return safeNew(d.SP, {
             items: items.filter((c) => c != null),
@@ -416,6 +466,17 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             text: spec.label,
             type: d.T_Type.STRONG
         }, 'Text(cred-label)');
+        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
+            content: 'Twilio docs ↗',
+            url: spec.docUrl,
+            target: component__namespace.Link.Target.BLANK
+        }, 'Link(cred-doc-' + spec.label + ')') : null;
+        const labelRow = docLink ? safeNew(d.SP, {
+            items: [labelText, docLink].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(cred-label-row-' + spec.label + ')') : labelText;
         const valueText = safeNew(d.T, {
             text: spec.value,
             type: d.T_Type.DEFAULT
@@ -426,7 +487,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             size: d.T && d.T.Size ? d.T.Size.S : undefined
         }, 'Text(cred-help)');
         const inner = safeNew(d.SP, {
-            items: [labelText, valueText, helpText].filter((c) => c != null),
+            items: [labelRow, valueText, helpText].filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XXS
         }, 'StackPanel(cred-row-inner)');
@@ -484,12 +545,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     const buildHealthSection = (d, deps) => {
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Health',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(health)');
-        if (heading)
-            items.push(heading);
         const preflightBlock = buildHealthPreflightBlock(d, deps);
         if (preflightBlock)
             items.push(preflightBlock);
@@ -521,25 +576,36 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             content: 'Preflight',
             type: d.H_Type.SMALL_HEADING
         }, 'Heading(health-preflight)');
+        const refreshing = !!STATE.console.preflightRefreshing;
         const rerunBtn = safeNew(component__namespace.Button, {
-            label: '↻ Re-run',
+            label: refreshing ? 'Re-running…' : 'Re-run',
             type: ButtonType.DEFAULT,
+            startIcon: core__namespace.SystemIcon.REFRESH,
+            enabled: !refreshing,
             action: () => {
+                STATE.console.preflightRefreshing = true;
+                deps.rerender();
                 wizardCall('wizardRunPreflight', {}).then((p) => {
                     const checks = p && p.checks;
                     STATE.console.preflight = Array.isArray(checks) ? checks : [];
-                    deps.rerender();
                 }).catch((e) => {
                     const err = e;
                     STATE.console.actionError = 'Preflight failed: ' +
                         (err && err.message ? err.message : String(e));
+                }).then(() => {
+                    STATE.console.preflightRefreshing = false;
                     deps.rerender();
                 });
             }
         }, 'Button(rerun-preflight)');
-        const headerRow = safeNew(d.SP, {
-            items: [sectionHeader, rerunBtn].filter((c) => c != null),
+        const toolbar = safeNew(d.SP, {
+            items: [rerunBtn].filter((c) => c != null),
             orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(preflight-toolbar)');
+        const headerRow = safeNew(d.SP, {
+            items: [sectionHeader, toolbar].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.S
         }, 'StackPanel(preflight-header-row)');
         const preflight = STATE.console.preflight;
@@ -622,22 +688,50 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             return null;
         }
         const CT = d.DG.ColumnType;
-        const statusColDef = {
+        const statusLabelFor = (status) => {
+            switch (status) {
+                case 'pass':
+                    return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
+                case 'fail':
+                    return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
+                case 'warn':
+                    return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
+                case 'info_enabled':
+                    return { text: 'Info', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
+                case 'info_disabled':
+                    return { text: 'Off', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+                default:
+                    return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            }
+        };
+        const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
+            (component__namespace.DataGrid && component__namespace.DataGrid.HorizontalAlignment);
+        const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
+        const statusIconColDef = {
             type: CT.TEMPLATED,
-            name: 'status',
-            label: 'Status',
+            name: 'statusIcon',
+            label: '',
             stretchFactor: 1,
+            horizontalAlignment: colAlignCenter,
+            headerHorizontalAlignment: colAlignCenter,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
                         args.cell.row.dataItem;
                     if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                    return badgeFor(row.status || '') || safeNew(d.T, { text: row.status }, 'Text(status-fallback)');
+                        return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
+                    const icon = badgeFor(row.status || '') ||
+                        safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+                    if (!d.CP)
+                        return icon;
+                    return safeNew(d.CP, {
+                        content: icon,
+                        horizontalAlignment: d.CP_HAlign.CENTER
+                    }, 'ContentPanel(health-icon-center)') || icon;
                 }
                 catch (e) {
-                    console.error('[CTC] Health status column threw:', e);
-                    return safeNew(d.T, { text: '?' }, 'Text(status-error)');
+                    console.error('[CTC] Health status icon column threw:', e);
+                    return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
                 }
             }
         };
@@ -688,9 +782,37 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 }
             }
         };
+        const statusBadgeColDef = {
+            type: CT.TEMPLATED,
+            name: 'statusBadge',
+            label: 'Status',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(statusbadge-empty)');
+                    const sb = statusLabelFor(row.status || '');
+                    return safeNew(d.Bdg, {
+                        content: sb.text,
+                        type: d.Bdg.Type.SUBTLE,
+                        rootStyle: {
+                            backgroundColor: sb.palette.bg,
+                            color: sb.palette.fg,
+                            border: '1px solid ' + sb.palette.border
+                        }
+                    }, 'Badge(health-status)') || safeNew(d.T, { text: sb.text }, 'Text(statusbadge-fallback)');
+                }
+                catch (e) {
+                    console.error('[CTC] Health status-badge column threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(statusbadge-error)');
+                }
+            }
+        };
         return safeNew(d.DG, {
             dataSource: rowsDs,
-            columns: [statusColDef, checkColDef, detailColDef],
+            columns: [statusIconColDef, checkColDef, detailColDef, statusBadgeColDef],
             columnStretch: true,
             highlightRowsOnHover: true,
             stripedRows: true,
@@ -777,12 +899,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     const buildOverviewSection = (d, deps) => {
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Overview',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(overview)');
-        if (heading)
-            items.push(heading);
         const stats = buildOverviewStatCards(d);
         if (stats)
             items.push(stats);
@@ -815,12 +931,20 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         const preflightTotal = preflight.length;
         const statusLabel = snap.active === false ? 'Paused' :
             snap.active === true ? 'Active' : 'Unknown';
+        const statusIcon = snap.active === true ? core__namespace.SystemIcon.STATUS_SUCCESS_FILLED :
+            snap.active === false ? core__namespace.SystemIcon.STATUS_WARNING_FILLED :
+                core__namespace.SystemIcon.STATUS_INFO_FILLED;
+        const statusTone = snap.active === true ? 'success' :
+            snap.active === false ? 'warning' :
+                'info';
         const cards = [
             buildStatCard(d, {
                 title: 'Status',
                 metric: statusLabel,
                 description: snap.active === false ? 'Reps cannot place calls'
-                    : 'Reps can place calls'
+                    : 'Reps can place calls',
+                icon: statusIcon,
+                tone: statusTone
             }),
             buildStatCard(d, {
                 title: 'Phone numbers',
@@ -865,64 +989,333 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             content: 'Quick actions',
             type: d.H_Type.SMALL_HEADING
         }, 'Heading(quick-actions)');
+        const subtitle = safeNew(d.T, {
+            text: 'Common admin tasks — full screens still available via the left rail.',
+            type: d.T_Type.WEAK,
+            size: d.T && d.T.Size ? d.T.Size.S : undefined
+        }, 'Text(quick-actions-subtitle)');
+        const headerStack = safeNew(d.SP, {
+            items: [heading, subtitle].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS
+        }, 'StackPanel(quick-actions-header)');
         const actions = [
-            { label: 'Add a phone number', onClick: () => deps.goToSection('phones') },
-            { label: 'Reassign reps', onClick: () => deps.goToSection('phones') },
-            { label: 'Update voice config', onClick: () => deps.goToSection('voice') },
-            { label: 'Rotate API Key Secret', onClick: () => deps.goToSection('credentials') },
-            { label: 'Run health check', onClick: () => deps.goToSection('health') }
+            {
+                label: 'Add a phone number',
+                icon: core__namespace.SystemIcon.ADD,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('phones')
+            },
+            {
+                label: 'Reassign reps',
+                icon: core__namespace.SystemIcon.REFRESH,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('phones')
+            },
+            {
+                label: 'Update voice config',
+                icon: core__namespace.SystemIcon.PLAY,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('voice')
+            },
+            {
+                label: 'Rotate API Key Secret',
+                icon: core__namespace.SystemIcon.LOCK,
+                type: ButtonType.DEFAULT,
+                onClick: () => deps.goToSection('credentials')
+            },
+            {
+                label: 'Deactivate',
+                icon: core__namespace.SystemIcon.STOP,
+                type: ButtonType.DANGER || ButtonType.DEFAULT,
+                onClick: deps.onDeactivateClick
+            }
         ];
         const buttons = actions.map((a) => {
             return safeNew(component__namespace.Button, {
                 label: a.label,
-                type: ButtonType.PURE || ButtonType.DEFAULT,
+                type: a.type,
+                startIcon: a.icon,
                 action: a.onClick
             }, 'Button(qa-' + a.label + ')');
         }).filter((b) => b != null);
         if (buttons.length === 0)
-            return heading;
+            return headerStack;
         const row = safeNew(d.SP, {
             items: buttons,
             orientation: d.SP_Orient.HORIZONTAL,
             itemGap: d.SP_Gap.S
         }, 'StackPanel(quick-actions-row)');
         return safeNew(d.SP, {
-            items: [heading, row].filter((c) => c != null),
+            items: [headerStack, row].filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
+            itemGap: d.SP_Gap.S
         }, 'StackPanel(quick-actions-block)');
     };
     const buildOverviewActivityFeed = (d) => {
         const heading = safeNew(d.H, {
-            content: 'Recent activity',
+            content: 'Recent calls',
             type: d.H_Type.SMALL_HEADING
-        }, 'Heading(activity-feed)');
+        }, 'Heading(recent-calls)');
+        const calls = STATE.console.recentCalls;
         const rows = [];
-        {
-            const stub = safeNew(d.T, {
-                text: 'Activity feed arrives in Phase 3c (U8 — wizardActivity). ' +
-                    'When live, it shows the last 50 audit-level wizard events.',
+        if (calls === null) {
+            const loader = safeNew(component__namespace.Loader, {
+                label: 'Loading recent calls…',
+                indeterminate: true
+            }, 'Loader(recent-calls)');
+            if (loader)
+                rows.push(loader);
+        }
+        else if (calls.length === 0) {
+            const empty = safeNew(d.T, {
+                text: 'No calls logged yet. Once reps start placing calls ' +
+                    'through Click-to-Call, the 10 most recent will show up here.',
                 type: d.T_Type.WEAK
-            }, 'Text(activity-stub)');
-            if (stub)
-                rows.push(stub);
+            }, 'Text(recent-calls-empty)');
+            if (empty)
+                rows.push(empty);
+        }
+        else {
+            const grid = buildRecentCallsDataGrid(d, calls);
+            if (grid)
+                rows.push(grid);
         }
         return safeNew(d.SP, {
             items: [heading].concat(rows).filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(recent-calls-feed)');
+    };
+    const buildRecentCallsDataGrid = (d, calls) => {
+        if (!d.DG) {
+            console.warn('[CTC] DataGrid component unavailable; recent calls falling back to text');
+            return buildRecentCallsFallback(d, calls);
+        }
+        let rowsDs;
+        try {
+            rowsDs = new d.Ads(calls);
+        }
+        catch (e) {
+            console.error('[CTC] Recent calls ArrayDataSource failed:', e);
+            return buildRecentCallsFallback(d, calls);
+        }
+        const CT = d.DG.ColumnType;
+        const BdgType = d.Bdg.Type;
+        const dateColDef = {
+            type: CT.TEMPLATED,
+            name: 'date',
+            label: 'Date',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(date-empty)');
+                    return safeNew(d.T, {
+                        text: row.date || '(no date)',
+                        type: d.T_Type.DEFAULT
+                    }, 'Text(call-date)');
+                }
+                catch (e) {
+                    console.error('[CTC] Recent calls date column threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(date-error)');
+                }
+            }
+        };
+        const repColDef = {
+            type: CT.TEMPLATED,
+            name: 'rep',
+            label: 'Rep',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(rep-empty)');
+                    return safeNew(d.T, {
+                        text: row.repName || '(unassigned)',
+                        type: d.T_Type.DEFAULT
+                    }, 'Text(call-rep)');
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(rep-error)');
+                }
+            }
+        };
+        const contactColDef = {
+            type: CT.TEMPLATED,
+            name: 'contact',
+            label: 'Contact',
+            stretchFactor: 3,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(contact-empty)');
+                    const primary = row.companyName || row.contactName || '(unknown)';
+                    const secondary = (row.companyName && row.contactName)
+                        ? row.contactName
+                        : '';
+                    const primaryText = safeNew(d.T, {
+                        text: primary,
+                        type: d.T_Type.STRONG
+                    }, 'Text(call-contact-primary)');
+                    const secondaryText = secondary ? safeNew(d.T, {
+                        text: secondary,
+                        type: d.T_Type.WEAK,
+                        size: d.T.Size && d.T.Size.S
+                    }, 'Text(call-contact-secondary)') : null;
+                    return safeNew(d.SP, {
+                        items: [primaryText, secondaryText].filter((c) => c != null),
+                        orientation: d.SP_Orient.VERTICAL,
+                        itemGap: d.SP_Gap.XXS
+                    }, 'StackPanel(call-contact)') || primaryText;
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(contact-error)');
+                }
+            }
+        };
+        const durationColDef = {
+            type: CT.TEMPLATED,
+            name: 'duration',
+            label: 'Duration',
+            stretchFactor: 1,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(dur-empty)');
+                    return safeNew(d.T, {
+                        text: formatDuration(row.duration),
+                        type: d.T_Type.DEFAULT
+                    }, 'Text(call-duration)');
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(dur-error)');
+                }
+            }
+        };
+        const statusColDef = {
+            type: CT.TEMPLATED,
+            name: 'status',
+            label: 'AI Status',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
+                    const label = formatCallStatus(row.status);
+                    const palette = statusBadgePalette(row.status);
+                    return safeNew(d.Bdg, {
+                        content: label,
+                        type: BdgType.SUBTLE,
+                        rootStyle: {
+                            backgroundColor: palette.bg,
+                            color: palette.fg,
+                            border: '1px solid ' + palette.border
+                        }
+                    }, 'Badge(call-status)') || safeNew(d.T, { text: label }, 'Text(call-status-fb)');
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
+                }
+            }
+        };
+        const grid = safeNew(d.DG, {
+            dataSource: rowsDs,
+            columns: [dateColDef, repColDef, contactColDef, durationColDef, statusColDef],
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            stripedRows: true,
+            dataRowHeight: 56,
+            headerRowHeight: 40,
+            rootStyle: { width: '100%' },
+            onRowClick: (args) => {
+                const dataItem = args && args.row && args.row.dataItem;
+                if (!dataItem || !dataItem.id)
+                    return;
+                try {
+                    window.open('/app/crm/calendar/call.nl?id=' + encodeURIComponent(String(dataItem.id)), '_blank');
+                }
+                catch (e) { }
+            }
+        }, 'DataGrid(recent-calls)');
+        if (!grid) {
+            console.warn('[CTC] Recent calls DataGrid construction returned null; using text fallback');
+            return buildRecentCallsFallback(d, calls);
+        }
+        return grid;
+    };
+    const buildRecentCallsFallback = (d, calls) => {
+        const rows = calls.map((c) => {
+            const label = (c.date || '?') + ' — ' +
+                (c.companyName || c.contactName || '(unknown)') +
+                ' [' + (c.repName || 'unassigned') + ']' +
+                ' — ' + formatDuration(c.duration);
+            return safeNew(d.T, { text: label }, 'Text(call-row-fb)');
+        }).filter((r) => r != null);
+        if (rows.length === 0)
+            return null;
+        return safeNew(d.SP, {
+            items: rows,
+            orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XS
-        }, 'StackPanel(activity-feed)');
+        }, 'StackPanel(recent-calls-fallback)');
+    };
+    const formatDuration = (seconds) => {
+        if (!seconds || seconds < 0)
+            return '—';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        const pad = (n) => (n < 10 ? '0' + n : String(n));
+        if (h > 0)
+            return h + ':' + pad(m) + ':' + pad(s);
+        return m + ':' + pad(s);
+    };
+    const statusBadgePalette = (status) => {
+        const norm = (status || '').toLowerCase().trim();
+        switch (norm) {
+            case 'transcribed':
+                return { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' };
+            case 'processing':
+                return { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' };
+            case 'logged':
+                return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
+            case 'no_transcript':
+            case 'no transcript':
+                return { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
+            case 'failed':
+                return { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' };
+            default:
+                return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
+        }
+    };
+    const formatCallStatus = (status) => {
+        if (!status)
+            return '—';
+        const norm = String(status).trim();
+        if (!norm)
+            return '—';
+        return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
     };
 
+    const TWILIO_DOCS = {
+        twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
+        phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
+        intelService: 'https://www.twilio.com/docs/voice/intelligence'
+    };
     const buildVoiceSection = (d, deps) => {
         const snap = (STATE.console.snapshot || {});
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Voice config',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(voice)');
-        if (heading)
-            items.push(heading);
         const intro = safeNew(d.T, {
             text: 'Manage TwiML application, default outbound caller-ID ' +
                 'number, and optional Conversational Intelligence ' +
@@ -944,21 +1337,31 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             field: 'twimlAppSid',
             label: 'TwiML Application',
             value: snap.twimlAppSid,
-            helpText: 'Twilio application that handles outbound call routing.'
+            helpText: 'The Twilio application that handles outbound call ' +
+                'routing. The wizard registers this app\'s VoiceUrl with ' +
+                'the CTC Suitelet, so every call a rep places hits ' +
+                'NetSuite first for screening before connecting to Twilio.',
+            docUrl: TWILIO_DOCS.twimlApp
         }));
         items.push(buildVoiceFieldRow(d, deps, {
             field: 'phoneNumber',
             label: 'Default outbound caller-ID',
             value: snap.phoneNumber,
-            helpText: 'Number reps see as their outbound caller ID.'
+            helpText: 'Number reps see as their outbound caller ID. ' +
+                'Specific rep-to-number assignments override this default ' +
+                '— see Phones & reps section to assign different numbers ' +
+                'to individual reps.',
+            docUrl: TWILIO_DOCS.phoneNumber
         }));
         items.push(buildVoiceFieldRow(d, deps, {
             field: 'intelServiceSid',
             label: 'Conversational Intelligence',
             value: snap.intelServiceSid,
             helpText: 'Twilio Conversational Intelligence service that ' +
-                'transcribes calls and powers AI summaries, tone keywords, ' +
-                'and satisfaction scoring on logged Phone Call records.'
+                'transcribes call audio and powers the AI summary, tone ' +
+                'keywords, and satisfaction scoring on Phone Call records. ' +
+                'Required for the AI analysis pipeline.',
+            docUrl: TWILIO_DOCS.intelService
         }));
         if (items.length === 0)
             return safeNew(d.T, { text: 'Voice config' }, 'Text(voice-empty)');
@@ -971,37 +1374,53 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     const buildVoiceFieldRow = (d, deps, spec) => {
         const isEditing = STATE.console.voiceEditing === spec.field;
         const ButtonType = component__namespace.Button.Type;
-        const label = safeNew(d.T, {
+        const labelText = safeNew(d.T, {
             text: spec.label,
             type: d.T_Type.STRONG
         }, 'Text(voice-label-' + spec.field + ')');
+        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
+            content: 'Twilio docs ↗',
+            url: spec.docUrl,
+            target: component__namespace.Link.Target.BLANK
+        }, 'Link(voice-doc-' + spec.field + ')') : null;
+        const labelCell = docLink ? safeNew(d.SP, {
+            items: [labelText, docLink].filter((c) => c != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.XXS,
+            alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
+        }, 'StackPanel(voice-label-cell-' + spec.field + ')') : labelText;
         const help = safeNew(d.T, {
             text: spec.helpText,
             type: d.T_Type.WEAK,
             size: d.T.Size && d.T.Size.S
         }, 'Text(voice-help-' + spec.field + ')');
-        const labelStack = safeNew(d.SP, {
-            items: [label, help].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, 'StackPanel(voice-label-' + spec.field + ')');
-        const rightSide = isEditing
+        const rightSideRaw = isEditing
             ? buildVoiceEditControls(d, deps, spec)
             : buildVoiceViewControls(d, deps, spec, ButtonType);
-        const row = safeNew(d.SP, {
-            items: [labelStack, rightSide].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.L,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined
-        }, 'StackPanel(voice-row-' + spec.field + ')');
+        const rightSide = d.CP ? safeNew(d.CP, {
+            content: rightSideRaw,
+            horizontalAlignment: d.CP_HAlign.END
+        }, 'ContentPanel(voice-right-align-' + spec.field + ')') || rightSideRaw
+            : rightSideRaw;
+        const cells = [labelCell, help, rightSide].filter((c) => c != null);
+        const grid = safeNew(d.GP, {
+            columns: '1fr 3fr 2fr',
+            rows: 'auto',
+            items: cells,
+            columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined
+        }, 'GridPanel(voice-row-' + spec.field + ')') || safeNew(d.SP, {
+            items: cells,
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(voice-row-fallback-' + spec.field + ')');
         if (d.CP) {
             return safeNew(d.CP, {
-                content: row,
+                content: grid,
                 outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
                 horizontalAlignment: d.CP_HAlign.STRETCH
-            }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || row;
+            }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || grid;
         }
-        return row;
+        return grid;
     };
     const buildVoiceViewControls = (d, deps, spec, ButtonType) => {
         const valueText = spec.value
@@ -1206,12 +1625,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     const buildPhonesSection = (d, deps) => {
         const items = [];
-        const heading = safeNew(d.H, {
-            content: 'Phones & reps',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(phones)');
-        if (heading)
-            items.push(heading);
         if (STATE.console.phonesLoading) {
             const loader = safeNew(component__namespace.Loader, {
                 label: 'Loading phones & reps…',
@@ -1223,7 +1636,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 items: items,
                 orientation: d.SP_Orient.VERTICAL,
                 itemGap: d.SP_Gap.L
-            }, 'StackPanel(phones-loading)') || heading;
+            }, 'StackPanel(phones-loading)') || loader;
         }
         const toolbar = buildPhonesToolbar(d, deps);
         if (toolbar)
@@ -1310,6 +1723,67 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 return sid;
             return sid.slice(0, 6) + '…' + sid.slice(-4);
         };
+        const ImageCtor = component__namespace.Image;
+        const statusForRow = (row) => {
+            const saving = STATE.console.phonesSaving[row.phoneSid || ''];
+            const hasReps = (row.employeeIds || []).length > 0;
+            if (saving) {
+                return {
+                    icon: core__namespace.SystemIcon.STATUS_INFO_FILLED,
+                    color: core__namespace.ImageConstant.Color.INFO,
+                    label: 'Saving…'
+                };
+            }
+            if (hasReps) {
+                return {
+                    icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED,
+                    color: core__namespace.ImageConstant.Color.SUCCESS,
+                    label: 'Live'
+                };
+            }
+            return {
+                icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED,
+                color: core__namespace.ImageConstant.Color.WARNING,
+                label: 'No reps'
+            };
+        };
+        const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
+            (component__namespace.DataGrid && component__namespace.DataGrid.HorizontalAlignment);
+        const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
+        const statusIconColDef = {
+            type: CT.TEMPLATED,
+            name: 'statusIcon',
+            label: '',
+            stretchFactor: 1,
+            horizontalAlignment: colAlignCenter,
+            headerHorizontalAlignment: colAlignCenter,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
+                    const s = statusForRow(row);
+                    const icon = safeNew(ImageCtor, {
+                        image: s.icon,
+                        size: component__namespace.Image.Size.M,
+                        color: s.color,
+                        presentation: true
+                    }, 'Image(phone-status-icon)') ||
+                        safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+                    if (!d.CP)
+                        return icon;
+                    return safeNew(d.CP, {
+                        content: icon,
+                        horizontalAlignment: d.CP_HAlign.CENTER
+                    }, 'ContentPanel(phone-icon-center)') || icon;
+                }
+                catch (e) {
+                    console.error('[CTC] phone status icon column threw:', e);
+                    return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
+                }
+            }
+        };
         const phoneColDef = {
             type: CT.TEMPLATED,
             name: 'phone',
@@ -1321,24 +1795,37 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                         args.cell.row.dataItem;
                     if (!row)
                         return safeNew(d.T, { text: '—' }, 'Text(phone-empty)');
-                    const top = safeNew(d.T, {
+                    return safeNew(d.T, {
                         text: row.phoneNumber || '(unknown)',
                         type: d.T_Type.STRONG
-                    }, 'Text(phone-top)');
-                    const sub = safeNew(d.T, {
-                        text: truncSid(row.phoneSid),
-                        type: d.T_Type.WEAK,
-                        size: d.T.Size && d.T.Size.S
-                    }, 'Text(phone-sub)');
-                    return safeNew(d.SP, {
-                        items: [top, sub].filter((c) => c != null),
-                        orientation: d.SP_Orient.VERTICAL,
-                        itemGap: d.SP_Gap.XXS
-                    }, 'StackPanel(phone-cell)') || top || safeNew(d.T, { text: row.phoneNumber || '' }, 'Text(phone-fallback)');
+                    }, 'Text(phone-number)');
                 }
                 catch (e) {
                     console.error('[CTC] phone column template threw:', e);
                     return safeNew(d.T, { text: '(error)' }, 'Text(phone-error)');
+                }
+            }
+        };
+        const phoneSidColDef = {
+            type: CT.TEMPLATED,
+            name: 'phoneSid',
+            label: 'Phone SID',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(sid-empty)');
+                    return safeNew(d.T, {
+                        text: truncSid(row.phoneSid),
+                        type: d.T_Type.WEAK,
+                        size: d.T.Size && d.T.Size.S
+                    }, 'Text(phone-sid)');
+                }
+                catch (e) {
+                    console.error('[CTC] phone SID column template threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(sid-error)');
                 }
             }
         };
@@ -1387,31 +1874,27 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: CT.TEMPLATED,
             name: 'status',
             label: 'Status',
-            stretchFactor: 1,
+            stretchFactor: 2,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
                         args.cell.row.dataItem;
                     if (!row)
                         return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                    const saving = STATE.console.phonesSaving[row.phoneSid || ''];
-                    const hasReps = (row.employeeIds || []).length > 0;
-                    if (saving) {
-                        return safeNew(d.Bdg, {
-                            content: 'Saving…',
-                            type: BdgType.SUBTLE
-                        }, 'Badge(saving)') || safeNew(d.T, { text: 'Saving…' }, 'Text(saving-fallback)');
-                    }
-                    else if (hasReps) {
-                        return safeNew(d.Bdg, {
-                            content: '✓ Live',
-                            type: BdgType.SOLID
-                        }, 'Badge(live)') || safeNew(d.T, { text: '✓ Live' }, 'Text(live-fallback)');
-                    }
+                    const s = statusForRow(row);
+                    const palette = s.label === 'Live' ? { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } :
+                        s.label === 'Saving…' ? { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } :
+                            { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
                     return safeNew(d.Bdg, {
-                        content: 'No reps',
-                        type: BdgType.SUBTLE
-                    }, 'Badge(no-reps)') || safeNew(d.T, { text: 'No reps' }, 'Text(no-reps-fallback)');
+                        content: s.label,
+                        type: BdgType.SUBTLE,
+                        rootStyle: {
+                            backgroundColor: palette.bg,
+                            color: palette.fg,
+                            border: '1px solid ' + palette.border
+                        }
+                    }, 'Badge(phone-status)') ||
+                        safeNew(d.T, { text: s.label }, 'Text(status-fallback)');
                 }
                 catch (e) {
                     console.error('[CTC] status column template threw:', e);
@@ -1419,7 +1902,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 }
             }
         };
-        const columns = [phoneColDef, repsColDef, statusColDef];
+        const columns = [statusIconColDef, phoneColDef, phoneSidColDef, repsColDef, statusColDef];
         const grid = safeNew(d.DG, {
             dataSource: rowsDs,
             columns: columns,
@@ -2027,6 +2510,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     var scriptCtx = null;
     var bodyContainer = null;
     var enums = null;
+    var mountRouting = true;
     var run = function (scriptContext) {
         try {
             var SP = component__namespace.StackPanel;
@@ -2083,23 +2567,31 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     "failed; rail may not fill viewport:", e);
             }
             rerender();
-            loadPrereqs();
             wizardCall('wizardSnapshot', {}).then(function (payload) {
-                var snap = payload && payload.snapshot;
-                if (!snap)
+                var resp = payload;
+                var snap = (resp && resp.snapshot);
+                if (!snap) {
+                    mountRouting = false;
+                    rerender();
+                    loadPrereqs();
                     return;
+                }
                 var target = determineLandingStep(snap);
+                mountRouting = false;
                 if (target === 'console') {
-                    console.log("[CTC Setup Wizard] resumability — routing to Admin Console");
+                    console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
                     goToConsole();
                 }
-                else if (target !== CURRENT_STEP) {
-                    console.log("[CTC Setup Wizard] resumability — routing to step " + target);
+                else {
+                    console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
                     goToStep(target);
                 }
             }).catch(function (e) {
-                console.warn("[CTC Setup Wizard] resumability snapshot " +
-                    "failed; staying on Step 1:", e);
+                console.warn('[CTC Setup Wizard] resumability snapshot ' +
+                    'failed; falling back to Step 1:', e);
+                mountRouting = false;
+                rerender();
+                loadPrereqs();
             });
         }
         catch (e) {
@@ -2107,7 +2599,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
     };
     function determineLandingStep(snap) {
-        var has = function (v) { return !!(v && String(v).trim().length > 0); };
+        var has = function (v) {
+            return !!(v && String(v).trim().length > 0);
+        };
         if (!has(snap.accountSid) || !has(snap.apiKeySid))
             return 2;
         if (!has(snap.apiSecretId))
@@ -2120,6 +2614,19 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         if (!scriptCtx || !enums)
             return;
         try {
+            if (mountRouting) {
+                var loader = safeNew(component__namespace.Loader, {
+                    label: 'Loading…',
+                    indeterminate: true
+                }, 'Loader(mount-routing)');
+                var loaderRoot = safeNew(enums.CP, {
+                    content: loader,
+                    horizontalAlignment: enums.CP_HAlign.CENTER,
+                    outerGap: enums.CP_Gap.XL
+                }, 'ContentPanel(mount-routing)') || loader;
+                scriptCtx.setContent(loaderRoot);
+                return;
+            }
             var root = buildRoot(enums);
             scriptCtx.setContent(root);
             console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
@@ -2156,10 +2663,11 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         STATE.console.snapshot = null;
         STATE.console.assignments = null;
         STATE.console.preflight = null;
+        STATE.console.recentCalls = null;
         STATE.console.drift = null;
         rerender();
         var settled = 0;
-        var TARGET = 4;
+        var TARGET = 5;
         function onSettled() {
             settled += 1;
             if (settled >= TARGET) {
@@ -2193,6 +2701,13 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             STATE.console.preflight = (resp && resp.checks) || [];
         })
             .catch(function () { STATE.console.preflight = []; })
+            .then(onSettled);
+        wizardCall('wizardListRecentCalls', { limit: 10 })
+            .then(function (p) {
+            var resp = p;
+            STATE.console.recentCalls = (resp && resp.items) || [];
+        })
+            .catch(function () { STATE.console.recentCalls = []; })
             .then(onSettled);
         wizardCall('wizardListEmployees', {})
             .then(function (p) {
@@ -2338,6 +2853,12 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     function onDeactivateClick() {
         if (!STATE.console.pendingDeactivateConfirm) {
             STATE.console.pendingDeactivateConfirm = true;
+            STATE.console.actionError = null;
+            if (SELECTED_SECTION !== 'health') {
+                setSelectedSection('health');
+                if (MODE === 'stepper')
+                    setMode('console');
+            }
             rerender();
             return;
         }
@@ -2505,12 +3026,28 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         var titleText = MODE === 'console'
             ? "Click-to-Call Admin Console"
             : "Click-to-Call Setup Wizard";
-        var title = safeNew(d.H, {
+        var subtitleText;
+        if (MODE === 'console') {
+            subtitleText =
+                SELECTED_SECTION === 'phones' ? 'Phones & reps' :
+                    SELECTED_SECTION === 'voice' ? 'Voice config' :
+                        SELECTED_SECTION === 'credentials' ? 'Credentials' :
+                            SELECTED_SECTION === 'health' ? 'Health' :
+                                'Overview';
+        }
+        else {
+            subtitleText = 'Step ' + CURRENT_STEP + ' of ' + STEPS.length +
+                ' — ' + STEPS[CURRENT_STEP - 1].label;
+        }
+        var appHeader = safeNew(component__namespace.ApplicationHeader, {
+            title: titleText,
+            subtitle: subtitleText
+        }, 'ApplicationHeader(page-root)') || safeNew(d.H, {
             content: titleText,
             type: d.H_Type.PAGE_TITLE
-        }, "Heading(content-title)");
-        if (title)
-            items.push(title);
+        }, 'Heading(content-title-fallback)');
+        if (appHeader)
+            items.push(appHeader);
         if (MODE === 'console' && STATE.console.snapshot
             && STATE.console.snapshot.active === false) {
             var paused = buildPausedBanner(d, onReactivateClick);
@@ -2523,12 +3060,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 items.push(section);
         }
         else {
-            var subtitle = safeNew(d.T, {
-                text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
-                    STEPS[CURRENT_STEP - 1].label
-            }, "Text(rail-subtitle)");
-            if (subtitle)
-                items.push(subtitle);
             var stepperWidget = buildStepper(d);
             if (stepperWidget) {
                 var stepperBox = safeNew(d.CP, {
@@ -2626,7 +3157,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     }
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
-            case 'overview': return buildOverviewSection(d, { goToSection: goToSection });
+            case 'overview': return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
             case 'phones': return buildPhonesSection(d, {
                 loadPhonesData: loadPhonesData,
                 goToStep: goToStep,
@@ -2638,7 +3172,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 rerender: rerender,
                 onDeactivateClick: onDeactivateClick
             });
-            default: return buildOverviewSection(d, { goToSection: goToSection });
+            default: return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
         }
     }
     function buildStepBodyContainer(d) {

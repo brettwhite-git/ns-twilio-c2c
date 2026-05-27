@@ -38,19 +38,17 @@
 
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
-import { wizardCall, extractPayload, WIZARD_API_URL } from './wizard_api_client';
+import { wizardCall } from './wizard_api_client';
 import {
     MODE, CURRENT_STEP, SELECTED_SECTION, RAIL_VISIBLE,
     setMode, setCurrentStep, setSelectedSection, setRailVisible
 } from './dispatch';
+import type { SectionName } from './dispatch';
 import { STATE } from './state';
 import { safeNew } from './render/primitives';
-import {
-    buildTextField, buildCheckRow, badgeFor, buildErrorBox, buildPrereqsList
-} from './render/shared';
-import {
-    wrapContent, buildPausedBanner, buildStatCard
-} from './render/shell';
+import { buildErrorBox, buildPrereqsList } from './render/shared';
+import { wrapContent, buildPausedBanner } from './render/shell';
+import type { EnumsBag } from './render/shell';
 import { buildCredentialsSection } from './sections/credentials';
 import { buildHealthSection } from './sections/health';
 import { buildOverviewSection } from './sections/overview';
@@ -156,6 +154,13 @@ interface SaveResponse {
     var bodyContainer = null;      // for swapping step body
     var enums = null;              // cached enum bag from run()
 
+    // Path C-9 (U8): true between mount and snapshot-routing decision.
+    // While true, rerender() paints a centered Loader instead of the
+    // full root tree — prevents the Step 1 stepper from flashing
+    // onscreen for returning admins (whose snapshot will route them to
+    // the console once the wizardSnapshot Promise resolves).
+    var mountRouting = true;
+
     // Path B.3d — STATE moved to ./state.ts (typed interfaces per
     // step + console). 235 `STATE.X` references in this file work
     // unchanged because the import is a `const` binding — we mutate
@@ -163,7 +168,18 @@ interface SaveResponse {
 
     // Path B.3b — wizardCall moved to ./wizard_api_client.ts.
 
-    var run = function (scriptContext) {
+    /**
+     * SpaServerScript runtime context passed to the SPA client's run()
+     * entry point. UIF doesn't ship a public type for this — we model
+     * the two methods we actually call (setContent for re-renders and
+     * setLayout for viewport sizing).
+     */
+    interface SpaScriptContext {
+        setContent: (content: unknown) => void;
+        setLayout?: (mode: 'application' | 'natural') => void;
+    }
+
+    var run = function (scriptContext: SpaScriptContext) {
         try {
             // Resolve enums from the actual classes (verified against d.ts).
             // UIF v9.0.0 type catalog guarantees all of these — the
@@ -234,32 +250,49 @@ interface SaveResponse {
                     "failed; rail may not fill viewport:", e);
             }
 
-            // U9 fix: previously CURRENT_STEP was always 1 on mount,
-            // dropping returning admins back at the prereqs check.
-            // Now we fetch the config snapshot and route to the right
-            // step via lib/ctc_wizard_state.determineCurrentStep.
+            // Path C-9 (U8) fix: previously this called rerender() +
+            // loadPrereqs() immediately, which painted Step 1 stepper
+            // onscreen BEFORE the snapshot resolved. For returning
+            // admins (snapshot.active === true), Step 1 would briefly
+            // flash before goToConsole() flipped MODE='console' and
+            // re-rendered. Visual regression for the most common case.
             //
-            // While snapshot is in flight, render Step 1 with a loader
-            // so the admin sees something immediately. When the
-            // snapshot lands, goToStep navigates to the correct step
-            // and fires its per-step loader.
-            rerender();
-            loadPrereqs(); // immediate Step 1 affordance during routing
+            // New mount flow:
+            //   1. rerender() paints a centered Loader (mountRouting=true
+            //      bypasses buildRoot inside rerender)
+            //   2. Fire wizardSnapshot
+            //   3. On resolve: route via determineLandingStep
+            //      - 'console' → goToConsole (sets mountRouting=false)
+            //      - 1..5      → goToStep + loadPrereqs if Step 1
+            //   4. On reject (or no snapshot — fresh install):
+            //      stay at Step 1 → fire loadPrereqs() + clear flag
+            rerender();  // paints Loader because mountRouting=true
 
             wizardCall('wizardSnapshot', {}).then(function (payload) {
-                var snap = payload && payload.snapshot;
-                if (!snap) return; // fresh install — stay on Step 1
+                var resp = payload as SnapshotPayload | null;
+                var snap = (resp && resp.snapshot) as ConfigSnapshot | null;
+                if (!snap) {
+                    // Fresh install — fall through to Step 1.
+                    mountRouting = false;
+                    rerender();
+                    loadPrereqs();
+                    return;
+                }
                 var target = determineLandingStep(snap);
+                mountRouting = false;
                 if (target === 'console') {
-                    console.log("[CTC Setup Wizard] resumability — routing to Admin Console");
+                    console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
                     goToConsole();
-                } else if (target !== CURRENT_STEP) {
-                    console.log("[CTC Setup Wizard] resumability — routing to step " + target);
-                    goToStep(target);
+                } else {
+                    console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
+                    goToStep(target);  // fires per-step loader internally
                 }
             }).catch(function (e) {
-                console.warn("[CTC Setup Wizard] resumability snapshot " +
-                    "failed; staying on Step 1:", e);
+                console.warn('[CTC Setup Wizard] resumability snapshot ' +
+                    'failed; falling back to Step 1:', e);
+                mountRouting = false;
+                rerender();
+                loadPrereqs();
             });
         } catch (e) {
             console.error("[CTC Setup Wizard] run() threw:", e);
@@ -273,11 +306,12 @@ interface SaveResponse {
      * cross-folder libs are uncertain in NetSuite UIF — safer to keep
      * the routing tiny and local.
      *
-     * @param {Object} snap — masked snapshot from wizardSnapshot action
-     * @returns {number|string} 1..5 or 'console'
+     * Returns 1..5 (step index) or 'console' (post-activation).
      */
-    function determineLandingStep(snap) {
-        var has = function (v) { return !!(v && String(v).trim().length > 0); };
+    function determineLandingStep(snap: ConfigSnapshot): number | 'console' {
+        var has = function (v: string | undefined | null): boolean {
+            return !!(v && String(v).trim().length > 0);
+        };
         if (!has(snap.accountSid) || !has(snap.apiKeySid)) return 2;
         if (!has(snap.apiSecretId)) return 2;
         if (!has(snap.twimlAppSid) || !has(snap.phoneNumber)) return 3;
@@ -297,6 +331,24 @@ interface SaveResponse {
     function rerender() {
         if (!scriptCtx || !enums) return;
         try {
+            // Path C-9 (U8): while the snapshot is still resolving on
+            // mount, paint a centered Loader instead of the full root
+            // tree. Without this, the default CURRENT_STEP=1 causes
+            // Step 1 stepper to flash onscreen before goToConsole /
+            // goToStep redirects returning admins.
+            if (mountRouting) {
+                var loader = safeNew(component.Loader, {
+                    label: 'Loading…',
+                    indeterminate: true
+                }, 'Loader(mount-routing)');
+                var loaderRoot = safeNew(enums.CP, {
+                    content: loader,
+                    horizontalAlignment: enums.CP_HAlign.CENTER,
+                    outerGap: enums.CP_Gap.XL
+                }, 'ContentPanel(mount-routing)') || loader;
+                scriptCtx.setContent(loaderRoot);
+                return;
+            }
             var root = buildRoot(enums);
             scriptCtx.setContent(root);
             console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
@@ -310,7 +362,7 @@ interface SaveResponse {
      * Always flips MODE back to 'stepper' — used both for normal nav
      * AND for jumping out of the Admin Console into a specific step.
      */
-    function goToStep(stepNum) {
+    function goToStep(stepNum: number) {
         setMode('stepper');
         setCurrentStep(Math.max(1, Math.min(STEPS.length, stepNum)));
         rerender();
@@ -350,6 +402,7 @@ interface SaveResponse {
         STATE.console.snapshot = null;
         STATE.console.assignments = null;
         STATE.console.preflight = null;
+        STATE.console.recentCalls = null;
         STATE.console.drift = null;
         rerender();
 
@@ -360,7 +413,10 @@ interface SaveResponse {
         // DataGrid's widgetOptions ran BEFORE employees resolved → chips
         // initialized with selectedItems=[] and never recovered on subsequent
         // renders.
-        var TARGET = 4;
+        // Path C-3 (revised) — TARGET bumped from 4 → 5 to include the new
+        // wizardListRecentCalls fetch powering the Overview "Recent calls"
+        // DataGrid. Same settled-counter pattern; no race risk.
+        var TARGET = 5;
         function onSettled() {
             settled += 1;
             if (settled >= TARGET) {
@@ -398,6 +454,16 @@ interface SaveResponse {
                 STATE.console.preflight = (resp && resp.checks) || [];
             })
             .catch(function () { STATE.console.preflight = []; })
+            .then(onSettled);
+
+        // Path C-3 (revised) — Overview Recent calls feed. Fetched in
+        // parallel with the other 4 loads; settled-counter waits for all 5.
+        wizardCall('wizardListRecentCalls', { limit: 10 })
+            .then(function (p) {
+                var resp = p as ListPayload | null;
+                STATE.console.recentCalls = (resp && resp.items) || [];
+            })
+            .catch(function () { STATE.console.recentCalls = []; })
             .then(onSettled);
 
         wizardCall('wizardListEmployees', {})
@@ -447,7 +513,7 @@ interface SaveResponse {
      * rerender — sections share STATE.console so no additional fetch
      * is needed unless the section has section-specific data.
      */
-    function goToSection(sectionName) {
+    function goToSection(sectionName: SectionName) {
         setSelectedSection(sectionName);
         // U1.5: if entering console from stepper mode (Re-run → navigate),
         // also flip MODE back so the rail's onSelectedValueChanged sees
@@ -608,10 +674,29 @@ interface SaveResponse {
      * U6: deactivate handler. Two-click confirm pattern. Unlike U11's
      * original — does NOT bounce to stepper on success; stays on the
      * console with isPaused state per R7 (the plan).
+     *
+     * Path C-4 fix: when priming the confirm flag for the first time,
+     * navigate to Health section so the Cancel/Confirm buttons in the
+     * danger zone are visible. Without this, callers from other
+     * sections (Overview's Quick action) hit the priming branch
+     * silently — the flag flips but the user can't see the resulting
+     * UI change, so the button appears to require two clicks before
+     * "doing anything."
+     *
+     * Cannot just call goToSection('health') — that explicitly RESETS
+     * pendingDeactivateConfirm to false as its standard "cancel pending
+     * on nav" behavior. Inline the nav steps in the right order: set
+     * the flag, then setSelectedSection + setMode + rerender (without
+     * touching pendingDeactivateConfirm).
      */
     function onDeactivateClick() {
         if (!STATE.console.pendingDeactivateConfirm) {
             STATE.console.pendingDeactivateConfirm = true;
+            STATE.console.actionError = null;
+            if (SELECTED_SECTION !== 'health') {
+                setSelectedSection('health');
+                if (MODE === 'stepper') setMode('console');
+            }
             rerender();
             return;
         }
@@ -695,7 +780,7 @@ interface SaveResponse {
                 checks?: unknown[];
                 error?: string;
             } | null;
-            var body;
+            var body: unknown;
             if (resp && resp.ok && resp.checks) {
                 // Wrap prereqs list with the nav footer so Continue button
                 // sits below the rows. Since loadPrereqs runs ONLY on
@@ -732,7 +817,7 @@ interface SaveResponse {
         });
     }
 
-    function buildRoot(d) {
+    function buildRoot(d: EnumsBag) {
         // U1.5: rail-visible layout when MODE='console' OR when admin
         // has previously reached the console and is now in re-run-wizard
         // stepper mode. Fresh install (never activated) drops the rail
@@ -870,7 +955,7 @@ interface SaveResponse {
      *   - MODE='console':  title + paused banner + section content
      *   - MODE='stepper':  title + subtitle + stepper + step body + nav footer
      */
-    function buildRailContentPane(d) {
+    function buildRailContentPane(d: EnumsBag) {
         if (STATE.console.loading && MODE === 'console') {
             var loader = safeNew(component.Loader, {
                 label: "Loading console…",
@@ -881,15 +966,42 @@ interface SaveResponse {
 
         var items = [];
 
-        // ── Title ─────────────────────────────────────────────────────
+        // ── Title (Path C-8: native ApplicationHeader) ────────────────
+        // Replaces the previous single Heading.PAGE_TITLE block with
+        // component.ApplicationHeader, which natively supports a title
+        // + subtitle pair plus future-proof slots (actions, tools, badge).
+        // The subtitle reflects the active console section OR stepper
+        // step so every screen carries a "where am I" label without
+        // each section having to ship its own header.
+        //
+        // Stepper mode's previous "Text(rail-subtitle)" Text block is
+        // dropped — the same content now rides in ApplicationHeader's
+        // subtitle slot.
         var titleText = MODE === 'console'
             ? "Click-to-Call Admin Console"
             : "Click-to-Call Setup Wizard";
-        var title = safeNew(d.H, {
+
+        var subtitleText: string;
+        if (MODE === 'console') {
+            subtitleText =
+                SELECTED_SECTION === 'phones'      ? 'Phones & reps' :
+                SELECTED_SECTION === 'voice'       ? 'Voice config' :
+                SELECTED_SECTION === 'credentials' ? 'Credentials' :
+                SELECTED_SECTION === 'health'      ? 'Health' :
+                                                     'Overview';
+        } else {
+            subtitleText = 'Step ' + CURRENT_STEP + ' of ' + STEPS.length +
+                ' — ' + STEPS[CURRENT_STEP - 1].label;
+        }
+
+        var appHeader = safeNew(component.ApplicationHeader, {
+            title: titleText,
+            subtitle: subtitleText
+        }, 'ApplicationHeader(page-root)') || safeNew(d.H, {
             content: titleText,
             type: d.H_Type.PAGE_TITLE
-        }, "Heading(content-title)");
-        if (title) items.push(title);
+        }, 'Heading(content-title-fallback)');
+        if (appHeader) items.push(appHeader);
 
         // ── Paused banner (console mode only) ─────────────────────────
         if (MODE === 'console' && STATE.console.snapshot
@@ -903,14 +1015,9 @@ interface SaveResponse {
             var section = buildSectionContent(d);
             if (section) items.push(section);
         } else {
-            // Stepper mode (re-run flow). Reuse the original stepper
-            // rendering bits: subtitle, stepper widget, step body, nav footer.
-            var subtitle = safeNew(d.T, {
-                text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
-                    STEPS[CURRENT_STEP - 1].label
-            }, "Text(rail-subtitle)");
-            if (subtitle) items.push(subtitle);
-
+            // Stepper mode (re-run flow). The "Step N of 5 — …"
+            // subtitle is now in ApplicationHeader; render the stepper
+            // widget + step body without re-stating it.
             var stepperWidget = buildStepper(d);
             if (stepperWidget) {
                 var stepperBox = safeNew(d.CP, {
@@ -948,7 +1055,7 @@ interface SaveResponse {
      * wizard); the section items rely on onSelectedValueChanged at the
      * drawer level.
      */
-    function buildConsoleNavDrawer(d) {
+    function buildConsoleNavDrawer(d: EnumsBag) {
         if (!d.ND) {
             // No NavigationDrawer — fall back to a vertical button list.
             return buildNavFallback(d);
@@ -987,7 +1094,7 @@ interface SaveResponse {
             selectedValue: selectedVal,
             width: 240,
             visualStyle: VisualStyle.DARK,
-            onSelectedValueChanged: function (args) {
+            onSelectedValueChanged: function (args: { value?: string }) {
                 var value = args && args.value;
                 if (!value) return;
                 if (value === 're-run') {
@@ -997,8 +1104,10 @@ interface SaveResponse {
                 }
                 // Section click — flips MODE='console' and sets the
                 // active section (works whether admin was in console
-                // or stepper mode).
-                goToSection(value);
+                // or stepper mode). NavigationDrawer items are owned by
+                // buildConsoleNavDrawer with a constrained value-space
+                // (the SectionName union); the cast is safe.
+                goToSection(value as SectionName);
             }
         }, "NavigationDrawer(console)");
     }
@@ -1007,10 +1116,10 @@ interface SaveResponse {
      * Fallback nav when NavigationDrawer isn't available — vertical
      * StackPanel of Buttons. Same routing semantics; ugly but functional.
      */
-    function buildNavFallback(d) {
+    function buildNavFallback(d: EnumsBag) {
         // component.Button.Type guaranteed by UIF v9.0.0 type catalog.
         var ButtonType = component.Button.Type;
-        var navSpecs = [
+        var navSpecs: { value: SectionName | 're-run'; label: string }[] = [
             { value: 'overview',    label: 'Overview' },
             { value: 'phones',      label: 'Phones & reps' },
             { value: 'voice',       label: 'Voice config' },
@@ -1044,9 +1153,12 @@ interface SaveResponse {
      * NOT here — keeps the banner above every section without per-
      * section code.
      */
-    function buildSectionContent(d) {
+    function buildSectionContent(d: EnumsBag) {
         switch (SELECTED_SECTION) {
-            case 'overview':    return buildOverviewSection(d, { goToSection: goToSection });
+            case 'overview':    return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
             case 'phones':      return buildPhonesSection(d, {
                 loadPhonesData: loadPhonesData,
                 goToStep: goToStep,
@@ -1058,111 +1170,13 @@ interface SaveResponse {
                 rerender: rerender,
                 onDeactivateClick: onDeactivateClick
             });
-            default:            return buildOverviewSection(d, { goToSection: goToSection });
+            default:            return buildOverviewSection(d, {
+                goToSection: goToSection,
+                onDeactivateClick: onDeactivateClick
+            });
         }
     }
 
-    /**
-     * U1: placeholder section content for the not-yet-implemented sections.
-     * Shows the section name + a "coming in Phase 3b/3c" note so admin
-     * sees something useful instead of a blank pane.
-     */
-    function buildSectionStub(d, title, note) {
-        var heading = safeNew(d.H, {
-            content: title,
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(stub-" + title + ")");
-
-        var body = safeNew(d.T, {
-            text: note,
-            type: d.T_Type.WEAK
-        }, "Text(stub-body-" + title + ")");
-
-        // Until the section ships, offer a stepper deep-link as a fallback
-        // path so admin isn't stranded (this contradicts R3's "no deep
-        // links" but is acceptable as a temporary affordance during the
-        // phased rollout — removed when U3/U4/U5 land).
-        var fallbackBtn = null;
-        if (title === 'Phones & reps' || title === 'Voice config') {
-            var stepTarget = title === 'Phones & reps' ? 4 : 3;
-            fallbackBtn = safeNew(component.Button, {
-                label: 'Open via wizard (temporary)',
-                type: (component.Button && component.Button.Type
-                    && component.Button.Type.DEFAULT) || undefined,
-                action: function () { goToStep(stepTarget); }
-            }, "Button(stub-deeplink-" + title + ")");
-        } else if (title === 'Credentials') {
-            fallbackBtn = safeNew(component.Button, {
-                label: 'Open API Secrets',
-                type: (component.Button && component.Button.Type
-                    && component.Button.Type.DEFAULT) || undefined,
-                action: function () {
-                    try {
-                        window.open('/app/common/scripting/secrets/settings.nl', '_blank');
-                    } catch (e) { /* ignore */ }
-                }
-            }, "Button(stub-secrets)");
-        }
-
-        var items = [heading, body, fallbackBtn]
-            .filter(function (c) { return c != null; });
-        if (items.length === 0) {
-            return safeNew(d.T, { text: title }, "Text(stub-fallback)");
-        }
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(stub-" + title + ")");
-    }
-
-    /**
-     * Configuration summary card — read-only view of the current config
-     * snapshot, mirrored from Step 5's Configuration Review section so
-     * admins can verify what's live without re-running the wizard.
-     */
-    function buildConsoleSummaryCard(d) {
-        var snap = STATE.console.snapshot as ConfigSnapshot | null;
-        if (!snap) return null;
-
-        var assignments = (STATE.console.assignments || []) as ServerAssignmentRow[];
-        var phoneNumbersWithReps: Record<string, boolean> = {};
-        assignments.forEach(function (a) {
-            if (a.phoneSid) phoneNumbersWithReps[a.phoneSid] = true;
-        });
-
-        var lines = [
-            'Account SID:        ' + (snap.accountSid || '(not set)'),
-            'API Key SID:        ' + (snap.apiKeySid || '(not set)'),
-            'API Key Secret:     ' + (snap.apiSecretId || '(not set)'),
-            'TwiML Application:  ' + (snap.twimlAppSid || '(not set)'),
-            'Default caller ID:  ' + (snap.phoneNumber || '(not set)'),
-            'Intel Service:      ' + (snap.intelServiceSid || '(none)'),
-            'Phone assignments:  ' + assignments.length + ' rep(s) across ' +
-                Object.keys(phoneNumbersWithReps).length + ' number(s)'
-        ];
-
-        var heading = safeNew(d.H, {
-            content: "Current configuration",
-            type: d.H_Type.SMALL_HEADING
-        }, "Heading(console-summary)");
-
-        var rows = [heading];
-        lines.forEach(function (l) {
-            var t = safeNew(d.T, {
-                text: l,
-                type: d.T_Type.DEFAULT,
-                size: d.T && d.T.Size ? d.T.Size.S : undefined
-            }, "Text(summary-line)");
-            if (t) rows.push(t);
-        });
-
-        return safeNew(d.SP, {
-            items: rows.filter(function (r) { return r != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(console-summary)");
-    }
 
 
     /**
@@ -1170,8 +1184,8 @@ interface SaveResponse {
      * builds the appropriate per-step UI. Stash the outer container on
      * a module-level variable so async actions can swap its content.
      */
-    function buildStepBodyContainer(d) {
-        var initial;
+    function buildStepBodyContainer(d: EnumsBag) {
+        var initial: unknown;
         if (CURRENT_STEP === 1) {
             initial = safeNew(component.Loader, {
                 label: "Running prerequisite checks…",
@@ -1221,7 +1235,7 @@ interface SaveResponse {
      * Step 1: no Back; Step N>1: Back goes to N-1; Continue advances
      * (with per-step validation/save in onContinueClick).
      */
-    function buildNavFooter(d) {
+    function buildNavFooter(d: EnumsBag) {
         var ButtonType = component.Button.Type;
 
         var backBtn = (CURRENT_STEP > 1) ? safeNew(component.Button, {
@@ -1342,7 +1356,7 @@ interface SaveResponse {
         }
         goToStep(CURRENT_STEP + 1);
     }
-    function buildStepper(d) {
+    function buildStepper(d: EnumsBag) {
         // UIF v9.0.0 type catalog guarantees these classes + nested
         // enums exist; the pre-catalog `|| {}` fallbacks have been
         // removed. Pull enums directly from the typed catalog.

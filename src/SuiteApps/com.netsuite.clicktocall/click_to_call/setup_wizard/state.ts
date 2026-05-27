@@ -98,7 +98,8 @@ export interface ConsoleState {
     snapshot: unknown | null;        // from wizardSnapshot
     assignments: unknown[] | null;   // from wizardLoadAssignments
     preflight: unknown[] | null;     // from wizardRunPreflight (Health + Overview)
-    activity: unknown[] | null;      // from wizardActivity (U8 — Phase 3c); null until then
+    activity: unknown[] | null;      // legacy stub field — kept for back-compat; superseded by recentCalls
+    recentCalls: unknown[] | null;   // from wizardListRecentCalls (Overview Recent calls)
     drift: unknown | null;           // client-computed {phoneNumbers, voiceUrl, intelService}
     loading: boolean;                // initial-load gate
 
@@ -128,6 +129,12 @@ export interface ConsoleState {
     // Health + Deactivate flow (U6 / U11 carry-over).
     pendingDeactivateConfirm: boolean;
     deactivateError: string | null;
+
+    // Path C-7: Health Re-run preflight button loading state.
+    // Set true before wizardCall('wizardRunPreflight'); cleared after
+    // settle (then OR catch). Button reads this to swap label and
+    // enabled state so admins see visible feedback during the refresh.
+    preflightRefreshing: boolean;
 
     // Cross-section error surface.
     actionError: string | null;
@@ -180,6 +187,7 @@ export const STATE: WizardState = {
         assignments: null,
         preflight: null,
         activity: null,
+        recentCalls: null,
         drift: null,
         loading: false,
         phonesEmployees: null,
@@ -201,6 +209,7 @@ export const STATE: WizardState = {
         activeModal: null,
         pendingDeactivateConfirm: false,
         deactivateError: null,
+        preflightRefreshing: false,
         actionError: null
     }
 };

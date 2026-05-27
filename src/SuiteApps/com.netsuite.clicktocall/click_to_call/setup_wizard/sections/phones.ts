@@ -17,6 +17,7 @@
  * the workarounds aren't accidentally regressed).
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from '../render/primitives';
 import { STATE } from '../state';
@@ -67,11 +68,8 @@ interface CellArgs {
 export const buildPhonesSection = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Phones & reps',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(phones)');
-    if (heading) items.push(heading);
+    // Section-level Heading dropped — ApplicationHeader subtitle in
+    // SpaClient.buildRailContentPane shows the section name.
 
     if (STATE.console.phonesLoading) {
         const loader = safeNew(component.Loader, {
@@ -83,7 +81,7 @@ export const buildPhonesSection = (d: EnumsBag, deps: PhonesSectionDeps): unknow
             items: items,
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.L
-        }, 'StackPanel(phones-loading)') || heading;
+        }, 'StackPanel(phones-loading)') || loader;
     }
 
     const toolbar = buildPhonesToolbar(d, deps);
@@ -222,43 +220,140 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
         return sid.slice(0, 6) + '…' + sid.slice(-4);
     };
 
+    // Path C-6: status icon resolver — maps row state to native UIF
+    // SystemIcon + Image.Color. Shared between the leading icon column
+    // and any future inline-status uses.
+    const ImageCtor = component.Image as unknown as new (options?: object) => unknown;
+    const statusForRow = (row: PhoneRow): { icon: unknown; color: unknown; label: string } => {
+        const saving = STATE.console.phonesSaving[row.phoneSid || ''];
+        const hasReps = (row.employeeIds || []).length > 0;
+        if (saving) {
+            return {
+                icon: core.SystemIcon.STATUS_INFO_FILLED,
+                color: core.ImageConstant.Color.INFO,
+                label: 'Saving…'
+            };
+        }
+        if (hasReps) {
+            return {
+                icon: core.SystemIcon.STATUS_SUCCESS_FILLED,
+                color: core.ImageConstant.Color.SUCCESS,
+                label: 'Live'
+            };
+        }
+        return {
+            icon: core.SystemIcon.STATUS_WARNING_FILLED,
+            color: core.ImageConstant.Color.WARNING,
+            label: 'No reps'
+        };
+    };
+
     // Per MEMORY.md DataGrid learning: with columnStretch: true,
-    // `width` on each column acts as a PROPORTIONAL WEIGHT (not a
-    // fixed pixel). Without width on a column, it collapses to
-    // minimum width. So reps column NEEDS a width or it stays
-    // narrow and chips can't render. Widths chosen so reps gets
-    // the most space (it has the largest content — chip list).
+    // `stretchFactor` acts as a PROPORTIONAL WEIGHT for the column.
+    // Must be a positive INTEGER — fractional values (0.5, 1.5) cause
+    // DataGrid construction to throw silently and fall through to the
+    // text fallback.
+    // 5-column layout (Path C-6): icon | phone | SID | reps | badge
+    // Stretch factors: 1 | 2 | 2 | 5 | 2
+
+    // ── Column 1: status icon ────────────────────────────────────
+    // The column-level `horizontalAlignment` prop requires DataGrid to
+    // expose its nested HorizontalAlignment enum as a runtime property.
+    // UIF's TS catalog declares `export import HorizontalAlignment` on
+    // the DataGrid namespace, but the actual JS module doesn't always
+    // re-emit that aliasing at runtime — accessing d.DG.HorizontalAlignment
+    // returns undefined, and `undefined.CENTER` throws TypeError when
+    // the column def is evaluated. rerender()'s outer try/catch swallows
+    // the error and the UI freezes at the prior loading-spinner state.
+    //
+    // Defensive access: read HorizontalAlignment optionally and OMIT the
+    // alignment property entirely when unavailable. Center the icon via
+    // a wrapper ContentPanel inside the cell content callback instead —
+    // CP.HorizontalAlignment is known-good (used throughout the SPA).
+    const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
+                     (component.DataGrid && (component.DataGrid as unknown as { HorizontalAlignment?: { CENTER?: unknown } }).HorizontalAlignment);
+    const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
+
+    const statusIconColDef = {
+        type: CT.TEMPLATED,
+        name: 'statusIcon',
+        label: '',
+        stretchFactor: 1,
+        horizontalAlignment: colAlignCenter,        // undefined-safe
+        headerHorizontalAlignment: colAlignCenter,
+        content: (args: CellArgs): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                          args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
+                const s = statusForRow(row);
+                const icon = safeNew(ImageCtor, {
+                    image: s.icon,
+                    size: component.Image.Size.M,
+                    color: s.color,
+                    presentation: true
+                }, 'Image(phone-status-icon)') ||
+                             safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+
+                // Wrap in a ContentPanel with CP.HorizontalAlignment.CENTER
+                // so the icon centers in the cell regardless of whether
+                // the column-level horizontalAlignment prop was honored.
+                if (!d.CP) return icon;
+                return safeNew(d.CP, {
+                    content: icon,
+                    horizontalAlignment: d.CP_HAlign.CENTER
+                }, 'ContentPanel(phone-icon-center)') || icon;
+            } catch (e) {
+                console.error('[CTC] phone status icon column threw:', e);
+                return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
+            }
+        }
+    };
+
+    // ── Column 2: phone number ───────────────────────────────────
     const phoneColDef = {
         type: CT.TEMPLATED,
         name: 'phone',
         label: 'Phone number',
-        // Per UIF catalog (DataGrid > Columns > Column Sizing):
-        // when columnStretch:true, use `stretchFactor` for the
-        // fraction-of-available-width weight. `width` is a fixed
-        // pixel size and CAPS the grid at sum-of-widths.
         stretchFactor: 2,
         content: (args: CellArgs): unknown => {
             try {
                 const row = args && args.cell && args.cell.row &&
                           args.cell.row.dataItem;
                 if (!row) return safeNew(d.T, { text: '—' }, 'Text(phone-empty)');
-                const top = safeNew(d.T, {
+                return safeNew(d.T, {
                     text: row.phoneNumber || '(unknown)',
                     type: d.T_Type.STRONG
-                }, 'Text(phone-top)');
-                const sub = safeNew(d.T, {
-                    text: truncSid(row.phoneSid),
-                    type: d.T_Type.WEAK,
-                    size: d.T.Size && d.T.Size.S
-                }, 'Text(phone-sub)');
-                return safeNew(d.SP, {
-                    items: [top, sub].filter((c) => c != null),
-                    orientation: d.SP_Orient.VERTICAL,
-                    itemGap: d.SP_Gap.XXS
-                }, 'StackPanel(phone-cell)') || top || safeNew(d.T, { text: row.phoneNumber || '' }, 'Text(phone-fallback)');
+                }, 'Text(phone-number)');
             } catch (e) {
                 console.error('[CTC] phone column template threw:', e);
                 return safeNew(d.T, { text: '(error)' }, 'Text(phone-error)');
+            }
+        }
+    };
+
+    // ── Column 3: phone SID (new dedicated column, Path C-6) ─────
+    // Previously the truncated SID rode as a WEAK subtitle under the
+    // phone number; admin had to read two text levels in one cell.
+    // Promoted to its own column for scannability.
+    const phoneSidColDef = {
+        type: CT.TEMPLATED,
+        name: 'phoneSid',
+        label: 'Phone SID',
+        stretchFactor: 2,
+        content: (args: CellArgs): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                          args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(sid-empty)');
+                return safeNew(d.T, {
+                    text: truncSid(row.phoneSid),
+                    type: d.T_Type.WEAK,
+                    size: d.T.Size && d.T.Size.S
+                }, 'Text(phone-sid)');
+            } catch (e) {
+                console.error('[CTC] phone SID column template threw:', e);
+                return safeNew(d.T, { text: '(error)' }, 'Text(sid-error)');
             }
         }
     };
@@ -331,33 +426,37 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
         }
     };
 
+    // ── Column 5: status badge (semantic palette) ────────────────
+    // Drops the embedded ✓ glyph from the previous Badge content —
+    // the icon column at the row start now carries the visual cue,
+    // so the badge text is plain ("Live" / "No reps" / "Saving…"
+    // without prefix glyph). Color palette matches the icon's
+    // semantic tone via rootStyle (same pattern Recent calls' AI
+    // Status column uses on Overview).
     const statusColDef = {
         type: CT.TEMPLATED,
         name: 'status',
         label: 'Status',
-        stretchFactor: 1,
+        stretchFactor: 2,
         content: (args: CellArgs): unknown => {
             try {
                 const row = args && args.cell && args.cell.row &&
                           args.cell.row.dataItem;
                 if (!row) return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                const saving = STATE.console.phonesSaving[row.phoneSid || ''];
-                const hasReps = (row.employeeIds || []).length > 0;
-                if (saving) {
-                    return safeNew(d.Bdg, {
-                        content: 'Saving…',
-                        type: BdgType.SUBTLE
-                    }, 'Badge(saving)') || safeNew(d.T, { text: 'Saving…' }, 'Text(saving-fallback)');
-                } else if (hasReps) {
-                    return safeNew(d.Bdg, {
-                        content: '✓ Live',
-                        type: BdgType.SOLID
-                    }, 'Badge(live)') || safeNew(d.T, { text: '✓ Live' }, 'Text(live-fallback)');
-                }
+                const s = statusForRow(row);
+                const palette = s.label === 'Live'   ? { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } :
+                                s.label === 'Saving…' ? { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } :
+                                                        { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
                 return safeNew(d.Bdg, {
-                    content: 'No reps',
-                    type: BdgType.SUBTLE
-                }, 'Badge(no-reps)') || safeNew(d.T, { text: 'No reps' }, 'Text(no-reps-fallback)');
+                    content: s.label,
+                    type: BdgType.SUBTLE,
+                    rootStyle: {
+                        backgroundColor: palette.bg,
+                        color: palette.fg,
+                        border: '1px solid ' + palette.border
+                    }
+                }, 'Badge(phone-status)') ||
+                       safeNew(d.T, { text: s.label }, 'Text(status-fallback)');
             } catch (e) {
                 console.error('[CTC] status column template threw:', e);
                 return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
@@ -365,7 +464,7 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
         }
     };
 
-    const columns = [phoneColDef, repsColDef, statusColDef];
+    const columns = [statusIconColDef, phoneColDef, phoneSidColDef, repsColDef, statusColDef];
 
     const grid = safeNew(d.DG, {
         dataSource: rowsDs,

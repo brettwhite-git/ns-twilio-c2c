@@ -15,6 +15,7 @@
  * STATE + UIF + injected callbacks.
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from '../render/primitives';
 import { STATE } from '../state';
@@ -60,12 +61,8 @@ interface DriftSnapshot {
 export const buildHealthSection = (d: EnumsBag, deps: HealthSectionDeps): unknown => {
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Health',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(health)');
-    if (heading) items.push(heading);
-
+    // Section-level Heading dropped — ApplicationHeader subtitle shows
+    // "Health" at the page chrome.
     const preflightBlock = buildHealthPreflightBlock(d, deps);
     if (preflightBlock) items.push(preflightBlock);
 
@@ -103,26 +100,47 @@ const buildHealthPreflightBlock = (d: EnumsBag, deps: HealthSectionDeps): unknow
         type: d.H_Type.SMALL_HEADING
     }, 'Heading(health-preflight)');
 
+    // Path C-7: re-run button shows a visible loading state via
+    // STATE.console.preflightRefreshing. Label flips to "Re-running…"
+    // and the button disables while the call is in flight; settled
+    // (then OR catch) clears the flag and re-enables.
+    //
+    // C-9-followup: button styled to match the Phones & reps toolbar
+    // (DEFAULT type with leading SystemIcon.REFRESH) and placed in a
+    // left-aligned toolbar row of its own under the section header
+    // (instead of inline-right of the heading).
+    const refreshing = !!STATE.console.preflightRefreshing;
     const rerunBtn = safeNew(component.Button, {
-        label: '↻ Re-run',
+        label: refreshing ? 'Re-running…' : 'Re-run',
         type: ButtonType.DEFAULT,
+        startIcon: core.SystemIcon.REFRESH,
+        enabled: !refreshing,
         action: (): void => {
+            STATE.console.preflightRefreshing = true;
+            deps.rerender();
             wizardCall('wizardRunPreflight', {}).then((p) => {
                 const checks = p && (p as { checks?: unknown[] }).checks;
                 STATE.console.preflight = Array.isArray(checks) ? checks : [];
-                deps.rerender();
             }).catch((e: unknown) => {
                 const err = e as { message?: string };
                 STATE.console.actionError = 'Preflight failed: ' +
                     (err && err.message ? err.message : String(e));
+            }).then(() => {
+                STATE.console.preflightRefreshing = false;
                 deps.rerender();
             });
         }
     }, 'Button(rerun-preflight)');
 
-    const headerRow = safeNew(d.SP, {
-        items: [sectionHeader, rerunBtn].filter((c) => c != null),
+    const toolbar = safeNew(d.SP, {
+        items: [rerunBtn].filter((c) => c != null),
         orientation: d.SP_Orient.HORIZONTAL,
+        itemGap: d.SP_Gap.S
+    }, 'StackPanel(preflight-toolbar)');
+
+    const headerRow = safeNew(d.SP, {
+        items: [sectionHeader, toolbar].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.S
     }, 'StackPanel(preflight-header-row)');
 
@@ -245,20 +263,61 @@ const buildHealthChecksDataGrid = (
     // UIF v9.0.0 guarantees DataGrid.ColumnType.
     const CT = d.DG.ColumnType;
 
-    const statusColDef = {
+    // Path C-7: status text-label palette mapping. Same Bootstrap-style
+    // alert colors used by Phones (Path C-6) + Recent calls (Path C-3)
+    // — keeps semantic color cohesion across all three DataGrids that
+    // show check/status state.
+    const statusLabelFor = (status: string): { text: string; palette: { bg: string; fg: string; border: string } } => {
+        switch (status) {
+            case 'pass':
+                return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
+            case 'fail':
+                return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
+            case 'warn':
+                return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
+            case 'info_enabled':
+                return { text: 'Info', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
+            case 'info_disabled':
+                return { text: 'Off',  palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            default:
+                return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+        }
+    };
+
+    // Defensive read for column-level horizontalAlignment (same trap
+    // as Phones C-6: TS namespace re-export doesn't always survive into
+    // runtime). Falls back to wrapping the icon in a centering
+    // ContentPanel in the content callback.
+    const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
+                     (component.DataGrid && (component.DataGrid as unknown as { HorizontalAlignment?: { CENTER?: unknown } }).HorizontalAlignment);
+    const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
+
+    // ── Column 1: status icon (first, Path C-7) ──────────────────
+    const statusIconColDef = {
         type: CT.TEMPLATED,
-        name: 'status',
-        label: 'Status',
+        name: 'statusIcon',
+        label: '',
         stretchFactor: 1,
+        horizontalAlignment: colAlignCenter,
+        headerHorizontalAlignment: colAlignCenter,
         content: (args: { cell?: { row?: { dataItem?: CheckItem } } }): unknown => {
             try {
                 const row = args && args.cell && args.cell.row &&
                           args.cell.row.dataItem;
-                if (!row) return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                return badgeFor(row.status || '') || safeNew(d.T, { text: row.status }, 'Text(status-fallback)');
+                if (!row) return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
+                const icon = badgeFor(row.status || '') ||
+                             safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+                // Center via ContentPanel wrapper (cell-content path) so
+                // the icon centers regardless of whether the column-level
+                // horizontalAlignment prop was honored.
+                if (!d.CP) return icon;
+                return safeNew(d.CP, {
+                    content: icon,
+                    horizontalAlignment: d.CP_HAlign.CENTER
+                }, 'ContentPanel(health-icon-center)') || icon;
             } catch (e) {
-                console.error('[CTC] Health status column threw:', e);
-                return safeNew(d.T, { text: '?' }, 'Text(status-error)');
+                console.error('[CTC] Health status icon column threw:', e);
+                return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
             }
         }
     };
@@ -308,9 +367,39 @@ const buildHealthChecksDataGrid = (
         }
     };
 
+    // ── Column 4: status text badge (last, Path C-7) ─────────────
+    // Same colored-pill pattern as Phones (Path C-6) — semantic color
+    // via rootStyle override on a SUBTLE Badge.
+    const statusBadgeColDef = {
+        type: CT.TEMPLATED,
+        name: 'statusBadge',
+        label: 'Status',
+        stretchFactor: 2,
+        content: (args: { cell?: { row?: { dataItem?: CheckItem } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                          args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(statusbadge-empty)');
+                const sb = statusLabelFor(row.status || '');
+                return safeNew(d.Bdg, {
+                    content: sb.text,
+                    type: d.Bdg.Type.SUBTLE,
+                    rootStyle: {
+                        backgroundColor: sb.palette.bg,
+                        color: sb.palette.fg,
+                        border: '1px solid ' + sb.palette.border
+                    }
+                }, 'Badge(health-status)') || safeNew(d.T, { text: sb.text }, 'Text(statusbadge-fallback)');
+            } catch (e) {
+                console.error('[CTC] Health status-badge column threw:', e);
+                return safeNew(d.T, { text: '(error)' }, 'Text(statusbadge-error)');
+            }
+        }
+    };
+
     return safeNew(d.DG, {
         dataSource: rowsDs,
-        columns: [statusColDef, checkColDef, detailColDef],
+        columns: [statusIconColDef, checkColDef, detailColDef, statusBadgeColDef],
         columnStretch: true,
         highlightRowsOnHover: true,
         stripedRows: true,

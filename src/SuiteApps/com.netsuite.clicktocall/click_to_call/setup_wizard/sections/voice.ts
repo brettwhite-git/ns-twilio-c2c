@@ -55,8 +55,38 @@ interface VoiceFieldSpec {
     label: string;
     value: string | undefined;
     helpText: string;
+    /**
+     * Path C-5: Twilio docs URL for the field. Opens in a new tab via
+     * a "Twilio docs ↗" Button under the help text. Omit to hide the
+     * link.
+     */
+    docUrl?: string;
     allowEmpty?: boolean;
 }
+
+/**
+ * Path C-5: Twilio docs URLs for each voice config field. Public docs,
+ * no auth required. All three verified via WebFetch (200 OK + content
+ * relevance check) on 2026-05-27 — these point at the most specific
+ * canonical doc for each wizard field rather than generic landings:
+ *
+ *   - twimlApp:     REST API: Applications — documents the TwiML
+ *                   Application resource the wizard configures
+ *                   (the dropdown lists Application SIDs from this API)
+ *   - phoneNumber:  IncomingPhoneNumber resource — documents the exact
+ *                   resource the wizard's caller-ID dropdown queries
+ *                   (Twilio-owned numbers in the account, the set you
+ *                   can use as outbound caller IDs)
+ *   - intelService: Conversation Intelligence — the current canonical
+ *                   Voice Intelligence landing (URL still says "voice/
+ *                   intelligence" and page is labelled "classic" but
+ *                   this is where the product docs live)
+ */
+const TWILIO_DOCS = {
+    twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
+    phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
+    intelService: 'https://www.twilio.com/docs/voice/intelligence'
+};
 
 /** One item in a Twilio list response. */
 interface TwilioListItem {
@@ -73,11 +103,8 @@ export const buildVoiceSection = (d: EnumsBag, deps: VoiceSectionDeps): unknown 
     const snap = (STATE.console.snapshot || {}) as VoiceSnapshot;
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Voice config',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(voice)');
-    if (heading) items.push(heading);
+    // Section-level Heading dropped — ApplicationHeader subtitle shows
+    // "Voice config" at the page chrome.
 
     const intro = safeNew(d.T, {
         text: 'Manage TwiML application, default outbound caller-ID ' +
@@ -100,14 +127,22 @@ export const buildVoiceSection = (d: EnumsBag, deps: VoiceSectionDeps): unknown 
         field: 'twimlAppSid',
         label: 'TwiML Application',
         value: snap.twimlAppSid,
-        helpText: 'Twilio application that handles outbound call routing.'
+        helpText: 'The Twilio application that handles outbound call ' +
+            'routing. The wizard registers this app\'s VoiceUrl with ' +
+            'the CTC Suitelet, so every call a rep places hits ' +
+            'NetSuite first for screening before connecting to Twilio.',
+        docUrl: TWILIO_DOCS.twimlApp
     }));
 
     items.push(buildVoiceFieldRow(d, deps, {
         field: 'phoneNumber',
         label: 'Default outbound caller-ID',
         value: snap.phoneNumber,
-        helpText: 'Number reps see as their outbound caller ID.'
+        helpText: 'Number reps see as their outbound caller ID. ' +
+            'Specific rep-to-number assignments override this default ' +
+            '— see Phones & reps section to assign different numbers ' +
+            'to individual reps.',
+        docUrl: TWILIO_DOCS.phoneNumber
     }));
 
     items.push(buildVoiceFieldRow(d, deps, {
@@ -115,8 +150,10 @@ export const buildVoiceSection = (d: EnumsBag, deps: VoiceSectionDeps): unknown 
         label: 'Conversational Intelligence',
         value: snap.intelServiceSid,
         helpText: 'Twilio Conversational Intelligence service that ' +
-            'transcribes calls and powers AI summaries, tone keywords, ' +
-            'and satisfaction scoring on logged Phone Call records.'
+            'transcribes call audio and powers the AI summary, tone ' +
+            'keywords, and satisfaction scoring on Phone Call records. ' +
+            'Required for the AI analysis pipeline.',
+        docUrl: TWILIO_DOCS.intelService
     }));
 
     if (items.length === 0) return safeNew(d.T, { text: 'Voice config' }, 'Text(voice-empty)');
@@ -133,17 +170,43 @@ export const buildVoiceSection = (d: EnumsBag, deps: VoiceSectionDeps): unknown 
 
 /**
  * One field row — VIEW mode by default, swaps to EDIT when this
- * field is the active `voiceEditing` target. Uses a horizontal
- * StackPanel: label/value on left (grow:1), action button(s) right.
+ * field is the active `voiceEditing` target.
+ *
+ * Path C-5: row uses a 3-column GridPanel: [label | help+doc-link |
+ * value/edit-controls]. Previous version stacked label+help vertically
+ * on the left with value/controls on the right (HORIZONTAL StackPanel
+ * + SPACE_BETWEEN). The 3-column shape makes better use of admin-
+ * console width and gives the per-field Twilio docs link a natural
+ * home next to its description.
  */
 const buildVoiceFieldRow = (d: EnumsBag, deps: VoiceSectionDeps, spec: VoiceFieldSpec): unknown => {
     const isEditing = STATE.console.voiceEditing === spec.field;
     const ButtonType = component.Button.Type;
 
-    const label = safeNew(d.T, {
+    const labelText = safeNew(d.T, {
         text: spec.label,
         type: d.T_Type.STRONG
     }, 'Text(voice-label-' + spec.field + ')');
+
+    // Path C-5 v5: "Twilio docs ↗" moves from the 4th column back to
+    // inline below the label, matching the Credentials section pattern.
+    // Native component.Link with target=BLANK — NetSuite-blue link
+    // color from the UIF theme.
+    const docLink = spec.docUrl ? safeNew(component.Link, {
+        content: 'Twilio docs ↗',
+        url: spec.docUrl,
+        target: component.Link.Target.BLANK
+    }, 'Link(voice-doc-' + spec.field + ')') : null;
+
+    // Label cell stacks [STRONG label, doc link] vertically so the link
+    // sits with the field name at the row start instead of at the row's
+    // far right end.
+    const labelCell = docLink ? safeNew(d.SP, {
+        items: [labelText, docLink].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.XXS,
+        alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
+    }, 'StackPanel(voice-label-cell-' + spec.field + ')') : labelText;
 
     const help = safeNew(d.T, {
         text: spec.helpText,
@@ -151,35 +214,42 @@ const buildVoiceFieldRow = (d: EnumsBag, deps: VoiceSectionDeps, spec: VoiceFiel
         size: d.T.Size && d.T.Size.S
     }, 'Text(voice-help-' + spec.field + ')');
 
-    const labelStack = safeNew(d.SP, {
-        items: [label, help].filter((c) => c != null),
-        orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.XXS
-    }, 'StackPanel(voice-label-' + spec.field + ')');
-
-    const rightSide = isEditing
+    const rightSideRaw = isEditing
         ? buildVoiceEditControls(d, deps, spec)
         : buildVoiceViewControls(d, deps, spec, ButtonType);
 
-    // Card's Options has no `content` prop (only `children` for JSX,
-    // plus title/text/image/tools). Wrapping in Card with `content`
-    // renders an empty card. Use plain ContentPanel for padding and
-    // let the parent StackPanel's itemGap provide row separation.
-    const row = safeNew(d.SP, {
-        items: [labelStack, rightSide].filter((c) => c != null),
-        orientation: d.SP_Orient.HORIZONTAL,
-        itemGap: d.SP_Gap.L,
-        justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined
-    }, 'StackPanel(voice-row-' + spec.field + ')');
+    // Path C-5 v3: wrap value+controls in a ContentPanel with
+    // horizontalAlignment END so the content (value text + Change button,
+    // or Dropdown+Save+Cancel in edit mode) sits flush against the right
+    // edge of its grid cell.
+    const rightSide = d.CP ? safeNew(d.CP, {
+        content: rightSideRaw,
+        horizontalAlignment: d.CP_HAlign.END
+    }, 'ContentPanel(voice-right-align-' + spec.field + ')') || rightSideRaw
+                            : rightSideRaw;
+
+    // 3-column GridPanel: label+doc (narrow) | help (wide) | value+controls.
+    // Falls back to a vertical stack if GridPanel construction fails.
+    const cells = [labelCell, help, rightSide].filter((c) => c != null);
+    const grid = safeNew(d.GP, {
+        columns: '1fr 3fr 2fr',
+        rows: 'auto',
+        items: cells,
+        columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined
+    }, 'GridPanel(voice-row-' + spec.field + ')') || safeNew(d.SP, {
+        items: cells,
+        orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.S
+    }, 'StackPanel(voice-row-fallback-' + spec.field + ')');
 
     if (d.CP) {
         return safeNew(d.CP, {
-            content: row,
+            content: grid,
             outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
             horizontalAlignment: d.CP_HAlign.STRETCH
-        }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || row;
+        }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || grid;
     }
-    return row;
+    return grid;
 };
 
 // ─────────────────────────────────────────────────────────────────────

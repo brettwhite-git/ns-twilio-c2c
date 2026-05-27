@@ -14,11 +14,12 @@
  * OverviewSectionDeps carries that callback explicitly.
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from '../render/primitives';
 import { STATE } from '../state';
 import { buildStatCard } from '../render/shell';
-import type { EnumsBag } from '../render/shell';
+import type { EnumsBag, StatCardTone } from '../render/shell';
 import type { SectionName } from '../dispatch';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -29,9 +30,16 @@ import type { SectionName } from '../dispatch';
 export interface OverviewSectionDeps {
     /**
      * Navigate to an admin-console section. Mutates SELECTED_SECTION
-     * via dispatch + triggers rerender. Used by every Quick action.
+     * via dispatch + triggers rerender. Used by 4 of 5 Quick actions.
      */
     goToSection: (section: SectionName) => void;
+    /**
+     * Path C-4: Deactivate handler for the 5th Quick action (DANGER
+     * button). Wires to SpaClient's onDeactivateClick, which sets
+     * pendingDeactivateConfirm + routes to Health section for the
+     * two-click confirm flow.
+     */
+    onDeactivateClick: () => void;
 }
 
 interface ConsoleSnapshot {
@@ -53,6 +61,23 @@ interface ActivityRow {
     user?: string;
 }
 
+/**
+ * Path C-3 (revised): a Phone Call row from wizardListRecentCalls.
+ * Mirrors the server payload shape from ctc_sl_wizard_api.js.
+ */
+interface RecentCallRow {
+    id: string | number;
+    date: string;         // e.g. "5/27/2026 10:42 am"
+    title: string;
+    repName: string;
+    companyName: string;
+    contactName: string;
+    duration: number;     // seconds
+    brief: string;        // AI summary snippet
+    status: string;       // custevent_ctc_call_status value
+    satisfaction: number | null;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // buildOverviewSection — section root
 // ─────────────────────────────────────────────────────────────────────
@@ -66,11 +91,10 @@ interface ActivityRow {
 export const buildOverviewSection = (d: EnumsBag, deps: OverviewSectionDeps): unknown => {
     const items: unknown[] = [];
 
-    const heading = safeNew(d.H, {
-        content: 'Overview',
-        type: d.H_Type.MEDIUM_HEADING
-    }, 'Heading(overview)');
-    if (heading) items.push(heading);
+    // Path C-9-followup: section-level Heading dropped — the
+    // ApplicationHeader's subtitle slot (SpaClient.buildRailContentPane)
+    // already shows "Overview" at the page chrome. Rendering it again
+    // here was duplicate visual hierarchy.
 
     const stats = buildOverviewStatCards(d);
     if (stats) items.push(stats);
@@ -106,15 +130,27 @@ const buildOverviewStatCards = (d: EnumsBag): unknown => {
     const repCount = assignments.length;
     const preflightPassed = preflight.filter((c) => c.status === 'pass').length;
     const preflightTotal = preflight.length;
+    // Path C-2: Status card gets a semantic SystemIcon + color so admins
+    // can scan Active/Paused state at a glance. The other 3 cards stay
+    // text-only because their metric values are numeric and don't have
+    // a binary good/bad semantic.
     const statusLabel = snap.active === false ? 'Paused' :
                         snap.active === true ? 'Active' : 'Unknown';
+    const statusIcon = snap.active === true  ? core.SystemIcon.STATUS_SUCCESS_FILLED :
+                       snap.active === false ? core.SystemIcon.STATUS_WARNING_FILLED :
+                                                core.SystemIcon.STATUS_INFO_FILLED;
+    const statusTone: StatCardTone = snap.active === true  ? 'success' :
+                                     snap.active === false ? 'warning' :
+                                                              'info';
 
     const cards = [
         buildStatCard(d, {
             title: 'Status',
             metric: statusLabel,
             description: snap.active === false ? 'Reps cannot place calls'
-                                               : 'Reps can place calls'
+                                               : 'Reps can place calls',
+            icon: statusIcon,
+            tone: statusTone
         }),
         buildStatCard(d, {
             title: 'Phone numbers',
@@ -159,37 +195,84 @@ const buildOverviewStatCards = (d: EnumsBag): unknown => {
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// Quick actions strip — 5 deep-link buttons
+// Quick actions strip — 5 icon-prefixed buttons (4 DEFAULT + 1 DANGER)
 // ─────────────────────────────────────────────────────────────────────
 
 const buildOverviewQuickActions = (d: EnumsBag, deps: OverviewSectionDeps): unknown => {
     const ButtonType = component.Button.Type as Record<string, unknown>;
 
+    // Header row: title + descriptive subtitle stacked vertically.
+    // Matches the wireframe — title is a SMALL_HEADING, subtitle is WEAK
+    // body Text so it reads as supporting copy rather than another label.
     const heading = safeNew(d.H, {
         content: 'Quick actions',
         type: d.H_Type.SMALL_HEADING
     }, 'Heading(quick-actions)');
 
-    const actions: { label: string; onClick: () => void }[] = [
-        { label: 'Add a phone number',      onClick: () => deps.goToSection('phones') },
-        { label: 'Reassign reps',           onClick: () => deps.goToSection('phones') },
-        { label: 'Update voice config',     onClick: () => deps.goToSection('voice') },
-        { label: 'Rotate API Key Secret',   onClick: () => deps.goToSection('credentials') },
-        { label: 'Run health check',        onClick: () => deps.goToSection('health') }
+    const subtitle = safeNew(d.T, {
+        text: 'Common admin tasks — full screens still available via the left rail.',
+        type: d.T_Type.WEAK,
+        size: d.T && d.T.Size ? d.T.Size.S : undefined
+    }, 'Text(quick-actions-subtitle)');
+
+    const headerStack = safeNew(d.SP, {
+        items: [heading, subtitle].filter((c) => c != null),
+        orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.XXS
+    }, 'StackPanel(quick-actions-header)');
+
+    // Action specs. Each button: leading SystemIcon, plain DEFAULT type
+    // except the 5th (Deactivate) which uses DANGER for emphasis.
+    // Icons sourced from core.SystemIcon — verified members:
+    //   ADD / REFRESH / PLAY / LOCK / STOP (all in v9.0.0 catalog)
+    const actions: {
+        label: string;
+        icon: unknown;
+        type: unknown;
+        onClick: () => void;
+    }[] = [
+        {
+            label: 'Add a phone number',
+            icon: core.SystemIcon.ADD,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('phones')
+        },
+        {
+            label: 'Reassign reps',
+            icon: core.SystemIcon.REFRESH,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('phones')
+        },
+        {
+            label: 'Update voice config',
+            icon: core.SystemIcon.PLAY,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('voice')
+        },
+        {
+            label: 'Rotate API Key Secret',
+            icon: core.SystemIcon.LOCK,
+            type: ButtonType.DEFAULT,
+            onClick: () => deps.goToSection('credentials')
+        },
+        {
+            label: 'Deactivate',
+            icon: core.SystemIcon.STOP,
+            type: ButtonType.DANGER || ButtonType.DEFAULT,
+            onClick: deps.onDeactivateClick
+        }
     ];
 
     const buttons = actions.map((a) => {
-        // PURE-type buttons read as text-only links — appropriate for
-        // a row of 5 affordances where DEFAULT (filled outline) would
-        // dominate the page. Per d.ts Button.Type enum.
         return safeNew(component.Button, {
             label: a.label,
-            type: ButtonType.PURE || ButtonType.DEFAULT,
+            type: a.type,
+            startIcon: a.icon,
             action: a.onClick
         }, 'Button(qa-' + a.label + ')');
     }).filter((b) => b != null);
 
-    if (buttons.length === 0) return heading;
+    if (buttons.length === 0) return headerStack;
 
     const row = safeNew(d.SP, {
         items: buttons,
@@ -198,9 +281,9 @@ const buildOverviewQuickActions = (d: EnumsBag, deps: OverviewSectionDeps): unkn
     }, 'StackPanel(quick-actions-row)');
 
     return safeNew(d.SP, {
-        items: [heading, row].filter((c) => c != null),
+        items: [headerStack, row].filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.XS
+        itemGap: d.SP_Gap.S
     }, 'StackPanel(quick-actions-block)');
 };
 
@@ -208,44 +291,318 @@ const buildOverviewQuickActions = (d: EnumsBag, deps: OverviewSectionDeps): unkn
 // Activity feed (stub until U8 / Phase 3c)
 // ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Path C-3 (revised): Recent calls dashboard widget. Replaces the
+ * earlier wizard-activity-feed stub. Pulls real Phone Call records
+ * from wizardListRecentCalls (server-side filter by
+ * `custevent_ctc_call_sid is-not-empty` → only CTC-logged calls,
+ * ORDER BY startdate DESC LIMIT 10).
+ *
+ * Rendered as a UIF DataGrid for scannability — admins see the last
+ * 10 calls with rep / contact / duration / AI status at a glance,
+ * with a row-click affordance opening the full Phone Call record in
+ * a new tab.
+ *
+ * Three branches by data state:
+ *   - null      → loading (handled by the parent settled-counter; we
+ *                 see this briefly during loadConsole)
+ *   - []        → empty (no CTC calls yet — fresh install)
+ *   - [n > 0]   → DataGrid with the rows
+ */
 const buildOverviewActivityFeed = (d: EnumsBag): unknown => {
     const heading = safeNew(d.H, {
-        content: 'Recent activity',
+        content: 'Recent calls',
         type: d.H_Type.SMALL_HEADING
-    }, 'Heading(activity-feed)');
+    }, 'Heading(recent-calls)');
 
-    // U8 (Phase 3c) wires this to wizardActivity. Until then, show
-    // a stub note so admins know the feed is intentional, not missing.
-    const activity = STATE.console.activity as ActivityRow[] | null;
+    const calls = STATE.console.recentCalls as RecentCallRow[] | null;
     const rows: unknown[] = [];
 
-    if (!activity) {
-        const stub = safeNew(d.T, {
-            text: 'Activity feed arrives in Phase 3c (U8 — wizardActivity). ' +
-                  'When live, it shows the last 50 audit-level wizard events.',
-            type: d.T_Type.WEAK
-        }, 'Text(activity-stub)');
-        if (stub) rows.push(stub);
-    } else if (activity.length === 0) {
+    if (calls === null) {
+        // Loading state — settled-counter in loadConsole rerenders once
+        // all 5 parallel calls land. This branch is a one-frame flicker
+        // most of the time.
+        const loader = safeNew(component.Loader, {
+            label: 'Loading recent calls…',
+            indeterminate: true
+        }, 'Loader(recent-calls)');
+        if (loader) rows.push(loader);
+    } else if (calls.length === 0) {
         const empty = safeNew(d.T, {
-            text: 'No recent activity.',
+            text: 'No calls logged yet. Once reps start placing calls ' +
+                  'through Click-to-Call, the 10 most recent will show up here.',
             type: d.T_Type.WEAK
-        }, 'Text(activity-empty)');
+        }, 'Text(recent-calls-empty)');
         if (empty) rows.push(empty);
     } else {
-        activity.slice(0, 5).forEach((row) => {
-            const line = safeNew(d.T, {
-                text: (row.timestamp || '') + ' — ' + (row.title || '') +
-                      (row.user ? ' (' + row.user + ')' : ''),
-                size: d.T && d.T.Size ? d.T.Size.S : undefined
-            }, 'Text(activity-row)');
-            if (line) rows.push(line);
-        });
+        const grid = buildRecentCallsDataGrid(d, calls);
+        if (grid) rows.push(grid);
     }
 
     return safeNew(d.SP, {
         items: [heading as unknown].concat(rows).filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
+        itemGap: d.SP_Gap.S
+    }, 'StackPanel(recent-calls-feed)');
+};
+
+/**
+ * DataGrid renderer for the Recent calls feed. Mirrors the column-
+ * definition pattern used in sections/phones.ts and sections/health.ts:
+ * plain options objects in `columns: [...]`, TEMPLATED columns whose
+ * `content` callback returns Components built via safeNew.
+ *
+ * Columns: [Date | Rep | Contact | Duration | Status]
+ *
+ * Row click → opens the Phone Call record in a new tab via window.open.
+ * Falls back to a vertical Text list if DataGrid isn't available at
+ * runtime.
+ */
+const buildRecentCallsDataGrid = (d: EnumsBag, calls: RecentCallRow[]): unknown => {
+    if (!d.DG) {
+        console.warn('[CTC] DataGrid component unavailable; recent calls falling back to text');
+        return buildRecentCallsFallback(d, calls);
+    }
+
+    let rowsDs: unknown;
+    try {
+        rowsDs = new d.Ads(calls);
+    } catch (e) {
+        console.error('[CTC] Recent calls ArrayDataSource failed:', e);
+        return buildRecentCallsFallback(d, calls);
+    }
+
+    const CT = d.DG.ColumnType;
+    const BdgType = d.Bdg.Type;
+
+    const dateColDef = {
+        type: CT.TEMPLATED,
+        name: 'date',
+        label: 'Date',
+        stretchFactor: 2,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(date-empty)');
+                return safeNew(d.T, {
+                    text: row.date || '(no date)',
+                    type: d.T_Type.DEFAULT
+                }, 'Text(call-date)');
+            } catch (e) {
+                console.error('[CTC] Recent calls date column threw:', e);
+                return safeNew(d.T, { text: '(error)' }, 'Text(date-error)');
+            }
+        }
+    };
+
+    const repColDef = {
+        type: CT.TEMPLATED,
+        name: 'rep',
+        label: 'Rep',
+        stretchFactor: 2,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(rep-empty)');
+                return safeNew(d.T, {
+                    text: row.repName || '(unassigned)',
+                    type: d.T_Type.DEFAULT
+                }, 'Text(call-rep)');
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(rep-error)');
+            }
+        }
+    };
+
+    const contactColDef = {
+        type: CT.TEMPLATED,
+        name: 'contact',
+        label: 'Contact',
+        stretchFactor: 3,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(contact-empty)');
+                const primary = row.companyName || row.contactName || '(unknown)';
+                const secondary = (row.companyName && row.contactName)
+                    ? row.contactName
+                    : '';
+                const primaryText = safeNew(d.T, {
+                    text: primary,
+                    type: d.T_Type.STRONG
+                }, 'Text(call-contact-primary)');
+                const secondaryText = secondary ? safeNew(d.T, {
+                    text: secondary,
+                    type: d.T_Type.WEAK,
+                    size: d.T.Size && d.T.Size.S
+                }, 'Text(call-contact-secondary)') : null;
+                return safeNew(d.SP, {
+                    items: [primaryText, secondaryText].filter((c) => c != null),
+                    orientation: d.SP_Orient.VERTICAL,
+                    itemGap: d.SP_Gap.XXS
+                }, 'StackPanel(call-contact)') || primaryText;
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(contact-error)');
+            }
+        }
+    };
+
+    const durationColDef = {
+        type: CT.TEMPLATED,
+        name: 'duration',
+        label: 'Duration',
+        stretchFactor: 1,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(dur-empty)');
+                return safeNew(d.T, {
+                    text: formatDuration(row.duration),
+                    type: d.T_Type.DEFAULT
+                }, 'Text(call-duration)');
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(dur-error)');
+            }
+        }
+    };
+
+    const statusColDef = {
+        type: CT.TEMPLATED,
+        name: 'status',
+        label: 'AI Status',
+        stretchFactor: 2,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
+                const label = formatCallStatus(row.status);
+                const palette = statusBadgePalette(row.status);
+                return safeNew(d.Bdg, {
+                    content: label,
+                    type: BdgType.SUBTLE,
+                    // UIF Badge has no color prop (SOLID/SUBTLE only) —
+                    // override via rootStyle for semantic tinting. Same
+                    // approach Health's danger zone uses for its red
+                    // callout box.
+                    rootStyle: {
+                        backgroundColor: palette.bg,
+                        color: palette.fg,
+                        border: '1px solid ' + palette.border
+                    }
+                }, 'Badge(call-status)') || safeNew(d.T, { text: label }, 'Text(call-status-fb)');
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
+            }
+        }
+    };
+
+    const grid = safeNew(d.DG, {
+        dataSource: rowsDs,
+        columns: [dateColDef, repColDef, contactColDef, durationColDef, statusColDef],
+        columnStretch: true,
+        highlightRowsOnHover: true,
+        stripedRows: true,
+        dataRowHeight: 56,
+        headerRowHeight: 40,
+        rootStyle: { width: '100%' },
+        // Row-click → open the Phone Call record in a new tab. Path
+        // pattern matches NetSuite's standard call.nl URL.
+        onRowClick: (args: { row?: { dataItem?: RecentCallRow } }): void => {
+            const dataItem = args && args.row && args.row.dataItem;
+            if (!dataItem || !dataItem.id) return;
+            try {
+                window.open(
+                    '/app/crm/calendar/call.nl?id=' + encodeURIComponent(String(dataItem.id)),
+                    '_blank'
+                );
+            } catch (e) { /* ignore */ }
+        }
+    }, 'DataGrid(recent-calls)');
+
+    if (!grid) {
+        console.warn('[CTC] Recent calls DataGrid construction returned null; using text fallback');
+        return buildRecentCallsFallback(d, calls);
+    }
+    return grid;
+};
+
+/**
+ * Text-only fallback for the Recent calls feed when DataGrid is
+ * unavailable. Mirrors the buildPhonesFallback pattern.
+ */
+const buildRecentCallsFallback = (d: EnumsBag, calls: RecentCallRow[]): unknown => {
+    const rows = calls.map((c) => {
+        const label = (c.date || '?') + ' — ' +
+                      (c.companyName || c.contactName || '(unknown)') +
+                      ' [' + (c.repName || 'unassigned') + ']' +
+                      ' — ' + formatDuration(c.duration);
+        return safeNew(d.T, { text: label }, 'Text(call-row-fb)');
+    }).filter((r) => r != null);
+    if (rows.length === 0) return null;
+    return safeNew(d.SP, {
+        items: rows,
+        orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.XS
-    }, 'StackPanel(activity-feed)');
+    }, 'StackPanel(recent-calls-fallback)');
+};
+
+/** Format a duration in seconds → "Mm:Ss" or "Hh:Mm:Ss". */
+const formatDuration = (seconds: number): string => {
+    if (!seconds || seconds < 0) return '—';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    const pad = (n: number) => (n < 10 ? '0' + n : String(n));
+    if (h > 0) return h + ':' + pad(m) + ':' + pad(s);
+    return m + ':' + pad(s);
+};
+
+/**
+ * Map a call status value to a tinted-badge color palette. Bootstrap-
+ * style alert palette: light background + darker readable text + matching
+ * border tint. Falls back to neutral grey for any status not in the
+ * known list (defensive against server adding new status values).
+ *
+ * Status taxonomy (per CLAUDE.md / Sprint 2 status field):
+ *   - logged        → grey   (just created, no transcript yet)
+ *   - processing    → blue   (Twilio Conversational Intelligence in-flight)
+ *   - transcribed   → green  (transcript landed + AI analysis complete)
+ *   - no_transcript → yellow (transcript never produced — short call, etc.)
+ *   - failed        → red    (transcript fetch errored or LLM threw)
+ */
+const statusBadgePalette = (status: string): { bg: string; fg: string; border: string } => {
+    const norm = (status || '').toLowerCase().trim();
+    switch (norm) {
+        case 'transcribed':
+            return { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' };  // green
+        case 'processing':
+            return { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' };  // blue
+        case 'logged':
+            return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };  // grey
+        case 'no_transcript':
+        case 'no transcript':
+            return { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };  // yellow
+        case 'failed':
+            return { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' };  // red
+        default:
+            return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };  // grey fallback
+    }
+};
+
+/** Map custevent_ctc_call_status raw value → human-readable label. */
+const formatCallStatus = (status: string): string => {
+    if (!status) return '—';
+    // Status values from CLAUDE.md memory: Logged / Processing /
+    // Transcribed / No transcript / Failed. The raw value may also
+    // already be a human-readable label depending on whether the field
+    // is text or a List/Record selector. Pass-through with title-case
+    // normalization.
+    const norm = String(status).trim();
+    if (!norm) return '—';
+    return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
 };

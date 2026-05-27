@@ -44,6 +44,7 @@
  *   minimization) when the rest of the render tree has settled.
  */
 
+import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import { safeNew } from './primitives';
 
@@ -72,11 +73,25 @@ export type EnumsBag = any;
  *   - title:       small WEAK label above the metric
  *   - metric:      the big value (e.g., "Active", "5", "3 of 7")
  *   - description: subline detail (small, optional)
+ *   - icon:        optional SystemIcon source rendered next to the metric.
+ *                  When set, the card switches from Card.metric() (which
+ *                  only takes string-typed metric values) to a custom
+ *                  layout that puts the icon + metric in a horizontal
+ *                  StackPanel. Other cards in the same row stay
+ *                  Card.metric()-based — the visual hierarchy is consistent
+ *                  enough that mixing the two doesn't read as a regression.
+ *   - tone:        semantic color for the icon. Maps to Image.Color enum.
+ *                  Currently used by the Status card to express
+ *                  Active/Paused/Unknown. Other cards leave tone unset.
  */
+export type StatCardTone = 'success' | 'warning' | 'info' | 'neutral';
+
 export interface StatCardSpec {
     title: string;
     metric: string;
     description?: string;
+    icon?: unknown;       // Image.Source from core.SystemIcon.STATUS_*_FILLED
+    tone?: StatCardTone;
 }
 
 /** Click handler for buildPausedBanner's Reactivate button. */
@@ -219,7 +234,18 @@ export const buildStatCard = (d: EnumsBag, spec: StatCardSpec): unknown => {
         return d.Cd.metric({
             title: spec.title,
             metric: spec.metric,
-            description: spec.description
+            // For icon-bearing cards (Path C-2 final iteration), the icon
+            // rides in the description slot as a Component instead of
+            // pushing the metric value right. Card.metric()'s `metric`
+            // field is string-only — trying to mix icon + text in there
+            // either fails or produces off-baseline alignment vs. the
+            // sibling cards' string-only metrics. Putting the icon in
+            // the description preserves Card.metric's full internal CSS
+            // (title/metric layout, padding, border, baseline) so the
+            // Status card sits visually flush with its siblings.
+            description: spec.icon
+                ? buildIconedDescription(d, spec)
+                : spec.description
         });
     } catch (e) {
         console.warn('[CTC Setup Wizard] Card.metric threw, ' +
@@ -227,6 +253,47 @@ export const buildStatCard = (d: EnumsBag, spec: StatCardSpec): unknown => {
     }
 
     // Runtime fallback: hand-rolled stack if Card.metric() threw above.
+    return buildStatCardManualStack(d, spec);
+};
+
+/**
+ * Icon-prefixed description component for icon-bearing stat cards
+ * (Path C-2). Returns a horizontal StackPanel [Image, Text] suitable
+ * for use as Card.metric()'s `description` slot. The Image is tinted
+ * via Image.Color enum per the spec's tone.
+ */
+const buildIconedDescription = (d: EnumsBag, spec: StatCardSpec): unknown => {
+    // component.Image's constructor accepts `Options | string | ImageMetadata`,
+    // which is broader than safeNew's AnyCtor (options-object only).
+    // The cast narrows it; we always pass an Options object here.
+    const ImageCtor = component.Image as unknown as new (options?: object) => unknown;
+    const iconColor = toneToImageColor(spec.tone);
+    const icon = safeNew(ImageCtor, {
+        image: spec.icon,
+        size: component.Image.Size.S,
+        color: iconColor,
+        presentation: true
+    }, 'Image(stat-icon-desc-' + spec.title + ')');
+
+    const descText = spec.description ? safeNew(d.T, {
+        text: spec.description,
+        type: d.T_Type.WEAK,
+        size: d.T && d.T.Size ? d.T.Size.S : undefined
+    }, 'Text(stat-desc-' + spec.title + ')') : null;
+
+    return safeNew(d.SP, {
+        items: [icon, descText].filter((c) => c != null),
+        orientation: d.SP_Orient.HORIZONTAL,
+        itemGap: d.SP_Gap.XS,
+        alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+    }, 'StackPanel(stat-iconed-desc-' + spec.title + ')') || icon || descText;
+};
+
+/**
+ * Manual stack used both as the Card.metric() fallback and as the
+ * base layout for icon-bearing cards.
+ */
+const buildStatCardManualStack = (d: EnumsBag, spec: StatCardSpec): unknown => {
     const label = safeNew(d.T, {
         text: spec.title,
         type: d.T_Type.WEAK,
@@ -246,4 +313,15 @@ export const buildStatCard = (d: EnumsBag, spec: StatCardSpec): unknown => {
         orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.XXS
     }, 'StackPanel(stat-card-' + spec.title + ')');
+};
+
+const toneToImageColor = (tone: StatCardTone | undefined): unknown => {
+    if (!tone) return undefined;
+    switch (tone) {
+        case 'success': return core.ImageConstant.Color.SUCCESS;
+        case 'warning': return core.ImageConstant.Color.WARNING;
+        case 'info':    return core.ImageConstant.Color.INFO;
+        case 'neutral': return core.ImageConstant.Color.NEUTRAL;
+        default: return undefined;
+    }
 };
