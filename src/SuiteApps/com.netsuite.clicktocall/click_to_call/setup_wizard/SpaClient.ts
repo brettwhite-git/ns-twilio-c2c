@@ -44,6 +44,7 @@ import {
     setMode, setCurrentStep, setSelectedSection, setRailVisible
 } from './dispatch';
 import { STATE } from './state';
+import { safeNew } from './render/primitives';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -3657,20 +3658,6 @@ import { STATE } from './state';
         }, "StackPanel(stepper-strip)");
     }
 
-    function safeNew(Ctor, options, label) {
-        if (!Ctor) {
-            console.log("[CTC Setup Wizard] " + label + " constructor " +
-                "missing — skipping");
-            return null;
-        }
-        try {
-            return new Ctor(options);
-        } catch (e) {
-            console.log("[CTC Setup Wizard] " + label + " construction " +
-                "failed:", e && e.message ? e.message : e,
-                "— options:", options);
-            return null;
-        }
-    }
+    // Path B.3e-1 — safeNew moved to ./render/primitives.ts.
 
 export { run };

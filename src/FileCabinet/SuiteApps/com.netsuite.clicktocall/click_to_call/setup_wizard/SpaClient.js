@@ -163,6 +163,21 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
     };
 
+    const safeNew = (Ctor, options, label) => {
+        if (!Ctor) {
+            console.log('[CTC Setup Wizard] ' + label + ' constructor missing — skipping');
+            return null;
+        }
+        try {
+            return new Ctor(options);
+        }
+        catch (e) {
+            const err = e;
+            console.log('[CTC Setup Wizard] ' + label + ' construction failed:', err && err.message ? err.message : e, '— options:', options);
+            return null;
+        }
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -2757,21 +2772,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             justification: SPJust.SPACE_BETWEEN,
             itemGap: d.SP_Gap.M
         }, "StackPanel(stepper-strip)");
-    }
-    function safeNew(Ctor, options, label) {
-        if (!Ctor) {
-            console.log("[CTC Setup Wizard] " + label + " constructor " +
-                "missing — skipping");
-            return null;
-        }
-        try {
-            return new Ctor(options);
-        }
-        catch (e) {
-            console.log("[CTC Setup Wizard] " + label + " construction " +
-                "failed:", e && e.message ? e.message : e, "— options:", options);
-            return null;
-        }
     }
 
     exports.run = run;
