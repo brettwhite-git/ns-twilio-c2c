@@ -2500,6 +2500,61 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         });
     };
 
+    function createRouter(deps) {
+        function determineLandingStep(snap) {
+            const has = function (v) {
+                return !!(v && String(v).trim().length > 0);
+            };
+            if (!has(snap.accountSid) || !has(snap.apiKeySid))
+                return 2;
+            if (!has(snap.apiSecretId))
+                return 2;
+            if (!has(snap.twimlAppSid) || !has(snap.phoneNumber))
+                return 3;
+            return 'console';
+        }
+        function goToStep(stepNum) {
+            setMode('stepper');
+            setCurrentStep(Math.max(1, Math.min(deps.totalSteps, stepNum)));
+            deps.rerender();
+            if (CURRENT_STEP === 1)
+                deps.loadPrereqs();
+            if (CURRENT_STEP === 3)
+                loadStep3Lists({ rerender: deps.rerender });
+            if (CURRENT_STEP === 4)
+                loadStep4Lists({ rerender: deps.rerender });
+            if (CURRENT_STEP === 5)
+                loadStep5({
+                    rerender: deps.rerender,
+                    goToConsole: goToConsole
+                });
+        }
+        function goToConsole() {
+            setMode('console');
+            setSelectedSection('overview');
+            setRailVisible(true);
+            STATE.console.pendingDeactivateConfirm = false;
+            STATE.console.deactivateError = null;
+            STATE.console.actionError = null;
+            STATE.console.activeModal = null;
+            deps.loadConsole();
+        }
+        function goToSection(sectionName) {
+            setSelectedSection(sectionName);
+            if (MODE === 'stepper') {
+                setMode('console');
+            }
+            STATE.console.pendingDeactivateConfirm = false;
+            STATE.console.actionError = null;
+            deps.rerender();
+            if (sectionName === 'phones' &&
+                STATE.console.phonesNumbers === null) {
+                deps.loadPhonesData();
+            }
+        }
+        return { determineLandingStep, goToStep, goToConsole, goToSection };
+    }
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -2510,6 +2565,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     var scriptCtx = null;
     var bodyContainer = null;
     var enums = null;
+    var router = null;
     var mountRouting = true;
     var run = function (scriptContext) {
         try {
@@ -2557,6 +2613,13 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 SysIcon: SysIcon
             };
             scriptCtx = scriptContext;
+            router = createRouter({
+                rerender: rerender,
+                loadConsole: loadConsole,
+                loadPhonesData: loadPhonesData,
+                loadPrereqs: loadPrereqs,
+                totalSteps: STEPS.length
+            });
             try {
                 if (scriptContext && typeof scriptContext.setLayout === 'function') {
                     scriptContext.setLayout('application');
@@ -2576,15 +2639,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     loadPrereqs();
                     return;
                 }
-                var target = determineLandingStep(snap);
+                var target = router.determineLandingStep(snap);
                 mountRouting = false;
                 if (target === 'console') {
                     console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
-                    goToConsole();
+                    router.goToConsole();
                 }
                 else {
                     console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
-                    goToStep(target);
+                    router.goToStep(target);
                 }
             }).catch(function (e) {
                 console.warn('[CTC Setup Wizard] resumability snapshot ' +
@@ -2598,18 +2661,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             console.error("[CTC Setup Wizard] run() threw:", e);
         }
     };
-    function determineLandingStep(snap) {
-        var has = function (v) {
-            return !!(v && String(v).trim().length > 0);
-        };
-        if (!has(snap.accountSid) || !has(snap.apiKeySid))
-            return 2;
-        if (!has(snap.apiSecretId))
-            return 2;
-        if (!has(snap.twimlAppSid) || !has(snap.phoneNumber))
-            return 3;
-        return 'console';
-    }
     function rerender() {
         if (!scriptCtx || !enums)
             return;
@@ -2634,29 +2685,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         catch (e) {
             console.error("[CTC Setup Wizard] rerender threw:", e);
         }
-    }
-    function goToStep(stepNum) {
-        setMode('stepper');
-        setCurrentStep(Math.max(1, Math.min(STEPS.length, stepNum)));
-        rerender();
-        if (CURRENT_STEP === 1)
-            loadPrereqs();
-        if (CURRENT_STEP === 3)
-            loadStep3Lists({ rerender: rerender });
-        if (CURRENT_STEP === 4)
-            loadStep4Lists({ rerender: rerender });
-        if (CURRENT_STEP === 5)
-            loadStep5({ rerender: rerender, goToConsole: goToConsole });
-    }
-    function goToConsole() {
-        setMode('console');
-        setSelectedSection('overview');
-        setRailVisible(true);
-        STATE.console.pendingDeactivateConfirm = false;
-        STATE.console.deactivateError = null;
-        STATE.console.actionError = null;
-        STATE.console.activeModal = null;
-        loadConsole();
     }
     function loadConsole() {
         STATE.console.loading = true;
@@ -2735,19 +2763,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             voiceUrl: 'in-sync',
             intelService: snap.intelServiceSid ? 'in-sync' : 'not-configured'
         };
-    }
-    function goToSection(sectionName) {
-        setSelectedSection(sectionName);
-        if (MODE === 'stepper') {
-            setMode('console');
-        }
-        STATE.console.pendingDeactivateConfirm = false;
-        STATE.console.actionError = null;
-        rerender();
-        if (sectionName === 'phones' &&
-            STATE.console.phonesNumbers === null) {
-            loadPhonesData();
-        }
     }
     function groupAssignmentsByPhone(flatRows) {
         var grouped = {};
@@ -3102,7 +3117,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             { value: 'health', label: 'Health', icon: SysIcon.HEART_FILLED },
             { value: 're-run', label: 'Re-run wizard', icon: SysIcon.REFRESH,
                 separatorTop: true,
-                action: function () { goToStep(1); } }
+                action: function () { router.goToStep(1); } }
         ];
         var selectedVal = MODE === 'stepper' ? 're-run' : SELECTED_SECTION;
         var VisualStyle = (d.ND && d.ND.VisualStyle) || {};
@@ -3116,10 +3131,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 if (!value)
                     return;
                 if (value === 're-run') {
-                    goToStep(1);
+                    router.goToStep(1);
                     return;
                 }
-                goToSection(value);
+                router.goToSection(value);
             }
         }, "NavigationDrawer(console)");
     }
@@ -3141,9 +3156,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     : ButtonType.DEFAULT,
                 action: function () {
                     if (spec.value === 're-run')
-                        goToStep(1);
+                        router.goToStep(1);
                     else
-                        goToSection(spec.value);
+                        router.goToSection(spec.value);
                 }
             }, "Button(nav-" + spec.value + ")");
         }).filter(function (b) { return b != null; });
@@ -3158,12 +3173,12 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
             case 'overview': return buildOverviewSection(d, {
-                goToSection: goToSection,
+                goToSection: router.goToSection,
                 onDeactivateClick: onDeactivateClick
             });
             case 'phones': return buildPhonesSection(d, {
                 loadPhonesData: loadPhonesData,
-                goToStep: goToStep,
+                goToStep: router.goToStep,
                 onPhonesRowSelectionChanged: onPhonesRowSelectionChanged
             });
             case 'voice': return buildVoiceSection(d, { rerender: rerender });
@@ -3173,7 +3188,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 onDeactivateClick: onDeactivateClick
             });
             default: return buildOverviewSection(d, {
-                goToSection: goToSection,
+                goToSection: router.goToSection,
                 onDeactivateClick: onDeactivateClick
             });
         }
@@ -3200,7 +3215,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         else if (CURRENT_STEP === 5) {
             initial = buildStep5Activate(d, {
                 rerender: rerender,
-                goToConsole: goToConsole
+                goToConsole: router.goToConsole
             });
         }
         else {
@@ -3228,7 +3243,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         var backBtn = (CURRENT_STEP > 1) ? safeNew(component__namespace.Button, {
             label: "Back",
             type: ButtonType.DEFAULT,
-            action: function () { goToStep(CURRENT_STEP - 1); }
+            action: function () { router.goToStep(CURRENT_STEP - 1); }
         }, "Button(back)") : null;
         var nextBtn = (CURRENT_STEP < STEPS.length) ? safeNew(component__namespace.Button, {
             label: "Continue",
@@ -3247,7 +3262,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     }
     function onContinueClick() {
         if (CURRENT_STEP === 1) {
-            goToStep(2);
+            router.goToStep(2);
             return;
         }
         if (CURRENT_STEP === 2) {
@@ -3257,7 +3272,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 apiSecretId: STATE.step2.apiSecretId
             }).then(function (payload) {
                 if (payload && payload.saved)
-                    goToStep(3);
+                    router.goToStep(3);
                 else
                     alert("Save failed: " +
                         ((payload && payload.error) || 'unknown'));
@@ -3274,7 +3289,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 intelServiceSid: STATE.step3.intelServiceSid
             }).then(function (payload) {
                 if (payload && payload.saved)
-                    goToStep(4);
+                    router.goToStep(4);
                 else
                     alert("Save failed: " +
                         ((payload && payload.error) || 'unknown'));
@@ -3309,7 +3324,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 .then(function (payload) {
                 console.log("[CTC Setup Wizard] saveAssignments response:", payload);
                 if (payload && payload.saved)
-                    goToStep(5);
+                    router.goToStep(5);
                 else
                     alert("Save failed: " +
                         ((payload && payload.error) || 'unknown'));
@@ -3319,7 +3334,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             });
             return;
         }
-        goToStep(CURRENT_STEP + 1);
+        router.goToStep(CURRENT_STEP + 1);
     }
     function buildStepper(d) {
         var Badge = component__namespace.Badge;
