@@ -260,30 +260,52 @@ const buildPhonesDataGrid = (d: EnumsBag, deps: PhonesSectionDeps): unknown => {
     // Stretch factors: 1 | 2 | 2 | 5 | 2
 
     // ── Column 1: status icon ────────────────────────────────────
-    // GridConstants.HorizontalAlignment.CENTER + Image.Size.M renders
-    // the icon centered in the cell at a size comparable to one line
-    // of SMALL_HEADING text (vs. the previous S size which read as a
-    // tiny accent dot next to the row text).
+    // The column-level `horizontalAlignment` prop requires DataGrid to
+    // expose its nested HorizontalAlignment enum as a runtime property.
+    // UIF's TS catalog declares `export import HorizontalAlignment` on
+    // the DataGrid namespace, but the actual JS module doesn't always
+    // re-emit that aliasing at runtime — accessing d.DG.HorizontalAlignment
+    // returns undefined, and `undefined.CENTER` throws TypeError when
+    // the column def is evaluated. rerender()'s outer try/catch swallows
+    // the error and the UI freezes at the prior loading-spinner state.
+    //
+    // Defensive access: read HorizontalAlignment optionally and OMIT the
+    // alignment property entirely when unavailable. Center the icon via
+    // a wrapper ContentPanel inside the cell content callback instead —
+    // CP.HorizontalAlignment is known-good (used throughout the SPA).
+    const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
+                     (component.DataGrid && (component.DataGrid as unknown as { HorizontalAlignment?: { CENTER?: unknown } }).HorizontalAlignment);
+    const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
+
     const statusIconColDef = {
         type: CT.TEMPLATED,
         name: 'statusIcon',
         label: '',
         stretchFactor: 1,
-        horizontalAlignment: d.DG.HorizontalAlignment.CENTER,
-        headerHorizontalAlignment: d.DG.HorizontalAlignment.CENTER,
+        horizontalAlignment: colAlignCenter,        // undefined-safe
+        headerHorizontalAlignment: colAlignCenter,
         content: (args: CellArgs): unknown => {
             try {
                 const row = args && args.cell && args.cell.row &&
                           args.cell.row.dataItem;
                 if (!row) return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
                 const s = statusForRow(row);
-                return safeNew(ImageCtor, {
+                const icon = safeNew(ImageCtor, {
                     image: s.icon,
                     size: component.Image.Size.M,
                     color: s.color,
                     presentation: true
                 }, 'Image(phone-status-icon)') ||
-                       safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+                             safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+
+                // Wrap in a ContentPanel with CP.HorizontalAlignment.CENTER
+                // so the icon centers in the cell regardless of whether
+                // the column-level horizontalAlignment prop was honored.
+                if (!d.CP) return icon;
+                return safeNew(d.CP, {
+                    content: icon,
+                    horizontalAlignment: d.CP_HAlign.CENTER
+                }, 'ContentPanel(phone-icon-center)') || icon;
             } catch (e) {
                 console.error('[CTC] phone status icon column threw:', e);
                 return safeNew(d.T, { text: '?' }, 'Text(icon-error)');

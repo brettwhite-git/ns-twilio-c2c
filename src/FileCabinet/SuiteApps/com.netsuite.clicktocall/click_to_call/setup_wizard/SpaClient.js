@@ -1675,13 +1675,16 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 label: 'No reps'
             };
         };
+        const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
+            (component__namespace.DataGrid && component__namespace.DataGrid.HorizontalAlignment);
+        const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
         const statusIconColDef = {
             type: CT.TEMPLATED,
             name: 'statusIcon',
             label: '',
             stretchFactor: 1,
-            horizontalAlignment: d.DG.HorizontalAlignment.CENTER,
-            headerHorizontalAlignment: d.DG.HorizontalAlignment.CENTER,
+            horizontalAlignment: colAlignCenter,
+            headerHorizontalAlignment: colAlignCenter,
             content: (args) => {
                 try {
                     const row = args && args.cell && args.cell.row &&
@@ -1689,13 +1692,19 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     if (!row)
                         return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
                     const s = statusForRow(row);
-                    return safeNew(ImageCtor, {
+                    const icon = safeNew(ImageCtor, {
                         image: s.icon,
                         size: component__namespace.Image.Size.M,
                         color: s.color,
                         presentation: true
                     }, 'Image(phone-status-icon)') ||
                         safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
+                    if (!d.CP)
+                        return icon;
+                    return safeNew(d.CP, {
+                        content: icon,
+                        horizontalAlignment: d.CP_HAlign.CENTER
+                    }, 'ContentPanel(phone-icon-center)') || icon;
                 }
                 catch (e) {
                     console.error('[CTC] phone status icon column threw:', e);
