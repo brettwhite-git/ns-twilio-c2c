@@ -38,6 +38,7 @@
 
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
+import { wizardCall, extractPayload, WIZARD_API_URL } from './wizard_api_client';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -65,12 +66,9 @@ import * as component from '@uif-js/component';
     // see the rail-less full-page stepper.
     var RAIL_VISIBLE = false;
 
-    // Suitelet-as-API endpoint backing the wizard SPA. Same-origin →
-    // NetSuite session cookies carry through; no separate auth needed.
-    var WIZARD_API_URL =
-        '/app/site/hosting/scriptlet.nl' +
-        '?script=customscript_ctc_sl_wizard_api' +
-        '&deploy=customdeploy_ctc_sl_wizard_api';
+    // Path B.3b — WIZARD_API_URL, wizardCall, extractPayload moved
+    // to ./wizard_api_client.ts. Still imported (line ~40) so
+    // existing in-file references stay valid.
 
     // Module-level state — populated by mount + form inputs.
     var scriptCtx = null;          // for re-render via setContent
@@ -149,18 +147,7 @@ import * as component from '@uif-js/component';
         }
     };
 
-    /**
-     * Shared Ajax helper. POSTs to the wizard API and returns the
-     * unwrapped payload (or null).
-     */
-    function wizardCall(action, payload) {
-        return core.Ajax.post(
-            WIZARD_API_URL + '&action=' + action,
-            payload || {},
-            { dataType: core.Ajax.DataType.JSON,
-              responseType: core.Ajax.ResponseType.JSON }
-        ).then(extractPayload);
-    }
+    // Path B.3b — wizardCall moved to ./wizard_api_client.ts.
 
     var run = function (scriptContext) {
         try {
@@ -828,36 +815,7 @@ import * as component from '@uif-js/component';
      * Outer container:
      *   StackPanel(HORIZONTAL, justification=SPACE_BETWEEN, gap=M)
      */
-    /**
-     * core.Ajax may return either the parsed JSON body directly, or a
-     * wrapper object like { status, statusText, data, responseHeaders }.
-     * Probe both shapes so we don't care which one this UIF version
-     * uses.
-     */
-    function extractPayload(response) {
-        if (response == null) return null;
-        // Direct: response IS the parsed body
-        if (response.ok !== undefined || response.checks !== undefined ||
-            response.error !== undefined) {
-            return response;
-        }
-        // Wrapped: try common wrapper keys
-        if (typeof response === 'object') {
-            if (response.data && typeof response.data === 'object') return response.data;
-            if (response.body && typeof response.body === 'object') return response.body;
-            if (response.response && typeof response.response === 'object') return response.response;
-            // Sometimes the response is a string that needs re-parse
-            if (typeof response.responseText === 'string') {
-                try { return JSON.parse(response.responseText); }
-                catch (e) { /* fall through */ }
-            }
-        }
-        if (typeof response === 'string') {
-            try { return JSON.parse(response); }
-            catch (e) { return null; }
-        }
-        return null;
-    }
+    // Path B.3b — extractPayload moved to ./wizard_api_client.ts.
 
     /* ────────────────────────────────────────────────────────────────── */
     /* U11 — Admin Console (post-activation surface)                      */

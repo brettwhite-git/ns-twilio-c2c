@@ -57,6 +57,48 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     var core__namespace = /*#__PURE__*/_interopNamespaceDefault(core);
     var component__namespace = /*#__PURE__*/_interopNamespaceDefault(component);
 
+    const WIZARD_API_URL = '/app/site/hosting/scriptlet.nl' +
+        '?script=customscript_ctc_sl_wizard_api' +
+        '&deploy=customdeploy_ctc_sl_wizard_api';
+    const extractPayload = (response) => {
+        if (response == null)
+            return null;
+        if (typeof response === 'object') {
+            const env = response;
+            if (env.ok !== undefined || env.checks !== undefined ||
+                env.error !== undefined) {
+                return response;
+            }
+            if (env.data && typeof env.data === 'object')
+                return env.data;
+            if (env.body && typeof env.body === 'object')
+                return env.body;
+            if (env.response && typeof env.response === 'object')
+                return env.response;
+            if (typeof env.responseText === 'string') {
+                try {
+                    return JSON.parse(env.responseText);
+                }
+                catch (e) { }
+            }
+        }
+        if (typeof response === 'string') {
+            try {
+                return JSON.parse(response);
+            }
+            catch (e) {
+                return null;
+            }
+        }
+        return null;
+    };
+    const wizardCall = (action, payload) => {
+        return core__namespace.Ajax.post(WIZARD_API_URL + '&action=' + action, payload || {}, {
+            dataType: core__namespace.Ajax.DataType.JSON,
+            responseType: core__namespace.Ajax.ResponseType.JSON
+        }).then(extractPayload);
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -68,9 +110,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     var MODE = 'stepper';
     var SELECTED_SECTION = 'overview';
     var RAIL_VISIBLE = false;
-    var WIZARD_API_URL = '/app/site/hosting/scriptlet.nl' +
-        '?script=customscript_ctc_sl_wizard_api' +
-        '&deploy=customdeploy_ctc_sl_wizard_api';
     var scriptCtx = null;
     var bodyContainer = null;
     var enums = null;
@@ -128,10 +167,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             actionError: null
         }
     };
-    function wizardCall(action, payload) {
-        return core__namespace.Ajax.post(WIZARD_API_URL + '&action=' + action, payload || {}, { dataType: core__namespace.Ajax.DataType.JSON,
-            responseType: core__namespace.Ajax.ResponseType.JSON }).then(extractPayload);
-    }
     var run = function (scriptContext) {
         try {
             console.log("[CTC Setup Wizard] === REAL API PASS ===");
@@ -579,37 +614,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             outerGap: d.CP_Gap.L
         }, "ContentPanel(page)");
         return page || stack;
-    }
-    function extractPayload(response) {
-        if (response == null)
-            return null;
-        if (response.ok !== undefined || response.checks !== undefined ||
-            response.error !== undefined) {
-            return response;
-        }
-        if (typeof response === 'object') {
-            if (response.data && typeof response.data === 'object')
-                return response.data;
-            if (response.body && typeof response.body === 'object')
-                return response.body;
-            if (response.response && typeof response.response === 'object')
-                return response.response;
-            if (typeof response.responseText === 'string') {
-                try {
-                    return JSON.parse(response.responseText);
-                }
-                catch (e) { }
-            }
-        }
-        if (typeof response === 'string') {
-            try {
-                return JSON.parse(response);
-            }
-            catch (e) {
-                return null;
-            }
-        }
-        return null;
     }
     function buildRailContentPane(d) {
         if (STATE.console.loading && MODE === 'console') {
