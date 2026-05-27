@@ -1311,28 +1311,17 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: d.T_Type.WEAK,
             size: d.T.Size && d.T.Size.S
         }, 'Text(voice-help-' + spec.field + ')');
-        const docLink = spec.docUrl ? safeNew(component__namespace.Button, {
-            label: 'Twilio docs ↗',
-            type: ButtonType.PURE || ButtonType.DEFAULT,
-            action: ((url) => () => {
-                try {
-                    window.open(url, '_blank');
-                }
-                catch (e) { }
-            })(spec.docUrl)
-        }, 'Button(voice-doc-link-' + spec.field + ')') : null;
-        const helpStack = safeNew(d.SP, {
-            items: [help, docLink].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS,
-            alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
-        }, 'StackPanel(voice-help-' + spec.field + ')');
         const rightSide = isEditing
             ? buildVoiceEditControls(d, deps, spec)
             : buildVoiceViewControls(d, deps, spec, ButtonType);
-        const cells = [label, helpStack, rightSide].filter((c) => c != null);
+        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
+            content: 'Twilio docs ↗',
+            url: spec.docUrl,
+            target: component__namespace.Link.Target.BLANK
+        }, 'Link(voice-doc-' + spec.field + ')') : null;
+        const cells = [label, help, rightSide, docLink].filter((c) => c != null);
         const grid = safeNew(d.GP, {
-            columns: '1fr 2fr 2fr',
+            columns: '1fr 3fr 2fr 1fr',
             rows: 'auto',
             items: cells,
             columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined

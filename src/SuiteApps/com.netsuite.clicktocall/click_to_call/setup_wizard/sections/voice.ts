@@ -185,33 +185,28 @@ const buildVoiceFieldRow = (d: EnumsBag, deps: VoiceSectionDeps, spec: VoiceFiel
         size: d.T.Size && d.T.Size.S
     }, 'Text(voice-help-' + spec.field + ')');
 
-    // Optional "Twilio docs ↗" button under the help text. window.open
-    // pattern matches the Credentials "Open API Secrets" deep-link.
-    const docLink = spec.docUrl ? safeNew(component.Button, {
-        label: 'Twilio docs ↗',
-        type: ButtonType.PURE || ButtonType.DEFAULT,
-        action: ((url: string) => (): void => {
-            try { window.open(url, '_blank'); } catch (e) { /* ignore */ }
-        })(spec.docUrl)
-    }, 'Button(voice-doc-link-' + spec.field + ')') : null;
-
-    const helpStack = safeNew(d.SP, {
-        items: [help, docLink].filter((c) => c != null),
-        orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.XXS,
-        alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
-    }, 'StackPanel(voice-help-' + spec.field + ')');
-
     const rightSide = isEditing
         ? buildVoiceEditControls(d, deps, spec)
         : buildVoiceViewControls(d, deps, spec, ButtonType);
 
-    // 3-column GridPanel: label (narrow) | help+doc (medium) | value
-    // controls (medium). Falls back to a vertical stack if GridPanel
-    // construction fails (same defensive pattern Step 2 uses).
-    const cells = [label, helpStack, rightSide].filter((c) => c != null);
+    // Path C-5 v2: "Twilio docs ↗" moved to its OWN 4th column at the
+    // far right of the row (was previously nested under help text in
+    // a 3-col grid). Uses native component.Link which inherits the
+    // NetSuite blue link color from the UIF theme — no rootStyle
+    // override needed.
+    const docLink = spec.docUrl ? safeNew(component.Link, {
+        content: 'Twilio docs ↗',
+        url: spec.docUrl,
+        target: component.Link.Target.BLANK
+    }, 'Link(voice-doc-' + spec.field + ')') : null;
+
+    // 4-column GridPanel: label (narrow) | help (wide — wide enough that
+    // the multi-sentence help text fits on 1-2 lines at standard
+    // admin-console widths) | value+controls | doc-link (compact).
+    // Falls back to a vertical stack if GridPanel construction fails.
+    const cells = [label, help, rightSide, docLink].filter((c) => c != null);
     const grid = safeNew(d.GP, {
-        columns: '1fr 2fr 2fr',
+        columns: '1fr 3fr 2fr 1fr',
         rows: 'auto',
         items: cells,
         columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined
