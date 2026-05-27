@@ -2532,6 +2532,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     var scriptCtx = null;
     var bodyContainer = null;
     var enums = null;
+    var mountRouting = true;
     var run = function (scriptContext) {
         try {
             var SP = component__namespace.StackPanel;
@@ -2588,23 +2589,31 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     "failed; rail may not fill viewport:", e);
             }
             rerender();
-            loadPrereqs();
             wizardCall('wizardSnapshot', {}).then(function (payload) {
-                var snap = payload && payload.snapshot;
-                if (!snap)
+                var resp = payload;
+                var snap = (resp && resp.snapshot);
+                if (!snap) {
+                    mountRouting = false;
+                    rerender();
+                    loadPrereqs();
                     return;
+                }
                 var target = determineLandingStep(snap);
+                mountRouting = false;
                 if (target === 'console') {
-                    console.log("[CTC Setup Wizard] resumability — routing to Admin Console");
+                    console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
                     goToConsole();
                 }
-                else if (target !== CURRENT_STEP) {
-                    console.log("[CTC Setup Wizard] resumability — routing to step " + target);
+                else {
+                    console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
                     goToStep(target);
                 }
             }).catch(function (e) {
-                console.warn("[CTC Setup Wizard] resumability snapshot " +
-                    "failed; staying on Step 1:", e);
+                console.warn('[CTC Setup Wizard] resumability snapshot ' +
+                    'failed; falling back to Step 1:', e);
+                mountRouting = false;
+                rerender();
+                loadPrereqs();
             });
         }
         catch (e) {
@@ -2627,6 +2636,19 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         if (!scriptCtx || !enums)
             return;
         try {
+            if (mountRouting) {
+                var loader = safeNew(component__namespace.Loader, {
+                    label: 'Loading…',
+                    indeterminate: true
+                }, 'Loader(mount-routing)');
+                var loaderRoot = safeNew(enums.CP, {
+                    content: loader,
+                    horizontalAlignment: enums.CP_HAlign.CENTER,
+                    outerGap: enums.CP_Gap.XL
+                }, 'ContentPanel(mount-routing)') || loader;
+                scriptCtx.setContent(loaderRoot);
+                return;
+            }
             var root = buildRoot(enums);
             scriptCtx.setContent(root);
             console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);

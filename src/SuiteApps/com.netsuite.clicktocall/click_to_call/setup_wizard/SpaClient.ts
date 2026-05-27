@@ -154,6 +154,13 @@ interface SaveResponse {
     var bodyContainer = null;      // for swapping step body
     var enums = null;              // cached enum bag from run()
 
+    // Path C-9 (U8): true between mount and snapshot-routing decision.
+    // While true, rerender() paints a centered Loader instead of the
+    // full root tree — prevents the Step 1 stepper from flashing
+    // onscreen for returning admins (whose snapshot will route them to
+    // the console once the wizardSnapshot Promise resolves).
+    var mountRouting = true;
+
     // Path B.3d — STATE moved to ./state.ts (typed interfaces per
     // step + console). 235 `STATE.X` references in this file work
     // unchanged because the import is a `const` binding — we mutate
@@ -243,32 +250,49 @@ interface SaveResponse {
                     "failed; rail may not fill viewport:", e);
             }
 
-            // U9 fix: previously CURRENT_STEP was always 1 on mount,
-            // dropping returning admins back at the prereqs check.
-            // Now we fetch the config snapshot and route to the right
-            // step via lib/ctc_wizard_state.determineCurrentStep.
+            // Path C-9 (U8) fix: previously this called rerender() +
+            // loadPrereqs() immediately, which painted Step 1 stepper
+            // onscreen BEFORE the snapshot resolved. For returning
+            // admins (snapshot.active === true), Step 1 would briefly
+            // flash before goToConsole() flipped MODE='console' and
+            // re-rendered. Visual regression for the most common case.
             //
-            // While snapshot is in flight, render Step 1 with a loader
-            // so the admin sees something immediately. When the
-            // snapshot lands, goToStep navigates to the correct step
-            // and fires its per-step loader.
-            rerender();
-            loadPrereqs(); // immediate Step 1 affordance during routing
+            // New mount flow:
+            //   1. rerender() paints a centered Loader (mountRouting=true
+            //      bypasses buildRoot inside rerender)
+            //   2. Fire wizardSnapshot
+            //   3. On resolve: route via determineLandingStep
+            //      - 'console' → goToConsole (sets mountRouting=false)
+            //      - 1..5      → goToStep + loadPrereqs if Step 1
+            //   4. On reject (or no snapshot — fresh install):
+            //      stay at Step 1 → fire loadPrereqs() + clear flag
+            rerender();  // paints Loader because mountRouting=true
 
             wizardCall('wizardSnapshot', {}).then(function (payload) {
-                var snap = payload && payload.snapshot;
-                if (!snap) return; // fresh install — stay on Step 1
+                var resp = payload as SnapshotPayload | null;
+                var snap = (resp && resp.snapshot) as ConfigSnapshot | null;
+                if (!snap) {
+                    // Fresh install — fall through to Step 1.
+                    mountRouting = false;
+                    rerender();
+                    loadPrereqs();
+                    return;
+                }
                 var target = determineLandingStep(snap);
+                mountRouting = false;
                 if (target === 'console') {
-                    console.log("[CTC Setup Wizard] resumability — routing to Admin Console");
+                    console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
                     goToConsole();
-                } else if (target !== CURRENT_STEP) {
-                    console.log("[CTC Setup Wizard] resumability — routing to step " + target);
-                    goToStep(target);
+                } else {
+                    console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
+                    goToStep(target);  // fires per-step loader internally
                 }
             }).catch(function (e) {
-                console.warn("[CTC Setup Wizard] resumability snapshot " +
-                    "failed; staying on Step 1:", e);
+                console.warn('[CTC Setup Wizard] resumability snapshot ' +
+                    'failed; falling back to Step 1:', e);
+                mountRouting = false;
+                rerender();
+                loadPrereqs();
             });
         } catch (e) {
             console.error("[CTC Setup Wizard] run() threw:", e);
@@ -307,6 +331,24 @@ interface SaveResponse {
     function rerender() {
         if (!scriptCtx || !enums) return;
         try {
+            // Path C-9 (U8): while the snapshot is still resolving on
+            // mount, paint a centered Loader instead of the full root
+            // tree. Without this, the default CURRENT_STEP=1 causes
+            // Step 1 stepper to flash onscreen before goToConsole /
+            // goToStep redirects returning admins.
+            if (mountRouting) {
+                var loader = safeNew(component.Loader, {
+                    label: 'Loading…',
+                    indeterminate: true
+                }, 'Loader(mount-routing)');
+                var loaderRoot = safeNew(enums.CP, {
+                    content: loader,
+                    horizontalAlignment: enums.CP_HAlign.CENTER,
+                    outerGap: enums.CP_Gap.XL
+                }, 'ContentPanel(mount-routing)') || loader;
+                scriptCtx.setContent(loaderRoot);
+                return;
+            }
             var root = buildRoot(enums);
             scriptCtx.setContent(root);
             console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
