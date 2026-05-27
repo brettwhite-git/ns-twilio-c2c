@@ -40,7 +40,27 @@ interface CredentialRowSpec {
     label: string;
     value: string;
     help: string;
+    /**
+     * Optional Twilio docs URL for the field. When set, renders a
+     * "Twilio docs ↗" Link next to the label, opening in a new tab.
+     * Same pattern Voice config (Path C-5) uses on its 3 fields.
+     */
+    docUrl?: string;
 }
+
+/**
+ * Path C-followup: Twilio docs URLs for each credential field.
+ * Verified via WebFetch (200 OK) on 2026-05-27:
+ *   - Account SID  → REST API: Accounts
+ *   - API Key SID  → API keys overview (covers both SID + Secret)
+ *   - API Secret   → same API keys page (Secret is a pair with the
+ *                    SID; Twilio docs them together)
+ */
+const TWILIO_CREDS_DOCS = {
+    accountSid: 'https://www.twilio.com/docs/iam/api/account',
+    apiKeySid:  'https://www.twilio.com/docs/iam/api-keys',
+    apiSecret:  'https://www.twilio.com/docs/iam/api-keys'
+};
 
 // ─────────────────────────────────────────────────────────────────────
 // buildCredentialsSection — section root
@@ -103,14 +123,16 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
         label: 'Account SID',
         value: snap.accountSid || '(not set)',
         help: 'Public identifier for your Twilio account. Safe to view; ' +
-              'used by SuiteScript to address the Twilio REST API.'
+              'used by SuiteScript to address the Twilio REST API.',
+        docUrl: TWILIO_CREDS_DOCS.accountSid
     }));
 
     items.push(buildCredentialRow(d, {
         label: 'API Key SID',
         value: snap.apiKeySid || '(not set)',
         help: 'Public identifier for the scoped API Key. Pairs with the ' +
-              'secret value to authenticate REST calls.'
+              'secret value to authenticate REST calls.',
+        docUrl: TWILIO_CREDS_DOCS.apiKeySid
     }));
 
     items.push(buildCredentialRow(d, {
@@ -118,7 +140,8 @@ export const buildCredentialsSection = (d: EnumsBag): unknown => {
         value: snap.apiSecretId || '(not set)',
         help: 'Script ID of the NetSuite API Secret holding the secret ' +
               'value. The actual secret stays encrypted in NetSuite ' +
-              'and is never exposed to SuiteScript at runtime.'
+              'and is never exposed to SuiteScript at runtime.',
+        docUrl: TWILIO_CREDS_DOCS.apiSecret
     }));
 
     // Rotation runbook callout — separate visual block so admins can
@@ -142,6 +165,22 @@ const buildCredentialRow = (d: EnumsBag, spec: CredentialRowSpec): unknown => {
         type: d.T_Type.STRONG
     }, 'Text(cred-label)');
 
+    // Path C-followup: Twilio docs link rendered as native component.Link
+    // (inherits NetSuite blue from UIF theme), sits inline next to the
+    // label. Same pattern Voice config uses for its per-field doc links.
+    const docLink = spec.docUrl ? safeNew(component.Link, {
+        content: 'Twilio docs ↗',
+        url: spec.docUrl,
+        target: component.Link.Target.BLANK
+    }, 'Link(cred-doc-' + spec.label + ')') : null;
+
+    const labelRow = docLink ? safeNew(d.SP, {
+        items: [labelText, docLink].filter((c) => c != null),
+        orientation: d.SP_Orient.HORIZONTAL,
+        itemGap: d.SP_Gap.M,
+        alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+    }, 'StackPanel(cred-label-row-' + spec.label + ')') : labelText;
+
     const valueText = safeNew(d.T, {
         text: spec.value,
         type: d.T_Type.DEFAULT
@@ -154,7 +193,7 @@ const buildCredentialRow = (d: EnumsBag, spec: CredentialRowSpec): unknown => {
     }, 'Text(cred-help)');
 
     const inner = safeNew(d.SP, {
-        items: [labelText, valueText, helpText].filter((c) => c != null),
+        items: [labelRow, valueText, helpText].filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
         itemGap: d.SP_Gap.XXS
     }, 'StackPanel(cred-row-inner)');

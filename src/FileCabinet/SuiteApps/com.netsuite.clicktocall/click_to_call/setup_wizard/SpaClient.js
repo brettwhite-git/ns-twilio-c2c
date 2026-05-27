@@ -395,6 +395,11 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
     };
 
+    const TWILIO_CREDS_DOCS = {
+        accountSid: 'https://www.twilio.com/docs/iam/api/account',
+        apiKeySid: 'https://www.twilio.com/docs/iam/api-keys',
+        apiSecret: 'https://www.twilio.com/docs/iam/api-keys'
+    };
     const buildCredentialsSection = (d) => {
         const snap = (STATE.console.snapshot || {});
         const items = [];
@@ -435,20 +440,23 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             label: 'Account SID',
             value: snap.accountSid || '(not set)',
             help: 'Public identifier for your Twilio account. Safe to view; ' +
-                'used by SuiteScript to address the Twilio REST API.'
+                'used by SuiteScript to address the Twilio REST API.',
+            docUrl: TWILIO_CREDS_DOCS.accountSid
         }));
         items.push(buildCredentialRow(d, {
             label: 'API Key SID',
             value: snap.apiKeySid || '(not set)',
             help: 'Public identifier for the scoped API Key. Pairs with the ' +
-                'secret value to authenticate REST calls.'
+                'secret value to authenticate REST calls.',
+            docUrl: TWILIO_CREDS_DOCS.apiKeySid
         }));
         items.push(buildCredentialRow(d, {
             label: 'API Key Secret pointer',
             value: snap.apiSecretId || '(not set)',
             help: 'Script ID of the NetSuite API Secret holding the secret ' +
                 'value. The actual secret stays encrypted in NetSuite ' +
-                'and is never exposed to SuiteScript at runtime.'
+                'and is never exposed to SuiteScript at runtime.',
+            docUrl: TWILIO_CREDS_DOCS.apiSecret
         }));
         items.push(buildSecretRotationRunbook(d));
         return safeNew(d.SP, {
@@ -462,6 +470,17 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             text: spec.label,
             type: d.T_Type.STRONG
         }, 'Text(cred-label)');
+        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
+            content: 'Twilio docs ↗',
+            url: spec.docUrl,
+            target: component__namespace.Link.Target.BLANK
+        }, 'Link(cred-doc-' + spec.label + ')') : null;
+        const labelRow = docLink ? safeNew(d.SP, {
+            items: [labelText, docLink].filter((c) => c != null),
+            orientation: d.SP_Orient.HORIZONTAL,
+            itemGap: d.SP_Gap.M,
+            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
+        }, 'StackPanel(cred-label-row-' + spec.label + ')') : labelText;
         const valueText = safeNew(d.T, {
             text: spec.value,
             type: d.T_Type.DEFAULT
@@ -472,7 +491,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             size: d.T && d.T.Size ? d.T.Size.S : undefined
         }, 'Text(cred-help)');
         const inner = safeNew(d.SP, {
-            items: [labelText, valueText, helpText].filter((c) => c != null),
+            items: [labelRow, valueText, helpText].filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
             itemGap: d.SP_Gap.XXS
         }, 'StackPanel(cred-row-inner)');
