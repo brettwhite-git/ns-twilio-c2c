@@ -54,6 +54,23 @@ interface ActivityRow {
     user?: string;
 }
 
+/**
+ * Path C-3 (revised): a Phone Call row from wizardListRecentCalls.
+ * Mirrors the server payload shape from ctc_sl_wizard_api.js.
+ */
+interface RecentCallRow {
+    id: string | number;
+    date: string;         // e.g. "5/27/2026 10:42 am"
+    title: string;
+    repName: string;
+    companyName: string;
+    contactName: string;
+    duration: number;     // seconds
+    brief: string;        // AI summary snippet
+    status: string;       // custevent_ctc_call_status value
+    satisfaction: number | null;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // buildOverviewSection — section root
 // ─────────────────────────────────────────────────────────────────────
@@ -221,97 +238,279 @@ const buildOverviewQuickActions = (d: EnumsBag, deps: OverviewSectionDeps): unkn
 // Activity feed (stub until U8 / Phase 3c)
 // ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Path C-3 (revised): Recent calls dashboard widget. Replaces the
+ * earlier wizard-activity-feed stub. Pulls real Phone Call records
+ * from wizardListRecentCalls (server-side filter by
+ * `custevent_ctc_call_sid is-not-empty` → only CTC-logged calls,
+ * ORDER BY startdate DESC LIMIT 10).
+ *
+ * Rendered as a UIF DataGrid for scannability — admins see the last
+ * 10 calls with rep / contact / duration / AI status at a glance,
+ * with a row-click affordance opening the full Phone Call record in
+ * a new tab.
+ *
+ * Three branches by data state:
+ *   - null      → loading (handled by the parent settled-counter; we
+ *                 see this briefly during loadConsole)
+ *   - []        → empty (no CTC calls yet — fresh install)
+ *   - [n > 0]   → DataGrid with the rows
+ */
 const buildOverviewActivityFeed = (d: EnumsBag): unknown => {
     const heading = safeNew(d.H, {
-        content: 'Recent activity',
+        content: 'Recent calls',
         type: d.H_Type.SMALL_HEADING
-    }, 'Heading(activity-feed)');
+    }, 'Heading(recent-calls)');
 
-    // Phase 3c will wire this to a server-side `wizardActivity` action.
-    // Until that endpoint ships, the empty/null branches render a richer
-    // callout pointing admins at NetSuite's native Script Execution Log
-    // as a temporary affordance — same callout-box pattern Credentials
-    // uses for its rotation runbook.
-    const activity = STATE.console.activity as ActivityRow[] | null;
+    const calls = STATE.console.recentCalls as RecentCallRow[] | null;
     const rows: unknown[] = [];
 
-    if (!activity) {
-        const stub = buildActivityComingSoonCallout(d);
-        if (stub) rows.push(stub);
-    } else if (activity.length === 0) {
+    if (calls === null) {
+        // Loading state — settled-counter in loadConsole rerenders once
+        // all 5 parallel calls land. This branch is a one-frame flicker
+        // most of the time.
+        const loader = safeNew(component.Loader, {
+            label: 'Loading recent calls…',
+            indeterminate: true
+        }, 'Loader(recent-calls)');
+        if (loader) rows.push(loader);
+    } else if (calls.length === 0) {
         const empty = safeNew(d.T, {
-            text: 'No recent activity.',
+            text: 'No calls logged yet. Once reps start placing calls ' +
+                  'through Click-to-Call, the 10 most recent will show up here.',
             type: d.T_Type.WEAK
-        }, 'Text(activity-empty)');
+        }, 'Text(recent-calls-empty)');
         if (empty) rows.push(empty);
     } else {
-        activity.slice(0, 5).forEach((row) => {
-            const line = safeNew(d.T, {
-                text: (row.timestamp || '') + ' — ' + (row.title || '') +
-                      (row.user ? ' (' + row.user + ')' : ''),
-                size: d.T && d.T.Size ? d.T.Size.S : undefined
-            }, 'Text(activity-row)');
-            if (line) rows.push(line);
-        });
+        const grid = buildRecentCallsDataGrid(d, calls);
+        if (grid) rows.push(grid);
     }
 
     return safeNew(d.SP, {
         items: [heading as unknown].concat(rows).filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.XS
-    }, 'StackPanel(activity-feed)');
+        itemGap: d.SP_Gap.S
+    }, 'StackPanel(recent-calls-feed)');
 };
 
 /**
- * Path C-3: callout for the not-yet-implemented activity feed. Shows a
- * subtle blue-bordered Card with explanatory body text and a deep-link
- * button to NetSuite's Script Execution Log as a temporary affordance
- * for admins who need to see what the CTC scripts have been doing.
+ * DataGrid renderer for the Recent calls feed. Mirrors the column-
+ * definition pattern used in sections/phones.ts and sections/health.ts:
+ * plain options objects in `columns: [...]`, TEMPLATED columns whose
+ * `content` callback returns Components built via safeNew.
  *
- * Same ContentPanel + rootStyle border pattern as
- * sections/credentials.ts:buildSecretRotationRunbook — the only
- * difference is the border tone (blue for "info / coming soon" vs.
- * orange for "action runbook").
+ * Columns: [Date | Rep | Contact | Duration | Status]
+ *
+ * Row click → opens the Phone Call record in a new tab via window.open.
+ * Falls back to a vertical Text list if DataGrid isn't available at
+ * runtime.
  */
-const buildActivityComingSoonCallout = (d: EnumsBag): unknown => {
-    const body = safeNew(d.T, {
-        text: 'A live activity feed showing the last 50 wizard events ' +
-              '(saves, activations, rep assignments, secret rotations) ' +
-              'is on the roadmap. In the meantime, NetSuite\'s native ' +
-              'Script Execution Log surfaces every CTC script invocation ' +
-              'with timestamps, user context, and any errors.',
-        type: d.T_Type.WEAK
-    }, 'Text(activity-coming-soon-body)');
+const buildRecentCallsDataGrid = (d: EnumsBag, calls: RecentCallRow[]): unknown => {
+    if (!d.DG) {
+        console.warn('[CTC] DataGrid component unavailable; recent calls falling back to text');
+        return buildRecentCallsFallback(d, calls);
+    }
 
-    const openLogBtn = safeNew(component.Button, {
-        label: 'Open Script Execution Log ↗',
-        type: component.Button.Type.DEFAULT,
-        action: (): void => {
+    let rowsDs: unknown;
+    try {
+        rowsDs = new d.Ads(calls);
+    } catch (e) {
+        console.error('[CTC] Recent calls ArrayDataSource failed:', e);
+        return buildRecentCallsFallback(d, calls);
+    }
+
+    const CT = d.DG.ColumnType;
+    const BdgType = d.Bdg.Type;
+
+    const dateColDef = {
+        type: CT.TEMPLATED,
+        name: 'date',
+        label: 'Date',
+        stretchFactor: 2,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(date-empty)');
+                return safeNew(d.T, {
+                    text: row.date || '(no date)',
+                    type: d.T_Type.DEFAULT
+                }, 'Text(call-date)');
+            } catch (e) {
+                console.error('[CTC] Recent calls date column threw:', e);
+                return safeNew(d.T, { text: '(error)' }, 'Text(date-error)');
+            }
+        }
+    };
+
+    const repColDef = {
+        type: CT.TEMPLATED,
+        name: 'rep',
+        label: 'Rep',
+        stretchFactor: 2,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(rep-empty)');
+                return safeNew(d.T, {
+                    text: row.repName || '(unassigned)',
+                    type: d.T_Type.DEFAULT
+                }, 'Text(call-rep)');
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(rep-error)');
+            }
+        }
+    };
+
+    const contactColDef = {
+        type: CT.TEMPLATED,
+        name: 'contact',
+        label: 'Contact',
+        stretchFactor: 3,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(contact-empty)');
+                const primary = row.companyName || row.contactName || '(unknown)';
+                const secondary = (row.companyName && row.contactName)
+                    ? row.contactName
+                    : '';
+                const primaryText = safeNew(d.T, {
+                    text: primary,
+                    type: d.T_Type.STRONG
+                }, 'Text(call-contact-primary)');
+                const secondaryText = secondary ? safeNew(d.T, {
+                    text: secondary,
+                    type: d.T_Type.WEAK,
+                    size: d.T.Size && d.T.Size.S
+                }, 'Text(call-contact-secondary)') : null;
+                return safeNew(d.SP, {
+                    items: [primaryText, secondaryText].filter((c) => c != null),
+                    orientation: d.SP_Orient.VERTICAL,
+                    itemGap: d.SP_Gap.XXS
+                }, 'StackPanel(call-contact)') || primaryText;
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(contact-error)');
+            }
+        }
+    };
+
+    const durationColDef = {
+        type: CT.TEMPLATED,
+        name: 'duration',
+        label: 'Duration',
+        stretchFactor: 1,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(dur-empty)');
+                return safeNew(d.T, {
+                    text: formatDuration(row.duration),
+                    type: d.T_Type.DEFAULT
+                }, 'Text(call-duration)');
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(dur-error)');
+            }
+        }
+    };
+
+    const statusColDef = {
+        type: CT.TEMPLATED,
+        name: 'status',
+        label: 'AI Status',
+        stretchFactor: 2,
+        content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+            try {
+                const row = args && args.cell && args.cell.row &&
+                            args.cell.row.dataItem;
+                if (!row) return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
+                const label = formatCallStatus(row.status);
+                const badgeType = row.status === 'transcribed' ? BdgType.SOLID :
+                                   row.status === 'failed' ? BdgType.SOLID :
+                                                              BdgType.SUBTLE;
+                return safeNew(d.Bdg, {
+                    content: label,
+                    type: badgeType
+                }, 'Badge(call-status)') || safeNew(d.T, { text: label }, 'Text(call-status-fb)');
+            } catch (e) {
+                return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
+            }
+        }
+    };
+
+    const grid = safeNew(d.DG, {
+        dataSource: rowsDs,
+        columns: [dateColDef, repColDef, contactColDef, durationColDef, statusColDef],
+        columnStretch: true,
+        highlightRowsOnHover: true,
+        stripedRows: true,
+        dataRowHeight: 56,
+        headerRowHeight: 40,
+        rootStyle: { width: '100%' },
+        // Row-click → open the Phone Call record in a new tab. Path
+        // pattern matches NetSuite's standard call.nl URL.
+        onRowClick: (args: { row?: { dataItem?: RecentCallRow } }): void => {
+            const dataItem = args && args.row && args.row.dataItem;
+            if (!dataItem || !dataItem.id) return;
             try {
                 window.open(
-                    '/app/common/scripting/scriptexecutionlogsearchresults.nl',
+                    '/app/crm/calendar/call.nl?id=' + encodeURIComponent(String(dataItem.id)),
                     '_blank'
                 );
             } catch (e) { /* ignore */ }
         }
-    }, 'Button(open-script-log)');
+    }, 'DataGrid(recent-calls)');
 
-    const inner = safeNew(d.SP, {
-        items: [body, openLogBtn].filter((c) => c != null),
+    if (!grid) {
+        console.warn('[CTC] Recent calls DataGrid construction returned null; using text fallback');
+        return buildRecentCallsFallback(d, calls);
+    }
+    return grid;
+};
+
+/**
+ * Text-only fallback for the Recent calls feed when DataGrid is
+ * unavailable. Mirrors the buildPhonesFallback pattern.
+ */
+const buildRecentCallsFallback = (d: EnumsBag, calls: RecentCallRow[]): unknown => {
+    const rows = calls.map((c) => {
+        const label = (c.date || '?') + ' — ' +
+                      (c.companyName || c.contactName || '(unknown)') +
+                      ' [' + (c.repName || 'unassigned') + ']' +
+                      ' — ' + formatDuration(c.duration);
+        return safeNew(d.T, { text: label }, 'Text(call-row-fb)');
+    }).filter((r) => r != null);
+    if (rows.length === 0) return null;
+    return safeNew(d.SP, {
+        items: rows,
         orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.S
-    }, 'StackPanel(activity-callout-inner)');
+        itemGap: d.SP_Gap.XS
+    }, 'StackPanel(recent-calls-fallback)');
+};
 
-    if (!d.CP) return inner;
-    return safeNew(d.CP, {
-        content: inner,
-        outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-        horizontalAlignment: d.CP_HAlign.STRETCH,
-        rootStyle: {
-            border: '1px solid #3A6FB0',
-            borderRadius: '8px',
-            backgroundColor: '#F2F6FB',
-            padding: '16px 20px'
-        }
-    }, 'ContentPanel(activity-callout)') || inner;
+/** Format a duration in seconds → "Mm:Ss" or "Hh:Mm:Ss". */
+const formatDuration = (seconds: number): string => {
+    if (!seconds || seconds < 0) return '—';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    const pad = (n: number) => (n < 10 ? '0' + n : String(n));
+    if (h > 0) return h + ':' + pad(m) + ':' + pad(s);
+    return m + ':' + pad(s);
+};
+
+/** Map custevent_ctc_call_status raw value → human-readable label. */
+const formatCallStatus = (status: string): string => {
+    if (!status) return '—';
+    // Status values from CLAUDE.md memory: Logged / Processing /
+    // Transcribed / No transcript / Failed. The raw value may also
+    // already be a human-readable label depending on whether the field
+    // is text or a List/Record selector. Pass-through with title-case
+    // normalization.
+    const norm = String(status).trim();
+    if (!norm) return '—';
+    return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
 };

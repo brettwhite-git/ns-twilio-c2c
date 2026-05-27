@@ -779,6 +779,68 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Action: wizardListRecentCalls (Overview Recent calls feed)         */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Path C-3 (revised): return the N most recent Phone Call records
+     * created by CTC (filtered by custevent_ctc_call_sid is-not-empty).
+     * Powers the Overview section's "Recent calls" DataGrid — admins
+     * see the latest activity across all reps without leaving the
+     * console.
+     *
+     * Returns: `{ items: [{ id, date, title, repName, companyName,
+     * contactName, duration, brief, status, satisfaction }, ...] }`
+     *
+     * @param {Object} payload - { limit?: number } (default 10, clamped [1, 25])
+     */
+    const wizardListRecentCalls = (payload) => {
+        try {
+            const requestedLimit = parseInt(payload && payload.limit, 10) || 10;
+            const limit = Math.min(Math.max(requestedLimit, 1), 25);
+
+            const results = search.create({
+                type: search.Type.PHONE_CALL,
+                filters: [['custevent_ctc_call_sid', 'isnotempty', '']],
+                columns: [
+                    { name: 'startdate', sort: search.Sort.DESC },
+                    'title',
+                    'assigned',
+                    'company',
+                    'contact',
+                    'custevent_ctc_ai_brief',
+                    'custevent_ctc_duration',
+                    'custevent_ctc_call_status',
+                    'custevent_ctc_satisfaction'
+                ]
+            }).run().getRange({ start: 0, end: limit });
+
+            const items = results.map(function (r) {
+                return {
+                    id: r.id,
+                    date: r.getValue('startdate') || '',
+                    title: r.getValue('title') || '',
+                    repName: r.getText('assigned') || '',
+                    companyName: r.getText('company') || '',
+                    contactName: r.getText('contact') || '',
+                    duration: parseInt(r.getValue('custevent_ctc_duration'), 10) || 0,
+                    brief: r.getValue('custevent_ctc_ai_brief') || '',
+                    status: r.getValue('custevent_ctc_call_status') || '',
+                    satisfaction: parseInt(r.getValue('custevent_ctc_satisfaction'), 10) || null
+                };
+            });
+
+            return { items: items };
+        } catch (e) {
+            log.error({
+                title: 'CTC Wizard — listRecentCalls failed',
+                details: e && e.message ? e.message : String(e)
+            });
+            return { items: [], error: 'list_recent_calls_failed' };
+        }
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Action: wizardSaveAssignments (Step 4 save)                        */
     /* ------------------------------------------------------------------ */
 
@@ -1196,6 +1258,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardSaveVoice:         wizardSaveVoice,
         wizardListEmployees:     wizardListEmployees,
         wizardLoadAssignments:   wizardLoadAssignments,
+        wizardListRecentCalls:   wizardListRecentCalls,
         wizardSaveAssignments:   wizardSaveAssignments,
         wizardRunPreflight:      wizardRunPreflight,
         wizardActivate:          wizardActivate

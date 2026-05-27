@@ -360,6 +360,7 @@ interface SaveResponse {
         STATE.console.snapshot = null;
         STATE.console.assignments = null;
         STATE.console.preflight = null;
+        STATE.console.recentCalls = null;
         STATE.console.drift = null;
         rerender();
 
@@ -370,7 +371,10 @@ interface SaveResponse {
         // DataGrid's widgetOptions ran BEFORE employees resolved → chips
         // initialized with selectedItems=[] and never recovered on subsequent
         // renders.
-        var TARGET = 4;
+        // Path C-3 (revised) — TARGET bumped from 4 → 5 to include the new
+        // wizardListRecentCalls fetch powering the Overview "Recent calls"
+        // DataGrid. Same settled-counter pattern; no race risk.
+        var TARGET = 5;
         function onSettled() {
             settled += 1;
             if (settled >= TARGET) {
@@ -408,6 +412,16 @@ interface SaveResponse {
                 STATE.console.preflight = (resp && resp.checks) || [];
             })
             .catch(function () { STATE.console.preflight = []; })
+            .then(onSettled);
+
+        // Path C-3 (revised) — Overview Recent calls feed. Fetched in
+        // parallel with the other 4 loads; settled-counter waits for all 5.
+        wizardCall('wizardListRecentCalls', { limit: 10 })
+            .then(function (p) {
+                var resp = p as ListPayload | null;
+                STATE.console.recentCalls = (resp && resp.items) || [];
+            })
+            .catch(function () { STATE.console.recentCalls = []; })
             .then(onSettled);
 
         wizardCall('wizardListEmployees', {})

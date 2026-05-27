@@ -138,6 +138,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             assignments: null,
             preflight: null,
             activity: null,
+            recentCalls: null,
             drift: null,
             loading: false,
             phonesEmployees: null,
@@ -939,58 +940,237 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     };
     const buildOverviewActivityFeed = (d) => {
         const heading = safeNew(d.H, {
-            content: 'Recent activity',
+            content: 'Recent calls',
             type: d.H_Type.SMALL_HEADING
-        }, 'Heading(activity-feed)');
+        }, 'Heading(recent-calls)');
+        const calls = STATE.console.recentCalls;
         const rows = [];
-        {
-            const stub = buildActivityComingSoonCallout(d);
-            if (stub)
-                rows.push(stub);
+        if (calls === null) {
+            const loader = safeNew(component__namespace.Loader, {
+                label: 'Loading recent calls…',
+                indeterminate: true
+            }, 'Loader(recent-calls)');
+            if (loader)
+                rows.push(loader);
+        }
+        else if (calls.length === 0) {
+            const empty = safeNew(d.T, {
+                text: 'No calls logged yet. Once reps start placing calls ' +
+                    'through Click-to-Call, the 10 most recent will show up here.',
+                type: d.T_Type.WEAK
+            }, 'Text(recent-calls-empty)');
+            if (empty)
+                rows.push(empty);
+        }
+        else {
+            const grid = buildRecentCallsDataGrid(d, calls);
+            if (grid)
+                rows.push(grid);
         }
         return safeNew(d.SP, {
             items: [heading].concat(rows).filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, 'StackPanel(activity-feed)');
+            itemGap: d.SP_Gap.S
+        }, 'StackPanel(recent-calls-feed)');
     };
-    const buildActivityComingSoonCallout = (d) => {
-        const body = safeNew(d.T, {
-            text: 'A live activity feed showing the last 50 wizard events ' +
-                '(saves, activations, rep assignments, secret rotations) ' +
-                'is on the roadmap. In the meantime, NetSuite\'s native ' +
-                'Script Execution Log surfaces every CTC script invocation ' +
-                'with timestamps, user context, and any errors.',
-            type: d.T_Type.WEAK
-        }, 'Text(activity-coming-soon-body)');
-        const openLogBtn = safeNew(component__namespace.Button, {
-            label: 'Open Script Execution Log ↗',
-            type: component__namespace.Button.Type.DEFAULT,
-            action: () => {
+    const buildRecentCallsDataGrid = (d, calls) => {
+        if (!d.DG) {
+            console.warn('[CTC] DataGrid component unavailable; recent calls falling back to text');
+            return buildRecentCallsFallback(d, calls);
+        }
+        let rowsDs;
+        try {
+            rowsDs = new d.Ads(calls);
+        }
+        catch (e) {
+            console.error('[CTC] Recent calls ArrayDataSource failed:', e);
+            return buildRecentCallsFallback(d, calls);
+        }
+        const CT = d.DG.ColumnType;
+        const BdgType = d.Bdg.Type;
+        const dateColDef = {
+            type: CT.TEMPLATED,
+            name: 'date',
+            label: 'Date',
+            stretchFactor: 2,
+            content: (args) => {
                 try {
-                    window.open('/app/common/scripting/scriptexecutionlogsearchresults.nl', '_blank');
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(date-empty)');
+                    return safeNew(d.T, {
+                        text: row.date || '(no date)',
+                        type: d.T_Type.DEFAULT
+                    }, 'Text(call-date)');
+                }
+                catch (e) {
+                    console.error('[CTC] Recent calls date column threw:', e);
+                    return safeNew(d.T, { text: '(error)' }, 'Text(date-error)');
+                }
+            }
+        };
+        const repColDef = {
+            type: CT.TEMPLATED,
+            name: 'rep',
+            label: 'Rep',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(rep-empty)');
+                    return safeNew(d.T, {
+                        text: row.repName || '(unassigned)',
+                        type: d.T_Type.DEFAULT
+                    }, 'Text(call-rep)');
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(rep-error)');
+                }
+            }
+        };
+        const contactColDef = {
+            type: CT.TEMPLATED,
+            name: 'contact',
+            label: 'Contact',
+            stretchFactor: 3,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(contact-empty)');
+                    const primary = row.companyName || row.contactName || '(unknown)';
+                    const secondary = (row.companyName && row.contactName)
+                        ? row.contactName
+                        : '';
+                    const primaryText = safeNew(d.T, {
+                        text: primary,
+                        type: d.T_Type.STRONG
+                    }, 'Text(call-contact-primary)');
+                    const secondaryText = secondary ? safeNew(d.T, {
+                        text: secondary,
+                        type: d.T_Type.WEAK,
+                        size: d.T.Size && d.T.Size.S
+                    }, 'Text(call-contact-secondary)') : null;
+                    return safeNew(d.SP, {
+                        items: [primaryText, secondaryText].filter((c) => c != null),
+                        orientation: d.SP_Orient.VERTICAL,
+                        itemGap: d.SP_Gap.XXS
+                    }, 'StackPanel(call-contact)') || primaryText;
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(contact-error)');
+                }
+            }
+        };
+        const durationColDef = {
+            type: CT.TEMPLATED,
+            name: 'duration',
+            label: 'Duration',
+            stretchFactor: 1,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(dur-empty)');
+                    return safeNew(d.T, {
+                        text: formatDuration(row.duration),
+                        type: d.T_Type.DEFAULT
+                    }, 'Text(call-duration)');
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(dur-error)');
+                }
+            }
+        };
+        const statusColDef = {
+            type: CT.TEMPLATED,
+            name: 'status',
+            label: 'AI Status',
+            stretchFactor: 2,
+            content: (args) => {
+                try {
+                    const row = args && args.cell && args.cell.row &&
+                        args.cell.row.dataItem;
+                    if (!row)
+                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
+                    const label = formatCallStatus(row.status);
+                    const badgeType = row.status === 'transcribed' ? BdgType.SOLID :
+                        row.status === 'failed' ? BdgType.SOLID :
+                            BdgType.SUBTLE;
+                    return safeNew(d.Bdg, {
+                        content: label,
+                        type: badgeType
+                    }, 'Badge(call-status)') || safeNew(d.T, { text: label }, 'Text(call-status-fb)');
+                }
+                catch (e) {
+                    return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
+                }
+            }
+        };
+        const grid = safeNew(d.DG, {
+            dataSource: rowsDs,
+            columns: [dateColDef, repColDef, contactColDef, durationColDef, statusColDef],
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            stripedRows: true,
+            dataRowHeight: 56,
+            headerRowHeight: 40,
+            rootStyle: { width: '100%' },
+            onRowClick: (args) => {
+                const dataItem = args && args.row && args.row.dataItem;
+                if (!dataItem || !dataItem.id)
+                    return;
+                try {
+                    window.open('/app/crm/calendar/call.nl?id=' + encodeURIComponent(String(dataItem.id)), '_blank');
                 }
                 catch (e) { }
             }
-        }, 'Button(open-script-log)');
-        const inner = safeNew(d.SP, {
-            items: [body, openLogBtn].filter((c) => c != null),
+        }, 'DataGrid(recent-calls)');
+        if (!grid) {
+            console.warn('[CTC] Recent calls DataGrid construction returned null; using text fallback');
+            return buildRecentCallsFallback(d, calls);
+        }
+        return grid;
+    };
+    const buildRecentCallsFallback = (d, calls) => {
+        const rows = calls.map((c) => {
+            const label = (c.date || '?') + ' — ' +
+                (c.companyName || c.contactName || '(unknown)') +
+                ' [' + (c.repName || 'unassigned') + ']' +
+                ' — ' + formatDuration(c.duration);
+            return safeNew(d.T, { text: label }, 'Text(call-row-fb)');
+        }).filter((r) => r != null);
+        if (rows.length === 0)
+            return null;
+        return safeNew(d.SP, {
+            items: rows,
             orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(activity-callout-inner)');
-        if (!d.CP)
-            return inner;
-        return safeNew(d.CP, {
-            content: inner,
-            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            rootStyle: {
-                border: '1px solid #3A6FB0',
-                borderRadius: '8px',
-                backgroundColor: '#F2F6FB',
-                padding: '16px 20px'
-            }
-        }, 'ContentPanel(activity-callout)') || inner;
+            itemGap: d.SP_Gap.XS
+        }, 'StackPanel(recent-calls-fallback)');
+    };
+    const formatDuration = (seconds) => {
+        if (!seconds || seconds < 0)
+            return '—';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        const pad = (n) => (n < 10 ? '0' + n : String(n));
+        if (h > 0)
+            return h + ':' + pad(m) + ':' + pad(s);
+        return m + ':' + pad(s);
+    };
+    const formatCallStatus = (status) => {
+        if (!status)
+            return '—';
+        const norm = String(status).trim();
+        if (!norm)
+            return '—';
+        return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
     };
 
     const buildVoiceSection = (d, deps) => {
@@ -2237,10 +2417,11 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         STATE.console.snapshot = null;
         STATE.console.assignments = null;
         STATE.console.preflight = null;
+        STATE.console.recentCalls = null;
         STATE.console.drift = null;
         rerender();
         var settled = 0;
-        var TARGET = 4;
+        var TARGET = 5;
         function onSettled() {
             settled += 1;
             if (settled >= TARGET) {
@@ -2274,6 +2455,13 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             STATE.console.preflight = (resp && resp.checks) || [];
         })
             .catch(function () { STATE.console.preflight = []; })
+            .then(onSettled);
+        wizardCall('wizardListRecentCalls', { limit: 10 })
+            .then(function (p) {
+            var resp = p;
+            STATE.console.recentCalls = (resp && resp.items) || [];
+        })
+            .catch(function () { STATE.console.recentCalls = []; })
             .then(onSettled);
         wizardCall('wizardListEmployees', {})
             .then(function (p) {

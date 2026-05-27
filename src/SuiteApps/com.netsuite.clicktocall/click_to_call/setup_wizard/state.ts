@@ -98,7 +98,8 @@ export interface ConsoleState {
     snapshot: unknown | null;        // from wizardSnapshot
     assignments: unknown[] | null;   // from wizardLoadAssignments
     preflight: unknown[] | null;     // from wizardRunPreflight (Health + Overview)
-    activity: unknown[] | null;      // from wizardActivity (U8 — Phase 3c); null until then
+    activity: unknown[] | null;      // legacy stub field — kept for back-compat; superseded by recentCalls
+    recentCalls: unknown[] | null;   // from wizardListRecentCalls (Overview Recent calls)
     drift: unknown | null;           // client-computed {phoneNumbers, voiceUrl, intelService}
     loading: boolean;                // initial-load gate
 
@@ -180,6 +181,7 @@ export const STATE: WizardState = {
         assignments: null,
         preflight: null,
         activity: null,
+        recentCalls: null,
         drift: null,
         loading: false,
         phonesEmployees: null,
