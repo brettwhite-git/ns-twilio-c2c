@@ -56,6 +56,7 @@ import { buildHealthSection } from './sections/health';
 import { buildOverviewSection } from './sections/overview';
 import { buildVoiceSection } from './sections/voice';
 import { buildPhonesSection } from './sections/phones';
+import { buildStep2Form } from './steps/step2';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -1253,47 +1254,6 @@ import { buildPhonesSection } from './sections/phones';
             return;
         }
         goToStep(CURRENT_STEP + 1);
-    }
-
-    /* ────────────────────────────────────────────────────────────────── */
-    /* Step 2 — Connect Twilio                                            */
-    /* ────────────────────────────────────────────────────────────────── */
-
-    function buildStep2Form(d) {
-        var rows = [];
-
-        rows.push(safeNew(d.H, {
-            content: "Connect to your Twilio account",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(step2)"));
-
-        rows.push(safeNew(d.T, {
-            text: "Enter your Twilio Account SID and API Key SID. " +
-                  "The API Key Secret must already exist in NetSuite " +
-                  "API Secrets (Setup > Company > API Secrets) — paste " +
-                  "its script ID below. Live validation against Twilio " +
-                  "runs at Step 6 (Test & activate) using the configured " +
-                  "secret pointer — no need to paste the secret value here."
-        }, "Text(step2-intro)"));
-
-        rows.push(buildTextField('Account SID', 'AC...',
-            STATE.step2.accountSid,
-            function (v) { STATE.step2.accountSid = v; }));
-
-        rows.push(buildTextField('API Key SID', 'SK...',
-            STATE.step2.apiKeySid,
-            function (v) { STATE.step2.apiKeySid = v; }));
-
-        rows.push(buildTextField('API Key Secret script ID',
-            'custsecret_...',
-            STATE.step2.apiSecretId,
-            function (v) { STATE.step2.apiSecretId = v; }));
-
-        return safeNew(d.SP, {
-            items: rows.filter(function (r) { return r != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(step2)");
     }
 
     /* ────────────────────────────────────────────────────────────────── */

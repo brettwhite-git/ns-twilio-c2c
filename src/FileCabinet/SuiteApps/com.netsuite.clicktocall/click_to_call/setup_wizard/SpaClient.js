@@ -1459,6 +1459,30 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }, 'StackPanel(phones-fallback)');
     };
 
+    const buildStep2Form = (d) => {
+        const rows = [];
+        rows.push(safeNew(d.H, {
+            content: 'Connect to your Twilio account',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(step2)'));
+        rows.push(safeNew(d.T, {
+            text: 'Enter your Twilio Account SID and API Key SID. ' +
+                'The API Key Secret must already exist in NetSuite ' +
+                'API Secrets (Setup > Company > API Secrets) — paste ' +
+                'its script ID below. Live validation against Twilio ' +
+                'runs at Step 6 (Test & activate) using the configured ' +
+                'secret pointer — no need to paste the secret value here.'
+        }, 'Text(step2-intro)'));
+        rows.push(buildTextField('Account SID', 'AC...', STATE.step2.accountSid, (v) => { STATE.step2.accountSid = v; }));
+        rows.push(buildTextField('API Key SID', 'SK...', STATE.step2.apiKeySid, (v) => { STATE.step2.apiKeySid = v; }));
+        rows.push(buildTextField('API Key Secret script ID', 'custsecret_...', STATE.step2.apiSecretId, (v) => { STATE.step2.apiSecretId = v; }));
+        return safeNew(d.SP, {
+            items: rows.filter((r) => r != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, 'StackPanel(step2)');
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -2203,29 +2227,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             return;
         }
         goToStep(CURRENT_STEP + 1);
-    }
-    function buildStep2Form(d) {
-        var rows = [];
-        rows.push(safeNew(d.H, {
-            content: "Connect to your Twilio account",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(step2)"));
-        rows.push(safeNew(d.T, {
-            text: "Enter your Twilio Account SID and API Key SID. " +
-                "The API Key Secret must already exist in NetSuite " +
-                "API Secrets (Setup > Company > API Secrets) — paste " +
-                "its script ID below. Live validation against Twilio " +
-                "runs at Step 6 (Test & activate) using the configured " +
-                "secret pointer — no need to paste the secret value here."
-        }, "Text(step2-intro)"));
-        rows.push(buildTextField('Account SID', 'AC...', STATE.step2.accountSid, function (v) { STATE.step2.accountSid = v; }));
-        rows.push(buildTextField('API Key SID', 'SK...', STATE.step2.apiKeySid, function (v) { STATE.step2.apiKeySid = v; }));
-        rows.push(buildTextField('API Key Secret script ID', 'custsecret_...', STATE.step2.apiSecretId, function (v) { STATE.step2.apiSecretId = v; }));
-        return safeNew(d.SP, {
-            items: rows.filter(function (r) { return r != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(step2)");
     }
     function buildStep3Form(d) {
         var rows = [];
