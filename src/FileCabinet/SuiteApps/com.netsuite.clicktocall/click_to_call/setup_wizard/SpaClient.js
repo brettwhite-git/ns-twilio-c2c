@@ -1311,9 +1311,14 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             type: d.T_Type.WEAK,
             size: d.T.Size && d.T.Size.S
         }, 'Text(voice-help-' + spec.field + ')');
-        const rightSide = isEditing
+        const rightSideRaw = isEditing
             ? buildVoiceEditControls(d, deps, spec)
             : buildVoiceViewControls(d, deps, spec, ButtonType);
+        const rightSide = d.CP ? safeNew(d.CP, {
+            content: rightSideRaw,
+            horizontalAlignment: d.CP_HAlign.END
+        }, 'ContentPanel(voice-right-align-' + spec.field + ')') || rightSideRaw
+            : rightSideRaw;
         const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
             content: 'Twilio docs ↗',
             url: spec.docUrl,

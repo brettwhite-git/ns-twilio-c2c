@@ -185,9 +185,21 @@ const buildVoiceFieldRow = (d: EnumsBag, deps: VoiceSectionDeps, spec: VoiceFiel
         size: d.T.Size && d.T.Size.S
     }, 'Text(voice-help-' + spec.field + ')');
 
-    const rightSide = isEditing
+    const rightSideRaw = isEditing
         ? buildVoiceEditControls(d, deps, spec)
         : buildVoiceViewControls(d, deps, spec, ButtonType);
+
+    // Path C-5 v3: wrap value+controls in a ContentPanel with
+    // horizontalAlignment END so the content (value text + Change button,
+    // or Dropdown+Save+Cancel in edit mode) sits flush against the right
+    // edge of its grid cell. Without this, the value+controls hug the
+    // left edge of their 2fr cell, leaving an awkward gap between Change
+    // and the Twilio docs column.
+    const rightSide = d.CP ? safeNew(d.CP, {
+        content: rightSideRaw,
+        horizontalAlignment: d.CP_HAlign.END
+    }, 'ContentPanel(voice-right-align-' + spec.field + ')') || rightSideRaw
+                            : rightSideRaw;
 
     // Path C-5 v2: "Twilio docs ↗" moved to its OWN 4th column at the
     // far right of the row (was previously nested under help text in
