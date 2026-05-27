@@ -1833,6 +1833,179 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }).catch(() => { });
     };
 
+    const buildStep5Activate = (d, deps) => {
+        const rows = [];
+        rows.push(safeNew(d.H, {
+            content: 'Test & activate',
+            type: d.H_Type.MEDIUM_HEADING
+        }, 'Heading(step5)'));
+        if (STATE.step5.activated) {
+            rows.push(safeNew(d.T, {
+                text: '✓ Click-to-Call is active. Sales reps can now use ' +
+                    'the phone icon on Customer, Lead, and Contact ' +
+                    'records.',
+                type: d.T_Type.STRONG
+            }, 'Text(activated)'));
+            const ButtonType = component__namespace.Button.Type;
+            const consoleBtn = safeNew(component__namespace.Button, {
+                label: 'Go to Admin Console',
+                type: ButtonType.PRIMARY,
+                action: deps.goToConsole
+            }, 'Button(step5-to-console)');
+            if (consoleBtn)
+                rows.push(consoleBtn);
+            return safeNew(d.SP, {
+                items: rows.filter((r) => r != null),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, 'StackPanel(step5-activated)');
+        }
+        if (STATE.step5.loading) {
+            const loader = safeNew(component__namespace.Loader, {
+                label: 'Running preflight checks…',
+                indeterminate: true
+            }, 'Loader(step5)');
+            if (loader)
+                rows.push(loader);
+            return safeNew(d.SP, {
+                items: rows.filter((r) => r != null),
+                orientation: d.SP_Orient.VERTICAL,
+                itemGap: d.SP_Gap.M
+            }, 'StackPanel(step5-loading)');
+        }
+        if (STATE.step5.snapshot) {
+            rows.push(safeNew(d.H, {
+                content: 'Configuration review',
+                type: d.H_Type.SMALL_HEADING
+            }, 'Heading(review)'));
+            const snap = STATE.step5.snapshot;
+            const assignments = (STATE.step5.assignments || []);
+            const assignmentCount = assignments.length;
+            const phoneNumbersWithReps = {};
+            assignments.forEach((a) => {
+                if (a.phoneSid)
+                    phoneNumbersWithReps[a.phoneSid] = true;
+            });
+            const lines = [
+                'Account SID:        ' + (snap.accountSid || '(not set)'),
+                'API Key SID:        ' + (snap.apiKeySid || '(not set)'),
+                'API Key Secret:     ' + (snap.apiSecretId || '(not set)'),
+                'TwiML Application:  ' + (snap.twimlAppSid || '(not set)'),
+                'Default caller ID:  ' + (snap.phoneNumber || '(not set)'),
+                'Intel Service:      ' + (snap.intelServiceSid || '(none)'),
+                'Phone assignments:  ' + assignmentCount + ' rep(s) across ' +
+                    Object.keys(phoneNumbersWithReps).length + ' number(s)'
+            ];
+            lines.forEach((l) => {
+                rows.push(safeNew(d.T, {
+                    text: l,
+                    type: d.T_Type.DEFAULT,
+                    size: d.T && d.T.Size ? d.T.Size.S : undefined
+                }, 'Text(review-line)'));
+            });
+        }
+        const preflight = (STATE.step5.preflight || null);
+        if (preflight) {
+            rows.push(safeNew(d.H, {
+                content: 'Preflight checks',
+                type: d.H_Type.SMALL_HEADING
+            }, 'Heading(preflight)'));
+            preflight.forEach((check) => {
+                rows.push(buildCheckRow(check));
+            });
+        }
+        const allPassed = preflight !== null &&
+            preflight.every((c) => c.status === 'pass');
+        const activateBtn = safeNew(component__namespace.Button, {
+            label: allPassed ? 'Activate Click-to-Call'
+                : 'Activate Click-to-Call (fix preflight first)',
+            type: component__namespace.Button.Type.PRIMARY,
+            enabled: allPassed,
+            action: () => { onActivateClick(deps); }
+        }, 'Button(activate)');
+        if (activateBtn)
+            rows.push(activateBtn);
+        if (STATE.step5.activateError) {
+            rows.push(safeNew(d.T, {
+                text: '✕ Activation failed: ' + STATE.step5.activateError,
+                type: d.T_Type.STRONG
+            }, 'Text(activate-error)'));
+        }
+        const rerunBtn = safeNew(component__namespace.Button, {
+            label: 'Re-run preflight',
+            type: component__namespace.Button.Type.DEFAULT,
+            action: () => { loadStep5(deps); }
+        }, 'Button(rerun-preflight)');
+        if (rerunBtn)
+            rows.push(rerunBtn);
+        return safeNew(d.SP, {
+            items: rows.filter((r) => r != null),
+            orientation: d.SP_Orient.VERTICAL,
+            itemGap: d.SP_Gap.M
+        }, 'StackPanel(step5)');
+    };
+    const loadStep5 = (deps) => {
+        STATE.step5.loading = true;
+        STATE.step5.activateError = null;
+        STATE.step5.snapshot = null;
+        STATE.step5.assignments = null;
+        STATE.step5.preflight = null;
+        deps.rerender();
+        let settled = 0;
+        const onSettled = () => {
+            settled += 1;
+            if (settled >= 3) {
+                STATE.step5.loading = false;
+                deps.rerender();
+            }
+        };
+        wizardCall('wizardSnapshot', {})
+            .then((p) => { STATE.step5.snapshot = p && p.snapshot; })
+            .catch(() => { STATE.step5.snapshot = null; })
+            .then(onSettled);
+        wizardCall('wizardLoadAssignments', {})
+            .then((p) => {
+            const resp = p;
+            STATE.step5.assignments = (resp && resp.items) || [];
+        })
+            .catch(() => { STATE.step5.assignments = []; })
+            .then(onSettled);
+        wizardCall('wizardRunPreflight', {})
+            .then((p) => {
+            const resp = p;
+            STATE.step5.preflight = (resp && resp.checks) || [];
+        }).catch((e) => {
+            const err = e;
+            STATE.step5.preflight = [{
+                    id: 'network', label: 'Preflight call', status: 'fail',
+                    detail: 'Network error: ' +
+                        (err && err.message ? err.message : String(e))
+                }];
+        }).then(onSettled);
+    };
+    const onActivateClick = (deps) => {
+        wizardCall('wizardActivate', {})
+            .then((payload) => {
+            const resp = payload;
+            if (resp && resp.activated) {
+                STATE.step5.activated = true;
+                STATE.step5.activateError = null;
+            }
+            else {
+                STATE.step5.activateError = (resp && resp.error) || 'unknown';
+                if (resp && resp.failedChecks) {
+                    STATE.step5.preflight = resp.failedChecks;
+                }
+            }
+            deps.rerender();
+        }).catch((e) => {
+            const err = e;
+            STATE.step5.activateError = 'Network: ' +
+                (err && err.message ? err.message : String(e));
+            deps.rerender();
+        });
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -1957,7 +2130,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         if (CURRENT_STEP === 4)
             loadStep4Lists({ rerender: rerender });
         if (CURRENT_STEP === 5)
-            loadStep5();
+            loadStep5({ rerender: rerender, goToConsole: goToConsole });
     }
     function goToConsole() {
         setMode('console');
@@ -2459,7 +2632,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             initial = buildStep4Form(d);
         }
         else if (CURRENT_STEP === 5) {
-            initial = buildStep5Activate(d);
+            initial = buildStep5Activate(d, {
+                rerender: rerender,
+                goToConsole: goToConsole
+            });
         }
         else {
             initial = safeNew(d.T, {
@@ -2577,172 +2753,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             return;
         }
         goToStep(CURRENT_STEP + 1);
-    }
-    function buildStep5Activate(d) {
-        var rows = [];
-        rows.push(safeNew(d.H, {
-            content: "Test & activate",
-            type: d.H_Type.MEDIUM_HEADING
-        }, "Heading(step5)"));
-        if (STATE.step5.activated) {
-            rows.push(safeNew(d.T, {
-                text: "✓ Click-to-Call is active. Sales reps can now use " +
-                    "the phone icon on Customer, Lead, and Contact " +
-                    "records.",
-                type: d.T_Type.STRONG
-            }, "Text(activated)"));
-            var ButtonType = (component__namespace.Button && component__namespace.Button.Type) || {};
-            var consoleBtn = safeNew(component__namespace.Button, {
-                label: "Go to Admin Console",
-                type: ButtonType.PRIMARY,
-                action: goToConsole
-            }, "Button(step5-to-console)");
-            if (consoleBtn)
-                rows.push(consoleBtn);
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step5-activated)");
-        }
-        if (STATE.step5.loading) {
-            var loader = safeNew(component__namespace.Loader, {
-                label: "Running preflight checks…",
-                indeterminate: true
-            }, "Loader(step5)");
-            if (loader)
-                rows.push(loader);
-            return safeNew(d.SP, {
-                items: rows.filter(function (r) { return r != null; }),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(step5-loading)");
-        }
-        if (STATE.step5.snapshot) {
-            rows.push(safeNew(d.H, {
-                content: "Configuration review",
-                type: d.H_Type.SMALL_HEADING
-            }, "Heading(review)"));
-            var snap = STATE.step5.snapshot;
-            var assignmentCount = (STATE.step5.assignments || []).length;
-            var phoneNumbersWithReps = {};
-            (STATE.step5.assignments || []).forEach(function (a) {
-                if (a.phoneSid)
-                    phoneNumbersWithReps[a.phoneSid] = true;
-            });
-            var lines = [
-                'Account SID:        ' + (snap.accountSid || '(not set)'),
-                'API Key SID:        ' + (snap.apiKeySid || '(not set)'),
-                'API Key Secret:     ' + (snap.apiSecretId || '(not set)'),
-                'TwiML Application:  ' + (snap.twimlAppSid || '(not set)'),
-                'Default caller ID:  ' + (snap.phoneNumber || '(not set)'),
-                'Intel Service:      ' + (snap.intelServiceSid || '(none)'),
-                'Phone assignments:  ' + assignmentCount + ' rep(s) across ' +
-                    Object.keys(phoneNumbersWithReps).length + ' number(s)'
-            ];
-            lines.forEach(function (l) {
-                rows.push(safeNew(d.T, {
-                    text: l,
-                    type: d.T_Type.DEFAULT,
-                    size: d.T && d.T.Size ? d.T.Size.S : undefined
-                }, "Text(review-line)"));
-            });
-        }
-        if (STATE.step5.preflight) {
-            rows.push(safeNew(d.H, {
-                content: "Preflight checks",
-                type: d.H_Type.SMALL_HEADING
-            }, "Heading(preflight)"));
-            STATE.step5.preflight.forEach(function (check) {
-                rows.push(buildCheckRow(check));
-            });
-        }
-        var allPassed = STATE.step5.preflight &&
-            STATE.step5.preflight.every(function (c) { return c.status === 'pass'; });
-        var activateBtn = safeNew(component__namespace.Button, {
-            label: allPassed ? "Activate Click-to-Call"
-                : "Activate Click-to-Call (fix preflight first)",
-            type: (component__namespace.Button && component__namespace.Button.Type)
-                ? component__namespace.Button.Type.PRIMARY : undefined,
-            enabled: allPassed,
-            action: function () { onActivateClick(); }
-        }, "Button(activate)");
-        if (activateBtn)
-            rows.push(activateBtn);
-        if (STATE.step5.activateError) {
-            rows.push(safeNew(d.T, {
-                text: "✕ Activation failed: " + STATE.step5.activateError,
-                type: d.T_Type.STRONG
-            }, "Text(activate-error)"));
-        }
-        var rerunBtn = safeNew(component__namespace.Button, {
-            label: "Re-run preflight",
-            type: (component__namespace.Button && component__namespace.Button.Type)
-                ? component__namespace.Button.Type.DEFAULT : undefined,
-            action: function () { loadStep5(); }
-        }, "Button(rerun-preflight)");
-        if (rerunBtn)
-            rows.push(rerunBtn);
-        return safeNew(d.SP, {
-            items: rows.filter(function (r) { return r != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(step5)");
-    }
-    function loadStep5() {
-        STATE.step5.loading = true;
-        STATE.step5.activateError = null;
-        STATE.step5.snapshot = null;
-        STATE.step5.assignments = null;
-        STATE.step5.preflight = null;
-        rerender();
-        var settled = 0;
-        function onSettled() {
-            settled += 1;
-            if (settled >= 3) {
-                STATE.step5.loading = false;
-                rerender();
-            }
-        }
-        wizardCall('wizardSnapshot', {})
-            .then(function (p) { STATE.step5.snapshot = p && p.snapshot; })
-            .catch(function () { STATE.step5.snapshot = null; })
-            .then(onSettled);
-        wizardCall('wizardLoadAssignments', {})
-            .then(function (p) { STATE.step5.assignments = (p && p.items) || []; })
-            .catch(function () { STATE.step5.assignments = []; })
-            .then(onSettled);
-        wizardCall('wizardRunPreflight', {})
-            .then(function (p) {
-            STATE.step5.preflight = (p && p.checks) || [];
-        }).catch(function (e) {
-            STATE.step5.preflight = [{
-                    id: 'network', label: 'Preflight call', status: 'fail',
-                    detail: 'Network error: ' +
-                        (e && e.message ? e.message : String(e))
-                }];
-        }).then(onSettled);
-    }
-    function onActivateClick() {
-        wizardCall('wizardActivate', {})
-            .then(function (payload) {
-            if (payload && payload.activated) {
-                STATE.step5.activated = true;
-                STATE.step5.activateError = null;
-            }
-            else {
-                STATE.step5.activateError =
-                    (payload && payload.error) || 'unknown';
-                if (payload && payload.failedChecks) {
-                    STATE.step5.preflight = payload.failedChecks;
-                }
-            }
-            rerender();
-        }).catch(function (e) {
-            STATE.step5.activateError = 'Network: ' +
-                (e && e.message ? e.message : String(e));
-            rerender();
-        });
     }
     function buildStepper(d) {
         if (!d.SP || !d.T || !d.SI) ;
