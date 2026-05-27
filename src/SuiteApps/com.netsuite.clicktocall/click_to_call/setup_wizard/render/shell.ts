@@ -300,7 +300,10 @@ const buildStatCardWithIcon = (d: EnumsBag, spec: StatCardSpec): unknown => {
     const ImageCtor = component.Image as unknown as new (options?: object) => unknown;
     const icon = safeNew(ImageCtor, {
         image: spec.icon,
-        size: component.Image.Size.M,
+        // S sizing keeps the icon proportional to the SMALL_HEADING
+        // metric text — M was visually heavier than the text and
+        // pushed the row taller than the sibling cards' metric rows.
+        size: component.Image.Size.S,
         color: iconColor,
         presentation: true
     }, 'Image(stat-icon-' + spec.title + ')');
@@ -323,12 +326,13 @@ const buildStatCardWithIcon = (d: EnumsBag, spec: StatCardSpec): unknown => {
         size: d.T && d.T.Size ? d.T.Size.S : undefined
     }, 'Text(stat-sub-' + spec.title + ')') : null;
 
-    // Two-stack composition to match Card.metric's spacing:
+    // Two-stack composition matching Card.metric's spacing rhythm:
     //   - inner stack: [label, valueRow] with XXS gap (label sits tight
     //     above the metric)
-    //   - outer stack: [innerStack, sub] with M gap (description sits
-    //     with breathing room below the metric, same as Card.metric's
-    //     internal layout)
+    //   - outer stack: [innerStack, sub] with SPACE_BETWEEN justification
+    //     so the description floats to the bottom of the card height,
+    //     matching Card.metric's internal layout where the description
+    //     sits at the card foot regardless of metric-row height.
     const titleAndValue = safeNew(d.SP, {
         items: [label, valueRow].filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
@@ -338,7 +342,9 @@ const buildStatCardWithIcon = (d: EnumsBag, spec: StatCardSpec): unknown => {
     const innerStack = safeNew(d.SP, {
         items: [titleAndValue, sub].filter((c) => c != null),
         orientation: d.SP_Orient.VERTICAL,
-        itemGap: d.SP_Gap.M
+        itemGap: d.SP_Gap.M,
+        justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+        rootStyle: { height: '100%' }
     }, 'StackPanel(stat-card-icon-inner-' + spec.title + ')');
 
     // Wrap in a ContentPanel with rootStyle that mimics Card.metric's

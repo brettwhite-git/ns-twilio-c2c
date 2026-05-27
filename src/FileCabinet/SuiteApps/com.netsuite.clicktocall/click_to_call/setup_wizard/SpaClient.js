@@ -369,7 +369,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         const ImageCtor = component__namespace.Image;
         const icon = safeNew(ImageCtor, {
             image: spec.icon,
-            size: component__namespace.Image.Size.M,
+            size: component__namespace.Image.Size.S,
             color: iconColor,
             presentation: true
         }, 'Image(stat-icon-' + spec.title + ')');
@@ -396,7 +396,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         const innerStack = safeNew(d.SP, {
             items: [titleAndValue, sub].filter((c) => c != null),
             orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
+            itemGap: d.SP_Gap.M,
+            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
+            rootStyle: { height: '100%' }
         }, 'StackPanel(stat-card-icon-inner-' + spec.title + ')');
         if (!d.CP)
             return innerStack;
