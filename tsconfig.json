@@ -48,6 +48,14 @@
   },
   "include": [
     "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/**/*.js",
+    // Path B (B.3+, 2026-05-27) — include the SPA TypeScript source tree
+    // so VS Code's TS Language Server resolves @uif-js/* paths and
+    // cross-module imports for files under setup_wizard/sections/ and
+    // setup_wizard/render/. Without this, opening a TS file in VS Code
+    // triggers TS2307 "Cannot find module" red squigglies on the UIF
+    // imports — even though gulp's tsconfig.build.json builds cleanly.
+    "src/SuiteApps/com.netsuite.clicktocall/**/*.ts",
+    "src/SuiteApps/com.netsuite.clicktocall/**/*.tsx",
     "node_modules/@oracle/netsuite-uif-types/uif/*.d.ts",
     "types/**/*.d.ts"
   ],
