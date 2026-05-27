@@ -45,6 +45,9 @@ import {
 } from './dispatch';
 import { STATE } from './state';
 import { safeNew } from './render/primitives';
+import {
+    buildTextField, buildCheckRow, badgeFor, buildErrorBox
+} from './render/shared';
 
 // 5-step flow. Mirrors lib/ctc_wizard_state.js STEPS — original
     // 6-step plan collapsed "Reps & roles" into the final "Test &
@@ -3459,31 +3462,9 @@ import { safeNew } from './render/primitives';
 
     /* ────────────────────────────────────────────────────────────────── */
     /* Shared form helper                                                 */
+    /* Path B.3e-2 — buildTextField/buildCheckRow/badgeFor/buildErrorBox  */
+    /* moved to render/shared.ts (imported at module top).                */
     /* ────────────────────────────────────────────────────────────────── */
-
-    function buildTextField(label, placeholder, currentValue, onChange) {
-        var tb = safeNew(component.TextBox, {
-            text: currentValue || '',
-            placeholder: placeholder,
-            onTextChanged: function (args) {
-                onChange(args && args.text ? args.text : '');
-            }
-        }, "TextBox(" + label + ")");
-        if (!tb) return null;
-
-        var lbl = safeNew(component.Text, {
-            text: label,
-            type: component.Text.Type.STRONG,
-            size: component.Text.Size ? component.Text.Size.S : undefined
-        }, "Text(label-" + label + ")");
-
-        return safeNew(component.StackPanel, {
-            items: [lbl, tb].filter(function (c) { return c != null; }),
-            orientation: component.StackPanel.Orientation.VERTICAL,
-            itemGap: component.StackPanel.GapSize.XXS
-        }, "StackPanel(field-" + label + ")") || tb;
-    }
-
 
     /**
      * Render a vertical list of prerequisite check rows.
@@ -3506,98 +3487,9 @@ import { safeNew } from './render/primitives';
         }, "StackPanel(prereqs)");
     }
 
-    /**
-     * One check row. Status icon comes from a Badge (SOLID green-ish
-     * for pass, SUBTLE for warn/info, SOLID red-ish for fail — within
-     * the limits of Badge.Type's two-value enum).
-     */
-    function buildCheckRow(check) {
-        var icon = badgeFor(check.status);
-
-        var labelText = safeNew(component.Text, {
-            text: check.label,
-            type: component.Text.Type.STRONG
-        }, "Text(row-label)");
-
-        var detailText = check.detail ? safeNew(component.Text, {
-            text: check.detail,
-            type: component.Text.Type.WEAK,
-            size: component.Text.Size.S
-        }, "Text(row-detail)") : null;
-
-        var hintText = check.repairHint ? safeNew(component.Text, {
-            text: "→ " + check.repairHint,
-            type: component.Text.Type.DEFAULT,
-            size: component.Text.Size.S
-        }, "Text(row-hint)") : null;
-
-        var rightStackItems = [labelText, detailText, hintText]
-            .filter(function (c) { return c != null; });
-
-        var rightStack = safeNew(component.StackPanel, {
-            items: rightStackItems,
-            orientation: component.StackPanel.Orientation.VERTICAL,
-            itemGap: component.StackPanel.GapSize.XXS
-        }, "StackPanel(row-right)");
-
-        var rowItems = [icon, rightStack]
-            .filter(function (c) { return c != null; });
-
-        return safeNew(component.StackPanel, {
-            items: rowItems,
-            orientation: component.StackPanel.Orientation.HORIZONTAL,
-            alignment: component.StackPanel.Alignment.START,
-            itemGap: component.StackPanel.GapSize.M
-        }, "StackPanel(row)");
-    }
-
-    /**
-     * Status badge: pass=✓, fail=✕, warn=!, info_enabled=ⓘ, info_disabled=○
-     */
-    function badgeFor(status) {
-        var content, type;
-        switch (status) {
-            case 'pass':
-                content = '✓';
-                type = component.Badge.Type.SOLID;
-                break;
-            case 'fail':
-                content = '✕';
-                type = component.Badge.Type.SOLID;
-                break;
-            case 'warn':
-                content = '!';
-                type = component.Badge.Type.SOLID;
-                break;
-            case 'info_enabled':
-                content = 'ⓘ';
-                type = component.Badge.Type.SUBTLE;
-                break;
-            case 'info_disabled':
-                content = '○';
-                type = component.Badge.Type.SUBTLE;
-                break;
-            default:
-                content = '?';
-                type = component.Badge.Type.SUBTLE;
-        }
-        return safeNew(component.Badge, {
-            content: content,
-            type: type,
-            size: component.Badge.Size.DEFAULT
-        }, "Badge(status-" + status + ")");
-    }
-
-    /**
-     * Error-state body content when the Ajax call fails or the server
-     * returns ok=false.
-     */
-    function buildErrorBox(errorMessage) {
-        return safeNew(component.Text, {
-            text: "Could not load prerequisite checks: " + errorMessage,
-            type: component.Text.Type.STRONG
-        }, "Text(error)");
-    }
+    // buildCheckRow / badgeFor / buildErrorBox moved to render/shared.ts
+    // (Path B.3e-2). The original implementations were lifted verbatim
+    // into named exports there.
 
     function buildStepper(d) {
         if (!d.SP || !d.T || !d.SI) {

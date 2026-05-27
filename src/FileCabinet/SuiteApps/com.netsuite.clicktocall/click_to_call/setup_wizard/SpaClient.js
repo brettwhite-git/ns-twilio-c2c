@@ -178,6 +178,95 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }
     };
 
+    const buildTextField = (label, placeholder, currentValue, onChange) => {
+        const tb = safeNew(component__namespace.TextBox, {
+            text: currentValue || '',
+            placeholder: placeholder,
+            onTextChanged: (args) => {
+                onChange(args && args.text ? args.text : '');
+            }
+        }, 'TextBox(' + label + ')');
+        if (!tb)
+            return null;
+        return safeNew(component__namespace.Field, {
+            label: label,
+            control: tb,
+            orientation: component__namespace.Field.Orientation.VERTICAL
+        }, 'Field(' + label + ')') || tb;
+    };
+    const buildCheckRow = (check) => {
+        const icon = badgeFor(check.status);
+        const labelText = safeNew(component__namespace.Text, {
+            text: check.label,
+            type: component__namespace.Text.Type.STRONG
+        }, 'Text(row-label)');
+        const detailText = check.detail ? safeNew(component__namespace.Text, {
+            text: check.detail,
+            type: component__namespace.Text.Type.WEAK,
+            size: component__namespace.Text.Size.S
+        }, 'Text(row-detail)') : null;
+        const hintText = check.repairHint ? safeNew(component__namespace.Text, {
+            text: '→ ' + check.repairHint,
+            type: component__namespace.Text.Type.DEFAULT,
+            size: component__namespace.Text.Size.S
+        }, 'Text(row-hint)') : null;
+        const rightStackItems = [labelText, detailText, hintText]
+            .filter((c) => c != null);
+        const rightStack = safeNew(component__namespace.StackPanel, {
+            items: rightStackItems,
+            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
+            itemGap: component__namespace.StackPanel.GapSize.XXS
+        }, 'StackPanel(row-right)');
+        const rowItems = [icon, rightStack]
+            .filter((c) => c != null);
+        return safeNew(component__namespace.StackPanel, {
+            items: rowItems,
+            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
+            alignment: component__namespace.StackPanel.Alignment.START,
+            itemGap: component__namespace.StackPanel.GapSize.M
+        }, 'StackPanel(row)');
+    };
+    const badgeFor = (status) => {
+        let content;
+        let type;
+        switch (status) {
+            case 'pass':
+                content = '✓';
+                type = component__namespace.Badge.Type.SOLID;
+                break;
+            case 'fail':
+                content = '✕';
+                type = component__namespace.Badge.Type.SOLID;
+                break;
+            case 'warn':
+                content = '!';
+                type = component__namespace.Badge.Type.SOLID;
+                break;
+            case 'info_enabled':
+                content = 'ⓘ';
+                type = component__namespace.Badge.Type.SUBTLE;
+                break;
+            case 'info_disabled':
+                content = '○';
+                type = component__namespace.Badge.Type.SUBTLE;
+                break;
+            default:
+                content = '?';
+                type = component__namespace.Badge.Type.SUBTLE;
+        }
+        return safeNew(component__namespace.Badge, {
+            content: content,
+            type: type,
+            size: component__namespace.Badge.Size.DEFAULT
+        }, 'Badge(status-' + status + ')');
+    };
+    const buildErrorBox = (errorMessage) => {
+        return safeNew(component__namespace.Text, {
+            text: 'Could not load prerequisite checks: ' + errorMessage,
+            type: component__namespace.Text.Type.STRONG
+        }, 'Text(error)');
+    };
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -2621,27 +2710,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             rerender();
         });
     }
-    function buildTextField(label, placeholder, currentValue, onChange) {
-        var tb = safeNew(component__namespace.TextBox, {
-            text: currentValue || '',
-            placeholder: placeholder,
-            onTextChanged: function (args) {
-                onChange(args && args.text ? args.text : '');
-            }
-        }, "TextBox(" + label + ")");
-        if (!tb)
-            return null;
-        var lbl = safeNew(component__namespace.Text, {
-            text: label,
-            type: component__namespace.Text.Type.STRONG,
-            size: component__namespace.Text.Size ? component__namespace.Text.Size.S : undefined
-        }, "Text(label-" + label + ")");
-        return safeNew(component__namespace.StackPanel, {
-            items: [lbl, tb].filter(function (c) { return c != null; }),
-            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-            itemGap: component__namespace.StackPanel.GapSize.XXS
-        }, "StackPanel(field-" + label + ")") || tb;
-    }
     function buildPrereqsList(checks) {
         var rows = checks.map(function (c) { return buildCheckRow(c); })
             .filter(function (r) { return r != null; });
@@ -2655,77 +2723,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             orientation: component__namespace.StackPanel.Orientation.VERTICAL,
             itemGap: component__namespace.StackPanel.GapSize.M
         }, "StackPanel(prereqs)");
-    }
-    function buildCheckRow(check) {
-        var icon = badgeFor(check.status);
-        var labelText = safeNew(component__namespace.Text, {
-            text: check.label,
-            type: component__namespace.Text.Type.STRONG
-        }, "Text(row-label)");
-        var detailText = check.detail ? safeNew(component__namespace.Text, {
-            text: check.detail,
-            type: component__namespace.Text.Type.WEAK,
-            size: component__namespace.Text.Size.S
-        }, "Text(row-detail)") : null;
-        var hintText = check.repairHint ? safeNew(component__namespace.Text, {
-            text: "→ " + check.repairHint,
-            type: component__namespace.Text.Type.DEFAULT,
-            size: component__namespace.Text.Size.S
-        }, "Text(row-hint)") : null;
-        var rightStackItems = [labelText, detailText, hintText]
-            .filter(function (c) { return c != null; });
-        var rightStack = safeNew(component__namespace.StackPanel, {
-            items: rightStackItems,
-            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-            itemGap: component__namespace.StackPanel.GapSize.XXS
-        }, "StackPanel(row-right)");
-        var rowItems = [icon, rightStack]
-            .filter(function (c) { return c != null; });
-        return safeNew(component__namespace.StackPanel, {
-            items: rowItems,
-            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-            alignment: component__namespace.StackPanel.Alignment.START,
-            itemGap: component__namespace.StackPanel.GapSize.M
-        }, "StackPanel(row)");
-    }
-    function badgeFor(status) {
-        var content, type;
-        switch (status) {
-            case 'pass':
-                content = '✓';
-                type = component__namespace.Badge.Type.SOLID;
-                break;
-            case 'fail':
-                content = '✕';
-                type = component__namespace.Badge.Type.SOLID;
-                break;
-            case 'warn':
-                content = '!';
-                type = component__namespace.Badge.Type.SOLID;
-                break;
-            case 'info_enabled':
-                content = 'ⓘ';
-                type = component__namespace.Badge.Type.SUBTLE;
-                break;
-            case 'info_disabled':
-                content = '○';
-                type = component__namespace.Badge.Type.SUBTLE;
-                break;
-            default:
-                content = '?';
-                type = component__namespace.Badge.Type.SUBTLE;
-        }
-        return safeNew(component__namespace.Badge, {
-            content: content,
-            type: type,
-            size: component__namespace.Badge.Size.DEFAULT
-        }, "Badge(status-" + status + ")");
-    }
-    function buildErrorBox(errorMessage) {
-        return safeNew(component__namespace.Text, {
-            text: "Could not load prerequisite checks: " + errorMessage,
-            type: component__namespace.Text.Type.STRONG
-        }, "Text(error)");
     }
     function buildStepper(d) {
         if (!d.SP || !d.T || !d.SI) ;
