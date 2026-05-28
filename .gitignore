@@ -56,7 +56,5 @@ CLAUDE.md
 docs/
 tasks/
 
-# Unit tests + mocks (internal verification only)
-__tests__/
-__mocks__/
-jest.config.js
+# Unit tests + mocks tracked so CI can run them
+# (Previously gitignored — caused CI Jest step to find 0 tests; see fix on 2026-05-28)
