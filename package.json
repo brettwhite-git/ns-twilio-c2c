@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "test": "jest",
-    "lint": "eslint src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/",
+    "lint": "eslint src/FileCabinet/SuiteApps/com.netsuite.clicktocall/",
     "typecheck": "tsc --noEmit",
     "clean": "gulp clean",
     "build": "gulp build",

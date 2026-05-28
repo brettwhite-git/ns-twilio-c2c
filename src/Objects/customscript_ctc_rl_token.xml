@@ -1,6 +1,6 @@
 <restlet scriptid="customscript_ctc_rl_token">
     <name>CTC Token Generator</name>
-    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_rl_token.js]</scriptfile>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/ctc_rl_token.js]</scriptfile>
     <notifyadmins>F</notifyadmins>
     <notifyemails></notifyemails>
     <notifyowner>T</notifyowner>

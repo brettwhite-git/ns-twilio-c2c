@@ -59,7 +59,7 @@ Scheduled Script  -->  Twilio Recordings API  -->  Conversational Intelligence
 ```
 src/
 ├── FileCabinet/SuiteApps/com.netsuite.clicktocall/
-│   └── click_to_call/
+│   └── 
 │       ├── ctc_cl_phone_button.js         # Client Script — button injection
 │       ├── ctc_sl_softphone.js            # Suitelet — softphone popup HTML
 │       ├── ctc_rl_token.js                # RESTlet — JWT token generation

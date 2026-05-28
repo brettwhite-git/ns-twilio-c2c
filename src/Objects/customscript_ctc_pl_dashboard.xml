@@ -1,6 +1,6 @@
 <portlet scriptid="customscript_ctc_pl_dashboard">
     <name>CTC Sales Dashboard</name>
-    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_pl_dashboard.js]</scriptfile>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/ctc_pl_dashboard.js]</scriptfile>
     <notifyadmins>F</notifyadmins>
     <notifyemails></notifyemails>
     <notifyowner>T</notifyowner>

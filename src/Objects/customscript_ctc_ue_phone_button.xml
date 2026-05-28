@@ -1,6 +1,6 @@
 <usereventscript scriptid="customscript_ctc_ue_phone_button">
     <name>CTC Phone Button</name>
-    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_ue_phone_button.js]</scriptfile>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/ctc_ue_phone_button.js]</scriptfile>
     <notifyadmins>F</notifyadmins>
     <notifyemails></notifyemails>
     <notifyowner>T</notifyowner>

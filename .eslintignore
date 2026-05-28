@@ -4,10 +4,10 @@
 # already controls (and which `removeComments: true` strips from the
 # AMD anyway). The setup_wizard/ subdir under FileCabinet/ is fully
 # owned by `gulp bundle` after Path B.2.
-src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/
+src/FileCabinet/SuiteApps/com.netsuite.clicktocall/setup_wizard/
 
 # Bundled vendor (existed pre-Path-B).
-src/FileCabinet/SuiteApps/com.netsuite.clicktocall/click_to_call/lib/twilio.min.js
+src/FileCabinet/SuiteApps/com.netsuite.clicktocall/lib/twilio.min.js
 
 # Build intermediates.
 build/
