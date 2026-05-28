@@ -1,41 +1,4 @@
-/**
- * @NApiVersion 2.1
- *
- * Setup Wizard v2 — SpaClient (proper props, no more guessing).
- *
- * Path B.3a (2026-05-27) — mechanical AMD → ESM TS conversion.
- * The middle 3,700+ lines of code were preserved IDENTICALLY; only
- * the AMD `define([...], function(...))` wrapper at the top and the
- * `exports.run = run; })` close at the bottom changed. This is the
- * skeleton conversion that unblocks subsequent extractions (B.3b+).
- *
- * `// @ts-nocheck` above is intentional during this skeleton commit
- * — the 3,700 lines were never type-checked (the original .js had no
- * `// @ts-check`), and turning on TS errors for 3,700 untyped lines
- * in one go would be unmanageable. Subsequent B.3 commits extract
- * code OUT of this file into properly-typed modules where the type
- * benefits accrue. The shrinking SpaClient.ts here keeps ts-nocheck
- * until B.5 minimizes it to the ~600-line entry-point shell.
- *
- * Rewrote against the actual @uif-js TypeScript definitions
- * (component.d.ts from the netsuite-uif-reference skill). Earlier
- * iterations were guessing prop names from JSX conventions. Real shapes:
- *
- *   Heading       — `content` (NOT `text`), `type: PAGE_TITLE|...`
- *   Text          — `text` (correct), `type/size/weight/color` enums
- *   StepperItem   — `label` only (description/done/disabled aren't in Options)
- *   Stepper       — `items, selectedStepIndex, orientation, descriptionGenerator`
- *                   step "done/active" is computed from selectedStepIndex
- *   ContentPanel  — `content, horizontalAlignment: STRETCH, outerGap`
- *   StackPanel    — `items, orientation, itemGap` (with own enums)
- *
- * The HTML reference at docs/architecture/setup-wizard-v2.html ships a
- * specific page layout (stepper across the top, content card below); the
- * UIF equivalent below uses StackPanel(VERTICAL) [ContentPanel-wrapped
- * Stepper, ContentPanel-wrapped step body ].
- */
-
-define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, core, component) { 'use strict';
+define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/component'], (function (exports, jsxRuntime, core, component) { 'use strict';
 
     function _interopNamespaceDefault(e) {
         var n = Object.create(null);
@@ -56,48 +19,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     var core__namespace = /*#__PURE__*/_interopNamespaceDefault(core);
     var component__namespace = /*#__PURE__*/_interopNamespaceDefault(component);
-
-    const WIZARD_API_URL = '/app/site/hosting/scriptlet.nl' +
-        '?script=customscript_ctc_sl_wizard_api' +
-        '&deploy=customdeploy_ctc_sl_wizard_api';
-    const extractPayload = (response) => {
-        if (response == null)
-            return null;
-        if (typeof response === 'object') {
-            const env = response;
-            if (env.ok !== undefined || env.checks !== undefined ||
-                env.error !== undefined) {
-                return response;
-            }
-            if (env.data && typeof env.data === 'object')
-                return env.data;
-            if (env.body && typeof env.body === 'object')
-                return env.body;
-            if (env.response && typeof env.response === 'object')
-                return env.response;
-            if (typeof env.responseText === 'string') {
-                try {
-                    return JSON.parse(env.responseText);
-                }
-                catch (e) { }
-            }
-        }
-        if (typeof response === 'string') {
-            try {
-                return JSON.parse(response);
-            }
-            catch (e) {
-                return null;
-            }
-        }
-        return null;
-    };
-    const wizardCall = (action, payload) => {
-        return core__namespace.Ajax.post(WIZARD_API_URL + '&action=' + action, payload || {}, {
-            dataType: core__namespace.Ajax.DataType.JSON,
-            responseType: core__namespace.Ajax.ResponseType.JSON
-        }).then(extractPayload);
-    };
 
     const ActionType = {
         SET_MODE: Symbol('setMode'),
@@ -163,6 +84,48 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         reducer,
         state: initialState
     });
+
+    const WIZARD_API_URL = '/app/site/hosting/scriptlet.nl' +
+        '?script=customscript_ctc_sl_wizard_api' +
+        '&deploy=customdeploy_ctc_sl_wizard_api';
+    const extractPayload = (response) => {
+        if (response == null)
+            return null;
+        if (typeof response === 'object') {
+            const env = response;
+            if (env.ok !== undefined || env.checks !== undefined ||
+                env.error !== undefined) {
+                return response;
+            }
+            if (env.data && typeof env.data === 'object')
+                return env.data;
+            if (env.body && typeof env.body === 'object')
+                return env.body;
+            if (env.response && typeof env.response === 'object')
+                return env.response;
+            if (typeof env.responseText === 'string') {
+                try {
+                    return JSON.parse(env.responseText);
+                }
+                catch (e) { }
+            }
+        }
+        if (typeof response === 'string') {
+            try {
+                return JSON.parse(response);
+            }
+            catch (e) {
+                return null;
+            }
+        }
+        return null;
+    };
+    const wizardCall = (action, payload) => {
+        return core__namespace.Ajax.post(WIZARD_API_URL + '&action=' + action, payload || {}, {
+            dataType: core__namespace.Ajax.DataType.JSON,
+            responseType: core__namespace.Ajax.ResponseType.JSON
+        }).then(extractPayload);
+    };
 
     const initial = store.getState();
     let MODE = initial.mode;
@@ -2642,12 +2605,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
         { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
-    var scriptCtx = null;
     var bodyContainer = null;
     var enums = null;
+    var rerenderHook = function () { };
     var router = null;
     var mountRouting = true;
-    var run = function (scriptContext) {
+    function setRerenderHook(fn) {
+        rerenderHook = fn;
+    }
+    function initializeApp() {
         try {
             var SP = component__namespace.StackPanel;
             var CP = component__namespace.ContentPanel;
@@ -2692,7 +2658,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 GP_Gap: GP_Gap,
                 SysIcon: SysIcon
             };
-            scriptCtx = scriptContext;
             router = createRouter({
                 rerender: rerender,
                 loadConsole: loadConsole,
@@ -2701,15 +2666,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 totalSteps: STEPS.length
             });
             store.subscribe(() => rerender());
-            try {
-                if (scriptContext && typeof scriptContext.setLayout === 'function') {
-                    scriptContext.setLayout('application');
-                }
-            }
-            catch (e) {
-                console.warn("[CTC Setup Wizard] setLayout('application') " +
-                    "failed; rail may not fill viewport:", e);
-            }
             rerender();
             wizardCall('wizardSnapshot', {}).then(function (payload) {
                 var resp = payload;
@@ -2739,12 +2695,21 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             });
         }
         catch (e) {
-            console.error("[CTC Setup Wizard] run() threw:", e);
+            console.error("[CTC Setup Wizard] initializeApp() threw:", e);
         }
-    };
+    }
     function rerender() {
-        if (!scriptCtx || !enums)
-            return;
+        try {
+            rerenderHook();
+        }
+        catch (e) {
+            console.error("[CTC Setup Wizard] rerender hook threw:", e);
+        }
+    }
+    function renderRoot() {
+        if (!enums) {
+            return null;
+        }
         try {
             if (mountRouting) {
                 var loader = safeNew(component__namespace.Loader, {
@@ -2756,15 +2721,14 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     horizontalAlignment: enums.CP_HAlign.CENTER,
                     outerGap: enums.CP_Gap.XL
                 }, 'ContentPanel(mount-routing)') || loader;
-                scriptCtx.setContent(loaderRoot);
-                return;
+                return loaderRoot;
             }
-            var root = buildRoot(enums);
-            scriptCtx.setContent(root);
-            console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
+            console.log("[CTC Setup Wizard] renderRoot — step " + CURRENT_STEP);
+            return buildRoot(enums);
         }
         catch (e) {
-            console.error("[CTC Setup Wizard] rerender threw:", e);
+            console.error("[CTC Setup Wizard] renderRoot threw:", e);
+            return null;
         }
     }
     function loadConsole() {
@@ -3462,6 +3426,45 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             itemGap: d.SP_Gap.M
         }, "StackPanel(stepper-strip)");
     }
+
+    class App extends core.PureComponent {
+        storeUnsubscribe = null;
+        constructor(props, context) {
+            super(props, context);
+            this.state = { tick: 0 };
+        }
+        forceRerender = () => {
+            this.setState({ tick: this.state.tick + 1 });
+        };
+        componentDidMount() {
+            setRerenderHook(this.forceRerender);
+            this.storeUnsubscribe = store.subscribe(this.forceRerender);
+            initializeApp();
+        }
+        componentWillUnmount() {
+            if (this.storeUnsubscribe) {
+                this.storeUnsubscribe();
+                this.storeUnsubscribe = null;
+            }
+            setRerenderHook(() => { });
+        }
+        render() {
+            return renderRoot();
+        }
+    }
+
+    const run = (context) => {
+        try {
+            if (typeof context.setLayout === 'function') {
+                context.setLayout('application');
+            }
+        }
+        catch (e) {
+            console.warn("[CTC Setup Wizard] setLayout('application') failed; " +
+                "rail may not fill viewport:", e);
+        }
+        context.setContent(jsxRuntime.jsx(App, {}));
+    };
 
     exports.run = run;
 

@@ -153,9 +153,22 @@ interface SaveResponse {
     // remain here for now. They're tightly coupled with run() + the
     // rerender helper (still in this file); will extract with the
     // render-shell module in B.3e.
-    var scriptCtx = null;          // for re-render via setContent
+    // Path D-Store-3a (2026-05-27) — scriptCtx removed. App.tsx now
+    // owns the mounting model: rerenders flow through App.setState
+    // (triggered via the rerenderHook callback below) rather than
+    // scriptContext.setContent. This eliminates full-tree teardown on
+    // every state change — UIF's PureComponent diff updates only the
+    // subtrees that actually changed.
     var bodyContainer = null;      // for swapping step body
-    var enums = null;              // cached enum bag from run()
+    var enums = null;              // cached enum bag from initializeApp()
+
+    // Path D-Store-3a — rerender hook. App.tsx registers a setState
+    // callback via setRerenderHook() in componentDidMount. The internal
+    // rerender() function (called by loaders, handlers, etc.) invokes
+    // this hook to trigger a React-like re-render. Until App mounts,
+    // the hook is a no-op (state mutations are batched until the first
+    // render).
+    var rerenderHook: () => void = function () { /* no-op until App mounts */ };
 
     // Path D-1: router wired at run() time. All goToStep/goToConsole/
     // goToSection/determineLandingStep callsites read through `router!.x`
@@ -179,17 +192,23 @@ interface SaveResponse {
     // Path B.3b — wizardCall moved to ./wizard_api_client.ts.
 
     /**
-     * SpaServerScript runtime context passed to the SPA client's run()
-     * entry point. UIF doesn't ship a public type for this — we model
-     * the two methods we actually call (setContent for re-renders and
-     * setLayout for viewport sizing).
+     * Path D-Store-3a — register App's setState-driven rerender callback.
+     * Called from App.componentDidMount. Until this fires, the internal
+     * rerender() function below is a no-op (which is fine since App
+     * isn't mounted yet — there's nothing to re-render).
      */
-    interface SpaScriptContext {
-        setContent: (content: unknown) => void;
-        setLayout?: (mode: 'application' | 'natural') => void;
+    export function setRerenderHook(fn: () => void): void {
+        rerenderHook = fn;
     }
 
-    var run = function (scriptContext: SpaScriptContext) {
+    /**
+     * Path D-Store-3a — formerly `run(scriptContext)`. App.componentDidMount
+     * calls this to kick off the wizardSnapshot + resumability routing
+     * flow. The setLayout/setContent calls moved to SpaClient.tsx (the
+     * 5-line entry point); App.render() returns whatever renderRoot()
+     * produces, which UIF diffs and mounts.
+     */
+    export function initializeApp(): void {
         try {
             // Resolve enums from the actual classes (verified against d.ts).
             // UIF v9.0.0 type catalog guarantees all of these — the
@@ -242,8 +261,6 @@ interface SaveResponse {
                 GP_Gap: GP_Gap,
                 SysIcon: SysIcon
             };
-            scriptCtx = scriptContext;
-
             // Path D-1: wire the router. Deps point at the still-local
             // loadConsole / loadPhonesData / loadPrereqs (to be extracted
             // in D-2 / D-3); STEPS.length supplies the clamp upper bound
@@ -273,21 +290,10 @@ interface SaveResponse {
             // that was already followed by an explicit rerender).
             store.subscribe(() => rerender());
 
-            // U1.5: per the UIF catalog (Integration > SuiteApps >
-            // Code tips > Layout), calling context.setLayout('application')
-            // makes the SPA fill the entire viewport (vs the default
-            // 'natural' which sizes the SPA to its content). This is
-            // what enables the rail's `rows: '100%'` to actually fill
-            // the visible area below NetSuite's chrome — without it,
-            // 100% resolves to content height and the rail collapses.
-            try {
-                if (scriptContext && typeof scriptContext.setLayout === 'function') {
-                    scriptContext.setLayout('application');
-                }
-            } catch (e) {
-                console.warn("[CTC Setup Wizard] setLayout('application') " +
-                    "failed; rail may not fill viewport:", e);
-            }
+            // Path D-Store-3a — setLayout('application') call moved to
+            // SpaClient.tsx (the 5-line entry point), where it has
+            // access to the scriptContext object that this function
+            // no longer receives.
 
             // Path C-9 (U8) fix: previously this called rerender() +
             // loadPrereqs() immediately, which painted Step 1 stepper
@@ -334,27 +340,52 @@ interface SaveResponse {
                 loadPrereqs();
             });
         } catch (e) {
-            console.error("[CTC Setup Wizard] run() threw:", e);
+            console.error("[CTC Setup Wizard] initializeApp() threw:", e);
         }
-    };
+    }
 
     // Path D-1: determineLandingStep / goToStep / goToConsole / goToSection
     // moved to ./orchestration/router.ts. Wired in run() and called
     // through `router!.x`.
 
     /**
-     * Rebuild and mount the full root tree. Called on initial render
-     * and on every step navigation. Keeps the stepper + title in sync
-     * with CURRENT_STEP.
+     * Path D-Store-3a — trigger a re-render via App's setState.
+     * Internal callers (loaders, handlers, router) call this after
+     * mutating state. The actual render tree is computed by
+     * renderRoot() below, called from App.render().
+     *
+     * Previously this function called scriptCtx.setContent(buildRoot())
+     * directly — full-tree teardown on every state change. Now it just
+     * notifies App, which calls setState and re-evaluates render().
+     * UIF's PureComponent diff updates only subtrees that actually
+     * changed, preserving focus / scroll / input transients.
      */
     function rerender() {
-        if (!scriptCtx || !enums) return;
         try {
-            // Path C-9 (U8): while the snapshot is still resolving on
-            // mount, paint a centered Loader instead of the full root
-            // tree. Without this, the default CURRENT_STEP=1 causes
-            // Step 1 stepper to flash onscreen before goToConsole /
-            // goToStep redirects returning admins.
+            rerenderHook();
+        } catch (e) {
+            console.error("[CTC Setup Wizard] rerender hook threw:", e);
+        }
+    }
+
+    /**
+     * Path D-Store-3a — compute what App should render right now.
+     * Called from App.render() on every store-triggered or
+     * hook-triggered re-render. Returns either a Loader (during
+     * mount-routing) or the full root tree.
+     *
+     * Path C-9 (U8): while the snapshot is still resolving on mount,
+     * paint a centered Loader instead of the full root tree. Without
+     * this, the default CURRENT_STEP=1 causes Step 1 stepper to flash
+     * onscreen before goToConsole / goToStep redirects returning admins.
+     */
+    export function renderRoot(): unknown {
+        if (!enums) {
+            // Should not happen — initializeApp populates enums before
+            // App mounts — but defensive return prevents crashes.
+            return null;
+        }
+        try {
             if (mountRouting) {
                 var loader = safeNew(component.Loader, {
                     label: 'Loading…',
@@ -365,14 +396,13 @@ interface SaveResponse {
                     horizontalAlignment: enums.CP_HAlign.CENTER,
                     outerGap: enums.CP_Gap.XL
                 }, 'ContentPanel(mount-routing)') || loader;
-                scriptCtx.setContent(loaderRoot);
-                return;
+                return loaderRoot;
             }
-            var root = buildRoot(enums);
-            scriptCtx.setContent(root);
-            console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
+            console.log("[CTC Setup Wizard] renderRoot — step " + CURRENT_STEP);
+            return buildRoot(enums);
         } catch (e) {
-            console.error("[CTC Setup Wizard] rerender threw:", e);
+            console.error("[CTC Setup Wizard] renderRoot threw:", e);
+            return null;
         }
     }
 
@@ -1374,4 +1404,7 @@ interface SaveResponse {
 
     // Path B.3e-1 — safeNew moved to ./render/primitives.ts.
 
-export { run };
+// Path D-Store-3a — exports are now declared inline at each function:
+//   setRerenderHook  — App.componentDidMount registers its setState callback
+//   initializeApp    — App.componentDidMount calls this to fire wizardSnapshot resumability
+//   renderRoot       — App.render() calls this to get the current tree
