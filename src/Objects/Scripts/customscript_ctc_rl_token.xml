@@ -7,19 +7,19 @@
     <notifyuser>F</notifyuser>
     <status>RELEASED</status>
     <isinactive>F</isinactive>
-    <loglevel>DEBUG</loglevel>
+    <!-- Script-level loglevel sets the maximum log level any deployment of
+         this script can emit. ERROR matches what the production deployment
+         below uses and what HIGH-10 (SAFE review 2026-05-21) flagged: every
+         RESTlet invocation runs on behalf of the calling user, and log
+         entries can contain entityId, callSid, found counts, etc. The 30-day
+         log retention has no automatic PII scrubbing, so production DEBUG
+         logging would persist user-identifying data unnecessarily. -->
+    <loglevel>ERROR</loglevel>
     <scriptdeployments>
         <scriptdeployment scriptid="customdeploy_ctc_rl_token">
             <title>CTC Token Generator</title>
             <isdeployed>T</isdeployed>
             <status>RELEASED</status>
-            <!-- HIGH-10 (SAFE review 2026-05-21) — production deployment
-                 must run at ERROR. Script-level loglevel above remains
-                 DEBUG as the max-level cap for local dev. BFN reviewers
-                 consistently flag DEBUG in production: every user
-                 interaction would write log.debug entries containing
-                 entityId, callSid, found counts, etc. to a 30-day-
-                 retained log with no automatic PII scrubbing. -->
             <loglevel>ERROR</loglevel>
             <allroles>T</allroles>
         </scriptdeployment>
