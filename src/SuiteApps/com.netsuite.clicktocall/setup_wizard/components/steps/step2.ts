@@ -15,10 +15,10 @@
  * Path B.4-2 (2026-05-27) — first per-step module extracted.
  */
 
-import { safeNew } from '../render/primitives';
-import { STATE } from '../state';
-import { buildTextField } from '../render/shared';
-import type { EnumsBag } from '../render/shell';
+import { safeNew } from '../shared/primitives';
+import { STATE } from '../../state';
+import { buildTextField } from '../shared/shared';
+import type { EnumsBag } from '../shared/shell';
 
 /**
  * Render the Step 2 form: heading + intro + three text fields laid

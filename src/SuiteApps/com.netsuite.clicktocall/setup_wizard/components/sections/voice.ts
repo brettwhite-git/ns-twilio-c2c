@@ -21,10 +21,10 @@
 
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
-import { safeNew } from '../render/primitives';
-import { STATE } from '../state';
-import { wizardCall } from '../wizard_api_client';
-import type { EnumsBag } from '../render/shell';
+import { safeNew } from '../shared/primitives';
+import { STATE } from '../../state';
+import { wizardCall } from '../../services/wizardApi';
+import type { EnumsBag } from '../shared/shell';
 
 // ─────────────────────────────────────────────────────────────────────
 // Types

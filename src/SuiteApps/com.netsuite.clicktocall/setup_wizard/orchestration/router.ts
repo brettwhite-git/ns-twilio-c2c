@@ -40,9 +40,9 @@ import {
 } from '../dispatch';
 import type { SectionName } from '../dispatch';
 import { STATE } from '../state';
-import { loadStep3Lists } from '../steps/step3';
-import { loadStep4Lists } from '../steps/step4';
-import { loadStep5 } from '../steps/step5';
+import { loadStep3Lists } from '../components/steps/step3';
+import { loadStep4Lists } from '../components/steps/step4';
+import { loadStep5 } from '../components/steps/step5';
 
 // ─────────────────────────────────────────────────────────────────────
 // Types
