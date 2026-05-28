@@ -1,0 +1,61 @@
+# Security note: this workflow uses zero untrusted inputs.
+# No github.event.*, no PR titles, no commit messages, no head refs are
+# interpolated into run: commands. All commands are static npm scripts +
+# a hardcoded git diff path. Safe per the workflow-injection guide at
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Lint + Typecheck + Tests + Bundle Drift
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Jest
+        run: npm test
+
+      # Rebundle the SPA and assert no drift between committed bundle output
+      # and what gulp + rollup produce from the .ts(x) source. Bundle output
+      # is committed (clone-and-deploy convenience) and marked as
+      # linguist-generated in .gitattributes so diff view collapses it — but
+      # without this gate, source changes that aren't rebundled would silently
+      # ship a stale bundle.
+      - name: Bundle drift check
+        run: |
+          npm run bundle
+          if ! git diff --quiet src/FileCabinet/SuiteApps/com.netsuite.clicktocall/setup_wizard/; then
+            echo "ERROR: SPA bundle output drifted from committed bundle."
+            echo "Source files changed but the committed .js bundle wasn't"
+            echo "regenerated. Run 'npm run bundle' locally and commit the"
+            echo "regenerated SpaClient.js + SpaServer.js."
+            echo ""
+            echo "Drift diff:"
+            git diff src/FileCabinet/SuiteApps/com.netsuite.clicktocall/setup_wizard/
+            exit 1
+          fi
+          echo "Bundle output matches committed source — no drift."

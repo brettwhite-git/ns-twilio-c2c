@@ -16,7 +16,7 @@
 // Hybrid SuiteApp safety:
 //   This SuiteApp ALSO contains hand-written AMD modules (the softphone
 //   Suitelet, RESTlet, scheduled script, UE scripts, libs) that live
-//   directly in src/FileCabinet/SuiteApps/.../click_to_call/. Those
+//   directly in src/FileCabinet/SuiteApps/.../. Those
 //   modules MUST NOT be touched by this pipeline.
 //
 //   The cleanBundles + bundleScripts tasks only descend into FileCabinet
@@ -122,10 +122,10 @@ const isEntryPoint = (filePath) => {
 // srcSuiteAppDir so the FileCabinet output preserves identical nesting.
 //
 // This handles arbitrarily nested SPA folders. For our SuiteApp:
-//   src/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/SpaServer.ts
-//   → relativePath = "com.netsuite.clicktocall/click_to_call/setup_wizard"
+//   src/SuiteApps/com.netsuite.clicktocall/setup_wizard/SpaServer.ts
+//   → relativePath = "com.netsuite.clicktocall/setup_wizard"
 //   → cleanBundles deletes ONLY the setup_wizard/ output directory
-//     (NOT the parent click_to_call/ which contains hand-written
+//     (NOT the parent  which contains hand-written
 //      CTC scripts that must never be touched by this pipeline).
 const findSpaFolders = () => {
     if (!exists(srcSuiteAppDir)) return [];

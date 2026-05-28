@@ -8,7 +8,7 @@
 //   - include: only src/SuiteApps/**/*.ts (the new TS source tree)
 //
 // Why two tsconfigs? Our SuiteApp is hybrid — the existing hand-written
-// AMD modules in src/FileCabinet/.../click_to_call/ stay where they are
+// AMD modules in src/FileCabinet/.../ stay where they are
 // (per the Oracle docs, gulp only converts the SPA folder under
 // src/SuiteApps/). Path A's tsconfig.json still type-checks those
 // hand-written modules via // @ts-check. This tsconfig.build.json

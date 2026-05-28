@@ -1,0 +1,27 @@
+<restlet scriptid="customscript_ctc_rl_token">
+    <name>CTC Token Generator</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/ctc_rl_token.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <status>RELEASED</status>
+    <isinactive>F</isinactive>
+    <!-- Script-level loglevel sets the maximum log level any deployment of
+         this script can emit. ERROR matches what the production deployment
+         below uses and what HIGH-10 (SAFE review 2026-05-21) flagged: every
+         RESTlet invocation runs on behalf of the calling user, and log
+         entries can contain entityId, callSid, found counts, etc. The 30-day
+         log retention has no automatic PII scrubbing, so production DEBUG
+         logging would persist user-identifying data unnecessarily. -->
+    <loglevel>ERROR</loglevel>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_rl_token">
+            <title>CTC Token Generator</title>
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <loglevel>ERROR</loglevel>
+            <allroles>T</allroles>
+        </scriptdeployment>
+    </scriptdeployments>
+</restlet>

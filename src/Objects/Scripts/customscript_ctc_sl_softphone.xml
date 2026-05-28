@@ -1,6 +1,6 @@
 <suitelet scriptid="customscript_ctc_sl_softphone">
     <name>CTC Softphone</name>
-    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/ctc_sl_softphone.js]</scriptfile>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/ctc_sl_softphone.js]</scriptfile>
     <notifyadmins>F</notifyadmins>
     <notifyemails></notifyemails>
     <notifyowner>T</notifyowner>

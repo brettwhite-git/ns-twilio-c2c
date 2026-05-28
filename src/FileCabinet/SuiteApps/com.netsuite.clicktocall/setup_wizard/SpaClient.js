@@ -1,41 +1,4 @@
-/**
- * @NApiVersion 2.1
- *
- * Setup Wizard v2 — SpaClient (proper props, no more guessing).
- *
- * Path B.3a (2026-05-27) — mechanical AMD → ESM TS conversion.
- * The middle 3,700+ lines of code were preserved IDENTICALLY; only
- * the AMD `define([...], function(...))` wrapper at the top and the
- * `exports.run = run; })` close at the bottom changed. This is the
- * skeleton conversion that unblocks subsequent extractions (B.3b+).
- *
- * `// @ts-nocheck` above is intentional during this skeleton commit
- * — the 3,700 lines were never type-checked (the original .js had no
- * `// @ts-check`), and turning on TS errors for 3,700 untyped lines
- * in one go would be unmanageable. Subsequent B.3 commits extract
- * code OUT of this file into properly-typed modules where the type
- * benefits accrue. The shrinking SpaClient.ts here keeps ts-nocheck
- * until B.5 minimizes it to the ~600-line entry-point shell.
- *
- * Rewrote against the actual @uif-js TypeScript definitions
- * (component.d.ts from the netsuite-uif-reference skill). Earlier
- * iterations were guessing prop names from JSX conventions. Real shapes:
- *
- *   Heading       — `content` (NOT `text`), `type: PAGE_TITLE|...`
- *   Text          — `text` (correct), `type/size/weight/color` enums
- *   StepperItem   — `label` only (description/done/disabled aren't in Options)
- *   Stepper       — `items, selectedStepIndex, orientation, descriptionGenerator`
- *                   step "done/active" is computed from selectedStepIndex
- *   ContentPanel  — `content, horizontalAlignment: STRETCH, outerGap`
- *   StackPanel    — `items, orientation, itemGap` (with own enums)
- *
- * The HTML reference at docs/architecture/setup-wizard-v2.html ships a
- * specific page layout (stepper across the top, content card below); the
- * UIF equivalent below uses StackPanel(VERTICAL) [ContentPanel-wrapped
- * Stepper, ContentPanel-wrapped step body ].
- */
-
-define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, core, component) { 'use strict';
+define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/component'], (function (exports, jsxRuntime, core, component) { 'use strict';
 
     function _interopNamespaceDefault(e) {
         var n = Object.create(null);
@@ -56,6 +19,71 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
 
     var core__namespace = /*#__PURE__*/_interopNamespaceDefault(core);
     var component__namespace = /*#__PURE__*/_interopNamespaceDefault(component);
+
+    const ActionType = {
+        SET_MODE: Symbol('setMode'),
+        SET_CURRENT_STEP: Symbol('setCurrentStep'),
+        SET_SELECTED_SECTION: Symbol('setSelectedSection'),
+        SET_RAIL_VISIBLE: Symbol('setRailVisible')
+    };
+    const Action = {
+        setMode(mode) {
+            return { type: ActionType.SET_MODE, payload: mode };
+        },
+        setCurrentStep(step) {
+            return { type: ActionType.SET_CURRENT_STEP, payload: step };
+        },
+        setSelectedSection(section) {
+            return { type: ActionType.SET_SELECTED_SECTION, payload: section };
+        },
+        setRailVisible(visible) {
+            return { type: ActionType.SET_RAIL_VISIBLE, payload: visible };
+        }
+    };
+
+    function reducer(state, action) {
+        const actionMap = new Map([
+            [
+                ActionType.SET_MODE,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.mode = action.payload;
+                })
+            ],
+            [
+                ActionType.SET_CURRENT_STEP,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.currentStep = action.payload;
+                })
+            ],
+            [
+                ActionType.SET_SELECTED_SECTION,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.selectedSection =
+                        action.payload;
+                })
+            ],
+            [
+                ActionType.SET_RAIL_VISIBLE,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.railVisible = action.payload;
+                })
+            ]
+        ]);
+        const handler = actionMap.get(action.type);
+        return handler ? handler(state) : state;
+    }
+
+    const initialState = {
+        mode: 'stepper',
+        currentStep: 1,
+        selectedSection: 'overview',
+        railVisible: false
+    };
+
+    const store = core.Store.create({
+        reducer,
+        state: initialState
+    });
 
     const WIZARD_API_URL = '/app/site/hosting/scriptlet.nl' +
         '?script=customscript_ctc_sl_wizard_api' +
@@ -99,14 +127,29 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }).then(extractPayload);
     };
 
-    let MODE = 'stepper';
-    let CURRENT_STEP = 1;
-    let SELECTED_SECTION = 'overview';
-    let RAIL_VISIBLE = false;
-    const setMode = (m) => { MODE = m; };
-    const setCurrentStep = (n) => { CURRENT_STEP = n; };
-    const setSelectedSection = (s) => { SELECTED_SECTION = s; };
-    const setRailVisible = (v) => { RAIL_VISIBLE = v; };
+    const initial = store.getState();
+    let MODE = initial.mode;
+    let CURRENT_STEP = initial.currentStep;
+    let SELECTED_SECTION = initial.selectedSection;
+    let RAIL_VISIBLE = initial.railVisible;
+    store.subscribe((state) => {
+        MODE = state.mode;
+        CURRENT_STEP = state.currentStep;
+        SELECTED_SECTION = state.selectedSection;
+        RAIL_VISIBLE = state.railVisible;
+    });
+    const setMode = (m) => {
+        store.dispatch(Action.setMode(m));
+    };
+    const setCurrentStep = (n) => {
+        store.dispatch(Action.setCurrentStep(n));
+    };
+    const setSelectedSection = (s) => {
+        store.dispatch(Action.setSelectedSection(s));
+    };
+    const setRailVisible = (v) => {
+        store.dispatch(Action.setRailVisible(v));
+    };
 
     const STATE = {
         step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
@@ -2500,6 +2543,61 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         });
     };
 
+    function createRouter(deps) {
+        function determineLandingStep(snap) {
+            const has = function (v) {
+                return !!(v && String(v).trim().length > 0);
+            };
+            if (!has(snap.accountSid) || !has(snap.apiKeySid))
+                return 2;
+            if (!has(snap.apiSecretId))
+                return 2;
+            if (!has(snap.twimlAppSid) || !has(snap.phoneNumber))
+                return 3;
+            return 'console';
+        }
+        function goToStep(stepNum) {
+            setMode('stepper');
+            setCurrentStep(Math.max(1, Math.min(deps.totalSteps, stepNum)));
+            deps.rerender();
+            if (CURRENT_STEP === 1)
+                deps.loadPrereqs();
+            if (CURRENT_STEP === 3)
+                loadStep3Lists({ rerender: deps.rerender });
+            if (CURRENT_STEP === 4)
+                loadStep4Lists({ rerender: deps.rerender });
+            if (CURRENT_STEP === 5)
+                loadStep5({
+                    rerender: deps.rerender,
+                    goToConsole: goToConsole
+                });
+        }
+        function goToConsole() {
+            setMode('console');
+            setSelectedSection('overview');
+            setRailVisible(true);
+            STATE.console.pendingDeactivateConfirm = false;
+            STATE.console.deactivateError = null;
+            STATE.console.actionError = null;
+            STATE.console.activeModal = null;
+            deps.loadConsole();
+        }
+        function goToSection(sectionName) {
+            setSelectedSection(sectionName);
+            if (MODE === 'stepper') {
+                setMode('console');
+            }
+            STATE.console.pendingDeactivateConfirm = false;
+            STATE.console.actionError = null;
+            deps.rerender();
+            if (sectionName === 'phones' &&
+                STATE.console.phonesNumbers === null) {
+                deps.loadPhonesData();
+            }
+        }
+        return { determineLandingStep, goToStep, goToConsole, goToSection };
+    }
+
     var STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
@@ -2507,11 +2605,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
         { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
-    var scriptCtx = null;
     var bodyContainer = null;
     var enums = null;
+    var rerenderHook = function () { };
+    var router = null;
     var mountRouting = true;
-    var run = function (scriptContext) {
+    function setRerenderHook(fn) {
+        rerenderHook = fn;
+    }
+    function initializeApp() {
         try {
             var SP = component__namespace.StackPanel;
             var CP = component__namespace.ContentPanel;
@@ -2556,16 +2658,14 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 GP_Gap: GP_Gap,
                 SysIcon: SysIcon
             };
-            scriptCtx = scriptContext;
-            try {
-                if (scriptContext && typeof scriptContext.setLayout === 'function') {
-                    scriptContext.setLayout('application');
-                }
-            }
-            catch (e) {
-                console.warn("[CTC Setup Wizard] setLayout('application') " +
-                    "failed; rail may not fill viewport:", e);
-            }
+            router = createRouter({
+                rerender: rerender,
+                loadConsole: loadConsole,
+                loadPhonesData: loadPhonesData,
+                loadPrereqs: loadPrereqs,
+                totalSteps: STEPS.length
+            });
+            store.subscribe(() => rerender());
             rerender();
             wizardCall('wizardSnapshot', {}).then(function (payload) {
                 var resp = payload;
@@ -2576,15 +2676,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     loadPrereqs();
                     return;
                 }
-                var target = determineLandingStep(snap);
+                var target = router.determineLandingStep(snap);
                 mountRouting = false;
                 if (target === 'console') {
                     console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
-                    goToConsole();
+                    router.goToConsole();
                 }
                 else {
                     console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
-                    goToStep(target);
+                    router.goToStep(target);
                 }
             }).catch(function (e) {
                 console.warn('[CTC Setup Wizard] resumability snapshot ' +
@@ -2595,24 +2695,21 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             });
         }
         catch (e) {
-            console.error("[CTC Setup Wizard] run() threw:", e);
+            console.error("[CTC Setup Wizard] initializeApp() threw:", e);
         }
-    };
-    function determineLandingStep(snap) {
-        var has = function (v) {
-            return !!(v && String(v).trim().length > 0);
-        };
-        if (!has(snap.accountSid) || !has(snap.apiKeySid))
-            return 2;
-        if (!has(snap.apiSecretId))
-            return 2;
-        if (!has(snap.twimlAppSid) || !has(snap.phoneNumber))
-            return 3;
-        return 'console';
     }
     function rerender() {
-        if (!scriptCtx || !enums)
-            return;
+        try {
+            rerenderHook();
+        }
+        catch (e) {
+            console.error("[CTC Setup Wizard] rerender hook threw:", e);
+        }
+    }
+    function renderRoot() {
+        if (!enums) {
+            return null;
+        }
         try {
             if (mountRouting) {
                 var loader = safeNew(component__namespace.Loader, {
@@ -2624,39 +2721,15 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     horizontalAlignment: enums.CP_HAlign.CENTER,
                     outerGap: enums.CP_Gap.XL
                 }, 'ContentPanel(mount-routing)') || loader;
-                scriptCtx.setContent(loaderRoot);
-                return;
+                return loaderRoot;
             }
-            var root = buildRoot(enums);
-            scriptCtx.setContent(root);
-            console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
+            console.log("[CTC Setup Wizard] renderRoot — step " + CURRENT_STEP);
+            return buildRoot(enums);
         }
         catch (e) {
-            console.error("[CTC Setup Wizard] rerender threw:", e);
+            console.error("[CTC Setup Wizard] renderRoot threw:", e);
+            return null;
         }
-    }
-    function goToStep(stepNum) {
-        setMode('stepper');
-        setCurrentStep(Math.max(1, Math.min(STEPS.length, stepNum)));
-        rerender();
-        if (CURRENT_STEP === 1)
-            loadPrereqs();
-        if (CURRENT_STEP === 3)
-            loadStep3Lists({ rerender: rerender });
-        if (CURRENT_STEP === 4)
-            loadStep4Lists({ rerender: rerender });
-        if (CURRENT_STEP === 5)
-            loadStep5({ rerender: rerender, goToConsole: goToConsole });
-    }
-    function goToConsole() {
-        setMode('console');
-        setSelectedSection('overview');
-        setRailVisible(true);
-        STATE.console.pendingDeactivateConfirm = false;
-        STATE.console.deactivateError = null;
-        STATE.console.actionError = null;
-        STATE.console.activeModal = null;
-        loadConsole();
     }
     function loadConsole() {
         STATE.console.loading = true;
@@ -2735,19 +2808,6 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             voiceUrl: 'in-sync',
             intelService: snap.intelServiceSid ? 'in-sync' : 'not-configured'
         };
-    }
-    function goToSection(sectionName) {
-        setSelectedSection(sectionName);
-        if (MODE === 'stepper') {
-            setMode('console');
-        }
-        STATE.console.pendingDeactivateConfirm = false;
-        STATE.console.actionError = null;
-        rerender();
-        if (sectionName === 'phones' &&
-            STATE.console.phonesNumbers === null) {
-            loadPhonesData();
-        }
     }
     function groupAssignmentsByPhone(flatRows) {
         var grouped = {};
@@ -3102,7 +3162,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             { value: 'health', label: 'Health', icon: SysIcon.HEART_FILLED },
             { value: 're-run', label: 'Re-run wizard', icon: SysIcon.REFRESH,
                 separatorTop: true,
-                action: function () { goToStep(1); } }
+                action: function () { router.goToStep(1); } }
         ];
         var selectedVal = MODE === 'stepper' ? 're-run' : SELECTED_SECTION;
         var VisualStyle = (d.ND && d.ND.VisualStyle) || {};
@@ -3116,10 +3176,10 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 if (!value)
                     return;
                 if (value === 're-run') {
-                    goToStep(1);
+                    router.goToStep(1);
                     return;
                 }
-                goToSection(value);
+                router.goToSection(value);
             }
         }, "NavigationDrawer(console)");
     }
@@ -3141,9 +3201,9 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                     : ButtonType.DEFAULT,
                 action: function () {
                     if (spec.value === 're-run')
-                        goToStep(1);
+                        router.goToStep(1);
                     else
-                        goToSection(spec.value);
+                        router.goToSection(spec.value);
                 }
             }, "Button(nav-" + spec.value + ")");
         }).filter(function (b) { return b != null; });
@@ -3158,12 +3218,12 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     function buildSectionContent(d) {
         switch (SELECTED_SECTION) {
             case 'overview': return buildOverviewSection(d, {
-                goToSection: goToSection,
+                goToSection: router.goToSection,
                 onDeactivateClick: onDeactivateClick
             });
             case 'phones': return buildPhonesSection(d, {
                 loadPhonesData: loadPhonesData,
-                goToStep: goToStep,
+                goToStep: router.goToStep,
                 onPhonesRowSelectionChanged: onPhonesRowSelectionChanged
             });
             case 'voice': return buildVoiceSection(d, { rerender: rerender });
@@ -3173,7 +3233,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 onDeactivateClick: onDeactivateClick
             });
             default: return buildOverviewSection(d, {
-                goToSection: goToSection,
+                goToSection: router.goToSection,
                 onDeactivateClick: onDeactivateClick
             });
         }
@@ -3200,7 +3260,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         else if (CURRENT_STEP === 5) {
             initial = buildStep5Activate(d, {
                 rerender: rerender,
-                goToConsole: goToConsole
+                goToConsole: router.goToConsole
             });
         }
         else {
@@ -3228,7 +3288,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         var backBtn = (CURRENT_STEP > 1) ? safeNew(component__namespace.Button, {
             label: "Back",
             type: ButtonType.DEFAULT,
-            action: function () { goToStep(CURRENT_STEP - 1); }
+            action: function () { router.goToStep(CURRENT_STEP - 1); }
         }, "Button(back)") : null;
         var nextBtn = (CURRENT_STEP < STEPS.length) ? safeNew(component__namespace.Button, {
             label: "Continue",
@@ -3247,7 +3307,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
     }
     function onContinueClick() {
         if (CURRENT_STEP === 1) {
-            goToStep(2);
+            router.goToStep(2);
             return;
         }
         if (CURRENT_STEP === 2) {
@@ -3257,7 +3317,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 apiSecretId: STATE.step2.apiSecretId
             }).then(function (payload) {
                 if (payload && payload.saved)
-                    goToStep(3);
+                    router.goToStep(3);
                 else
                     alert("Save failed: " +
                         ((payload && payload.error) || 'unknown'));
@@ -3274,7 +3334,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 intelServiceSid: STATE.step3.intelServiceSid
             }).then(function (payload) {
                 if (payload && payload.saved)
-                    goToStep(4);
+                    router.goToStep(4);
                 else
                     alert("Save failed: " +
                         ((payload && payload.error) || 'unknown'));
@@ -3309,7 +3369,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 .then(function (payload) {
                 console.log("[CTC Setup Wizard] saveAssignments response:", payload);
                 if (payload && payload.saved)
-                    goToStep(5);
+                    router.goToStep(5);
                 else
                     alert("Save failed: " +
                         ((payload && payload.error) || 'unknown'));
@@ -3319,7 +3379,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             });
             return;
         }
-        goToStep(CURRENT_STEP + 1);
+        router.goToStep(CURRENT_STEP + 1);
     }
     function buildStepper(d) {
         var Badge = component__namespace.Badge;
@@ -3366,6 +3426,45 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
             itemGap: d.SP_Gap.M
         }, "StackPanel(stepper-strip)");
     }
+
+    class App extends core.PureComponent {
+        storeUnsubscribe = null;
+        constructor(props, context) {
+            super(props, context);
+            this.state = { tick: 0 };
+        }
+        forceRerender = () => {
+            this.setState({ tick: this.state.tick + 1 });
+        };
+        componentDidMount() {
+            setRerenderHook(this.forceRerender);
+            this.storeUnsubscribe = store.subscribe(this.forceRerender);
+            initializeApp();
+        }
+        componentWillUnmount() {
+            if (this.storeUnsubscribe) {
+                this.storeUnsubscribe();
+                this.storeUnsubscribe = null;
+            }
+            setRerenderHook(() => { });
+        }
+        render() {
+            return renderRoot();
+        }
+    }
+
+    const run = (context) => {
+        try {
+            if (typeof context.setLayout === 'function') {
+                context.setLayout('application');
+            }
+        }
+        catch (e) {
+            console.warn("[CTC Setup Wizard] setLayout('application') failed; " +
+                "rail may not fill viewport:", e);
+        }
+        context.setContent(jsxRuntime.jsx(App, {}));
+    };
 
     exports.run = run;
 

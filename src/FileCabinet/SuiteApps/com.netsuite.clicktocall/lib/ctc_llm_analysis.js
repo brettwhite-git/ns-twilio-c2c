@@ -99,9 +99,17 @@ TRANSCRIPT:
      *   - modelFamily: COHERE_COMMAND is NetSuite's default free-tier
      *     choice (verified 2026 release notes). COHERE_COMMAND_LIGHT is
      *     faster + cheaper but produces shorter, less nuanced summaries.
+     *
+     * NetSuite gotcha (2026-05-27 deploy failure): accessing
+     * `llm.ModelFamily.COHERE_COMMAND` at module top-level inside the
+     * define() body throws SUITESCRIPT_API_UNAVAILABLE_IN_DEFINE during
+     * SDF deploy-time validation. Same parser-quirk family as accessing
+     * any N/* module member at module-load time. Fix: inline the string
+     * literal value (the enum is just a string constant — same pattern
+     * we use for Twilio codec strings 'opus'/'pcmu' per CLAUDE.md).
      */
     const DEFAULT_MODEL_PARAMS = {
-        modelFamily: llm.ModelFamily.COHERE_COMMAND,
+        modelFamily: 'COHERE_COMMAND',  // === llm.ModelFamily.COHERE_COMMAND
         modelParameters: { temperature: 0.2, maxTokens: 800 }
     };
 

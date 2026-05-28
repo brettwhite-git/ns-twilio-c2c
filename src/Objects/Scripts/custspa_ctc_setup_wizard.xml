@@ -5,9 +5,9 @@
          cryptic "Items deleted" errors per SDF Pitfall #57. "ctc-setup"
          is specific enough to avoid collisions across customer accounts. -->
     <url>ctc-setup</url>
-    <folder>[/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/]</folder>
-    <clientscriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/SpaClient.js]</clientscriptfile>
-    <serverscriptfile>[/SuiteApps/com.netsuite.clicktocall/click_to_call/setup_wizard/SpaServer.js]</serverscriptfile>
+    <folder>[/SuiteApps/com.netsuite.clicktocall/setup_wizard/]</folder>
+    <clientscriptfile>[/SuiteApps/com.netsuite.clicktocall/setup_wizard/SpaClient.js]</clientscriptfile>
+    <serverscriptfile>[/SuiteApps/com.netsuite.clicktocall/setup_wizard/SpaServer.js]</serverscriptfile>
     <loglevel>DEBUG</loglevel>
     <!-- audienceallroles=T fails on 2025.1+ accounts referencing deleted
          roles (SDF Pitfall #57); use F + explicit audienceroles. -->

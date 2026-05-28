@@ -55,9 +55,12 @@ import { buildOverviewSection } from './sections/overview';
 import { buildVoiceSection } from './sections/voice';
 import { buildPhonesSection } from './sections/phones';
 import { buildStep2Form } from './steps/step2';
-import { buildStep3Form, loadStep3Lists } from './steps/step3';
-import { buildStep4Form, loadStep4Lists } from './steps/step4';
-import { buildStep5Activate, loadStep5 } from './steps/step5';
+import { buildStep3Form } from './steps/step3';
+import { buildStep4Form } from './steps/step4';
+import { buildStep5Activate } from './steps/step5';
+import { createRouter } from './orchestration/router';
+import type { Router } from './orchestration/router';
+import { store } from './app/Store';
 
 // ─────────────────────────────────────────────────────────────────────
 // Local types — narrow shapes for the STATE.console payloads SpaClient
@@ -150,9 +153,29 @@ interface SaveResponse {
     // remain here for now. They're tightly coupled with run() + the
     // rerender helper (still in this file); will extract with the
     // render-shell module in B.3e.
-    var scriptCtx = null;          // for re-render via setContent
+    // Path D-Store-3a (2026-05-27) — scriptCtx removed. App.tsx now
+    // owns the mounting model: rerenders flow through App.setState
+    // (triggered via the rerenderHook callback below) rather than
+    // scriptContext.setContent. This eliminates full-tree teardown on
+    // every state change — UIF's PureComponent diff updates only the
+    // subtrees that actually changed.
     var bodyContainer = null;      // for swapping step body
-    var enums = null;              // cached enum bag from run()
+    var enums = null;              // cached enum bag from initializeApp()
+
+    // Path D-Store-3a — rerender hook. App.tsx registers a setState
+    // callback via setRerenderHook() in componentDidMount. The internal
+    // rerender() function (called by loaders, handlers, etc.) invokes
+    // this hook to trigger a React-like re-render. Until App mounts,
+    // the hook is a no-op (state mutations are batched until the first
+    // render).
+    var rerenderHook: () => void = function () { /* no-op until App mounts */ };
+
+    // Path D-1: router wired at run() time. All goToStep/goToConsole/
+    // goToSection/determineLandingStep callsites read through `router!.x`
+    // — the non-null assertion is sound because nothing reads router
+    // until rerender() paints something, which never happens before
+    // run() initializes the router.
+    var router: Router | null = null;
 
     // Path C-9 (U8): true between mount and snapshot-routing decision.
     // While true, rerender() paints a centered Loader instead of the
@@ -169,17 +192,23 @@ interface SaveResponse {
     // Path B.3b — wizardCall moved to ./wizard_api_client.ts.
 
     /**
-     * SpaServerScript runtime context passed to the SPA client's run()
-     * entry point. UIF doesn't ship a public type for this — we model
-     * the two methods we actually call (setContent for re-renders and
-     * setLayout for viewport sizing).
+     * Path D-Store-3a — register App's setState-driven rerender callback.
+     * Called from App.componentDidMount. Until this fires, the internal
+     * rerender() function below is a no-op (which is fine since App
+     * isn't mounted yet — there's nothing to re-render).
      */
-    interface SpaScriptContext {
-        setContent: (content: unknown) => void;
-        setLayout?: (mode: 'application' | 'natural') => void;
+    export function setRerenderHook(fn: () => void): void {
+        rerenderHook = fn;
     }
 
-    var run = function (scriptContext: SpaScriptContext) {
+    /**
+     * Path D-Store-3a — formerly `run(scriptContext)`. App.componentDidMount
+     * calls this to kick off the wizardSnapshot + resumability routing
+     * flow. The setLayout/setContent calls moved to SpaClient.tsx (the
+     * 5-line entry point); App.render() returns whatever renderRoot()
+     * produces, which UIF diffs and mounts.
+     */
+    export function initializeApp(): void {
         try {
             // Resolve enums from the actual classes (verified against d.ts).
             // UIF v9.0.0 type catalog guarantees all of these — the
@@ -232,23 +261,39 @@ interface SaveResponse {
                 GP_Gap: GP_Gap,
                 SysIcon: SysIcon
             };
-            scriptCtx = scriptContext;
+            // Path D-1: wire the router. Deps point at the still-local
+            // loadConsole / loadPhonesData / loadPrereqs (to be extracted
+            // in D-2 / D-3); STEPS.length supplies the clamp upper bound
+            // for goToStep so router.ts doesn't need to import the
+            // STEPS catalog (which still lives here for shell-builders).
+            router = createRouter({
+                rerender: rerender,
+                loadConsole: loadConsole,
+                loadPhonesData: loadPhonesData,
+                loadPrereqs: loadPrereqs,
+                totalSteps: STEPS.length
+            });
 
-            // U1.5: per the UIF catalog (Integration > SuiteApps >
-            // Code tips > Layout), calling context.setLayout('application')
-            // makes the SPA fill the entire viewport (vs the default
-            // 'natural' which sizes the SPA to its content). This is
-            // what enables the rail's `rows: '100%'` to actually fill
-            // the visible area below NetSuite's chrome — without it,
-            // 100% resolves to content height and the rail collapses.
-            try {
-                if (scriptContext && typeof scriptContext.setLayout === 'function') {
-                    scriptContext.setLayout('application');
-                }
-            } catch (e) {
-                console.warn("[CTC Setup Wizard] setLayout('application') " +
-                    "failed; rail may not fill viewport:", e);
-            }
+            // Path D-Store-2: subscribe rerender to the Store. Every
+            // dispatched action (setMode / setCurrentStep / etc) now
+            // triggers a reducer update, which fires this callback. The
+            // dispatch.ts adapter's own subscribe callback runs first
+            // (registered at module-import time, before this one) to
+            // update the export-let bindings; this one runs after to
+            // paint the new tree.
+            //
+            // Note: until D-Store-3 migrates STATE.console into the Store,
+            // STATE-mutation paths (loadConsole, onPhonesRowSelectionChanged,
+            // etc.) still call rerender() explicitly. Those callsites are
+            // unchanged here — the Store-driven rerender is additive and
+            // harmless (worst case: one extra setContent on a setX call
+            // that was already followed by an explicit rerender).
+            store.subscribe(() => rerender());
+
+            // Path D-Store-3a — setLayout('application') call moved to
+            // SpaClient.tsx (the 5-line entry point), where it has
+            // access to the scriptContext object that this function
+            // no longer receives.
 
             // Path C-9 (U8) fix: previously this called rerender() +
             // loadPrereqs() immediately, which painted Step 1 stepper
@@ -278,14 +323,14 @@ interface SaveResponse {
                     loadPrereqs();
                     return;
                 }
-                var target = determineLandingStep(snap);
+                var target = router!.determineLandingStep(snap);
                 mountRouting = false;
                 if (target === 'console') {
                     console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
-                    goToConsole();
+                    router!.goToConsole();
                 } else {
                     console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
-                    goToStep(target);  // fires per-step loader internally
+                    router!.goToStep(target);  // fires per-step loader internally
                 }
             }).catch(function (e) {
                 console.warn('[CTC Setup Wizard] resumability snapshot ' +
@@ -295,47 +340,52 @@ interface SaveResponse {
                 loadPrereqs();
             });
         } catch (e) {
-            console.error("[CTC Setup Wizard] run() threw:", e);
+            console.error("[CTC Setup Wizard] initializeApp() threw:", e);
         }
-    };
+    }
+
+    // Path D-1: determineLandingStep / goToStep / goToConsole / goToSection
+    // moved to ./orchestration/router.ts. Wired in run() and called
+    // through `router!.x`.
 
     /**
-     * U9 + U11: Determine the right landing step from a snapshot.
-     * Mirrors `lib/ctc_wizard_state.js:determineCurrentStep`. Inlined
-     * here because SPA Client runtime AMD require semantics for
-     * cross-folder libs are uncertain in NetSuite UIF — safer to keep
-     * the routing tiny and local.
+     * Path D-Store-3a — trigger a re-render via App's setState.
+     * Internal callers (loaders, handlers, router) call this after
+     * mutating state. The actual render tree is computed by
+     * renderRoot() below, called from App.render().
      *
-     * Returns 1..5 (step index) or 'console' (post-activation).
+     * Previously this function called scriptCtx.setContent(buildRoot())
+     * directly — full-tree teardown on every state change. Now it just
+     * notifies App, which calls setState and re-evaluates render().
+     * UIF's PureComponent diff updates only subtrees that actually
+     * changed, preserving focus / scroll / input transients.
      */
-    function determineLandingStep(snap: ConfigSnapshot): number | 'console' {
-        var has = function (v: string | undefined | null): boolean {
-            return !!(v && String(v).trim().length > 0);
-        };
-        if (!has(snap.accountSid) || !has(snap.apiKeySid)) return 2;
-        if (!has(snap.apiSecretId)) return 2;
-        if (!has(snap.twimlAppSid) || !has(snap.phoneNumber)) return 3;
-        // Once voice config is set, the admin should land on the console
-        // regardless of active state. Refresh-after-deactivate should
-        // return to the console (where the Reactivate banner lives), NOT
-        // the stepper. The active flag only controls rep call placement,
-        // not admin console access.
-        return 'console';
+    function rerender() {
+        try {
+            rerenderHook();
+        } catch (e) {
+            console.error("[CTC Setup Wizard] rerender hook threw:", e);
+        }
     }
 
     /**
-     * Rebuild and mount the full root tree. Called on initial render
-     * and on every step navigation. Keeps the stepper + title in sync
-     * with CURRENT_STEP.
+     * Path D-Store-3a — compute what App should render right now.
+     * Called from App.render() on every store-triggered or
+     * hook-triggered re-render. Returns either a Loader (during
+     * mount-routing) or the full root tree.
+     *
+     * Path C-9 (U8): while the snapshot is still resolving on mount,
+     * paint a centered Loader instead of the full root tree. Without
+     * this, the default CURRENT_STEP=1 causes Step 1 stepper to flash
+     * onscreen before goToConsole / goToStep redirects returning admins.
      */
-    function rerender() {
-        if (!scriptCtx || !enums) return;
+    export function renderRoot(): unknown {
+        if (!enums) {
+            // Should not happen — initializeApp populates enums before
+            // App mounts — but defensive return prevents crashes.
+            return null;
+        }
         try {
-            // Path C-9 (U8): while the snapshot is still resolving on
-            // mount, paint a centered Loader instead of the full root
-            // tree. Without this, the default CURRENT_STEP=1 causes
-            // Step 1 stepper to flash onscreen before goToConsole /
-            // goToStep redirects returning admins.
             if (mountRouting) {
                 var loader = safeNew(component.Loader, {
                     label: 'Loading…',
@@ -346,47 +396,14 @@ interface SaveResponse {
                     horizontalAlignment: enums.CP_HAlign.CENTER,
                     outerGap: enums.CP_Gap.XL
                 }, 'ContentPanel(mount-routing)') || loader;
-                scriptCtx.setContent(loaderRoot);
-                return;
+                return loaderRoot;
             }
-            var root = buildRoot(enums);
-            scriptCtx.setContent(root);
-            console.log("[CTC Setup Wizard] rerender — step " + CURRENT_STEP);
+            console.log("[CTC Setup Wizard] renderRoot — step " + CURRENT_STEP);
+            return buildRoot(enums);
         } catch (e) {
-            console.error("[CTC Setup Wizard] rerender threw:", e);
+            console.error("[CTC Setup Wizard] renderRoot threw:", e);
+            return null;
         }
-    }
-
-    /**
-     * Advance to the next step (or jump to a specific step). Re-renders.
-     * Always flips MODE back to 'stepper' — used both for normal nav
-     * AND for jumping out of the Admin Console into a specific step.
-     */
-    function goToStep(stepNum: number) {
-        setMode('stepper');
-        setCurrentStep(Math.max(1, Math.min(STEPS.length, stepNum)));
-        rerender();
-        if (CURRENT_STEP === 1) loadPrereqs();
-        if (CURRENT_STEP === 3) loadStep3Lists({ rerender: rerender });
-        if (CURRENT_STEP === 4) loadStep4Lists({ rerender: rerender });
-        if (CURRENT_STEP === 5) loadStep5({ rerender: rerender, goToConsole: goToConsole });
-    }
-
-    /**
-     * U1 (Phase 3a): enter Admin Console mode. Lands admin on 'overview'
-     * section by default and triggers the once-per-mount data load.
-     * U1.5: also flips RAIL_VISIBLE so the left rail persists into
-     * stepper mode if admin clicks "Re-run wizard."
-     */
-    function goToConsole() {
-        setMode('console');
-        setSelectedSection('overview');
-        setRailVisible(true);
-        STATE.console.pendingDeactivateConfirm = false;
-        STATE.console.deactivateError = null;
-        STATE.console.actionError = null;
-        STATE.console.activeModal = null;
-        loadConsole();
     }
 
     /**
@@ -505,34 +522,6 @@ interface SaveResponse {
             voiceUrl: 'in-sync',
             intelService: snap.intelServiceSid ? 'in-sync' : 'not-configured'
         };
-    }
-
-    /**
-     * U1 / U6: section navigator. Called from NavigationDrawer's
-     * onSelectedValueChanged. Switches SELECTED_SECTION and triggers
-     * rerender — sections share STATE.console so no additional fetch
-     * is needed unless the section has section-specific data.
-     */
-    function goToSection(sectionName: SectionName) {
-        setSelectedSection(sectionName);
-        // U1.5: if entering console from stepper mode (Re-run → navigate),
-        // also flip MODE back so the rail's onSelectedValueChanged sees
-        // console state.
-        if (MODE === 'stepper') {
-            setMode('console');
-        }
-        STATE.console.pendingDeactivateConfirm = false; // cancel pending
-        STATE.console.actionError = null;
-        rerender();
-
-        // U3 (Phase 3b): lazy-load Phones-section's Twilio phone list
-        // when admin first navigates there. Employees are pre-loaded in
-        // loadConsole so the DataGrid has them on first render (avoids
-        // the chip-display timing race).
-        if (sectionName === 'phones' &&
-            STATE.console.phonesNumbers === null) {
-            loadPhonesData();
-        }
     }
 
     /**
@@ -1075,7 +1064,7 @@ interface SaveResponse {
             { value: 'health',      label: 'Health',            icon: SysIcon.HEART_FILLED },
             { value: 're-run',      label: 'Re-run wizard',     icon: SysIcon.REFRESH,
               separatorTop: true,
-              action: function () { goToStep(1); } }
+              action: function () { router!.goToStep(1); } }
         ];
 
         // U1.5: in stepper mode (re-run flow), highlight the "Re-run
@@ -1099,7 +1088,7 @@ interface SaveResponse {
                 if (!value) return;
                 if (value === 're-run') {
                     // Re-run wizard click — fire the goToStep action.
-                    goToStep(1);
+                    router!.goToStep(1);
                     return;
                 }
                 // Section click — flips MODE='console' and sets the
@@ -1107,7 +1096,7 @@ interface SaveResponse {
                 // or stepper mode). NavigationDrawer items are owned by
                 // buildConsoleNavDrawer with a constrained value-space
                 // (the SectionName union); the cast is safe.
-                goToSection(value as SectionName);
+                router!.goToSection(value as SectionName);
             }
         }, "NavigationDrawer(console)");
     }
@@ -1134,8 +1123,8 @@ interface SaveResponse {
                     ? ButtonType.PRIMARY
                     : ButtonType.DEFAULT,
                 action: function () {
-                    if (spec.value === 're-run') goToStep(1);
-                    else goToSection(spec.value);
+                    if (spec.value === 're-run') router!.goToStep(1);
+                    else router!.goToSection(spec.value);
                 }
             }, "Button(nav-" + spec.value + ")");
         }).filter(function (b) { return b != null; });
@@ -1156,12 +1145,12 @@ interface SaveResponse {
     function buildSectionContent(d: EnumsBag) {
         switch (SELECTED_SECTION) {
             case 'overview':    return buildOverviewSection(d, {
-                goToSection: goToSection,
+                goToSection: router!.goToSection,
                 onDeactivateClick: onDeactivateClick
             });
             case 'phones':      return buildPhonesSection(d, {
                 loadPhonesData: loadPhonesData,
-                goToStep: goToStep,
+                goToStep: router!.goToStep,
                 onPhonesRowSelectionChanged: onPhonesRowSelectionChanged
             });
             case 'voice':       return buildVoiceSection(d, { rerender: rerender });
@@ -1171,7 +1160,7 @@ interface SaveResponse {
                 onDeactivateClick: onDeactivateClick
             });
             default:            return buildOverviewSection(d, {
-                goToSection: goToSection,
+                goToSection: router!.goToSection,
                 onDeactivateClick: onDeactivateClick
             });
         }
@@ -1202,7 +1191,7 @@ interface SaveResponse {
         } else if (CURRENT_STEP === 5) {
             initial = buildStep5Activate(d, {
                 rerender: rerender,
-                goToConsole: goToConsole
+                goToConsole: router!.goToConsole
             });
         } else {
             initial = safeNew(d.T, {
@@ -1241,7 +1230,7 @@ interface SaveResponse {
         var backBtn = (CURRENT_STEP > 1) ? safeNew(component.Button, {
             label: "Back",
             type: ButtonType.DEFAULT,
-            action: function () { goToStep(CURRENT_STEP - 1); }
+            action: function () { router!.goToStep(CURRENT_STEP - 1); }
         }, "Button(back)") : null;
 
         var nextBtn = (CURRENT_STEP < STEPS.length) ? safeNew(component.Button, {
@@ -1268,7 +1257,7 @@ interface SaveResponse {
      */
     function onContinueClick() {
         if (CURRENT_STEP === 1) {
-            goToStep(2);
+            router!.goToStep(2);
             return;
         }
         if (CURRENT_STEP === 2) {
@@ -1277,7 +1266,7 @@ interface SaveResponse {
                 apiKeySid:    STATE.step2.apiKeySid,
                 apiSecretId:  STATE.step2.apiSecretId
             }).then(function (payload) {
-                if (payload && payload.saved) goToStep(3);
+                if (payload && payload.saved) router!.goToStep(3);
                 else alert("Save failed: " +
                     ((payload && payload.error) || 'unknown'));
             }).catch(function (e) {
@@ -1292,7 +1281,7 @@ interface SaveResponse {
                 phoneNumber:     STATE.step3.phoneNumber,
                 intelServiceSid: STATE.step3.intelServiceSid
             }).then(function (payload) {
-                if (payload && payload.saved) goToStep(4);
+                if (payload && payload.saved) router!.goToStep(4);
                 else alert("Save failed: " +
                     ((payload && payload.error) || 'unknown'));
             }).catch(function (e) {
@@ -1345,7 +1334,7 @@ interface SaveResponse {
             wizardCall('wizardSaveAssignments', { assignments: rows })
             .then(function (payload) {
                 console.log("[CTC Setup Wizard] saveAssignments response:", payload);
-                if (payload && payload.saved) goToStep(5);
+                if (payload && payload.saved) router!.goToStep(5);
                 else alert("Save failed: " +
                     ((payload && payload.error) || 'unknown'));
             }).catch(function (e) {
@@ -1354,7 +1343,7 @@ interface SaveResponse {
             });
             return;
         }
-        goToStep(CURRENT_STEP + 1);
+        router!.goToStep(CURRENT_STEP + 1);
     }
     function buildStepper(d: EnumsBag) {
         // UIF v9.0.0 type catalog guarantees these classes + nested
@@ -1415,4 +1404,7 @@ interface SaveResponse {
 
     // Path B.3e-1 — safeNew moved to ./render/primitives.ts.
 
-export { run };
+// Path D-Store-3a — exports are now declared inline at each function:
+//   setRerenderHook  — App.componentDidMount registers its setState callback
+//   initializeApp    — App.componentDidMount calls this to fire wizardSnapshot resumability
+//   renderRoot       — App.render() calls this to get the current tree

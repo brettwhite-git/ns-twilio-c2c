@@ -50,7 +50,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         try {
-            const sdkFile = file.load({ id: '/SuiteApps/com.netsuite.clicktocall/click_to_call/lib/twilio.min.js' });
+            const sdkFile = file.load({ id: '/SuiteApps/com.netsuite.clicktocall/lib/twilio.min.js' });
             sdkUrl = sdkFile.url;
         } catch (e) {
             log.error({ title: 'CTC Softphone — Failed to load Twilio SDK file', details: e.message || e });
