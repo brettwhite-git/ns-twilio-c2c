@@ -34,6 +34,14 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
 
+    // Path D-Store-2 (2026-05-27) — mirror tsconfig.build.json's JSX
+    // config so `npm run typecheck` (which uses THIS file) accepts the
+    // .tsx files in setup_wizard/app/. JSX runtime resolves to
+    // @uif-js/core's declared 'jsx-runtime' module at compile time;
+    // NetSuite's hosted UIF bundle provides the runtime at execution.
+    "jsx": "react-jsx",
+    "jsxImportSource": "@uif-js/core",
+
     // Map the @uif-js/* AMD module specifiers used in SpaClient.js +
     // SpaServer.js to the Oracle type-only package. NetSuite's runtime
     // resolves these to its hosted UIF bundle; locally these are types-only.

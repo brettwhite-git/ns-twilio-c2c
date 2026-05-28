@@ -99,14 +99,94 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
         }).then(extractPayload);
     };
 
-    let MODE = 'stepper';
-    let CURRENT_STEP = 1;
-    let SELECTED_SECTION = 'overview';
-    let RAIL_VISIBLE = false;
-    const setMode = (m) => { MODE = m; };
-    const setCurrentStep = (n) => { CURRENT_STEP = n; };
-    const setSelectedSection = (s) => { SELECTED_SECTION = s; };
-    const setRailVisible = (v) => { RAIL_VISIBLE = v; };
+    const ActionType = {
+        SET_MODE: Symbol('setMode'),
+        SET_CURRENT_STEP: Symbol('setCurrentStep'),
+        SET_SELECTED_SECTION: Symbol('setSelectedSection'),
+        SET_RAIL_VISIBLE: Symbol('setRailVisible')
+    };
+    const Action = {
+        setMode(mode) {
+            return { type: ActionType.SET_MODE, payload: mode };
+        },
+        setCurrentStep(step) {
+            return { type: ActionType.SET_CURRENT_STEP, payload: step };
+        },
+        setSelectedSection(section) {
+            return { type: ActionType.SET_SELECTED_SECTION, payload: section };
+        },
+        setRailVisible(visible) {
+            return { type: ActionType.SET_RAIL_VISIBLE, payload: visible };
+        }
+    };
+
+    function reducer(state, action) {
+        const actionMap = new Map([
+            [
+                ActionType.SET_MODE,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.mode = action.payload;
+                })
+            ],
+            [
+                ActionType.SET_CURRENT_STEP,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.currentStep = action.payload;
+                })
+            ],
+            [
+                ActionType.SET_SELECTED_SECTION,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.selectedSection =
+                        action.payload;
+                })
+            ],
+            [
+                ActionType.SET_RAIL_VISIBLE,
+                (state) => core.ImmutableUpdate.of(state, (draft) => {
+                    draft.railVisible = action.payload;
+                })
+            ]
+        ]);
+        const handler = actionMap.get(action.type);
+        return handler ? handler(state) : state;
+    }
+
+    const initialState = {
+        mode: 'stepper',
+        currentStep: 1,
+        selectedSection: 'overview',
+        railVisible: false
+    };
+
+    const store = core.Store.create({
+        reducer,
+        state: initialState
+    });
+
+    const initial = store.getState();
+    let MODE = initial.mode;
+    let CURRENT_STEP = initial.currentStep;
+    let SELECTED_SECTION = initial.selectedSection;
+    let RAIL_VISIBLE = initial.railVisible;
+    store.subscribe((state) => {
+        MODE = state.mode;
+        CURRENT_STEP = state.currentStep;
+        SELECTED_SECTION = state.selectedSection;
+        RAIL_VISIBLE = state.railVisible;
+    });
+    const setMode = (m) => {
+        store.dispatch(Action.setMode(m));
+    };
+    const setCurrentStep = (n) => {
+        store.dispatch(Action.setCurrentStep(n));
+    };
+    const setSelectedSection = (s) => {
+        store.dispatch(Action.setSelectedSection(s));
+    };
+    const setRailVisible = (v) => {
+        store.dispatch(Action.setRailVisible(v));
+    };
 
     const STATE = {
         step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
@@ -2620,6 +2700,7 @@ define(['exports', '@uif-js/core', '@uif-js/component'], (function (exports, cor
                 loadPrereqs: loadPrereqs,
                 totalSteps: STEPS.length
             });
+            store.subscribe(() => rerender());
             try {
                 if (scriptContext && typeof scriptContext.setLayout === 'function') {
                     scriptContext.setLayout('application');

@@ -60,6 +60,7 @@ import { buildStep4Form } from './steps/step4';
 import { buildStep5Activate } from './steps/step5';
 import { createRouter } from './orchestration/router';
 import type { Router } from './orchestration/router';
+import { store } from './app/Store';
 
 // ─────────────────────────────────────────────────────────────────────
 // Local types — narrow shapes for the STATE.console payloads SpaClient
@@ -255,6 +256,22 @@ interface SaveResponse {
                 loadPrereqs: loadPrereqs,
                 totalSteps: STEPS.length
             });
+
+            // Path D-Store-2: subscribe rerender to the Store. Every
+            // dispatched action (setMode / setCurrentStep / etc) now
+            // triggers a reducer update, which fires this callback. The
+            // dispatch.ts adapter's own subscribe callback runs first
+            // (registered at module-import time, before this one) to
+            // update the export-let bindings; this one runs after to
+            // paint the new tree.
+            //
+            // Note: until D-Store-3 migrates STATE.console into the Store,
+            // STATE-mutation paths (loadConsole, onPhonesRowSelectionChanged,
+            // etc.) still call rerender() explicitly. Those callsites are
+            // unchanged here — the Store-driven rerender is additive and
+            // harmless (worst case: one extra setContent on a setX call
+            // that was already followed by an explicit rerender).
+            store.subscribe(() => rerender());
 
             // U1.5: per the UIF catalog (Integration > SuiteApps >
             // Code tips > Layout), calling context.setLayout('application')
