@@ -16,11 +16,11 @@
 
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
-import { safeNew } from '../render/primitives';
-import { STATE } from '../state';
-import { buildStatCard } from '../render/shell';
-import type { EnumsBag, StatCardTone } from '../render/shell';
-import type { SectionName } from '../dispatch';
+import { safeNew } from '../shared/primitives';
+import { STATE } from '../../state';
+import { buildStatCard } from '../shared/shell';
+import type { EnumsBag, StatCardTone } from '../shared/shell';
+import type { SectionName } from '../../dispatch';
 
 // ─────────────────────────────────────────────────────────────────────
 // Types

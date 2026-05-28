@@ -87,11 +87,16 @@ src/
 │       └── SpaServer.js
 ├── SuiteApps/com.netsuite.clicktocall/
 │   └── setup_wizard/                    SPA TypeScript source
-│       ├── SpaClient.ts                 Entry point
+│       ├── SpaClient.tsx                Entry point (5-line, mounts <App />)
 │       ├── SpaServer.ts                 Server endpoints
-│       ├── sections/                    Admin Console sections (overview/phones/voice/...)
-│       ├── steps/                       Onboarding wizard step forms
-│       └── render/                      Shared render primitives
+│       ├── App.tsx                      Root PureComponent — subscribes to Store
+│       ├── AppController.tsx            Imperative builders + handlers + loaders
+│       ├── app/                         State machinery (Action, Reducer, InitialState, Store)
+│       ├── components/                  UI building blocks (matches airport360 canonical)
+│       │   ├── shared/                  Cross-feature primitives (was render/)
+│       │   ├── sections/                Admin Console sections (overview/phones/voice/...)
+│       │   └── steps/                   Onboarding wizard step forms
+│       └── services/                    Server data fetching (wizardApi)
 ├── Objects/
 │   ├── Records/                         customrecord_*.xml
 │   ├── Scripts/                         customscript_*.xml + custspa_*.xml

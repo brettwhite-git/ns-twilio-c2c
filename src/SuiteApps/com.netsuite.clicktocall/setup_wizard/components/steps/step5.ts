@@ -22,11 +22,11 @@
  */
 
 import * as component from '@uif-js/component';
-import { safeNew } from '../render/primitives';
-import { STATE } from '../state';
-import { wizardCall } from '../wizard_api_client';
-import { buildCheckRow } from '../render/shared';
-import type { EnumsBag } from '../render/shell';
+import { safeNew } from '../shared/primitives';
+import { STATE } from '../../state';
+import { wizardCall } from '../../services/wizardApi';
+import { buildCheckRow } from '../shared/shared';
+import type { EnumsBag } from '../shared/shell';
 
 // ─────────────────────────────────────────────────────────────────────
 // Types

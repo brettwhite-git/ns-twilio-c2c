@@ -38,26 +38,26 @@
 
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
-import { wizardCall } from './wizard_api_client';
+import { wizardCall } from './services/wizardApi';
 import {
     MODE, CURRENT_STEP, SELECTED_SECTION, RAIL_VISIBLE,
     setMode, setCurrentStep, setSelectedSection, setRailVisible
 } from './dispatch';
 import type { SectionName } from './dispatch';
 import { STATE } from './state';
-import { safeNew } from './render/primitives';
-import { buildErrorBox, buildPrereqsList } from './render/shared';
-import { wrapContent, buildPausedBanner } from './render/shell';
-import type { EnumsBag } from './render/shell';
-import { buildCredentialsSection } from './sections/credentials';
-import { buildHealthSection } from './sections/health';
-import { buildOverviewSection } from './sections/overview';
-import { buildVoiceSection } from './sections/voice';
-import { buildPhonesSection } from './sections/phones';
-import { buildStep2Form } from './steps/step2';
-import { buildStep3Form } from './steps/step3';
-import { buildStep4Form } from './steps/step4';
-import { buildStep5Activate } from './steps/step5';
+import { safeNew } from './components/shared/primitives';
+import { buildErrorBox, buildPrereqsList } from './components/shared/shared';
+import { wrapContent, buildPausedBanner } from './components/shared/shell';
+import type { EnumsBag } from './components/shared/shell';
+import { buildCredentialsSection } from './components/sections/credentials';
+import { buildHealthSection } from './components/sections/health';
+import { buildOverviewSection } from './components/sections/overview';
+import { buildVoiceSection } from './components/sections/voice';
+import { buildPhonesSection } from './components/sections/phones';
+import { buildStep2Form } from './components/steps/step2';
+import { buildStep3Form } from './components/steps/step3';
+import { buildStep4Form } from './components/steps/step4';
+import { buildStep5Activate } from './components/steps/step5';
 import { createRouter } from './orchestration/router';
 import type { Router } from './orchestration/router';
 import { store } from './app/Store';
@@ -73,7 +73,7 @@ import { store } from './app/Store';
 // SpaClient.ts. Each interface tracks ONE specific access pattern;
 // don't expand them into "everything a snapshot could possibly hold."
 // The right place for a canonical wizardSnapshot type is the server
-// boundary in wizard_api_client.ts when that surface stabilizes.
+// boundary in services/wizardApi.ts when that surface stabilizes.
 // ─────────────────────────────────────────────────────────────────────
 
 interface ConfigSnapshot {
@@ -146,7 +146,7 @@ interface SaveResponse {
     // through setMode/setCurrentStep/setSelectedSection/setRailVisible.
 
     // Path B.3b — WIZARD_API_URL, wizardCall, extractPayload moved
-    // to ./wizard_api_client.ts. Still imported (top of file) so
+    // to ./services/wizardApi.ts. Still imported (top of file) so
     // existing in-file references stay valid.
 
     // Module-level mount state — scriptCtx / bodyContainer / enums
@@ -189,7 +189,7 @@ interface SaveResponse {
     // unchanged because the import is a `const` binding — we mutate
     // properties (STATE.console.foo = bar), never the binding itself.
 
-    // Path B.3b — wizardCall moved to ./wizard_api_client.ts.
+    // Path B.3b — wizardCall moved to ./services/wizardApi.ts.
 
     /**
      * Path D-Store-3a — register App's setState-driven rerender callback.
@@ -928,7 +928,7 @@ interface SaveResponse {
      * Outer container:
      *   StackPanel(HORIZONTAL, justification=SPACE_BETWEEN, gap=M)
      */
-    // Path B.3b — extractPayload moved to ./wizard_api_client.ts.
+    // Path B.3b — extractPayload moved to ./services/wizardApi.ts.
 
     /* ────────────────────────────────────────────────────────────────── */
     /* U11 — Admin Console (post-activation surface)                      */
