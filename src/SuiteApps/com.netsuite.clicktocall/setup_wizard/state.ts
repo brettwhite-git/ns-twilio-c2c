@@ -1,215 +1,46 @@
-// @ts-check
 /**
- * Setup Wizard + Admin Console state — the single mutable STATE
- * object shared across all sections, steps, and the post-activation
- * console.
+ * Setup Wizard + Admin Console runtime state — legacy mutable singleton.
  *
- * Path B.3d (2026-05-27) — extracted from SpaClient.ts. The 235
- * `STATE.X` references in SpaClient.ts work unchanged because the
- * object is exported as a `const` binding — importers can't reassign
- * STATE itself but CAN mutate its properties (which is what every
- * existing call site does — `STATE.console.phonesNumbers = [...]`
- * etc.).
+ * Phase 1 (2026-05-28) — type interfaces moved to `app/InitialState.ts`
+ * (single source of state-shape truth). This module now re-exports those
+ * interfaces for back-compat with the 11 callers still importing
+ * `{ STATE }` and mutating it directly:
  *
- * Why one big STATE object instead of per-section modules?
+ *   - AppController.tsx
+ *   - dispatch.ts
+ *   - components/sections/{overview,phones,voice,credentials,health}.ts
+ *   - components/steps/{step2,step3,step4,step5}.ts
+ *   - orchestration/router.ts
  *
- *   The wizard's data model has heavy cross-section sharing —
- *   snapshot + assignments + preflight are fetched once on console
- *   mount and reused across overview/voice/health/phones. Splitting
- *   STATE into 5+ section modules would either duplicate the shared
- *   slices or require dependency injection at every section's render
- *   call. One mutable root is the pragmatic shape; the type interfaces
- *   below give us per-section typing without splitting the runtime
- *   object.
+ * Phases 3-6 rewrite each caller to use store.getState() + store.dispatch
+ * instead of mutating STATE; Phase 6 deletes this file entirely.
  *
- * TypeScript discipline (vs the original .js STATE):
- *
- *   The original SpaClient.js declared STATE as plain object literal
- *   with no types. This module adds interface declarations for each
- *   slice so:
- *     1. tsc errors when a section writes `STATE.console.foo` with
- *        a missing/typo field
- *     2. VS Code autocomplete works across the whole codebase
- *     3. Future renames can be refactored safely
- *
- *   The interfaces use `unknown`/`null` for fields where the upstream
- *   API response shape is intentionally loose (drift detection,
- *   activity feed). Tighten as discriminated unions when the shapes
- *   stabilize.
+ * Until then, the runtime STATE singleton coexists with the reducer's
+ * immutable copy. They will diverge until callers migrate — that is
+ * expected and accepted for the additive Phase 1 surface.
  */
 
-// ─────────────────────────────────────────────────────────────────────
-// Per-step state shapes (Steps 1-5 of the onboarding wizard)
-// ─────────────────────────────────────────────────────────────────────
+import initialState from './app/InitialState';
+import type {AppState as _WizardState} from './app/InitialState';
 
-export interface Step2State {
-    /** Twilio Account SID (starts with AC...). */
-    accountSid: string;
-    /** Twilio API Key SID (starts with SK...). */
-    apiKeySid: string;
-    /** NetSuite custsecret pointer for the API secret value. Never the secret itself. */
-    apiSecretId: string;
-}
+// Re-export interfaces so callers can keep `import type { Step2State } from '../../state'`
+export type {
+    Step2State,
+    Step3State,
+    Step4State,
+    Step5State,
+    ConsoleState,
+    PrereqsState,
+    AppState as WizardState
+} from './app/InitialState';
 
-export interface Step3State {
-    twimlAppSid: string;
-    phoneNumber: string;
-    intelServiceSid: string;
-    /**
-     * Auto-populated dropdown source lists. Fetched from the
-     * server via wizardListTwiMLApps / wizardListPhoneNumbers /
-     * wizardListIntelServices on Step 3 mount. Secret VALUE
-     * never travels — server uses SecureString + custsecret
-     * pointer at the N/https socket boundary.
-     */
-    twimlApps: unknown[] | null;
-    phoneNumbers: unknown[] | null;
-    intelServices: unknown[] | null;
-    listLoadError: string | null;
-}
-
-export interface Step4State {
-    /** Source lists (null = not yet fetched). */
-    phoneNumbers: unknown[] | null;  // from Twilio (live)
-    employees: unknown[] | null;      // from NetSuite
-    /**
-     * assignments shape: { <phoneSid>: { employeeIds: [n], label: '',
-     * primaryEmployeeId: n }, ... }
-     */
-    assignments: Record<string, unknown>;
-    listLoadError: string | null;
-}
-
-export interface Step5State {
-    snapshot: unknown | null;        // from wizardSnapshot — config record state
-    assignments: unknown[] | null;   // from wizardLoadAssignments — current rep list
-    preflight: unknown[] | null;     // from wizardRunPreflight — check results array
-    activated: boolean;              // true after successful activate
-    activateError: string | null;
-    loading: boolean;                // true while preflight is running
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Admin Console state (post-activation, multi-section)
-// ─────────────────────────────────────────────────────────────────────
-
-export interface ConsoleState {
-    // Shared across sections — fetched once on console mount.
-    snapshot: unknown | null;        // from wizardSnapshot
-    assignments: unknown[] | null;   // from wizardLoadAssignments
-    preflight: unknown[] | null;     // from wizardRunPreflight (Health + Overview)
-    activity: unknown[] | null;      // legacy stub field — kept for back-compat; superseded by recentCalls
-    recentCalls: unknown[] | null;   // from wizardListRecentCalls (Overview Recent calls)
-    drift: unknown | null;           // client-computed {phoneNumbers, voiceUrl, intelService}
-    loading: boolean;                // initial-load gate
-
-    // Phones section (U3 — Phase 3b): inline-edit DataGrid state.
-    phonesEmployees: unknown[] | null;   // from wizardListEmployees (cached)
-    phonesNumbers: unknown[] | null;     // from wizardListPhoneNumbers (live Twilio list)
-    phonesByPhone: unknown[] | null;     // derived: assignments grouped by phoneSid
-    phonesLoading: boolean;              // section-level loader gate
-    phonesSaving: Record<string, boolean>; // { phoneSid: bool } — per-row save spinner
-    phonesError: string | null;
-
-    // Voice section (U4 — Phase 3b): per-field VIEW/EDIT toggle.
-    voiceEditing: 'twimlAppSid' | 'phoneNumber' | 'intelServiceSid' | null;
-    voicePendingValue: string | null;
-    voiceLists: {
-        twimlApps: unknown[] | null;
-        phoneNumbers: unknown[] | null;
-        intelServices: unknown[] | null;
-    };
-    voiceListsLoading: boolean;
-    voiceSaving: boolean;
-    voiceError: string | null;
-
-    // Credentials section (U5 — Phase 3c): modal state.
-    activeModal: 'rotate-secret' | null;
-
-    // Health + Deactivate flow (U6 / U11 carry-over).
-    pendingDeactivateConfirm: boolean;
-    deactivateError: string | null;
-
-    // Path C-7: Health Re-run preflight button loading state.
-    // Set true before wizardCall('wizardRunPreflight'); cleared after
-    // settle (then OR catch). Button reads this to swap label and
-    // enabled state so admins see visible feedback during the refresh.
-    preflightRefreshing: boolean;
-
-    // Cross-section error surface.
-    actionError: string | null;
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Root state interface
-// ─────────────────────────────────────────────────────────────────────
-
-export interface WizardState {
-    step2: Step2State;
-    step3: Step3State;
-    step4: Step4State;
-    step5: Step5State;
-    console: ConsoleState;
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// The actual STATE object. Exported as `const` — importers mutate
-// properties (STATE.console.foo = bar) but never reassign STATE itself.
-// ─────────────────────────────────────────────────────────────────────
-
-export const STATE: WizardState = {
-    step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
-    step3: {
-        twimlAppSid: '',
-        phoneNumber: '',
-        intelServiceSid: '',
-        twimlApps: null,
-        phoneNumbers: null,
-        intelServices: null,
-        listLoadError: null
-    },
-    step4: {
-        phoneNumbers: null,
-        employees: null,
-        assignments: {},
-        listLoadError: null
-    },
-    step5: {
-        snapshot: null,
-        assignments: null,
-        preflight: null,
-        activated: false,
-        activateError: null,
-        loading: false
-    },
-    console: {
-        snapshot: null,
-        assignments: null,
-        preflight: null,
-        activity: null,
-        recentCalls: null,
-        drift: null,
-        loading: false,
-        phonesEmployees: null,
-        phonesNumbers: null,
-        phonesByPhone: null,
-        phonesLoading: false,
-        phonesSaving: {},
-        phonesError: null,
-        voiceEditing: null,
-        voicePendingValue: null,
-        voiceLists: {
-            twimlApps: null,
-            phoneNumbers: null,
-            intelServices: null
-        },
-        voiceListsLoading: false,
-        voiceSaving: false,
-        voiceError: null,
-        activeModal: null,
-        pendingDeactivateConfirm: false,
-        deactivateError: null,
-        preflightRefreshing: false,
-        actionError: null
-    }
-};
+/**
+ * Runtime mutable singleton — same shape as the reducer's initial state,
+ * but cloned so direct mutation in legacy callers doesn't poison the
+ * Store's initial state reference.
+ *
+ * Deep clone via JSON round-trip is acceptable here because the state
+ * tree contains only JSON-safe values (no functions, dates, or class
+ * instances). If that changes in a future phase, swap to structuredClone.
+ */
+export const STATE: _WizardState = JSON.parse(JSON.stringify(initialState));
