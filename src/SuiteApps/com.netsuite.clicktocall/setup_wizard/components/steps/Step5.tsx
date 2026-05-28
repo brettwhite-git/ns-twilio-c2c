@@ -214,10 +214,10 @@ export default class Step5 extends PureComponent<unknown, unknown> {
                 >
                     {heading}
                     <component.StackPanel.Item>
-                        <component.Loader
-                            label="Running preflight checks…"
-                            indeterminate={true}
-                        />
+                        {new component.Loader({
+                            label: 'Running preflight checks…',
+                            indeterminate: true
+                        } as never) as never}
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );

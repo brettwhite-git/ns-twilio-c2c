@@ -147,10 +147,10 @@ export default class Step4 extends PureComponent<unknown, unknown> {
                     {heading}
                     {intro}
                     <component.StackPanel.Item>
-                        <component.Loader
-                            label="Loading phone numbers and employees…"
-                            indeterminate={true}
-                        />
+                        {new component.Loader({
+                            label: 'Loading phone numbers and employees…',
+                            indeterminate: true
+                        } as never) as never}
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );

@@ -24,7 +24,31 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         SET_MODE: Symbol('setMode'),
         SET_CURRENT_STEP: Symbol('setCurrentStep'),
         SET_SELECTED_SECTION: Symbol('setSelectedSection'),
-        SET_RAIL_VISIBLE: Symbol('setRailVisible')
+        SET_RAIL_VISIBLE: Symbol('setRailVisible'),
+        SET_MOUNT_ROUTING: Symbol('setMountRouting'),
+        STEP2_FIELD_CHANGE: Symbol('step2FieldChange'),
+        STEP3_FIELD_CHANGE: Symbol('step3FieldChange'),
+        STEP4_FIELD_CHANGE: Symbol('step4FieldChange'),
+        STEP5_FIELD_CHANGE: Symbol('step5FieldChange'),
+        PREREQS_LOAD_START: Symbol('prereqsLoadStart'),
+        PREREQS_LOAD_SUCCESS: Symbol('prereqsLoadSuccess'),
+        PREREQS_LOAD_FAILURE: Symbol('prereqsLoadFailure'),
+        CONSOLE_LOAD_START: Symbol('consoleLoadStart'),
+        CONSOLE_LOAD_SUCCESS: Symbol('consoleLoadSuccess'),
+        CONSOLE_LOAD_FAILURE: Symbol('consoleLoadFailure'),
+        CONSOLE_DRIFT_SET: Symbol('consoleDriftSet'),
+        PHONES_LOAD_START: Symbol('phonesLoadStart'),
+        PHONES_LOAD_SUCCESS: Symbol('phonesLoadSuccess'),
+        PHONES_ASSIGNMENT_SAVE: Symbol('phonesAssignmentSave'),
+        VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
+        VOICE_FIELD_SAVE: Symbol('voiceFieldSave'),
+        DEACTIVATE_REQUEST: Symbol('deactivateRequest'),
+        DEACTIVATE_SUCCESS: Symbol('deactivateSuccess'),
+        DEACTIVATE_FAILURE: Symbol('deactivateFailure'),
+        REACTIVATE_REQUEST: Symbol('reactivateRequest'),
+        REACTIVATE_SUCCESS: Symbol('reactivateSuccess'),
+        REACTIVATE_FAILURE: Symbol('reactivateFailure'),
+        ACTION_ERROR_SET: Symbol('actionErrorSet')
     };
     const Action = {
         setMode(mode) {
@@ -38,38 +62,220 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         },
         setRailVisible(visible) {
             return { type: ActionType.SET_RAIL_VISIBLE, payload: visible };
+        },
+        setMountRouting(routing) {
+            return { type: ActionType.SET_MOUNT_ROUTING, payload: routing };
+        },
+        step2FieldChange(field, value) {
+            return { type: ActionType.STEP2_FIELD_CHANGE, payload: { field, value } };
+        },
+        step3FieldChange(field, value) {
+            return { type: ActionType.STEP3_FIELD_CHANGE, payload: { field, value } };
+        },
+        step4FieldChange(field, value) {
+            return { type: ActionType.STEP4_FIELD_CHANGE, payload: { field, value } };
+        },
+        step5FieldChange(field, value) {
+            return { type: ActionType.STEP5_FIELD_CHANGE, payload: { field, value } };
+        },
+        prereqsLoadStart() {
+            return { type: ActionType.PREREQS_LOAD_START, payload: null };
+        },
+        prereqsLoadSuccess(checks) {
+            return { type: ActionType.PREREQS_LOAD_SUCCESS, payload: { checks } };
+        },
+        prereqsLoadFailure(error) {
+            return { type: ActionType.PREREQS_LOAD_FAILURE, payload: { error } };
+        },
+        consoleLoadStart() {
+            return { type: ActionType.CONSOLE_LOAD_START, payload: null };
+        },
+        consoleLoadSuccess(slice) {
+            return { type: ActionType.CONSOLE_LOAD_SUCCESS, payload: slice };
+        },
+        consoleLoadFailure(error) {
+            return { type: ActionType.CONSOLE_LOAD_FAILURE, payload: { error } };
+        },
+        consoleDriftSet(drift) {
+            return { type: ActionType.CONSOLE_DRIFT_SET, payload: drift };
+        },
+        phonesLoadStart() {
+            return { type: ActionType.PHONES_LOAD_START, payload: null };
+        },
+        phonesLoadSuccess(slice) {
+            return { type: ActionType.PHONES_LOAD_SUCCESS, payload: slice };
+        },
+        phonesAssignmentSave(payload) {
+            return { type: ActionType.PHONES_ASSIGNMENT_SAVE, payload };
+        },
+        voiceFieldEdit(field, pendingValue = null) {
+            return { type: ActionType.VOICE_FIELD_EDIT, payload: { field, pendingValue } };
+        },
+        voiceFieldSave(payload) {
+            return { type: ActionType.VOICE_FIELD_SAVE, payload };
+        },
+        deactivateRequest() {
+            return { type: ActionType.DEACTIVATE_REQUEST, payload: null };
+        },
+        deactivateSuccess() {
+            return { type: ActionType.DEACTIVATE_SUCCESS, payload: null };
+        },
+        deactivateFailure(error) {
+            return { type: ActionType.DEACTIVATE_FAILURE, payload: { error } };
+        },
+        reactivateRequest() {
+            return { type: ActionType.REACTIVATE_REQUEST, payload: null };
+        },
+        reactivateSuccess() {
+            return { type: ActionType.REACTIVATE_SUCCESS, payload: null };
+        },
+        reactivateFailure(error) {
+            return { type: ActionType.REACTIVATE_FAILURE, payload: { error } };
+        },
+        actionErrorSet(error) {
+            return { type: ActionType.ACTION_ERROR_SET, payload: error };
         }
     };
 
     function reducer(state, action) {
-        const actionMap = new Map([
-            [
-                ActionType.SET_MODE,
-                (state) => core.ImmutableUpdate.of(state, (draft) => {
-                    draft.mode = action.payload;
-                })
-            ],
-            [
-                ActionType.SET_CURRENT_STEP,
-                (state) => core.ImmutableUpdate.of(state, (draft) => {
-                    draft.currentStep = action.payload;
-                })
-            ],
-            [
-                ActionType.SET_SELECTED_SECTION,
-                (state) => core.ImmutableUpdate.of(state, (draft) => {
-                    draft.selectedSection =
-                        action.payload;
-                })
-            ],
-            [
-                ActionType.SET_RAIL_VISIBLE,
-                (state) => core.ImmutableUpdate.of(state, (draft) => {
-                    draft.railVisible = action.payload;
-                })
-            ]
+        const a = action;
+        const handlers = new Map([
+            [ActionType.SET_MODE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.mode = a.payload;
+                })],
+            [ActionType.SET_CURRENT_STEP, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.currentStep = a.payload;
+                })],
+            [ActionType.SET_SELECTED_SECTION, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.selectedSection = a.payload;
+                })],
+            [ActionType.SET_RAIL_VISIBLE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.railVisible = a.payload;
+                })],
+            [ActionType.SET_MOUNT_ROUTING, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.mountRouting = a.payload;
+                })],
+            [ActionType.STEP2_FIELD_CHANGE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.step2[p.field] = p.value;
+                })],
+            [ActionType.STEP3_FIELD_CHANGE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.step3[p.field] = p.value;
+                })],
+            [ActionType.STEP4_FIELD_CHANGE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.step4[p.field] = p.value;
+                })],
+            [ActionType.STEP5_FIELD_CHANGE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.step5[p.field] = p.value;
+                })],
+            [ActionType.PREREQS_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.prereqs.loading = true;
+                    d.prereqs.error = null;
+                })],
+            [ActionType.PREREQS_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.prereqs.loading = false;
+                    d.prereqs.checks = p.checks;
+                    d.prereqs.error = null;
+                })],
+            [ActionType.PREREQS_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.prereqs.loading = false;
+                    d.prereqs.error = p.error;
+                })],
+            [ActionType.CONSOLE_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.loading = true;
+                    d.console.actionError = null;
+                })],
+            [ActionType.CONSOLE_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const slice = a.payload;
+                    Object.assign(d.console, slice);
+                    d.console.loading = false;
+                })],
+            [ActionType.CONSOLE_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.console.loading = false;
+                    d.console.actionError = p.error;
+                })],
+            [ActionType.CONSOLE_DRIFT_SET, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.drift = a.payload;
+                })],
+            [ActionType.PHONES_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.phonesLoading = true;
+                    d.console.phonesError = null;
+                })],
+            [ActionType.PHONES_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    if (p.employees !== undefined)
+                        d.console.phonesEmployees = p.employees;
+                    if (p.numbers !== undefined)
+                        d.console.phonesNumbers = p.numbers;
+                    if (p.byPhone !== undefined)
+                        d.console.phonesByPhone = p.byPhone;
+                    d.console.phonesLoading = false;
+                })],
+            [ActionType.PHONES_ASSIGNMENT_SAVE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    if (p.saving !== undefined) {
+                        d.console.phonesSaving[p.phoneSid] = p.saving;
+                    }
+                    if (p.error !== undefined) {
+                        d.console.phonesError = p.error;
+                    }
+                })],
+            [ActionType.VOICE_FIELD_EDIT, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.console.voiceEditing = p.field;
+                    d.console.voicePendingValue = p.pendingValue ?? null;
+                })],
+            [ActionType.VOICE_FIELD_SAVE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    if (p.phase === 'start') {
+                        d.console.voiceSaving = true;
+                        d.console.voiceError = null;
+                    }
+                    else if (p.phase === 'success') {
+                        d.console.voiceSaving = false;
+                        d.console.voiceEditing = null;
+                        d.console.voicePendingValue = null;
+                        d.console.voiceError = null;
+                    }
+                    else if (p.phase === 'failure') {
+                        d.console.voiceSaving = false;
+                        d.console.voiceError = p.error ?? 'Voice save failed';
+                    }
+                })],
+            [ActionType.DEACTIVATE_REQUEST, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.pendingDeactivateConfirm = true;
+                    d.console.deactivateError = null;
+                })],
+            [ActionType.DEACTIVATE_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.pendingDeactivateConfirm = false;
+                    d.console.deactivateError = null;
+                })],
+            [ActionType.DEACTIVATE_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.console.pendingDeactivateConfirm = false;
+                    d.console.deactivateError = p.error;
+                })],
+            [ActionType.REACTIVATE_REQUEST, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.actionError = null;
+                })],
+            [ActionType.REACTIVATE_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.actionError = null;
+                })],
+            [ActionType.REACTIVATE_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.console.actionError = p.error;
+                })],
+            [ActionType.ACTION_ERROR_SET, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.actionError = a.payload;
+                })]
         ]);
-        const handler = actionMap.get(action.type);
+        const handler = handlers.get(action.type);
         return handler ? handler(state) : state;
     }
 
@@ -77,7 +283,67 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         mode: 'stepper',
         currentStep: 1,
         selectedSection: 'overview',
-        railVisible: false
+        railVisible: false,
+        mountRouting: true,
+        step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
+        step3: {
+            twimlAppSid: '',
+            phoneNumber: '',
+            intelServiceSid: '',
+            twimlApps: null,
+            phoneNumbers: null,
+            intelServices: null,
+            listLoadError: null
+        },
+        step4: {
+            phoneNumbers: null,
+            employees: null,
+            assignments: {},
+            listLoadError: null
+        },
+        step5: {
+            snapshot: null,
+            assignments: null,
+            preflight: null,
+            activated: false,
+            activateError: null,
+            loading: false
+        },
+        prereqs: {
+            checks: null,
+            loading: false,
+            error: null
+        },
+        console: {
+            snapshot: null,
+            assignments: null,
+            preflight: null,
+            activity: null,
+            recentCalls: null,
+            drift: null,
+            loading: false,
+            phonesEmployees: null,
+            phonesNumbers: null,
+            phonesByPhone: null,
+            phonesLoading: false,
+            phonesSaving: {},
+            phonesError: null,
+            voiceEditing: null,
+            voicePendingValue: null,
+            voiceLists: {
+                twimlApps: null,
+                phoneNumbers: null,
+                intelServices: null
+            },
+            voiceListsLoading: false,
+            voiceSaving: false,
+            voiceError: null,
+            activeModal: null,
+            pendingDeactivateConfirm: false,
+            deactivateError: null,
+            preflightRefreshing: false,
+            actionError: null
+        }
     };
 
     const store = core.Store.create({
@@ -127,154 +393,164 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }).then(extractPayload);
     };
 
-    const initial = store.getState();
-    let MODE = initial.mode;
-    let CURRENT_STEP = initial.currentStep;
-    let SELECTED_SECTION = initial.selectedSection;
-    let RAIL_VISIBLE = initial.railVisible;
-    store.subscribe((state) => {
-        MODE = state.mode;
-        CURRENT_STEP = state.currentStep;
-        SELECTED_SECTION = state.selectedSection;
-        RAIL_VISIBLE = state.railVisible;
-    });
-    const setMode = (m) => {
-        store.dispatch(Action.setMode(m));
-    };
-    const setCurrentStep = (n) => {
-        store.dispatch(Action.setCurrentStep(n));
-    };
-    const setSelectedSection = (s) => {
-        store.dispatch(Action.setSelectedSection(s));
-    };
-    const setRailVisible = (v) => {
-        store.dispatch(Action.setRailVisible(v));
-    };
-
-    const STATE = {
-        step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
-        step3: {
-            twimlAppSid: '',
-            phoneNumber: '',
-            intelServiceSid: '',
-            twimlApps: null,
-            phoneNumbers: null,
-            intelServices: null,
-            listLoadError: null
-        },
-        step4: {
-            phoneNumbers: null,
-            employees: null,
-            assignments: {},
-            listLoadError: null
-        },
-        step5: {
-            snapshot: null,
-            assignments: null,
-            preflight: null,
-            activated: false,
-            activateError: null,
-            loading: false
-        },
-        console: {
-            snapshot: null,
-            assignments: null,
-            preflight: null,
-            activity: null,
-            recentCalls: null,
-            drift: null,
-            loading: false,
-            phonesEmployees: null,
-            phonesNumbers: null,
-            phonesByPhone: null,
-            phonesLoading: false,
-            phonesSaving: {},
-            phonesError: null,
-            voiceEditing: null,
-            voicePendingValue: null,
-            voiceLists: {
-                twimlApps: null,
-                phoneNumbers: null,
-                intelServices: null
-            },
-            voiceListsLoading: false,
-            voiceSaving: false,
-            voiceError: null,
-            activeModal: null,
-            pendingDeactivateConfirm: false,
-            deactivateError: null,
-            preflightRefreshing: false,
-            actionError: null
-        }
-    };
-
-    const safeNew = (Ctor, options, label) => {
-        if (!Ctor) {
-            console.log('[CTC Setup Wizard] ' + label + ' constructor missing — skipping');
-            return null;
-        }
+    async function loadConsole() {
+        store.dispatch(Action.consoleLoadStart());
+        const safe = (promise) => promise.catch(() => null);
         try {
-            return new Ctor(options);
+            const [snapshot, assignments, preflight, recentCalls] = await Promise.all([
+                safe(wizardCall('wizardSnapshot', {})),
+                safe(wizardCall('wizardLoadAssignments', {})),
+                safe(wizardCall('wizardRunPreflight', {})),
+                safe(wizardCall('wizardListRecentCalls', { limit: 10 }))
+            ]);
+            const slice = {
+                snapshot,
+                assignments: (assignments && assignments.rows) || null,
+                preflight: (preflight && preflight.checks) || null,
+                recentCalls: (recentCalls && recentCalls.calls) || null
+            };
+            store.dispatch(Action.consoleLoadSuccess(slice));
         }
         catch (e) {
-            const err = e;
-            console.log('[CTC Setup Wizard] ' + label + ' construction failed:', err && err.message ? err.message : e, '— options:', options);
-            return null;
+            const msg = e instanceof Error ? e.message : 'Console load failed';
+            store.dispatch(Action.consoleLoadFailure(msg));
         }
-    };
-
-    const buildTextField = (label, placeholder, currentValue, onChange) => {
-        const tb = safeNew(component__namespace.TextBox, {
-            text: currentValue || '',
-            placeholder: placeholder,
-            onTextChanged: (args) => {
-                onChange(args && args.text ? args.text : '');
+    }
+    async function deactivate() {
+        store.dispatch(Action.deactivateRequest());
+        try {
+            const result = await wizardCall('wizardActivate', { deactivate: true });
+            if (result && result.ok === false) {
+                const err = result.error || 'Deactivate failed';
+                store.dispatch(Action.deactivateFailure(err));
+                return;
             }
-        }, 'TextBox(' + label + ')');
-        if (!tb)
-            return null;
-        return safeNew(component__namespace.Field, {
-            label: label,
-            control: tb,
-            orientation: component__namespace.Field.Orientation.VERTICAL
-        }, 'Field(' + label + ')') || tb;
-    };
-    const buildCheckRow = (check) => {
-        const icon = badgeFor(check.status);
-        const labelText = safeNew(component__namespace.Text, {
-            text: check.label,
-            type: component__namespace.Text.Type.STRONG
-        }, 'Text(row-label)');
-        const detailText = check.detail ? safeNew(component__namespace.Text, {
-            text: check.detail,
-            type: component__namespace.Text.Type.WEAK,
-            size: component__namespace.Text.Size.S
-        }, 'Text(row-detail)') : null;
-        const hintText = check.repairHint ? safeNew(component__namespace.Text, {
-            text: '→ ' + check.repairHint,
-            type: component__namespace.Text.Type.DEFAULT,
-            size: component__namespace.Text.Size.S
-        }, 'Text(row-hint)') : null;
-        const rightStackItems = [labelText, detailText, hintText]
-            .filter((c) => c != null);
-        const rightStack = safeNew(component__namespace.StackPanel, {
-            items: rightStackItems,
-            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-            itemGap: component__namespace.StackPanel.GapSize.XXS
-        }, 'StackPanel(row-right)');
-        const rowItems = [icon, rightStack]
-            .filter((c) => c != null);
-        return safeNew(component__namespace.StackPanel, {
-            items: rowItems,
-            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-            alignment: component__namespace.StackPanel.Alignment.START,
-            itemGap: component__namespace.StackPanel.GapSize.M
-        }, 'StackPanel(row)');
-    };
-    const badgeFor = (status) => {
+            store.dispatch(Action.deactivateSuccess());
+            await loadConsole();
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : 'Deactivate failed';
+            store.dispatch(Action.deactivateFailure(msg));
+        }
+    }
+    async function reactivate() {
+        store.dispatch(Action.reactivateRequest());
+        try {
+            const result = await wizardCall('wizardActivate', {});
+            if (result && result.ok === false) {
+                const err = result.error || 'Reactivate failed';
+                store.dispatch(Action.reactivateFailure(err));
+                return;
+            }
+            store.dispatch(Action.reactivateSuccess());
+            await loadConsole();
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : 'Reactivate failed';
+            store.dispatch(Action.reactivateFailure(msg));
+        }
+    }
+
+    async function loadPhonesData() {
+        store.dispatch(Action.phonesLoadStart());
+        try {
+            const [phonesPayload, employeesPayload] = await Promise.all([
+                wizardCall('wizardListPhoneNumbers', {}),
+                wizardCall('wizardListEmployees', {})
+            ]);
+            const numbers = (phonesPayload && phonesPayload.phones) || [];
+            const employees = (employeesPayload && employeesPayload.employees) || [];
+            store.dispatch(Action.phonesLoadSuccess({ numbers, employees }));
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : 'Phones load failed';
+            store.dispatch(Action.phonesAssignmentSave({
+                phoneSid: '__load__',
+                error: msg
+            }));
+        }
+    }
+    async function savePhonesAssignment(phoneSid, employeeIds, label, primaryEmployeeId) {
+        store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: true, error: null }));
+        try {
+            const payload = {
+                phoneSid,
+                employeeIds,
+                label,
+                primaryEmployeeId
+            };
+            const result = await wizardCall('wizardSaveAssignments', payload);
+            if (result && result.ok === false) {
+                const err = result.error || 'Save failed';
+                store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: err }));
+                return;
+            }
+            const refreshed = await wizardCall('wizardLoadAssignments', {});
+            const byPhone = (refreshed && refreshed.byPhone) || [];
+            store.dispatch(Action.phonesLoadSuccess({ byPhone }));
+            store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: null }));
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : 'Save failed';
+            store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: msg }));
+        }
+    }
+
+    async function loadPrereqs() {
+        store.dispatch(Action.prereqsLoadStart());
+        try {
+            const payload = await wizardCall('wizardPrereqs', {});
+            const checks = (payload && payload.checks) || [];
+            store.dispatch(Action.prereqsLoadSuccess(checks));
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : 'Prereqs load failed';
+            store.dispatch(Action.prereqsLoadFailure(msg));
+        }
+    }
+
+    function determineLandingStep(snap) {
+        const has = (v) => !!(v && String(v).trim().length > 0);
+        if (!has(snap.accountSid) || !has(snap.apiKeySid))
+            return 2;
+        if (!has(snap.apiSecretId))
+            return 2;
+        if (!has(snap.twimlAppSid) || !has(snap.phoneNumber))
+            return 3;
+        return 'console';
+    }
+    const TOTAL_STEPS = 5;
+    function goToStep(stepNum) {
+        const clamped = Math.max(1, Math.min(TOTAL_STEPS, stepNum));
+        store.dispatch(Action.setMode('stepper'));
+        store.dispatch(Action.setCurrentStep(clamped));
+        if (clamped === 1) {
+            loadPrereqs();
+        }
+    }
+    function goToConsole() {
+        store.dispatch(Action.setMode('console'));
+        store.dispatch(Action.setSelectedSection('overview'));
+        store.dispatch(Action.setRailVisible(true));
+        store.dispatch(Action.actionErrorSet(null));
+        loadConsole();
+    }
+    function goToSection(sectionName) {
+        store.dispatch(Action.setSelectedSection(sectionName));
+        const state = store.getState();
+        if (state.mode === 'stepper') {
+            store.dispatch(Action.setMode('console'));
+        }
+        store.dispatch(Action.actionErrorSet(null));
+        if (sectionName === 'phones' && state.console.phonesNumbers === null) {
+            loadPhonesData();
+        }
+    }
+
+    const StatusIcon = (props) => {
         let icon;
         let color;
-        switch (status) {
+        switch (props.status) {
             case 'pass':
                 icon = core__namespace.SystemIcon.STATUS_SUCCESS_FILLED;
                 color = core__namespace.ImageConstant.Color.SUCCESS;
@@ -299,2056 +575,127 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 icon = core__namespace.SystemIcon.STATUS_INFO;
                 color = core__namespace.ImageConstant.Color.NEUTRAL;
         }
-        const ImageCtor = component__namespace.Image;
-        return safeNew(ImageCtor, {
-            image: icon,
-            size: component__namespace.Image.Size.M,
-            color: color,
-            presentation: true
-        }, 'Image(status-' + status + ')');
-    };
-    const buildErrorBox = (errorMessage) => {
-        return safeNew(component__namespace.Text, {
-            text: 'Could not load prerequisite checks: ' + errorMessage,
-            type: component__namespace.Text.Type.STRONG
-        }, 'Text(error)');
-    };
-    const buildPrereqsList = (checks) => {
-        const rows = (checks || []).map((c) => buildCheckRow(c))
-            .filter((r) => r != null);
-        if (rows.length === 0) {
-            return safeNew(component__namespace.Text, {
-                text: 'No checks returned.'
-            }, 'Text(empty-checks)');
-        }
-        return safeNew(component__namespace.StackPanel, {
-            items: rows,
-            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-            itemGap: component__namespace.StackPanel.GapSize.M
-        }, 'StackPanel(prereqs)');
+        return (jsxRuntime.jsx(component__namespace.Image, { image: icon, size: (props.size || component__namespace.Image.Size.M), color: color, presentation: true }));
     };
 
-    const wrapContent = (d, child) => {
-        const padded = safeNew(d.CP, {
-            content: child,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            outerGap: {
-                start: d.CP_Gap.XXL,
-                end: d.CP_Gap.XXL,
-                vertical: d.CP_Gap.M
-            }
-        }, 'ContentPanel(rail-wrapper)') || child;
-        return safeNew(d.Sp, {
-            content: padded,
-            orientation: d.Sp.Orientation.VERTICAL
-        }, 'ScrollPanel(rail-content)') || padded;
-    };
-    const buildPausedBanner = (d, onReactivate) => {
-        const ButtonType = component__namespace.Button.Type;
-        const bodyText = safeNew(d.T, {
-            text: 'Reps cannot place calls until you reactivate. All ' +
-                'config is preserved.'
-        }, 'Text(paused-banner-body)');
-        const reactivateBtn = safeNew(component__namespace.Button, {
-            label: 'Reactivate',
-            type: ButtonType.PRIMARY,
-            action: onReactivate
-        }, 'Button(paused-banner-reactivate)');
-        const contentRow = safeNew(d.SP, {
-            items: [bodyText, reactivateBtn].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.L,
-            justification: (d.SP.Justification && d.SP.Justification.SPACE_BETWEEN) || undefined,
-            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-        }, 'StackPanel(paused-banner-content)') || bodyText;
-        return safeNew(component__namespace.BannerMessage, {
-            title: 'Click-to-Call is paused',
-            content: contentRow,
-            type: component__namespace.BannerMessage.Type.WARNING,
-            showCloseButton: false
-        }, 'BannerMessage(paused)');
-    };
-    const buildStatCard = (d, spec) => {
-        try {
-            return d.Cd.metric({
-                title: spec.title,
-                metric: spec.metric,
-                description: spec.icon
-                    ? buildIconedDescription(d, spec)
-                    : spec.description
-            });
-        }
-        catch (e) {
-            console.warn('[CTC Setup Wizard] Card.metric threw, ' +
-                'falling back to manual stack:', e);
-        }
-        return buildStatCardManualStack(d, spec);
-    };
-    const buildIconedDescription = (d, spec) => {
-        const ImageCtor = component__namespace.Image;
-        const iconColor = toneToImageColor(spec.tone);
-        const icon = safeNew(ImageCtor, {
-            image: spec.icon,
-            size: component__namespace.Image.Size.S,
-            color: iconColor,
-            presentation: true
-        }, 'Image(stat-icon-desc-' + spec.title + ')');
-        const descText = spec.description ? safeNew(d.T, {
-            text: spec.description,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(stat-desc-' + spec.title + ')') : null;
-        return safeNew(d.SP, {
-            items: [icon, descText].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.XS,
-            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-        }, 'StackPanel(stat-iconed-desc-' + spec.title + ')') || icon || descText;
-    };
-    const buildStatCardManualStack = (d, spec) => {
-        const label = safeNew(d.T, {
-            text: spec.title,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(stat-label)');
-        const value = safeNew(d.H, {
-            content: spec.metric,
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(stat-value)');
-        const sub = spec.description ? safeNew(d.T, {
-            text: spec.description,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(stat-sub)') : null;
-        return safeNew(d.SP, {
-            items: [label, value, sub].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, 'StackPanel(stat-card-' + spec.title + ')');
-    };
-    const toneToImageColor = (tone) => {
-        if (!tone)
-            return undefined;
-        switch (tone) {
-            case 'success': return core__namespace.ImageConstant.Color.SUCCESS;
-            case 'warning': return core__namespace.ImageConstant.Color.WARNING;
-            case 'info': return core__namespace.ImageConstant.Color.INFO;
-            case 'neutral': return core__namespace.ImageConstant.Color.NEUTRAL;
-            default: return undefined;
-        }
+    const CheckRow = (props) => {
+        const { check } = props;
+        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, alignment: component__namespace.StackPanel.Alignment.START, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(StatusIcon, { status: check.status }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: check.label }) }), check.detail ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: check.detail }) })) : null, check.repairHint ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '→ ' + check.repairHint }) })) : null] }) })] }));
     };
 
-    const TWILIO_CREDS_DOCS = {
-        accountSid: 'https://www.twilio.com/docs/iam/api/account',
-        apiKeySid: 'https://www.twilio.com/docs/iam/api-keys',
-        apiSecret: 'https://www.twilio.com/docs/iam/api-keys'
-    };
-    const buildCredentialsSection = (d) => {
-        const snap = (STATE.console.snapshot || {});
-        const items = [];
-        const ButtonType = component__namespace.Button.Type;
-        const manageBtn = safeNew(component__namespace.Button, {
-            label: 'Open NetSuite API Secrets',
-            type: ButtonType.DEFAULT,
-            startIcon: core__namespace.SystemIcon.LOCK,
-            action: () => {
-                try {
-                    window.open('/app/common/scripting/secrets/settings.nl', '_blank');
-                }
-                catch (e) { }
-            }
-        }, 'Button(open-api-secrets)');
-        const headerRow = safeNew(d.SP, {
-            items: [manageBtn].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S,
-            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-        }, 'StackPanel(credentials-header-row)');
-        if (headerRow)
-            items.push(headerRow);
-        const intro = safeNew(d.T, {
-            text: 'Twilio public identifiers and NetSuite secret pointer. ' +
-                'These values are safe to view; the API Key Secret value ' +
-                'itself is held in NetSuite\'s encrypted vault and is ' +
-                'never exposed to scripts.',
-            type: d.T_Type.WEAK
-        }, 'Text(credentials-intro)');
-        if (intro)
-            items.push(intro);
-        items.push(buildCredentialRow(d, {
-            label: 'Account SID',
-            value: snap.accountSid || '(not set)',
-            help: 'Public identifier for your Twilio account. Safe to view; ' +
-                'used by SuiteScript to address the Twilio REST API.',
-            docUrl: TWILIO_CREDS_DOCS.accountSid
-        }));
-        items.push(buildCredentialRow(d, {
-            label: 'API Key SID',
-            value: snap.apiKeySid || '(not set)',
-            help: 'Public identifier for the scoped API Key. Pairs with the ' +
-                'secret value to authenticate REST calls.',
-            docUrl: TWILIO_CREDS_DOCS.apiKeySid
-        }));
-        items.push(buildCredentialRow(d, {
-            label: 'API Key Secret pointer',
-            value: snap.apiSecretId || '(not set)',
-            help: 'Script ID of the NetSuite API Secret holding the secret ' +
-                'value. The actual secret stays encrypted in NetSuite ' +
-                'and is never exposed to SuiteScript at runtime.',
-            docUrl: TWILIO_CREDS_DOCS.apiSecret
-        }));
-        items.push(buildSecretRotationRunbook(d));
-        return safeNew(d.SP, {
-            items: items.filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, 'StackPanel(credentials)');
-    };
-    const buildCredentialRow = (d, spec) => {
-        const labelText = safeNew(d.T, {
-            text: spec.label,
-            type: d.T_Type.STRONG
-        }, 'Text(cred-label)');
-        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
-            content: 'Twilio docs ↗',
-            url: spec.docUrl,
-            target: component__namespace.Link.Target.BLANK
-        }, 'Link(cred-doc-' + spec.label + ')') : null;
-        const labelRow = docLink ? safeNew(d.SP, {
-            items: [labelText, docLink].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M,
-            alignment: (d.SP.Alignment && d.SP.Alignment.CENTER) || undefined
-        }, 'StackPanel(cred-label-row-' + spec.label + ')') : labelText;
-        const valueText = safeNew(d.T, {
-            text: spec.value,
-            type: d.T_Type.DEFAULT
-        }, 'Text(cred-value)');
-        const helpText = safeNew(d.T, {
-            text: spec.help,
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(cred-help)');
-        const inner = safeNew(d.SP, {
-            items: [labelRow, valueText, helpText].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, 'StackPanel(cred-row-inner)');
-        if (!d.CP)
-            return inner;
-        return safeNew(d.CP, {
-            content: inner,
-            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-            horizontalAlignment: d.CP_HAlign.STRETCH
-        }, 'ContentPanel(cred-row-' + spec.label + ')') || inner;
-    };
-    const buildSecretRotationRunbook = (d) => {
-        const title = safeNew(d.H, {
-            content: 'Rotating the API Key Secret',
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(rotation-runbook)');
-        const intro = safeNew(d.T, {
-            text: 'Twilio recommends rotating API Key Secrets every 90 days. ' +
-                'The rotation happens in two external systems:',
-            type: d.T_Type.WEAK
-        }, 'Text(rotation-intro)');
-        const step1 = safeNew(d.T, {
-            text: '1. In the Twilio Console, generate a new API Key Secret ' +
-                '(Account > API keys & tokens > Create API key). Save the ' +
-                'Secret value — Twilio shows it only once.'
-        }, 'Text(rotation-step-1)');
-        const step2 = safeNew(d.T, {
-            text: '2. In NetSuite, navigate to Setup > Company > Preferences ' +
-                '> API Secrets. Edit the secret with script ID matching ' +
-                'the pointer above. Paste the new Twilio Secret value. Save.'
-        }, 'Text(rotation-step-2)');
-        const step3 = safeNew(d.T, {
-            text: '3. Return to this console\'s Health section and click ' +
-                'Re-run on Preflight to verify the new secret authenticates.'
-        }, 'Text(rotation-step-3)');
-        const inner = safeNew(d.SP, {
-            items: [title, intro, step1, step2, step3].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(rotation-inner)');
-        if (!d.CP)
-            return inner;
-        return safeNew(d.CP, {
-            content: inner,
-            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            rootStyle: {
-                border: '1px solid #E89C2B',
-                borderRadius: '8px',
-                backgroundColor: '#FDF8EE',
-                padding: '16px 20px'
-            }
-        }, 'ContentPanel(rotation-callout)') || inner;
+    const PrereqsList = (props) => {
+        const { checks } = props;
+        if (!checks || checks.length === 0) {
+            return (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No checks returned." }));
+        }
+        return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: checks.map((c, idx) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(CheckRow, { check: c }) }, 'check-' + (c.id || idx)))) }));
     };
 
-    const buildHealthSection = (d, deps) => {
-        const items = [];
-        const preflightBlock = buildHealthPreflightBlock(d, deps);
-        if (preflightBlock)
-            items.push(preflightBlock);
-        const driftBlock = buildHealthDriftBlock(d);
-        if (driftBlock)
-            items.push(driftBlock);
-        const dangerBlock = buildHealthDangerZone(d, deps);
-        if (dangerBlock)
-            items.push(dangerBlock);
-        if (STATE.console.actionError) {
-            const err = safeNew(d.T, {
-                text: '✕ ' + STATE.console.actionError,
-                type: d.T_Type.STRONG
-            }, 'Text(health-error)');
-            if (err)
-                items.push(err);
-        }
-        if (items.length === 0)
-            return safeNew(d.T, { text: 'Health' }, 'Text(health-empty)');
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, 'StackPanel(health)');
-    };
-    const buildHealthPreflightBlock = (d, deps) => {
-        const ButtonType = component__namespace.Button.Type;
-        const sectionHeader = safeNew(d.H, {
-            content: 'Preflight',
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(health-preflight)');
-        const refreshing = !!STATE.console.preflightRefreshing;
-        const rerunBtn = safeNew(component__namespace.Button, {
-            label: refreshing ? 'Re-running…' : 'Re-run',
-            type: ButtonType.DEFAULT,
-            startIcon: core__namespace.SystemIcon.REFRESH,
-            enabled: !refreshing,
-            action: () => {
-                STATE.console.preflightRefreshing = true;
-                deps.rerender();
-                wizardCall('wizardRunPreflight', {}).then((p) => {
-                    const checks = p && p.checks;
-                    STATE.console.preflight = Array.isArray(checks) ? checks : [];
-                }).catch((e) => {
-                    const err = e;
-                    STATE.console.actionError = 'Preflight failed: ' +
-                        (err && err.message ? err.message : String(e));
-                }).then(() => {
-                    STATE.console.preflightRefreshing = false;
-                    deps.rerender();
-                });
-            }
-        }, 'Button(rerun-preflight)');
-        const toolbar = safeNew(d.SP, {
-            items: [rerunBtn].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(preflight-toolbar)');
-        const headerRow = safeNew(d.SP, {
-            items: [sectionHeader, toolbar].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(preflight-header-row)');
-        const preflight = STATE.console.preflight;
-        let bodyContent;
-        if (preflight === null || preflight === undefined) {
-            bodyContent = safeNew(d.T, {
-                text: 'Preflight not yet run. Click Re-run to check.',
-                type: d.T_Type.WEAK
-            }, 'Text(preflight-loading)');
-        }
-        else if (preflight.length === 0) {
-            bodyContent = safeNew(d.T, {
-                text: 'No checks returned.',
-                type: d.T_Type.WEAK
-            }, 'Text(preflight-empty)');
-        }
-        else {
-            bodyContent = buildHealthChecksDataGrid(d, preflight, 'preflight');
-        }
-        return safeNew(d.SP, {
-            items: [headerRow, bodyContent].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(preflight-block)');
-    };
-    const buildHealthDriftBlock = (d) => {
-        const sectionHeader = safeNew(d.H, {
-            content: 'Drift detectors',
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(health-drift)');
-        const drift = (STATE.console.drift || {});
-        const detectors = [
-            { id: 'voiceUrl', label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'unknown' },
-            { id: 'phoneNumbers', label: 'Phone number list', status: drift.phoneNumbers || 'unknown' },
-            { id: 'intelService', label: 'Intel Service', status: drift.intelService || 'unknown' }
-        ];
-        const statusMap = {
-            'in-sync': { status: 'pass', detail: 'In sync with Twilio' },
-            'drift': { status: 'warn', detail: 'Drift detected — review section for details' },
-            'not-configured': { status: 'info_disabled', detail: 'Not configured' },
-            'unknown': { status: 'info_disabled', detail: 'Drift detection requires data load' }
-        };
-        const checks = detectors.map((det) => {
-            const mapped = statusMap[det.status] || statusMap.unknown;
-            return {
-                id: det.id,
-                label: det.label,
-                status: mapped.status,
-                detail: mapped.detail
-            };
-        });
-        const grid = buildHealthChecksDataGrid(d, checks, 'drift');
-        return safeNew(d.SP, {
-            items: [sectionHeader, grid].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(drift-block)');
-    };
-    const buildHealthChecksDataGrid = (d, checks, gridName) => {
-        if (!d.DG) {
-            console.warn('[CTC] DataGrid component unavailable; health falling back to StackPanel');
-            const fallbackRows = (checks || []).map((c) => buildCheckRow(c))
-                .filter((r) => r != null);
-            if (fallbackRows.length === 0)
-                return null;
-            return safeNew(d.SP, {
-                items: fallbackRows,
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(health-checks-fallback-' + gridName + ')');
-        }
-        if (!checks || checks.length === 0)
-            return null;
-        let rowsDs;
-        try {
-            rowsDs = new d.Ads(checks);
-        }
-        catch (e) {
-            console.error('[CTC] Health checks ArrayDataSource failed:', e);
-            return null;
-        }
-        const CT = d.DG.ColumnType;
-        const statusLabelFor = (status) => {
-            switch (status) {
-                case 'pass':
-                    return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
-                case 'fail':
-                    return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
-                case 'warn':
-                    return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
-                case 'info_enabled':
-                    return { text: 'Info', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
-                case 'info_disabled':
-                    return { text: 'Off', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-                default:
-                    return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-            }
-        };
-        const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
-            (component__namespace.DataGrid && component__namespace.DataGrid.HorizontalAlignment);
-        const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
-        const statusIconColDef = {
-            type: CT.TEMPLATED,
-            name: 'statusIcon',
-            label: '',
-            stretchFactor: 1,
-            horizontalAlignment: colAlignCenter,
-            headerHorizontalAlignment: colAlignCenter,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
-                    const icon = badgeFor(row.status || '') ||
-                        safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
-                    if (!d.CP)
-                        return icon;
-                    return safeNew(d.CP, {
-                        content: icon,
-                        horizontalAlignment: d.CP_HAlign.CENTER
-                    }, 'ContentPanel(health-icon-center)') || icon;
-                }
-                catch (e) {
-                    console.error('[CTC] Health status icon column threw:', e);
-                    return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
-                }
-            }
-        };
-        const checkColDef = {
-            type: CT.TEMPLATED,
-            name: 'check',
-            label: 'Check',
-            stretchFactor: 3,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(check-empty)');
-                    return safeNew(d.T, {
-                        text: row.label || '',
-                        type: d.T_Type.STRONG
-                    }, 'Text(check-label)');
-                }
-                catch (e) {
-                    console.error('[CTC] Health check column threw:', e);
-                    return safeNew(d.T, { text: '(error)' }, 'Text(check-error)');
-                }
-            }
-        };
-        const detailColDef = {
-            type: CT.TEMPLATED,
-            name: 'detail',
-            label: 'Detail',
-            stretchFactor: 6,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row || !row.detail)
-                        return safeNew(d.T, {
-                            text: '—',
-                            type: d.T_Type.WEAK
-                        }, 'Text(detail-empty)');
-                    return safeNew(d.T, {
-                        text: row.detail,
-                        type: d.T_Type.WEAK
-                    }, 'Text(check-detail)');
-                }
-                catch (e) {
-                    console.error('[CTC] Health detail column threw:', e);
-                    return safeNew(d.T, { text: '(error)' }, 'Text(detail-error)');
-                }
-            }
-        };
-        const statusBadgeColDef = {
-            type: CT.TEMPLATED,
-            name: 'statusBadge',
-            label: 'Status',
-            stretchFactor: 2,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(statusbadge-empty)');
-                    const sb = statusLabelFor(row.status || '');
-                    return safeNew(d.Bdg, {
-                        content: sb.text,
-                        type: d.Bdg.Type.SUBTLE,
-                        rootStyle: {
-                            backgroundColor: sb.palette.bg,
-                            color: sb.palette.fg,
-                            border: '1px solid ' + sb.palette.border
-                        }
-                    }, 'Badge(health-status)') || safeNew(d.T, { text: sb.text }, 'Text(statusbadge-fallback)');
-                }
-                catch (e) {
-                    console.error('[CTC] Health status-badge column threw:', e);
-                    return safeNew(d.T, { text: '(error)' }, 'Text(statusbadge-error)');
-                }
-            }
-        };
-        return safeNew(d.DG, {
-            dataSource: rowsDs,
-            columns: [statusIconColDef, checkColDef, detailColDef, statusBadgeColDef],
-            columnStretch: true,
-            highlightRowsOnHover: true,
-            stripedRows: true,
-            dataRowHeight: 48,
-            headerRowHeight: 40,
-            rootStyle: { width: '100%' }
-        }, 'DataGrid(health-' + gridName + ')');
-    };
-    const buildHealthDangerZone = (d, deps) => {
-        const snap = (STATE.console.snapshot || {});
-        const isPaused = snap.active === false;
-        if (isPaused)
-            return null;
-        const ButtonType = component__namespace.Button.Type;
-        const sectionHeader = safeNew(d.H, {
-            content: 'Danger zone',
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(danger-zone)');
-        const description = safeNew(d.T, {
-            text: 'Deactivate Click-to-Call: reps lose phone-icon access ' +
-                'across all roles. In-progress calls finish normally; new ' +
-                'calls cannot be placed. Reactivate any time.',
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(danger-desc)');
-        const buttons = [];
-        if (STATE.console.pendingDeactivateConfirm) {
-            const cancelBtn = safeNew(component__namespace.Button, {
-                label: 'Cancel',
-                type: ButtonType.DEFAULT,
-                action: () => {
-                    STATE.console.pendingDeactivateConfirm = false;
-                    deps.rerender();
-                }
-            }, 'Button(cancel-deactivate)');
-            if (cancelBtn)
-                buttons.push(cancelBtn);
-            const confirmBtn = safeNew(component__namespace.Button, {
-                label: 'Confirm deactivate',
-                type: ButtonType.DANGER || ButtonType.DEFAULT,
-                action: deps.onDeactivateClick
-            }, 'Button(confirm-deactivate)');
-            if (confirmBtn)
-                buttons.push(confirmBtn);
-        }
-        else {
-            const deactivateBtn = safeNew(component__namespace.Button, {
-                label: 'Deactivate',
-                type: ButtonType.DANGER || ButtonType.DEFAULT,
-                action: deps.onDeactivateClick
-            }, 'Button(deactivate)');
-            if (deactivateBtn)
-                buttons.push(deactivateBtn);
-        }
-        const deactivateErrorText = STATE.console.deactivateError ? safeNew(d.T, {
-            text: '✕ Deactivate failed: ' + STATE.console.deactivateError,
-            type: d.T_Type.STRONG
-        }, 'Text(deactivate-error)') : null;
-        const buttonRow = buttons.length > 0 ? safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(danger-buttons)') : null;
-        const inner = safeNew(d.SP, {
-            items: [sectionHeader, description, buttonRow, deactivateErrorText]
-                .filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(danger-zone)');
-        if (!d.CP)
-            return inner;
-        return safeNew(d.CP, {
-            content: inner,
-            outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            rootStyle: {
-                border: '1px solid #D33A2C',
-                borderRadius: '8px',
-                backgroundColor: '#FDF4F3',
-                padding: '16px 20px'
-            }
-        }, 'ContentPanel(danger-zone-callout)') || inner;
+    const ErrorText = (props) => {
+        const prefix = props.glyph === false ? '' : '✕ ';
+        return (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: prefix + props.message }));
     };
 
-    const buildOverviewSection = (d, deps) => {
-        const items = [];
-        const stats = buildOverviewStatCards(d);
-        if (stats)
-            items.push(stats);
-        const quick = buildOverviewQuickActions(d, deps);
-        if (quick)
-            items.push(quick);
-        const activity = buildOverviewActivityFeed(d);
-        if (activity)
-            items.push(activity);
-        if (items.length === 0)
-            return safeNew(d.T, { text: 'Overview' }, 'Text(overview-empty)');
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, 'StackPanel(overview)');
-    };
-    const buildOverviewStatCards = (d) => {
-        const snap = (STATE.console.snapshot || {});
-        const assignments = (STATE.console.assignments || []);
-        const preflight = (STATE.console.preflight || []);
-        const phoneCount = {};
-        assignments.forEach((a) => {
-            if (a.phoneSid)
-                phoneCount[a.phoneSid] = true;
-        });
-        const phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
-        const repCount = assignments.length;
-        const preflightPassed = preflight.filter((c) => c.status === 'pass').length;
-        const preflightTotal = preflight.length;
-        const statusLabel = snap.active === false ? 'Paused' :
-            snap.active === true ? 'Active' : 'Unknown';
-        const statusIcon = snap.active === true ? core__namespace.SystemIcon.STATUS_SUCCESS_FILLED :
-            snap.active === false ? core__namespace.SystemIcon.STATUS_WARNING_FILLED :
-                core__namespace.SystemIcon.STATUS_INFO_FILLED;
-        const statusTone = snap.active === true ? 'success' :
-            snap.active === false ? 'warning' :
-                'info';
-        const cards = [
-            buildStatCard(d, {
-                title: 'Status',
-                metric: statusLabel,
-                description: snap.active === false ? 'Reps cannot place calls'
-                    : 'Reps can place calls',
-                icon: statusIcon,
-                tone: statusTone
-            }),
-            buildStatCard(d, {
-                title: 'Phone numbers',
-                metric: String(phonesConfigured),
-                description: phonesConfigured === 0 ? 'No numbers configured'
-                    : snap.phoneNumber || ''
-            }),
-            buildStatCard(d, {
-                title: 'Assigned reps',
-                metric: String(repCount),
-                description: repCount === 0 ? 'No assignments'
-                    : (repCount === 1 ? '1 rep' : repCount + ' reps')
-            }),
-            buildStatCard(d, {
-                title: 'Preflight',
-                metric: preflightTotal > 0
-                    ? preflightPassed + ' of ' + preflightTotal
-                    : '—',
-                description: preflightTotal > 0 ? 'See Health for detail'
-                    : 'Not yet run'
-            })
-        ].filter((c) => c != null);
-        if (cards.length === 0)
-            return null;
-        if (d.GP) {
-            return safeNew(d.GP, {
-                columns: '1fr 1fr 1fr 1fr',
-                rows: 'auto',
-                items: cards,
-                columnGap: (d.GP_Gap && d.GP_Gap.M) || undefined
-            }, 'GridPanel(overview-stats)');
+    class Step1 extends core.PureComponent {
+        componentDidMount() {
+            loadPrereqs();
         }
-        return safeNew(d.SP, {
-            items: cards,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(overview-stats-fallback)');
-    };
-    const buildOverviewQuickActions = (d, deps) => {
-        const ButtonType = component__namespace.Button.Type;
-        const heading = safeNew(d.H, {
-            content: 'Quick actions',
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(quick-actions)');
-        const subtitle = safeNew(d.T, {
-            text: 'Common admin tasks — full screens still available via the left rail.',
-            type: d.T_Type.WEAK,
-            size: d.T && d.T.Size ? d.T.Size.S : undefined
-        }, 'Text(quick-actions-subtitle)');
-        const headerStack = safeNew(d.SP, {
-            items: [heading, subtitle].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS
-        }, 'StackPanel(quick-actions-header)');
-        const actions = [
-            {
-                label: 'Add a phone number',
-                icon: core__namespace.SystemIcon.ADD,
-                type: ButtonType.DEFAULT,
-                onClick: () => deps.goToSection('phones')
-            },
-            {
-                label: 'Reassign reps',
-                icon: core__namespace.SystemIcon.REFRESH,
-                type: ButtonType.DEFAULT,
-                onClick: () => deps.goToSection('phones')
-            },
-            {
-                label: 'Update voice config',
-                icon: core__namespace.SystemIcon.PLAY,
-                type: ButtonType.DEFAULT,
-                onClick: () => deps.goToSection('voice')
-            },
-            {
-                label: 'Rotate API Key Secret',
-                icon: core__namespace.SystemIcon.LOCK,
-                type: ButtonType.DEFAULT,
-                onClick: () => deps.goToSection('credentials')
-            },
-            {
-                label: 'Deactivate',
-                icon: core__namespace.SystemIcon.STOP,
-                type: ButtonType.DANGER || ButtonType.DEFAULT,
-                onClick: deps.onDeactivateClick
+        render() {
+            const state = store.getState();
+            const p = state.prereqs;
+            const heading = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Prerequisites" }) }));
+            const intro = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { children: "The wizard verifies that NetSuite features required by Click-to-Call are enabled. Fix any failures before continuing." }) }));
+            if (p.loading) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                                label: 'Running prerequisite checks…',
+                                indeterminate: true
+                            }) })] }));
             }
-        ];
-        const buttons = actions.map((a) => {
-            return safeNew(component__namespace.Button, {
-                label: a.label,
-                type: a.type,
-                startIcon: a.icon,
-                action: a.onClick
-            }, 'Button(qa-' + a.label + ')');
-        }).filter((b) => b != null);
-        if (buttons.length === 0)
-            return headerStack;
-        const row = safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(quick-actions-row)');
-        return safeNew(d.SP, {
-            items: [headerStack, row].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(quick-actions-block)');
-    };
-    const buildOverviewActivityFeed = (d) => {
-        const heading = safeNew(d.H, {
-            content: 'Recent calls',
-            type: d.H_Type.SMALL_HEADING
-        }, 'Heading(recent-calls)');
-        const calls = STATE.console.recentCalls;
-        const rows = [];
-        if (calls === null) {
-            const loader = safeNew(component__namespace.Loader, {
-                label: 'Loading recent calls…',
-                indeterminate: true
-            }, 'Loader(recent-calls)');
-            if (loader)
-                rows.push(loader);
-        }
-        else if (calls.length === 0) {
-            const empty = safeNew(d.T, {
-                text: 'No calls logged yet. Once reps start placing calls ' +
-                    'through Click-to-Call, the 10 most recent will show up here.',
-                type: d.T_Type.WEAK
-            }, 'Text(recent-calls-empty)');
-            if (empty)
-                rows.push(empty);
-        }
-        else {
-            const grid = buildRecentCallsDataGrid(d, calls);
-            if (grid)
-                rows.push(grid);
-        }
-        return safeNew(d.SP, {
-            items: [heading].concat(rows).filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(recent-calls-feed)');
-    };
-    const buildRecentCallsDataGrid = (d, calls) => {
-        if (!d.DG) {
-            console.warn('[CTC] DataGrid component unavailable; recent calls falling back to text');
-            return buildRecentCallsFallback(d, calls);
-        }
-        let rowsDs;
-        try {
-            rowsDs = new d.Ads(calls);
-        }
-        catch (e) {
-            console.error('[CTC] Recent calls ArrayDataSource failed:', e);
-            return buildRecentCallsFallback(d, calls);
-        }
-        const CT = d.DG.ColumnType;
-        const BdgType = d.Bdg.Type;
-        const dateColDef = {
-            type: CT.TEMPLATED,
-            name: 'date',
-            label: 'Date',
-            stretchFactor: 2,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(date-empty)');
-                    return safeNew(d.T, {
-                        text: row.date || '(no date)',
-                        type: d.T_Type.DEFAULT
-                    }, 'Text(call-date)');
-                }
-                catch (e) {
-                    console.error('[CTC] Recent calls date column threw:', e);
-                    return safeNew(d.T, { text: '(error)' }, 'Text(date-error)');
-                }
+            if (p.error) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(ErrorText, { message: p.error }) })] }));
             }
-        };
-        const repColDef = {
-            type: CT.TEMPLATED,
-            name: 'rep',
-            label: 'Rep',
-            stretchFactor: 2,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(rep-empty)');
-                    return safeNew(d.T, {
-                        text: row.repName || '(unassigned)',
-                        type: d.T_Type.DEFAULT
-                    }, 'Text(call-rep)');
-                }
-                catch (e) {
-                    return safeNew(d.T, { text: '(error)' }, 'Text(rep-error)');
-                }
-            }
-        };
-        const contactColDef = {
-            type: CT.TEMPLATED,
-            name: 'contact',
-            label: 'Contact',
-            stretchFactor: 3,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(contact-empty)');
-                    const primary = row.companyName || row.contactName || '(unknown)';
-                    const secondary = (row.companyName && row.contactName)
-                        ? row.contactName
-                        : '';
-                    const primaryText = safeNew(d.T, {
-                        text: primary,
-                        type: d.T_Type.STRONG
-                    }, 'Text(call-contact-primary)');
-                    const secondaryText = secondary ? safeNew(d.T, {
-                        text: secondary,
-                        type: d.T_Type.WEAK,
-                        size: d.T.Size && d.T.Size.S
-                    }, 'Text(call-contact-secondary)') : null;
-                    return safeNew(d.SP, {
-                        items: [primaryText, secondaryText].filter((c) => c != null),
-                        orientation: d.SP_Orient.VERTICAL,
-                        itemGap: d.SP_Gap.XXS
-                    }, 'StackPanel(call-contact)') || primaryText;
-                }
-                catch (e) {
-                    return safeNew(d.T, { text: '(error)' }, 'Text(contact-error)');
-                }
-            }
-        };
-        const durationColDef = {
-            type: CT.TEMPLATED,
-            name: 'duration',
-            label: 'Duration',
-            stretchFactor: 1,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(dur-empty)');
-                    return safeNew(d.T, {
-                        text: formatDuration(row.duration),
-                        type: d.T_Type.DEFAULT
-                    }, 'Text(call-duration)');
-                }
-                catch (e) {
-                    return safeNew(d.T, { text: '(error)' }, 'Text(dur-error)');
-                }
-            }
-        };
-        const statusColDef = {
-            type: CT.TEMPLATED,
-            name: 'status',
-            label: 'AI Status',
-            stretchFactor: 2,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                    const label = formatCallStatus(row.status);
-                    const palette = statusBadgePalette(row.status);
-                    return safeNew(d.Bdg, {
-                        content: label,
-                        type: BdgType.SUBTLE,
-                        rootStyle: {
-                            backgroundColor: palette.bg,
-                            color: palette.fg,
-                            border: '1px solid ' + palette.border
-                        }
-                    }, 'Badge(call-status)') || safeNew(d.T, { text: label }, 'Text(call-status-fb)');
-                }
-                catch (e) {
-                    return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
-                }
-            }
-        };
-        const grid = safeNew(d.DG, {
-            dataSource: rowsDs,
-            columns: [dateColDef, repColDef, contactColDef, durationColDef, statusColDef],
-            columnStretch: true,
-            highlightRowsOnHover: true,
-            stripedRows: true,
-            dataRowHeight: 56,
-            headerRowHeight: 40,
-            rootStyle: { width: '100%' },
-            onRowClick: (args) => {
-                const dataItem = args && args.row && args.row.dataItem;
-                if (!dataItem || !dataItem.id)
-                    return;
-                try {
-                    window.open('/app/crm/calendar/call.nl?id=' + encodeURIComponent(String(dataItem.id)), '_blank');
-                }
-                catch (e) { }
-            }
-        }, 'DataGrid(recent-calls)');
-        if (!grid) {
-            console.warn('[CTC] Recent calls DataGrid construction returned null; using text fallback');
-            return buildRecentCallsFallback(d, calls);
+            const checks = p.checks || [];
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PrereqsList, { checks: checks }) })] }));
         }
-        return grid;
-    };
-    const buildRecentCallsFallback = (d, calls) => {
-        const rows = calls.map((c) => {
-            const label = (c.date || '?') + ' — ' +
-                (c.companyName || c.contactName || '(unknown)') +
-                ' [' + (c.repName || 'unassigned') + ']' +
-                ' — ' + formatDuration(c.duration);
-            return safeNew(d.T, { text: label }, 'Text(call-row-fb)');
-        }).filter((r) => r != null);
-        if (rows.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: rows,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, 'StackPanel(recent-calls-fallback)');
-    };
-    const formatDuration = (seconds) => {
-        if (!seconds || seconds < 0)
-            return '—';
-        const h = Math.floor(seconds / 3600);
-        const m = Math.floor((seconds % 3600) / 60);
-        const s = seconds % 60;
-        const pad = (n) => (n < 10 ? '0' + n : String(n));
-        if (h > 0)
-            return h + ':' + pad(m) + ':' + pad(s);
-        return m + ':' + pad(s);
-    };
-    const statusBadgePalette = (status) => {
-        const norm = (status || '').toLowerCase().trim();
-        switch (norm) {
-            case 'transcribed':
-                return { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' };
-            case 'processing':
-                return { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' };
-            case 'logged':
-                return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
-            case 'no_transcript':
-            case 'no transcript':
-                return { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
-            case 'failed':
-                return { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' };
-            default:
-                return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
-        }
-    };
-    const formatCallStatus = (status) => {
-        if (!status)
-            return '—';
-        const norm = String(status).trim();
-        if (!norm)
-            return '—';
-        return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
-    };
+    }
 
-    const TWILIO_DOCS = {
-        twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
-        phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
-        intelService: 'https://www.twilio.com/docs/voice/intelligence'
-    };
-    const buildVoiceSection = (d, deps) => {
-        const snap = (STATE.console.snapshot || {});
-        const items = [];
-        const intro = safeNew(d.T, {
-            text: 'Manage TwiML application, default outbound caller-ID ' +
-                'number, and optional Conversational Intelligence ' +
-                'service. Changes save immediately and apply to the ' +
-                'next call placed.',
-            type: d.T_Type.WEAK
-        }, 'Text(voice-intro)');
-        if (intro)
-            items.push(intro);
-        if (STATE.console.voiceError) {
-            const err = safeNew(d.T, {
-                text: '✕ ' + STATE.console.voiceError,
-                type: d.T_Type.STRONG
-            }, 'Text(voice-error)');
-            if (err)
-                items.push(err);
+    class Step2Field extends core.PureComponent {
+        handleChange = (args) => {
+            const v = (args && args.text) || '';
+            store.dispatch(Action.step2FieldChange(this.props.field, v));
+        };
+        render() {
+            const state = store.getState();
+            const value = state.step2[this.props.field] || '';
+            return (jsxRuntime.jsx(component__namespace.Field, { label: this.props.label, orientation: component__namespace.Field.Orientation.VERTICAL, children: jsxRuntime.jsx(component__namespace.TextBox, { text: value, placeholder: this.props.placeholder, onTextChanged: this.handleChange }) }));
         }
-        items.push(buildVoiceFieldRow(d, deps, {
-            field: 'twimlAppSid',
-            label: 'TwiML Application',
-            value: snap.twimlAppSid,
-            helpText: 'The Twilio application that handles outbound call ' +
-                'routing. The wizard registers this app\'s VoiceUrl with ' +
-                'the CTC Suitelet, so every call a rep places hits ' +
-                'NetSuite first for screening before connecting to Twilio.',
-            docUrl: TWILIO_DOCS.twimlApp
-        }));
-        items.push(buildVoiceFieldRow(d, deps, {
-            field: 'phoneNumber',
-            label: 'Default outbound caller-ID',
-            value: snap.phoneNumber,
-            helpText: 'Number reps see as their outbound caller ID. ' +
-                'Specific rep-to-number assignments override this default ' +
-                '— see Phones & reps section to assign different numbers ' +
-                'to individual reps.',
-            docUrl: TWILIO_DOCS.phoneNumber
-        }));
-        items.push(buildVoiceFieldRow(d, deps, {
-            field: 'intelServiceSid',
-            label: 'Conversational Intelligence',
-            value: snap.intelServiceSid,
-            helpText: 'Twilio Conversational Intelligence service that ' +
-                'transcribes call audio and powers the AI summary, tone ' +
-                'keywords, and satisfaction scoring on Phone Call records. ' +
-                'Required for the AI analysis pipeline.',
-            docUrl: TWILIO_DOCS.intelService
-        }));
-        if (items.length === 0)
-            return safeNew(d.T, { text: 'Voice config' }, 'Text(voice-empty)');
-        return safeNew(d.SP, {
-            items: items.filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, 'StackPanel(voice)');
-    };
-    const buildVoiceFieldRow = (d, deps, spec) => {
-        const isEditing = STATE.console.voiceEditing === spec.field;
-        const ButtonType = component__namespace.Button.Type;
-        const labelText = safeNew(d.T, {
-            text: spec.label,
-            type: d.T_Type.STRONG
-        }, 'Text(voice-label-' + spec.field + ')');
-        const docLink = spec.docUrl ? safeNew(component__namespace.Link, {
-            content: 'Twilio docs ↗',
-            url: spec.docUrl,
-            target: component__namespace.Link.Target.BLANK
-        }, 'Link(voice-doc-' + spec.field + ')') : null;
-        const labelCell = docLink ? safeNew(d.SP, {
-            items: [labelText, docLink].filter((c) => c != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XXS,
-            alignment: (d.SP.Alignment && d.SP.Alignment.START) || undefined
-        }, 'StackPanel(voice-label-cell-' + spec.field + ')') : labelText;
-        const help = safeNew(d.T, {
-            text: spec.helpText,
-            type: d.T_Type.WEAK,
-            size: d.T.Size && d.T.Size.S
-        }, 'Text(voice-help-' + spec.field + ')');
-        const rightSideRaw = isEditing
-            ? buildVoiceEditControls(d, deps, spec)
-            : buildVoiceViewControls(d, deps, spec, ButtonType);
-        const rightSide = d.CP ? safeNew(d.CP, {
-            content: rightSideRaw,
-            horizontalAlignment: d.CP_HAlign.END
-        }, 'ContentPanel(voice-right-align-' + spec.field + ')') || rightSideRaw
-            : rightSideRaw;
-        const cells = [labelCell, help, rightSide].filter((c) => c != null);
-        const grid = safeNew(d.GP, {
-            columns: '1fr 3fr 2fr',
-            rows: 'auto',
-            items: cells,
-            columnGap: (d.GP_Gap && d.GP_Gap.L) || undefined
-        }, 'GridPanel(voice-row-' + spec.field + ')') || safeNew(d.SP, {
-            items: cells,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(voice-row-fallback-' + spec.field + ')');
-        if (d.CP) {
-            return safeNew(d.CP, {
-                content: grid,
-                outerGap: (d.CP_Gap && d.CP_Gap.M) || undefined,
-                horizontalAlignment: d.CP_HAlign.STRETCH
-            }, 'ContentPanel(voice-row-pad-' + spec.field + ')') || grid;
+    }
+    class Step2 extends core.PureComponent {
+        render() {
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Connect to your Twilio account" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { children: "Enter your Twilio Account SID and API Key SID. The API Key Secret must already exist in NetSuite API Secrets (Setup > Company > API Secrets) \u2014 paste its script ID below. Live validation against Twilio runs at Step 5 (Test & activate) using the configured secret pointer \u2014 no need to paste the secret value here." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(Step2Field, { label: "Account SID", placeholder: "AC...", field: "accountSid" }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(Step2Field, { label: "API Key SID", placeholder: "SK...", field: "apiKeySid" }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(Step2Field, { label: "API Key Secret script ID", placeholder: "custsecret_...", field: "apiSecretId" }) })] }) })] }));
         }
-        return grid;
-    };
-    const buildVoiceViewControls = (d, deps, spec, ButtonType) => {
-        const valueText = spec.value
-            ? safeNew(d.T, {
-                text: spec.value,
-                type: d.T_Type.DEFAULT
-            }, 'Text(voice-value-' + spec.field + ')')
-            : safeNew(d.T, {
-                text: '(not configured)',
-                type: d.T_Type.WEAK
-            }, 'Text(voice-empty-' + spec.field + ')');
-        const changeBtn = safeNew(component__namespace.Button, {
-            label: 'Change',
-            type: ButtonType.DEFAULT,
-            action: () => { onVoiceChangeClick(deps, spec.field, !!spec.allowEmpty); }
-        }, 'Button(voice-change-' + spec.field + ')');
-        return safeNew(d.SP, {
-            items: [valueText, changeBtn].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(voice-view-' + spec.field + ')');
-    };
-    const buildVoiceEditControls = (d, deps, spec) => {
-        const ButtonType = component__namespace.Button.Type;
-        const listKey = voiceListKeyFor(spec.field);
-        const list = listKey ? STATE.console.voiceLists[listKey] : null;
-        if (list === null || STATE.console.voiceListsLoading) {
-            const loader = safeNew(component__namespace.Loader, {
-                label: 'Loading from Twilio…',
-                indeterminate: true
-            }, 'Loader(voice-list-' + spec.field + ')');
-            return loader || safeNew(d.T, { text: 'Loading from Twilio…' }, 'Text(voice-loading)');
-        }
-        if (list.length === 0) {
-            const emptyText = safeNew(d.T, {
-                text: '(no items found in Twilio for this account)',
-                type: d.T_Type.WEAK
-            }, 'Text(voice-empty-list-' + spec.field + ')');
-            const cancelBtnE = safeNew(component__namespace.Button, {
-                label: 'Cancel',
-                type: ButtonType.DEFAULT,
-                action: () => { onVoiceCancelClick(deps); }
-            }, 'Button(voice-cancel-empty-' + spec.field + ')');
-            return safeNew(d.SP, {
-                items: [emptyText, cancelBtnE].filter((c) => c != null),
-                orientation: d.SP_Orient.HORIZONTAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(voice-empty-edit-' + spec.field + ')');
-        }
-        const normalized = list.map((it) => {
-            if (spec.field === 'phoneNumber') {
-                return {
-                    value: it.phoneNumber || '',
-                    label: (it.phoneNumber || '') +
-                        (it.friendlyName ? '  —  ' + it.friendlyName : '')
-                };
+    }
+
+    async function loadStep3Lists() {
+        store.dispatch(Action.step3FieldChange('twimlApps', null));
+        store.dispatch(Action.step3FieldChange('phoneNumbers', null));
+        store.dispatch(Action.step3FieldChange('intelServices', null));
+        store.dispatch(Action.step3FieldChange('listLoadError', null));
+        const fetchList = async (action, field, sidField, sidValue) => {
+            try {
+                const resp = (await wizardCall(action, {}));
+                const items = (resp && resp.items) || [];
+                store.dispatch(Action.step3FieldChange(field, items));
+                if (resp && resp.errorMessage) {
+                    store.dispatch(Action.step3FieldChange('listLoadError', resp.errorMessage));
+                }
+                const existing = store.getState().step3[sidField];
+                if (items.length > 0 && !existing) {
+                    const v = sidValue(items[0]);
+                    if (v)
+                        store.dispatch(Action.step3FieldChange(sidField, v));
+                }
             }
-            return {
-                value: it.sid || '',
-                label: (it.friendlyName || '(unnamed)') +
-                    (it.sid ? '  [' + it.sid + ']' : '')
-            };
-        });
-        const ds = new core__namespace.ArrayDataSource(normalized);
-        const pending = STATE.console.voicePendingValue;
-        const dropdown = safeNew(component__namespace.Dropdown, {
-            dataSource: ds,
-            valueMember: 'value',
-            displayMember: 'label',
-            selectedValue: pending || (spec.allowEmpty ? null : normalized[0].value),
-            allowEmpty: !!spec.allowEmpty,
-            placeholder: spec.allowEmpty ? '(none)' : 'Select…',
-            onSelectionChanged: (args) => {
-                STATE.console.voicePendingValue = (args && args.value) || null;
+            catch (e) {
+                const err = e;
+                store.dispatch(Action.step3FieldChange(field, []));
+                store.dispatch(Action.step3FieldChange('listLoadError', field + ': ' + (err.message || String(e))));
             }
-        }, 'Dropdown(voice-edit-' + spec.field + ')');
-        const saving = !!STATE.console.voiceSaving;
-        const saveBtn = safeNew(component__namespace.Button, {
-            label: saving ? 'Saving…' : 'Save',
-            type: ButtonType.PRIMARY,
-            enabled: !saving,
-            action: () => { onVoiceSaveClick(deps, spec.field); }
-        }, 'Button(voice-save-' + spec.field + ')');
-        const cancelBtn = safeNew(component__namespace.Button, {
-            label: 'Cancel',
-            type: ButtonType.DEFAULT,
-            enabled: !saving,
-            action: () => { onVoiceCancelClick(deps); }
-        }, 'Button(voice-cancel-' + spec.field + ')');
-        return safeNew(d.SP, {
-            items: [dropdown, saveBtn, cancelBtn].filter((c) => c != null),
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(voice-edit-' + spec.field + ')');
-    };
-    const voiceListKeyFor = (field) => {
-        if (field === 'twimlAppSid')
-            return 'twimlApps';
-        if (field === 'phoneNumber')
-            return 'phoneNumbers';
-        if (field === 'intelServiceSid')
-            return 'intelServices';
-        return null;
-    };
-    const voiceActionFor = (field) => {
-        if (field === 'twimlAppSid')
-            return 'wizardListTwiMLApps';
-        if (field === 'phoneNumber')
-            return 'wizardListPhoneNumbers';
-        if (field === 'intelServiceSid')
-            return 'wizardListIntelServices';
-        return null;
-    };
-    const onVoiceChangeClick = (deps, field, _allowEmpty) => {
-        STATE.console.voiceEditing = field;
-        STATE.console.voiceError = null;
-        const snap = (STATE.console.snapshot || {});
-        STATE.console.voicePendingValue = snap[field] || null;
-        const listKey = voiceListKeyFor(field);
-        if (!listKey) {
-            deps.rerender();
-            return;
-        }
-        if (STATE.console.voiceLists[listKey] !== null) {
-            deps.rerender();
-            return;
-        }
-        STATE.console.voiceListsLoading = true;
-        deps.rerender();
-        const action = voiceActionFor(field);
-        if (!action) {
-            STATE.console.voiceListsLoading = false;
-            STATE.console.voiceEditing = null;
-            deps.rerender();
-            return;
-        }
-        wizardCall(action, {})
+        };
+        await Promise.all([
+            fetchList('wizardListTwiMLApps', 'twimlApps', 'twimlAppSid', (i) => i.sid || ''),
+            fetchList('wizardListPhoneNumbers', 'phoneNumbers', 'phoneNumber', (i) => i.phoneNumber || ''),
+            fetchList('wizardListIntelServices', 'intelServices', 'intelServiceSid', (i) => i.sid || '')
+        ]);
+    }
+    async function loadStep4Lists() {
+        store.dispatch(Action.step4FieldChange('phoneNumbers', null));
+        store.dispatch(Action.step4FieldChange('employees', null));
+        store.dispatch(Action.step4FieldChange('assignments', {}));
+        store.dispatch(Action.step4FieldChange('listLoadError', null));
+        const reportError = (prefix, e) => {
+            const err = e;
+            store.dispatch(Action.step4FieldChange('listLoadError', prefix + ': ' + (err.message || String(e))));
+        };
+        const numbersTask = wizardCall('wizardListPhoneNumbers', {})
             .then((p) => {
-            const items = (p && p.items) || [];
-            STATE.console.voiceLists[listKey] = items;
-            STATE.console.voiceListsLoading = false;
-            deps.rerender();
+            const resp = p;
+            store.dispatch(Action.step4FieldChange('phoneNumbers', (resp && resp.items) || []));
         })
             .catch((e) => {
-            const err = e;
-            STATE.console.voiceListsLoading = false;
-            STATE.console.voiceError = 'Could not load list: ' +
-                (err && err.message ? err.message : String(e));
-            STATE.console.voiceEditing = null;
-            deps.rerender();
+            store.dispatch(Action.step4FieldChange('phoneNumbers', []));
+            reportError('Phone numbers', e);
         });
-    };
-    const onVoiceCancelClick = (deps) => {
-        STATE.console.voiceEditing = null;
-        STATE.console.voicePendingValue = null;
-        STATE.console.voiceError = null;
-        deps.rerender();
-    };
-    const onVoiceSaveClick = (deps, field) => {
-        const snap = (STATE.console.snapshot || {});
-        const newValue = STATE.console.voicePendingValue;
-        if (newValue === snap[field]) {
-            STATE.console.voiceEditing = null;
-            STATE.console.voicePendingValue = null;
-            deps.rerender();
-            return;
-        }
-        const payload = {
-            twimlAppSid: snap.twimlAppSid || '',
-            phoneNumber: snap.phoneNumber || '',
-            intelServiceSid: snap.intelServiceSid || ''
-        };
-        payload[field] = newValue || '';
-        STATE.console.voiceSaving = true;
-        STATE.console.voiceError = null;
-        deps.rerender();
-        wizardCall('wizardSaveVoice', payload)
+        const employeesTask = wizardCall('wizardListEmployees', {})
             .then((p) => {
-            STATE.console.voiceSaving = false;
             const resp = p;
-            if (resp && resp.saved) {
-                snap[field] = newValue || undefined;
-                STATE.console.snapshot = snap;
-                STATE.console.voiceEditing = null;
-                STATE.console.voicePendingValue = null;
-                deps.rerender();
-            }
-            else {
-                STATE.console.voiceError = 'Save failed: ' +
-                    ((resp && resp.error) || 'unknown');
-                deps.rerender();
-            }
+            store.dispatch(Action.step4FieldChange('employees', (resp && resp.items) || []));
         })
             .catch((e) => {
-            const err = e;
-            STATE.console.voiceSaving = false;
-            STATE.console.voiceError = 'Network error saving: ' +
-                (err && err.message ? err.message : String(e));
-            deps.rerender();
+            store.dispatch(Action.step4FieldChange('employees', []));
+            reportError('Employees', e);
         });
-    };
-
-    const buildPhonesSection = (d, deps) => {
-        const items = [];
-        if (STATE.console.phonesLoading) {
-            const loader = safeNew(component__namespace.Loader, {
-                label: 'Loading phones & reps…',
-                indeterminate: true
-            }, 'Loader(phones)');
-            if (loader)
-                items.push(loader);
-            return safeNew(d.SP, {
-                items: items,
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.L
-            }, 'StackPanel(phones-loading)') || loader;
-        }
-        const toolbar = buildPhonesToolbar(d, deps);
-        if (toolbar)
-            items.push(toolbar);
-        if (STATE.console.phonesError) {
-            const err = safeNew(d.T, {
-                text: '✕ ' + STATE.console.phonesError,
-                type: d.T_Type.STRONG
-            }, 'Text(phones-error)');
-            if (err)
-                items.push(err);
-        }
-        const grid = buildPhonesDataGrid(d, deps);
-        if (grid)
-            items.push(grid);
-        const grouped = (STATE.console.phonesByPhone || []);
-        if (grouped.length === 0) {
-            const emptyText = safeNew(d.T, {
-                text: 'No phone numbers configured yet. Click "Add phone ' +
-                    'number" above to claim a Twilio number and assign reps.',
-                type: d.T_Type.WEAK
-            }, 'Text(phones-empty)');
-            if (emptyText)
-                items.push(emptyText);
-        }
-        if (items.length === 0)
-            return safeNew(d.T, { text: 'Phones & reps' }, 'Text(phones-section-empty)');
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XL
-        }, 'StackPanel(phones)');
-    };
-    const buildPhonesToolbar = (d, deps) => {
-        const ButtonType = component__namespace.Button.Type;
-        const refreshBtn = safeNew(component__namespace.Button, {
-            label: 'Refresh from Twilio',
-            type: ButtonType.DEFAULT,
-            startIcon: d.SysIcon && d.SysIcon.REFRESH,
-            action: () => { deps.loadPhonesData(); }
-        }, 'Button(phones-refresh)');
-        const addBtn = safeNew(component__namespace.Button, {
-            label: 'Add phone number',
-            type: ButtonType.PRIMARY,
-            startIcon: d.SysIcon && d.SysIcon.ADD,
-            action: () => {
-                deps.goToStep(4);
-            }
-        }, 'Button(phones-add)');
-        const buttons = [refreshBtn, addBtn].filter((b) => b != null);
-        if (buttons.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.S
-        }, 'StackPanel(phones-toolbar)');
-    };
-    const buildPhonesDataGrid = (d, deps) => {
-        if (!d.DG) {
-            console.warn('[CTC] DataGrid component unavailable; falling back to text');
-            return buildPhonesFallback(d);
-        }
-        const grouped = (STATE.console.phonesByPhone || []);
-        const employees = (STATE.console.phonesEmployees || []);
-        if (grouped.length === 0)
-            return null;
-        let rowsDs;
-        let employeesDs;
-        try {
-            rowsDs = new d.Ads(grouped);
-            employeesDs = new d.Ads(employees);
-        }
-        catch (e) {
-            console.error('[CTC] ArrayDataSource construction failed:', e);
-            return buildPhonesFallback(d);
-        }
-        const CT = d.DG.ColumnType;
-        const BdgType = d.Bdg.Type;
-        const truncSid = (sid) => {
-            if (!sid)
-                return '';
-            if (sid.length <= 14)
-                return sid;
-            return sid.slice(0, 6) + '…' + sid.slice(-4);
-        };
-        const ImageCtor = component__namespace.Image;
-        const statusForRow = (row) => {
-            const saving = STATE.console.phonesSaving[row.phoneSid || ''];
-            const hasReps = (row.employeeIds || []).length > 0;
-            if (saving) {
-                return {
-                    icon: core__namespace.SystemIcon.STATUS_INFO_FILLED,
-                    color: core__namespace.ImageConstant.Color.INFO,
-                    label: 'Saving…'
-                };
-            }
-            if (hasReps) {
-                return {
-                    icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED,
-                    color: core__namespace.ImageConstant.Color.SUCCESS,
-                    label: 'Live'
-                };
-            }
-            return {
-                icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED,
-                color: core__namespace.ImageConstant.Color.WARNING,
-                label: 'No reps'
-            };
-        };
-        const DGHAlign = (d.DG && d.DG.HorizontalAlignment) ||
-            (component__namespace.DataGrid && component__namespace.DataGrid.HorizontalAlignment);
-        const colAlignCenter = DGHAlign ? DGHAlign.CENTER : undefined;
-        const statusIconColDef = {
-            type: CT.TEMPLATED,
-            name: 'statusIcon',
-            label: '',
-            stretchFactor: 1,
-            horizontalAlignment: colAlignCenter,
-            headerHorizontalAlignment: colAlignCenter,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '' }, 'Text(icon-empty)');
-                    const s = statusForRow(row);
-                    const icon = safeNew(ImageCtor, {
-                        image: s.icon,
-                        size: component__namespace.Image.Size.M,
-                        color: s.color,
-                        presentation: true
-                    }, 'Image(phone-status-icon)') ||
-                        safeNew(d.T, { text: '•' }, 'Text(icon-fallback)');
-                    if (!d.CP)
-                        return icon;
-                    return safeNew(d.CP, {
-                        content: icon,
-                        horizontalAlignment: d.CP_HAlign.CENTER
-                    }, 'ContentPanel(phone-icon-center)') || icon;
-                }
-                catch (e) {
-                    console.error('[CTC] phone status icon column threw:', e);
-                    return safeNew(d.T, { text: '?' }, 'Text(icon-error)');
-                }
-            }
-        };
-        const phoneColDef = {
-            type: CT.TEMPLATED,
-            name: 'phone',
-            label: 'Phone number',
-            stretchFactor: 2,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(phone-empty)');
-                    return safeNew(d.T, {
-                        text: row.phoneNumber || '(unknown)',
-                        type: d.T_Type.STRONG
-                    }, 'Text(phone-number)');
-                }
-                catch (e) {
-                    console.error('[CTC] phone column template threw:', e);
-                    return safeNew(d.T, { text: '(error)' }, 'Text(phone-error)');
-                }
-            }
-        };
-        const phoneSidColDef = {
-            type: CT.TEMPLATED,
-            name: 'phoneSid',
-            label: 'Phone SID',
-            stretchFactor: 2,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(sid-empty)');
-                    return safeNew(d.T, {
-                        text: truncSid(row.phoneSid),
-                        type: d.T_Type.WEAK,
-                        size: d.T.Size && d.T.Size.S
-                    }, 'Text(phone-sid)');
-                }
-                catch (e) {
-                    console.error('[CTC] phone SID column template threw:', e);
-                    return safeNew(d.T, { text: '(error)' }, 'Text(sid-error)');
-                }
-            }
-        };
-        const IM = d.DG.InputMode;
-        const repsDisplayMember = (value) => {
-            if (value && typeof value === 'object') {
-                return value.name || '';
-            }
-            const id = Number(value);
-            const emp = (STATE.console.phonesEmployees || [])
-                .find((e) => e.id === id);
-            return emp ? (emp.name || '') : '';
-        };
-        const repsColDef = {
-            type: CT.MULTI_SELECT_DROPDOWN,
-            name: 'reps',
-            label: 'Assigned reps',
-            stretchFactor: 5,
-            binding: 'employeeIds',
-            inputMode: IM.EDIT_ONLY,
-            dataSource: employeesDs,
-            displayMember: repsDisplayMember,
-            editable: true,
-            widgetOptions: (row) => {
-                const dataItem = (row && row.dataItem) || {};
-                const phoneSid = dataItem.phoneSid;
-                return {
-                    dataSource: employeesDs,
-                    valueMember: 'id',
-                    displayMember: 'name',
-                    placeholder: 'Pick reps',
-                    onSelectionChanged: (args) => {
-                        const newIds = ((args && args.values) || []).map((v) => {
-                            if (v && typeof v === 'object')
-                                return Number(v.id);
-                            return Number(v);
-                        });
-                        if (phoneSid) {
-                            deps.onPhonesRowSelectionChanged(phoneSid, newIds);
-                        }
-                    }
-                };
-            }
-        };
-        const statusColDef = {
-            type: CT.TEMPLATED,
-            name: 'status',
-            label: 'Status',
-            stretchFactor: 2,
-            content: (args) => {
-                try {
-                    const row = args && args.cell && args.cell.row &&
-                        args.cell.row.dataItem;
-                    if (!row)
-                        return safeNew(d.T, { text: '—' }, 'Text(status-empty)');
-                    const s = statusForRow(row);
-                    const palette = s.label === 'Live' ? { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } :
-                        s.label === 'Saving…' ? { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } :
-                            { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
-                    return safeNew(d.Bdg, {
-                        content: s.label,
-                        type: BdgType.SUBTLE,
-                        rootStyle: {
-                            backgroundColor: palette.bg,
-                            color: palette.fg,
-                            border: '1px solid ' + palette.border
-                        }
-                    }, 'Badge(phone-status)') ||
-                        safeNew(d.T, { text: s.label }, 'Text(status-fallback)');
-                }
-                catch (e) {
-                    console.error('[CTC] status column template threw:', e);
-                    return safeNew(d.T, { text: '(error)' }, 'Text(status-error)');
-                }
-            }
-        };
-        const columns = [statusIconColDef, phoneColDef, phoneSidColDef, repsColDef, statusColDef];
-        const grid = safeNew(d.DG, {
-            dataSource: rowsDs,
-            columns: columns,
-            columnStretch: true,
-            highlightRowsOnHover: true,
-            stripedRows: true,
-            dataRowHeight: 72,
-            headerRowHeight: 44,
-            editable: true,
-            rootStyle: { width: '100%' }
-        }, 'DataGrid(phones)');
-        if (!grid) {
-            console.warn('[CTC] DataGrid construction returned null; using text fallback');
-            return buildPhonesFallback(d);
-        }
-        return grid;
-    };
-    const buildPhonesFallback = (d) => {
-        const grouped = (STATE.console.phonesByPhone || []);
-        const rows = grouped.map((g) => {
-            const label = (g.phoneNumber || '(unknown)') + ' — ' +
-                (g.employeeIds || []).length + ' rep(s)';
-            return safeNew(d.T, { text: label }, 'Text(phone-row)');
-        }).filter((r) => r != null);
-        if (rows.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: rows,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, 'StackPanel(phones-fallback)');
-    };
-
-    const buildStep2Form = (d) => {
-        const heading = safeNew(d.H, {
-            content: 'Connect to your Twilio account',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(step2)');
-        const intro = safeNew(d.T, {
-            text: 'Enter your Twilio Account SID and API Key SID. ' +
-                'The API Key Secret must already exist in NetSuite ' +
-                'API Secrets (Setup > Company > API Secrets) — paste ' +
-                'its script ID below. Live validation against Twilio ' +
-                'runs at Step 5 (Test & activate) using the configured ' +
-                'secret pointer — no need to paste the secret value here.'
-        }, 'Text(step2-intro)');
-        const fields = [
-            buildTextField('Account SID', 'AC...', STATE.step2.accountSid, (v) => { STATE.step2.accountSid = v; }),
-            buildTextField('API Key SID', 'SK...', STATE.step2.apiKeySid, (v) => { STATE.step2.apiKeySid = v; }),
-            buildTextField('API Key Secret script ID', 'custsecret_...', STATE.step2.apiSecretId, (v) => { STATE.step2.apiSecretId = v; })
-        ].filter((f) => f != null);
-        const fieldsBlock = safeNew(d.GP, {
-            columns: '1fr 1fr 1fr',
-            rows: 'auto',
-            items: fields,
-            columnGap: (d.GP_Gap && d.GP_Gap.M) || undefined
-        }, 'GridPanel(step2-fields)') || safeNew(d.SP, {
-            items: fields,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(step2-fields-fallback)');
-        const items = [heading, intro, fieldsBlock].filter((c) => c != null);
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(step2)');
-    };
-
-    const buildStep3Form = (d) => {
-        const rows = [];
-        rows.push(safeNew(d.H, {
-            content: 'Voice configuration',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(step3)'));
-        rows.push(safeNew(d.T, {
-            text: 'Pick the TwiML application, default outbound caller ' +
-                'ID, and Conversational Intelligence service from your ' +
-                'Twilio account. These are fetched live from Twilio ' +
-                'using the secure API Secret configured in Step 2 — ' +
-                "the secret value never leaves NetSuite's vault. " +
-                'Conversational Intelligence is required: it produces ' +
-                'the call transcripts that drive AI summaries and ' +
-                'tone/satisfaction scoring.'
-        }, 'Text(step3-intro)'));
-        if (STATE.step3.twimlApps === null ||
-            STATE.step3.phoneNumbers === null ||
-            STATE.step3.intelServices === null) {
-            const loader = safeNew(component__namespace.Loader, {
-                label: 'Loading from Twilio…',
-                indeterminate: true
-            }, 'Loader(step3-lists)');
-            if (loader)
-                rows.push(loader);
-            else
-                rows.push(safeNew(d.T, {
-                    text: 'Loading from Twilio…'
-                }, 'Text(loading-fallback)'));
-            return safeNew(d.SP, {
-                items: rows.filter((r) => r != null),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(step3-loading)');
-        }
-        if (STATE.step3.listLoadError) {
-            rows.push(safeNew(d.T, {
-                text: '✕ Could not load Twilio lists: ' +
-                    STATE.step3.listLoadError + '. Verify the API ' +
-                    'Secret value is set at Setup > Company > API ' +
-                    'Secrets, then go back to Step 2 and Continue ' +
-                    'again to retry.',
-                type: d.T_Type.STRONG
-            }, 'Text(step3-error)'));
-            return safeNew(d.SP, {
-                items: rows.filter((r) => r != null),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(step3-error)');
-        }
-        rows.push(buildDropdownField(d, 'TwiML Application', (STATE.step3.twimlApps || []), STATE.step3.twimlAppSid, (sid) => { STATE.step3.twimlAppSid = sid || ''; }));
-        rows.push(buildDropdownField(d, 'Default outbound caller ID', (STATE.step3.phoneNumbers || []).map((n) => {
-            return {
-                value: n.phoneNumber || '',
-                label: (n.phoneNumber || '') +
-                    (n.friendlyName ? ' — ' + n.friendlyName : '')
-            };
-        }), STATE.step3.phoneNumber, (val) => { STATE.step3.phoneNumber = val || ''; }, { valueIsString: true }));
-        rows.push(buildDropdownField(d, 'Conversational Intelligence Service', (STATE.step3.intelServices || []), STATE.step3.intelServiceSid, (sid) => { STATE.step3.intelServiceSid = sid || ''; }));
-        return safeNew(d.SP, {
-            items: rows.filter((r) => r != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(step3)');
-    };
-    const loadStep3Lists = (deps) => {
-        STATE.step3.twimlApps = null;
-        STATE.step3.phoneNumbers = null;
-        STATE.step3.intelServices = null;
-        STATE.step3.listLoadError = null;
-        const handle = (field, payload) => {
-            if (payload && payload.items) {
-                STATE.step3[field] = payload.items;
-                const first = payload.items[0];
-                if (first) {
-                    if (field === 'twimlApps' && !STATE.step3.twimlAppSid) {
-                        STATE.step3.twimlAppSid = first.sid || '';
-                    }
-                    if (field === 'phoneNumbers' && !STATE.step3.phoneNumber) {
-                        STATE.step3.phoneNumber = first.phoneNumber || '';
-                    }
-                    if (field === 'intelServices' && !STATE.step3.intelServiceSid) {
-                        STATE.step3.intelServiceSid = first.sid || '';
-                    }
-                }
-            }
-            else {
-                STATE.step3[field] = [];
-                if (payload && payload.errorMessage) {
-                    STATE.step3.listLoadError = payload.errorMessage;
-                }
-            }
-            if (STATE.step3.twimlApps !== null &&
-                STATE.step3.phoneNumbers !== null &&
-                STATE.step3.intelServices !== null) {
-                deps.rerender();
-            }
-        };
-        wizardCall('wizardListTwiMLApps', {})
-            .then((p) => { handle('twimlApps', p); })
-            .catch((e) => {
-            const err = e;
-            STATE.step3.listLoadError = 'TwiML apps: ' +
-                (err && err.message ? err.message : String(e));
-            handle('twimlApps', null);
-        });
-        wizardCall('wizardListPhoneNumbers', {})
-            .then((p) => { handle('phoneNumbers', p); })
-            .catch((e) => {
-            const err = e;
-            STATE.step3.listLoadError = 'Phone numbers: ' +
-                (err && err.message ? err.message : String(e));
-            handle('phoneNumbers', null);
-        });
-        wizardCall('wizardListIntelServices', {})
-            .then((p) => { handle('intelServices', p); })
-            .catch((e) => {
-            const err = e;
-            STATE.step3.listLoadError = 'Intel services: ' +
-                (err && err.message ? err.message : String(e));
-            handle('intelServices', null);
-        });
-    };
-    const buildDropdownField = (d, label, items, currentValue, onChange, opts) => {
-        const o = opts || {};
-        const normalized = (items || []).map((it) => {
-            if (o.valueIsString)
-                return it;
-            const ti = it;
-            return {
-                value: ti.sid || '',
-                label: (ti.friendlyName || '(unnamed)') +
-                    (ti.sid ? '  [' + ti.sid + ']' : '')
-            };
-        });
-        if (normalized.length === 0) {
-            return safeNew(component__namespace.StackPanel, {
-                items: [
-                    safeNew(component__namespace.Text, {
-                        text: label,
-                        type: component__namespace.Text.Type.STRONG,
-                        size: component__namespace.Text.Size.S
-                    }, 'Text(label-' + label + ')'),
-                    safeNew(component__namespace.Text, {
-                        text: '(no items found in Twilio for this account)',
-                        type: component__namespace.Text.Type.WEAK,
-                        size: component__namespace.Text.Size.S
-                    }, 'Text(empty-' + label + ')')
-                ].filter((c) => c != null),
-                orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-                itemGap: component__namespace.StackPanel.GapSize.XXS
-            }, 'StackPanel(empty-' + label + ')');
-        }
-        const ds = new core__namespace.ArrayDataSource(normalized);
-        const dropdown = safeNew(component__namespace.Dropdown, {
-            dataSource: ds,
-            valueMember: 'value',
-            displayMember: 'label',
-            selectedValue: currentValue || (o.allowEmpty ? null : normalized[0].value),
-            allowEmpty: !!o.allowEmpty,
-            placeholder: o.allowEmpty ? '(none)' : 'Select…',
-            onSelectionChanged: (args) => {
-                onChange(args && args.value);
-            }
-        }, 'Dropdown(' + label + ')');
-        if (!dropdown) {
-            return buildTextField(label, '', currentValue || '', (v) => onChange(v));
-        }
-        const lblText = safeNew(component__namespace.Text, {
-            text: label,
-            type: component__namespace.Text.Type.STRONG,
-            size: component__namespace.Text.Size.S
-        }, 'Text(label-' + label + ')');
-        return safeNew(component__namespace.StackPanel, {
-            items: [lblText, dropdown].filter((c) => c != null),
-            orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-            itemGap: component__namespace.StackPanel.GapSize.XXS
-        }, 'StackPanel(field-' + label + ')') || dropdown;
-    };
-
-    const buildStep4Form = (d) => {
-        const rows = [];
-        rows.push(safeNew(d.H, {
-            content: 'Phone numbers & rep assignments',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(step4)'));
-        rows.push(safeNew(d.T, {
-            text: 'Assign reps to your Twilio phone numbers. Each rep ' +
-                'with a number assigned will use it as their outbound ' +
-                'caller ID. Reps without an assignment fall back to ' +
-                'the default caller ID set in Step 3.'
-        }, 'Text(step4-intro)'));
-        if (STATE.step4.phoneNumbers === null ||
-            STATE.step4.employees === null) {
-            const loader = safeNew(component__namespace.Loader, {
-                label: 'Loading phone numbers and employees…',
-                indeterminate: true
-            }, 'Loader(step4)');
-            if (loader)
-                rows.push(loader);
-            return safeNew(d.SP, {
-                items: rows.filter((r) => r != null),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(step4-loading)');
-        }
-        if (STATE.step4.listLoadError) {
-            rows.push(safeNew(d.T, {
-                text: '✕ ' + STATE.step4.listLoadError,
-                type: d.T_Type.STRONG
-            }, 'Text(step4-error)'));
-            return safeNew(d.SP, {
-                items: rows.filter((r) => r != null),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(step4-error)');
-        }
-        const phoneNumbers = (STATE.step4.phoneNumbers || []);
-        if (phoneNumbers.length === 0) {
-            rows.push(safeNew(d.T, {
-                text: '(no phone numbers owned by this Twilio account — ' +
-                    'buy one in Twilio Console before continuing)',
-                type: d.T_Type.WEAK
-            }, 'Text(step4-empty)'));
-            return safeNew(d.SP, {
-                items: rows.filter((r) => r != null),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(step4-empty)');
-        }
-        for (const pn of phoneNumbers) {
-            rows.push(buildStep4AssignmentRow(d, pn));
-        }
-        return safeNew(d.SP, {
-            items: rows.filter((r) => r != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, 'StackPanel(step4)');
-    };
-    const buildStep4AssignmentRow = (d, phoneNumber) => {
-        const assignments = STATE.step4.assignments;
-        const current = assignments[phoneNumber.sid] || {};
-        const employees = (STATE.step4.employees || []);
-        const pnLabel = safeNew(d.T, {
-            text: (phoneNumber.phoneNumber || '') +
-                (phoneNumber.friendlyName ? '  —  ' + phoneNumber.friendlyName : ''),
-            type: d.T_Type.STRONG
-        }, 'Text(step4-pn-' + phoneNumber.sid + ')');
-        const dataItems = employees.map((e) => {
-            return {
-                value: e.id,
-                label: (e.name || '') + (e.email ? ' (' + e.email + ')' : '')
-            };
-        });
-        const ds = new core__namespace.ArrayDataSource(dataItems);
-        const selectedItems = (current.employeeIds || []).map((id) => {
-            return { value: id, label: lookupEmployeeName(id) };
-        });
-        const picker = safeNew(component__namespace.MultiselectDropdown, {
-            dataSource: ds,
-            valueMember: 'value',
-            displayMember: 'label',
-            selectedItems: selectedItems,
-            placeholder: 'Assign reps…',
-            onSelectionChanged: (args) => {
-                const values = (args && args.values) || [];
-                console.log('[CTC Setup Wizard] Step 4 picker — ' +
-                    'phoneSid=' + phoneNumber.sid +
-                    ' selected values:', values);
-                if (!assignments[phoneNumber.sid]) {
-                    assignments[phoneNumber.sid] = {};
-                }
-                assignments[phoneNumber.sid].employeeIds = values;
-                const a = assignments[phoneNumber.sid];
-                if (!a.primaryEmployeeId || values.indexOf(a.primaryEmployeeId) === -1) {
-                    a.primaryEmployeeId = values.length > 0 ? values[0] : null;
-                }
-            }
-        }, 'MultiselectDropdown(emp-' + phoneNumber.sid + ')');
-        const children = [pnLabel, picker].filter((c) => c != null);
-        return safeNew(d.SP, {
-            items: children,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, 'StackPanel(step4-row-' + phoneNumber.sid + ')');
-    };
-    const lookupEmployeeName = (id) => {
-        const employees = (STATE.step4.employees || []);
-        for (const emp of employees) {
-            if (Number(emp.id) === Number(id))
-                return emp.name || '';
-        }
-        return '(id ' + id + ')';
-    };
-    const loadStep4Lists = (deps) => {
-        STATE.step4.phoneNumbers = null;
-        STATE.step4.employees = null;
-        STATE.step4.assignments = {};
-        STATE.step4.listLoadError = null;
-        const rerenderIfReady = () => {
-            if (STATE.step4.phoneNumbers !== null &&
-                STATE.step4.employees !== null) {
-                deps.rerender();
-            }
-        };
-        wizardCall('wizardListPhoneNumbers', {})
-            .then((p) => {
-            const resp = p;
-            STATE.step4.phoneNumbers = (resp && resp.items) || [];
-            if (resp && resp.errorMessage)
-                STATE.step4.listLoadError = resp.errorMessage;
-            rerenderIfReady();
-        }).catch((e) => {
-            const err = e;
-            STATE.step4.phoneNumbers = [];
-            STATE.step4.listLoadError = 'Phone numbers: ' +
-                (err && err.message ? err.message : String(e));
-            rerenderIfReady();
-        });
-        wizardCall('wizardListEmployees', {})
-            .then((p) => {
-            const resp = p;
-            STATE.step4.employees = (resp && resp.items) || [];
-            if (resp && resp.errorMessage)
-                STATE.step4.listLoadError = resp.errorMessage;
-            rerenderIfReady();
-        }).catch((e) => {
-            const err = e;
-            STATE.step4.employees = [];
-            STATE.step4.listLoadError = 'Employees: ' +
-                (err && err.message ? err.message : String(e));
-            rerenderIfReady();
-        });
-        wizardCall('wizardLoadAssignments', {})
+        const assignmentsTask = wizardCall('wizardLoadAssignments', {})
             .then((p) => {
             const resp = p;
             const items = (resp && resp.items) || [];
@@ -2366,1066 +713,986 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 if (a.isPrimary)
                     map[a.phoneSid].primaryEmployeeId = empId;
             });
-            STATE.step4.assignments = map;
-        }).catch(() => { });
-    };
+            store.dispatch(Action.step4FieldChange('assignments', map));
+        })
+            .catch(() => { });
+        await Promise.all([numbersTask, employeesTask, assignmentsTask]);
+    }
+    async function loadStep5() {
+        const safe = (promise) => promise.catch(() => null);
+        const [snapshot, assignments, preflight] = await Promise.all([
+            safe(wizardCall('wizardSnapshot', {})),
+            safe(wizardCall('wizardLoadAssignments', {})),
+            safe(wizardCall('wizardRunPreflight', {}))
+        ]);
+        store.dispatch(Action.consoleLoadSuccess({
+            snapshot,
+            assignments: (assignments && assignments.rows) || null,
+            preflight: (preflight && preflight.checks) || null
+        }));
+    }
 
-    const buildStep5Activate = (d, deps) => {
-        const rows = [];
-        rows.push(safeNew(d.H, {
-            content: 'Test & activate',
-            type: d.H_Type.MEDIUM_HEADING
-        }, 'Heading(step5)'));
-        if (STATE.step5.activated) {
-            rows.push(safeNew(d.T, {
-                text: '✓ Click-to-Call is active. Sales reps can now use ' +
-                    'the phone icon on Customer, Lead, and Contact ' +
-                    'records.',
-                type: d.T_Type.STRONG
-            }, 'Text(activated)'));
-            const ButtonType = component__namespace.Button.Type;
-            const consoleBtn = safeNew(component__namespace.Button, {
-                label: 'Go to Admin Console',
-                type: ButtonType.PRIMARY,
-                action: deps.goToConsole
-            }, 'Button(step5-to-console)');
-            if (consoleBtn)
-                rows.push(consoleBtn);
-            return safeNew(d.SP, {
-                items: rows.filter((r) => r != null),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(step5-activated)');
+    class DropdownField extends core.PureComponent {
+        render() {
+            const { label, options, selectedValue, allowEmpty } = this.props;
+            if (options.length === 0) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: label }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no items found in Twilio for this account)" }) })] }));
+            }
+            const ds = new core__namespace.ArrayDataSource(options);
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: label }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: ds, valueMember: "value", displayMember: "label", selectedValue: selectedValue || (allowEmpty ? null : options[0].value), allowEmpty: !!allowEmpty, placeholder: allowEmpty ? '(none)' : 'Select…', onSelectionChanged: (args) => {
+                                this.props.onChange((args && args.value) || '');
+                            } }) })] }));
         }
-        if (STATE.step5.loading) {
-            const loader = safeNew(component__namespace.Loader, {
-                label: 'Running preflight checks…',
-                indeterminate: true
-            }, 'Loader(step5)');
-            if (loader)
-                rows.push(loader);
-            return safeNew(d.SP, {
-                items: rows.filter((r) => r != null),
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, 'StackPanel(step5-loading)');
+    }
+    class Step3 extends core.PureComponent {
+        componentDidMount() {
+            loadStep3Lists();
         }
-        if (STATE.step5.snapshot) {
-            rows.push(safeNew(d.H, {
-                content: 'Configuration review',
-                type: d.H_Type.SMALL_HEADING
-            }, 'Heading(review)'));
-            const snap = STATE.step5.snapshot;
-            const assignments = (STATE.step5.assignments || []);
-            const assignmentCount = assignments.length;
+        dispatchField = (field, value) => {
+            store.dispatch(Action.step3FieldChange(field, value));
+        };
+        render() {
+            const state = store.getState();
+            const s = state.step3;
+            const heading = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Voice configuration" }) }));
+            const intro = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { children: "Pick the TwiML application, default outbound caller ID, and Conversational Intelligence service from your Twilio account. These are fetched live using the secure API Secret configured in Step 2 \u2014 the secret value never leaves NetSuite's vault." }) }));
+            if (s.twimlApps === null || s.phoneNumbers === null || s.intelServices === null) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                                label: 'Loading from Twilio…',
+                                indeterminate: true
+                            }) })] }));
+            }
+            if (s.listLoadError) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Could not load Twilio lists: ", s.listLoadError, ". Verify the API Secret value is set at Setup > Company > API Secrets, then go back to Step 2 and Continue again to retry."] }) })] }));
+            }
+            const twimlOptions = s.twimlApps.map((ti) => ({
+                value: ti.sid || '',
+                label: (ti.friendlyName || '(unnamed)') + (ti.sid ? '  [' + ti.sid + ']' : '')
+            }));
+            const phoneOptions = s.phoneNumbers.map((n) => ({
+                value: n.phoneNumber || '',
+                label: (n.phoneNumber || '') + (n.friendlyName ? ' — ' + n.friendlyName : '')
+            }));
+            const intelOptions = s.intelServices.map((ti) => ({
+                value: ti.sid || '',
+                label: (ti.friendlyName || '(unnamed)') + (ti.sid ? '  [' + ti.sid + ']' : '')
+            }));
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(DropdownField, { label: "TwiML Application", options: twimlOptions, selectedValue: s.twimlAppSid, onChange: (v) => this.dispatchField('twimlAppSid', v) }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(DropdownField, { label: "Default outbound caller ID", options: phoneOptions, selectedValue: s.phoneNumber, onChange: (v) => this.dispatchField('phoneNumber', v) }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(DropdownField, { label: "Conversational Intelligence Service", options: intelOptions, selectedValue: s.intelServiceSid, onChange: (v) => this.dispatchField('intelServiceSid', v) }) })] }));
+        }
+    }
+
+    class AssignmentRow extends core.PureComponent {
+        handleSelectionChanged = (args) => {
+            const { phoneNumber } = this.props;
+            const values = (args && args.values) || [];
+            const state = store.getState();
+            const assignments = {
+                ...state.step4.assignments
+            };
+            const prev = assignments[phoneNumber.sid] || {};
+            const next = {
+                ...prev,
+                employeeIds: values
+            };
+            if (!prev.primaryEmployeeId || values.indexOf(prev.primaryEmployeeId) === -1) {
+                next.primaryEmployeeId = values.length > 0 ? values[0] : null;
+            }
+            assignments[phoneNumber.sid] = next;
+            store.dispatch(Action.step4FieldChange('assignments', assignments));
+        };
+        render() {
+            const { phoneNumber, employees, assignment } = this.props;
+            const dataItems = employees.map((e) => ({
+                value: e.id,
+                label: (e.name || '') + (e.email ? ' (' + e.email + ')' : '')
+            }));
+            const ds = new core__namespace.ArrayDataSource(dataItems);
+            const lookupName = (id) => {
+                for (const emp of employees) {
+                    if (Number(emp.id) === Number(id))
+                        return emp.name || '';
+                }
+                return '(id ' + id + ')';
+            };
+            const selectedItems = (assignment.employeeIds || []).map((id) => ({
+                value: id,
+                label: lookupName(id)
+            }));
+            const labelText = (phoneNumber.phoneNumber || '') +
+                (phoneNumber.friendlyName ? '  —  ' + phoneNumber.friendlyName : '');
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: labelText }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.MultiselectDropdown, { dataSource: ds, valueMember: "value", displayMember: "label", selectedItems: selectedItems, placeholder: "Assign reps\u2026", onSelectionChanged: this.handleSelectionChanged }) })] }));
+        }
+    }
+    class Step4 extends core.PureComponent {
+        componentDidMount() {
+            loadStep4Lists();
+        }
+        render() {
+            const state = store.getState();
+            const s = state.step4;
+            const heading = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Phone numbers & rep assignments" }) }));
+            const intro = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { children: "Assign reps to your Twilio phone numbers. Each rep with a number assigned will use it as their outbound caller ID. Reps without an assignment fall back to the default caller ID set in Step 3." }) }));
+            if (s.phoneNumbers === null || s.employees === null) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                                label: 'Loading phone numbers and employees…',
+                                indeterminate: true
+                            }) })] }));
+            }
+            if (s.listLoadError) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", s.listLoadError] }) })] }));
+            }
+            const phoneNumbers = s.phoneNumbers || [];
+            const employees = s.employees || [];
+            const assignments = s.assignments;
+            if (phoneNumbers.length === 0) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no phone numbers owned by this Twilio account \u2014 buy one in Twilio Console before continuing)" }) })] }));
+            }
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [heading, intro, phoneNumbers.map((pn) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(AssignmentRow, { phoneNumber: pn, employees: employees, assignment: assignments[pn.sid] || {} }) }, pn.sid)))] }));
+        }
+    }
+
+    const CheckRowItem$1 = (props) => {
+        const { check } = props;
+        const status = check.status || 'info_enabled';
+        let icon;
+        let color;
+        switch (status) {
+            case 'pass':
+                icon = core__namespace.SystemIcon.STATUS_SUCCESS_FILLED;
+                color = core__namespace.ImageConstant.Color.SUCCESS;
+                break;
+            case 'fail':
+                icon = core__namespace.SystemIcon.STATUS_ERROR_FILLED;
+                color = core__namespace.ImageConstant.Color.DANGER;
+                break;
+            case 'warn':
+                icon = core__namespace.SystemIcon.STATUS_WARNING_FILLED;
+                color = core__namespace.ImageConstant.Color.WARNING;
+                break;
+            case 'info_enabled':
+                icon = core__namespace.SystemIcon.STATUS_INFO_FILLED;
+                color = core__namespace.ImageConstant.Color.INFO;
+                break;
+            default:
+                icon = core__namespace.SystemIcon.STATUS_INFO;
+                color = core__namespace.ImageConstant.Color.NEUTRAL;
+        }
+        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, alignment: component__namespace.StackPanel.Alignment.START, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Image, { image: icon, size: component__namespace.Image.Size.M, color: color, presentation: true }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: check.label || '' }) }), check.detail ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: check.detail }) })) : null, check.repairHint ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '→ ' + check.repairHint }) })) : null] }) })] }));
+    };
+    class Step5 extends core.PureComponent {
+        componentDidMount() {
+            store.dispatch(Action.step5FieldChange('loading', true));
+            store.dispatch(Action.step5FieldChange('activateError', null));
+            loadStep5().finally(() => {
+                store.dispatch(Action.step5FieldChange('loading', false));
+            });
+        }
+        rerunPreflight = () => {
+            store.dispatch(Action.step5FieldChange('loading', true));
+            store.dispatch(Action.step5FieldChange('activateError', null));
+            loadStep5().finally(() => {
+                store.dispatch(Action.step5FieldChange('loading', false));
+            });
+        };
+        activate = async () => {
+            try {
+                const payload = await wizardCall('wizardActivate', {});
+                const resp = payload;
+                if (resp && resp.activated) {
+                    store.dispatch(Action.step5FieldChange('activated', true));
+                    store.dispatch(Action.step5FieldChange('activateError', null));
+                }
+                else {
+                    store.dispatch(Action.step5FieldChange('activateError', (resp && resp.error) || 'unknown'));
+                    if (resp && resp.failedChecks) {
+                        store.dispatch(Action.consoleLoadSuccess({
+                            preflight: resp.failedChecks
+                        }));
+                    }
+                }
+            }
+            catch (e) {
+                const err = e;
+                store.dispatch(Action.step5FieldChange('activateError', 'Network: ' + (err.message || String(e))));
+            }
+        };
+        render() {
+            const state = store.getState();
+            const s = state.step5;
+            const heading = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Test & activate" }) }));
+            if (s.activated) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "\u2713 Click-to-Call is active. Sales reps can now use the phone icon on Customer, Lead, and Contact records." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Go to Admin Console", type: component__namespace.Button.Type.PRIMARY, action: () => { goToConsole(); } }) })] }));
+            }
+            if (s.loading) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                                label: 'Running preflight checks…',
+                                indeterminate: true
+                            }) })] }));
+            }
+            const consoleState = state.console;
+            const snap = consoleState.snapshot || null;
+            const assignments = consoleState.assignments || [];
+            const preflight = consoleState.preflight || null;
             const phoneNumbersWithReps = {};
             assignments.forEach((a) => {
                 if (a.phoneSid)
                     phoneNumbersWithReps[a.phoneSid] = true;
             });
-            const lines = [
+            const reviewLines = snap ? [
                 'Account SID:        ' + (snap.accountSid || '(not set)'),
                 'API Key SID:        ' + (snap.apiKeySid || '(not set)'),
                 'API Key Secret:     ' + (snap.apiSecretId || '(not set)'),
                 'TwiML Application:  ' + (snap.twimlAppSid || '(not set)'),
                 'Default caller ID:  ' + (snap.phoneNumber || '(not set)'),
                 'Intel Service:      ' + (snap.intelServiceSid || '(none)'),
-                'Phone assignments:  ' + assignmentCount + ' rep(s) across ' +
+                'Phone assignments:  ' + assignments.length + ' rep(s) across ' +
                     Object.keys(phoneNumbersWithReps).length + ' number(s)'
-            ];
-            lines.forEach((l) => {
-                rows.push(safeNew(d.T, {
-                    text: l,
-                    type: d.T_Type.DEFAULT,
-                    size: d.T && d.T.Size ? d.T.Size.S : undefined
-                }, 'Text(review-line)'));
-            });
+            ] : [];
+            const allPassed = preflight !== null &&
+                preflight.every((c) => c.status === 'pass');
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, snap ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Configuration review" }) })) : null, reviewLines.map((line, idx) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: line }) }, 'review-' + idx))), preflight ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight checks" }) })) : null, (preflight || []).map((check, idx) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(CheckRowItem$1, { check: check }) }, 'pf-' + (check.id || idx)))), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: allPassed
+                                ? 'Activate Click-to-Call'
+                                : 'Activate Click-to-Call (fix preflight first)', type: component__namespace.Button.Type.PRIMARY, enabled: allPassed, action: () => { this.activate(); } }) }), s.activateError ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Activation failed: ", s.activateError] }) })) : null, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Re-run preflight", type: component__namespace.Button.Type.DEFAULT, action: this.rerunPreflight }) })] }));
         }
-        const preflight = (STATE.step5.preflight || null);
-        if (preflight) {
-            rows.push(safeNew(d.H, {
-                content: 'Preflight checks',
-                type: d.H_Type.SMALL_HEADING
-            }, 'Heading(preflight)'));
-            preflight.forEach((check) => {
-                rows.push(buildCheckRow(check));
-            });
-        }
-        const allPassed = preflight !== null &&
-            preflight.every((c) => c.status === 'pass');
-        const activateBtn = safeNew(component__namespace.Button, {
-            label: allPassed ? 'Activate Click-to-Call'
-                : 'Activate Click-to-Call (fix preflight first)',
-            type: component__namespace.Button.Type.PRIMARY,
-            enabled: allPassed,
-            action: () => { onActivateClick(deps); }
-        }, 'Button(activate)');
-        if (activateBtn)
-            rows.push(activateBtn);
-        if (STATE.step5.activateError) {
-            rows.push(safeNew(d.T, {
-                text: '✕ Activation failed: ' + STATE.step5.activateError,
-                type: d.T_Type.STRONG
-            }, 'Text(activate-error)'));
-        }
-        const rerunBtn = safeNew(component__namespace.Button, {
-            label: 'Re-run preflight',
-            type: component__namespace.Button.Type.DEFAULT,
-            action: () => { loadStep5(deps); }
-        }, 'Button(rerun-preflight)');
-        if (rerunBtn)
-            rows.push(rerunBtn);
-        return safeNew(d.SP, {
-            items: rows.filter((r) => r != null),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.M
-        }, 'StackPanel(step5)');
-    };
-    const loadStep5 = (deps) => {
-        STATE.step5.loading = true;
-        STATE.step5.activateError = null;
-        STATE.step5.snapshot = null;
-        STATE.step5.assignments = null;
-        STATE.step5.preflight = null;
-        deps.rerender();
-        let settled = 0;
-        const onSettled = () => {
-            settled += 1;
-            if (settled >= 3) {
-                STATE.step5.loading = false;
-                deps.rerender();
-            }
-        };
-        wizardCall('wizardSnapshot', {})
-            .then((p) => { STATE.step5.snapshot = p && p.snapshot; })
-            .catch(() => { STATE.step5.snapshot = null; })
-            .then(onSettled);
-        wizardCall('wizardLoadAssignments', {})
-            .then((p) => {
-            const resp = p;
-            STATE.step5.assignments = (resp && resp.items) || [];
-        })
-            .catch(() => { STATE.step5.assignments = []; })
-            .then(onSettled);
-        wizardCall('wizardRunPreflight', {})
-            .then((p) => {
-            const resp = p;
-            STATE.step5.preflight = (resp && resp.checks) || [];
-        }).catch((e) => {
-            const err = e;
-            STATE.step5.preflight = [{
-                    id: 'network', label: 'Preflight call', status: 'fail',
-                    detail: 'Network error: ' +
-                        (err && err.message ? err.message : String(e))
-                }];
-        }).then(onSettled);
-    };
-    const onActivateClick = (deps) => {
-        wizardCall('wizardActivate', {})
-            .then((payload) => {
-            const resp = payload;
-            if (resp && resp.activated) {
-                STATE.step5.activated = true;
-                STATE.step5.activateError = null;
-            }
-            else {
-                STATE.step5.activateError = (resp && resp.error) || 'unknown';
-                if (resp && resp.failedChecks) {
-                    STATE.step5.preflight = resp.failedChecks;
-                }
-            }
-            deps.rerender();
-        }).catch((e) => {
-            const err = e;
-            STATE.step5.activateError = 'Network: ' +
-                (err && err.message ? err.message : String(e));
-            deps.rerender();
-        });
-    };
-
-    function createRouter(deps) {
-        function determineLandingStep(snap) {
-            const has = function (v) {
-                return !!(v && String(v).trim().length > 0);
-            };
-            if (!has(snap.accountSid) || !has(snap.apiKeySid))
-                return 2;
-            if (!has(snap.apiSecretId))
-                return 2;
-            if (!has(snap.twimlAppSid) || !has(snap.phoneNumber))
-                return 3;
-            return 'console';
-        }
-        function goToStep(stepNum) {
-            setMode('stepper');
-            setCurrentStep(Math.max(1, Math.min(deps.totalSteps, stepNum)));
-            deps.rerender();
-            if (CURRENT_STEP === 1)
-                deps.loadPrereqs();
-            if (CURRENT_STEP === 3)
-                loadStep3Lists({ rerender: deps.rerender });
-            if (CURRENT_STEP === 4)
-                loadStep4Lists({ rerender: deps.rerender });
-            if (CURRENT_STEP === 5)
-                loadStep5({
-                    rerender: deps.rerender,
-                    goToConsole: goToConsole
-                });
-        }
-        function goToConsole() {
-            setMode('console');
-            setSelectedSection('overview');
-            setRailVisible(true);
-            STATE.console.pendingDeactivateConfirm = false;
-            STATE.console.deactivateError = null;
-            STATE.console.actionError = null;
-            STATE.console.activeModal = null;
-            deps.loadConsole();
-        }
-        function goToSection(sectionName) {
-            setSelectedSection(sectionName);
-            if (MODE === 'stepper') {
-                setMode('console');
-            }
-            STATE.console.pendingDeactivateConfirm = false;
-            STATE.console.actionError = null;
-            deps.rerender();
-            if (sectionName === 'phones' &&
-                STATE.console.phonesNumbers === null) {
-                deps.loadPhonesData();
-            }
-        }
-        return { determineLandingStep, goToStep, goToConsole, goToSection };
     }
 
-    var STEPS = [
+    const StatCard = (props) => {
+        const toneColor = (() => {
+            switch (props.tone) {
+                case 'success': return core__namespace.ImageConstant.Color.SUCCESS;
+                case 'warning': return core__namespace.ImageConstant.Color.WARNING;
+                case 'info': return core__namespace.ImageConstant.Color.INFO;
+                default: return core__namespace.ImageConstant.Color.NEUTRAL;
+            }
+        })();
+        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XS, rootStyle: {
+                padding: '16px',
+                border: '1px solid #E2E3E5',
+                borderRadius: '6px',
+                background: '#FFFFFF'
+            }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: props.title }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, alignment: component__namespace.StackPanel.Alignment.CENTER, itemGap: component__namespace.StackPanel.GapSize.XS, children: [props.icon ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Image, { image: props.icon, size: component__namespace.Image.Size.M, color: toneColor, presentation: true }) })) : null, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: props.metric }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: props.description }) })] }));
+    };
+    const formatDuration = (seconds) => {
+        if (!seconds || seconds < 0)
+            return '—';
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        const pad = (n) => (n < 10 ? '0' + n : String(n));
+        if (h > 0)
+            return h + ':' + pad(m) + ':' + pad(s);
+        return m + ':' + pad(s);
+    };
+    const formatCallStatus = (status) => {
+        const norm = (status || '').trim();
+        if (!norm)
+            return '—';
+        return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
+    };
+    const statusBadgePalette = (status) => {
+        const norm = (status || '').toLowerCase().trim();
+        switch (norm) {
+            case 'transcribed': return { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' };
+            case 'processing': return { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' };
+            case 'logged': return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
+            case 'no_transcript':
+            case 'no transcript': return { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
+            case 'failed': return { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' };
+            default: return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
+        }
+    };
+    class OverviewPage extends core.PureComponent {
+        recentCallsColumns;
+        constructor(props, context) {
+            super(props, context);
+            const CT = component__namespace.DataGrid.ColumnType;
+            const BdgType = component__namespace.Badge.Type;
+            this.recentCallsColumns = [
+                {
+                    type: CT.TEMPLATED,
+                    name: 'date',
+                    label: 'Date',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({ text: row?.date || '—' });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'rep',
+                    label: 'Rep',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({ text: row?.repName || '(unassigned)' });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'contact',
+                    label: 'Contact',
+                    stretchFactor: 3,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        const primary = row?.companyName || row?.contactName || '(unknown)';
+                        return new component__namespace.Text({ text: primary, type: component__namespace.Text.Type.STRONG });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'duration',
+                    label: 'Duration',
+                    stretchFactor: 1,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({ text: row ? formatDuration(row.duration) : '—' });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'status',
+                    label: 'AI Status',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        if (!row)
+                            return new component__namespace.Text({ text: '—' });
+                        const palette = statusBadgePalette(row.status);
+                        return new component__namespace.Badge({
+                            content: formatCallStatus(row.status),
+                            type: BdgType.SUBTLE,
+                            rootStyle: {
+                                backgroundColor: palette.bg,
+                                color: palette.fg,
+                                border: '1px solid ' + palette.border
+                            }
+                        });
+                    }
+                }
+            ];
+        }
+        handleNav = (section) => goToSection(section);
+        handleDeactivate = () => { deactivate(); };
+        handleRowClick = (args) => {
+            const dataItem = args?.row?.dataItem;
+            if (!dataItem?.id)
+                return;
+            try {
+                window.open('/app/crm/calendar/call.nl?id=' + encodeURIComponent(String(dataItem.id)), '_blank');
+            }
+            catch (e) { }
+        };
+        render() {
+            const state = store.getState();
+            const c = state.console;
+            const snap = (c.snapshot || {});
+            const assignments = (c.assignments || []);
+            const preflight = (c.preflight || []);
+            const recentCalls = c.recentCalls;
+            const phoneCount = {};
+            assignments.forEach((a) => { if (a.phoneSid)
+                phoneCount[a.phoneSid] = true; });
+            const phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
+            const repCount = assignments.length;
+            const preflightPassed = preflight.filter((cc) => cc.status === 'pass').length;
+            const preflightTotal = preflight.length;
+            const statusLabel = snap.active === false ? 'Paused'
+                : snap.active === true ? 'Active' : 'Unknown';
+            const statusIcon = snap.active === true ? core__namespace.SystemIcon.STATUS_SUCCESS_FILLED
+                : snap.active === false ? core__namespace.SystemIcon.STATUS_WARNING_FILLED
+                    : core__namespace.SystemIcon.STATUS_INFO_FILLED;
+            const statusTone = snap.active === true ? 'success' : snap.active === false ? 'warning' : 'info';
+            const recentCallsDs = recentCalls && recentCalls.length > 0
+                ? new core__namespace.ArrayDataSource(recentCalls)
+                : null;
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr 1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Status", metric: statusLabel, description: snap.active === false
+                                            ? 'Reps cannot place calls'
+                                            : 'Reps can place calls', icon: statusIcon, tone: statusTone }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Phone numbers", metric: String(phonesConfigured), description: phonesConfigured === 0
+                                            ? 'No numbers configured'
+                                            : (snap.phoneNumber || '') }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Assigned reps", metric: String(repCount), description: repCount === 0
+                                            ? 'No assignments'
+                                            : (repCount === 1 ? '1 rep' : repCount + ' reps') }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Preflight", metric: preflightTotal > 0
+                                            ? preflightPassed + ' of ' + preflightTotal
+                                            : '—', description: preflightTotal > 0
+                                            ? 'See Health for detail'
+                                            : 'Not yet run' }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Quick actions" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add a phone number", startIcon: core__namespace.SystemIcon.ADD, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.REFRESH, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.PLAY, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Rotate API Key Secret", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleDeactivate }) })] }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Recent calls" }) }), recentCalls === null ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                                        label: 'Loading recent calls…',
+                                        indeterminate: true
+                                    }) })) : recentCalls.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No calls logged yet. Once reps start placing calls through Click-to-Call, the 10 most recent will show up here." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+                                        dataSource: recentCallsDs,
+                                        columns: this.recentCallsColumns,
+                                        columnStretch: true,
+                                        highlightRowsOnHover: true,
+                                        stripedRows: true,
+                                        dataRowHeight: 56,
+                                        headerRowHeight: 40,
+                                        onRowClick: this.handleRowClick
+                                    }) }))] }) })] }));
+        }
+    }
+
+    const truncSid = (sid) => {
+        if (!sid)
+            return '';
+        if (sid.length <= 14)
+            return sid;
+        return sid.slice(0, 6) + '…' + sid.slice(-4);
+    };
+    class PhonesPage extends core.PureComponent {
+        buildColumns(employees) {
+            const CT = component__namespace.DataGrid.ColumnType;
+            const IM = component__namespace.DataGrid.InputMode;
+            const BdgType = component__namespace.Badge.Type;
+            const employeesDs = new core__namespace.ArrayDataSource(employees);
+            const statusForRow = (row) => {
+                const state = store.getState();
+                const saving = state.console.phonesSaving[row.phoneSid || ''];
+                const hasReps = (row.employeeIds || []).length > 0;
+                if (saving) {
+                    return {
+                        icon: core__namespace.SystemIcon.STATUS_INFO_FILLED,
+                        color: core__namespace.ImageConstant.Color.INFO,
+                        label: 'Saving…'
+                    };
+                }
+                if (hasReps) {
+                    return {
+                        icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED,
+                        color: core__namespace.ImageConstant.Color.SUCCESS,
+                        label: 'Live'
+                    };
+                }
+                return {
+                    icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED,
+                    color: core__namespace.ImageConstant.Color.WARNING,
+                    label: 'No reps'
+                };
+            };
+            return [
+                {
+                    type: CT.TEMPLATED,
+                    name: 'statusIcon',
+                    label: '',
+                    stretchFactor: 1,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        if (!row)
+                            return new component__namespace.Text({ text: '' });
+                        const s = statusForRow(row);
+                        return new component__namespace.Image({
+                            image: s.icon,
+                            size: component__namespace.Image.Size.M,
+                            color: s.color,
+                            presentation: true
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'phone',
+                    label: 'Phone number',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({
+                            text: row?.phoneNumber || '(unknown)',
+                            type: component__namespace.Text.Type.STRONG
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'phoneSid',
+                    label: 'Phone SID',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({
+                            text: truncSid(row?.phoneSid),
+                            type: component__namespace.Text.Type.WEAK,
+                            size: component__namespace.Text.Size.S
+                        });
+                    }
+                },
+                {
+                    type: CT.MULTI_SELECT_DROPDOWN,
+                    name: 'reps',
+                    label: 'Assigned reps',
+                    stretchFactor: 5,
+                    binding: 'employeeIds',
+                    inputMode: IM.EDIT_ONLY,
+                    dataSource: employeesDs,
+                    editable: true,
+                    displayMember: (value) => {
+                        if (value && typeof value === 'object') {
+                            return value.name || '';
+                        }
+                        const id = Number(value);
+                        const emp = employees.find((e) => e.id === id);
+                        return emp?.name || '';
+                    },
+                    widgetOptions: (row) => {
+                        const dataItem = row?.dataItem || {};
+                        const phoneSid = dataItem.phoneSid;
+                        const label = dataItem.label || '';
+                        const primary = dataItem.primaryEmployeeId ?? null;
+                        return {
+                            dataSource: employeesDs,
+                            valueMember: 'id',
+                            displayMember: 'name',
+                            placeholder: 'Pick reps',
+                            onSelectionChanged: (args) => {
+                                const newIds = ((args && args.values) || []).map((v) => {
+                                    if (v && typeof v === 'object') {
+                                        return Number(v.id);
+                                    }
+                                    return Number(v);
+                                });
+                                if (phoneSid) {
+                                    savePhonesAssignment(phoneSid, newIds, label, primary);
+                                }
+                            }
+                        };
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'status',
+                    label: 'Status',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        if (!row)
+                            return new component__namespace.Text({ text: '—' });
+                        const s = statusForRow(row);
+                        const palette = s.label === 'Live' ? { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } :
+                            s.label === 'Saving…' ? { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } :
+                                { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
+                        return new component__namespace.Badge({
+                            content: s.label,
+                            type: BdgType.SUBTLE,
+                            rootStyle: {
+                                backgroundColor: palette.bg,
+                                color: palette.fg,
+                                border: '1px solid ' + palette.border
+                            }
+                        });
+                    }
+                }
+            ];
+        }
+        render() {
+            const state = store.getState();
+            const c = state.console;
+            const grouped = (c.phonesByPhone || []);
+            const employees = (c.phonesEmployees || []);
+            if (c.phonesLoading) {
+                return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                            label: 'Loading phones & reps…',
+                            indeterminate: true
+                        }) }) }));
+            }
+            const columns = this.buildColumns(employees);
+            const rowsDs = grouped.length > 0 ? new core__namespace.ArrayDataSource(grouped) : null;
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XL, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Refresh from Twilio", startIcon: core__namespace.SystemIcon.REFRESH, action: () => { loadPhonesData(); } }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add phone number", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.ADD, action: () => { goToStep(4); } }) })] }) }), c.phonesError ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.phonesError] }) })) : null, grouped.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No phone numbers configured yet. Click \"Add phone number\" above to claim a Twilio number and assign reps." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+                            dataSource: rowsDs,
+                            columns,
+                            columnStretch: true,
+                            highlightRowsOnHover: true,
+                            stripedRows: true,
+                            dataRowHeight: 72,
+                            headerRowHeight: 44,
+                            editable: true,
+                            rootStyle: { width: '100%' }
+                        }) }))] }));
+        }
+    }
+
+    async function loadVoiceLists() {
+        store.dispatch(Action.consoleLoadSuccess({ voiceListsLoading: true }));
+        const safe = (promise) => promise.catch(() => null);
+        try {
+            const [twiml, phones, intel] = await Promise.all([
+                safe(wizardCall('wizardListTwiMLApps', {})),
+                safe(wizardCall('wizardListPhoneNumbers', {})),
+                safe(wizardCall('wizardListIntelServices', {}))
+            ]);
+            const voiceLists = {
+                twimlApps: (twiml && twiml.apps) || null,
+                phoneNumbers: (phones && phones.phones) || null,
+                intelServices: (intel && intel.services) || null
+            };
+            store.dispatch(Action.consoleLoadSuccess({
+                voiceLists,
+                voiceListsLoading: false
+            }));
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : 'Voice lists load failed';
+            store.dispatch(Action.consoleLoadSuccess({
+                voiceListsLoading: false,
+                voiceError: msg
+            }));
+        }
+    }
+    async function saveVoiceField(field, value) {
+        store.dispatch(Action.voiceFieldSave({ phase: 'start' }));
+        try {
+            const payload = { [field]: value };
+            const result = await wizardCall('wizardSaveVoice', payload);
+            if (result && result.ok === false) {
+                const err = result.error || 'Voice save failed';
+                store.dispatch(Action.voiceFieldSave({ phase: 'failure', error: err }));
+                return;
+            }
+            store.dispatch(Action.voiceFieldSave({ phase: 'success', field, value }));
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : 'Voice save failed';
+            store.dispatch(Action.voiceFieldSave({ phase: 'failure', error: msg }));
+        }
+    }
+
+    const TWILIO_DOCS = {
+        twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
+        phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
+        intelService: 'https://www.twilio.com/docs/voice/intelligence'
+    };
+    const FIELD_SPECS = [
+        {
+            field: 'twimlAppSid',
+            label: 'TwiML Application',
+            helpText: 'The Twilio application that handles outbound call routing. ' +
+                'The wizard registers this app\'s VoiceUrl with the CTC Suitelet.',
+            docUrl: TWILIO_DOCS.twimlApp
+        },
+        {
+            field: 'phoneNumber',
+            label: 'Default outbound caller-ID',
+            helpText: 'Number reps see as their outbound caller ID. Specific ' +
+                'rep-to-number assignments override this default.',
+            docUrl: TWILIO_DOCS.phoneNumber
+        },
+        {
+            field: 'intelServiceSid',
+            label: 'Conversational Intelligence',
+            helpText: 'Optional. The Voice Intelligence service ID that ' +
+                'produces transcripts and AI summaries.',
+            docUrl: TWILIO_DOCS.intelService,
+            allowEmpty: true
+        }
+    ];
+    const listKeyFor = (field) => {
+        switch (field) {
+            case 'twimlAppSid': return 'twimlApps';
+            case 'phoneNumber': return 'phoneNumbers';
+            case 'intelServiceSid': return 'intelServices';
+        }
+    };
+    class VoiceFieldRow extends core.PureComponent {
+        handleEdit = () => {
+            const { spec } = this.props;
+            const state = store.getState();
+            const snap = (state.console.snapshot || {});
+            const current = snap[spec.field] || '';
+            store.dispatch(Action.voiceFieldEdit(spec.field, current));
+            loadVoiceLists();
+        };
+        handleCancel = () => {
+            store.dispatch(Action.voiceFieldEdit(null, null));
+        };
+        handlePendingChange = (args) => {
+            const value = (args && args.value) || null;
+            const state = store.getState();
+            store.dispatch(Action.voiceFieldEdit(state.console.voiceEditing, value));
+        };
+        handleSave = () => {
+            const { spec } = this.props;
+            const state = store.getState();
+            const pending = state.console.voicePendingValue;
+            if (pending !== null && pending !== undefined) {
+                saveVoiceField(spec.field, pending);
+            }
+        };
+        render() {
+            const { spec } = this.props;
+            const state = store.getState();
+            const snap = (state.console.snapshot || {});
+            const isEditing = state.console.voiceEditing === spec.field;
+            const value = snap[spec.field];
+            const labelCell = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: spec.label }) }), spec.docUrl ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Link, { content: "Twilio docs \u2197", url: spec.docUrl, target: component__namespace.Link.Target.BLANK }) })) : null] }));
+            const helpCell = (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: spec.helpText }));
+            const rightCell = isEditing
+                ? this.renderEditControls(spec)
+                : this.renderViewControls(spec, value);
+            return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 3fr 2fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: labelCell }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: helpCell }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: rightCell })] }));
+        }
+        renderViewControls(spec, value) {
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: value ? (jsxRuntime.jsx(component__namespace.Text, { children: value })) : (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(not configured)" })) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Change", action: this.handleEdit }) })] }));
+        }
+        renderEditControls(spec) {
+            const state = store.getState();
+            const c = state.console;
+            const listKey = listKeyFor(spec.field);
+            const list = c.voiceLists[listKey];
+            const saving = c.voiceSaving;
+            const pending = c.voicePendingValue;
+            if (list === null || c.voiceListsLoading) {
+                return (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                        label: 'Loading from Twilio…',
+                        indeterminate: true
+                    }) }));
+            }
+            if (list.length === 0) {
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no items found in Twilio for this account)" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", action: this.handleCancel }) })] }));
+            }
+            const normalized = list.map((it) => {
+                if (spec.field === 'phoneNumber') {
+                    return {
+                        value: it.phoneNumber || '',
+                        label: (it.phoneNumber || '') +
+                            (it.friendlyName ? '  —  ' + it.friendlyName : '')
+                    };
+                }
+                return {
+                    value: it.sid || '',
+                    label: (it.friendlyName || '(unnamed)') +
+                        (it.sid ? '  [' + it.sid + ']' : '')
+                };
+            });
+            const ds = new core__namespace.ArrayDataSource(normalized);
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: ds, valueMember: "value", displayMember: "label", selectedValue: pending || (spec.allowEmpty ? null : normalized[0].value), allowEmpty: !!spec.allowEmpty, placeholder: spec.allowEmpty ? '(none)' : 'Select…', onSelectionChanged: this.handlePendingChange }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: saving ? 'Saving…' : 'Save', type: component__namespace.Button.Type.PRIMARY, enabled: !saving, action: this.handleSave }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", enabled: !saving, action: this.handleCancel }) })] }));
+        }
+    }
+    class VoicePage extends core.PureComponent {
+        render() {
+            const state = store.getState();
+            const c = state.console;
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Manage TwiML application, default outbound caller-ID number, and optional Conversational Intelligence service. Changes save immediately and apply to the next call placed." }) }), c.voiceError ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.voiceError] }) })) : null, FIELD_SPECS.map((spec) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(VoiceFieldRow, { spec: spec }) }, spec.field)))] }));
+        }
+    }
+
+    const TWILIO_CREDS_DOCS = {
+        accountSid: 'https://www.twilio.com/docs/iam/api/account',
+        apiKeySid: 'https://www.twilio.com/docs/iam/api-keys',
+        apiSecret: 'https://www.twilio.com/docs/iam/api-keys'
+    };
+    const CredentialRow = (props) => {
+        const { spec } = props;
+        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 2fr 2fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: spec.label }) }), spec.docUrl ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Link, { content: "Twilio docs \u2197", url: spec.docUrl, target: component__namespace.Link.Target.BLANK }) })) : null] }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: spec.help }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: spec.value ? (jsxRuntime.jsx(component__namespace.Text, { children: spec.value })) : (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(not configured)" })) })] }));
+    };
+    class CredentialsPage extends core.PureComponent {
+        handleOpenSecrets = () => {
+            try {
+                window.open('/app/common/scripting/secrets/settings.nl', '_blank');
+            }
+            catch (e) { }
+        };
+        render() {
+            const state = store.getState();
+            const snap = (state.console.snapshot || {});
+            const rows = [
+                {
+                    label: 'Account SID',
+                    value: snap.accountSid || '',
+                    help: 'Your Twilio Account SID. Public — safe to display.',
+                    docUrl: TWILIO_CREDS_DOCS.accountSid
+                },
+                {
+                    label: 'API Key SID',
+                    value: snap.apiKeySid || '',
+                    help: 'Identifies which Twilio API Key the wizard uses. ' +
+                        'Public — the matching Secret stays in NetSuite\'s ' +
+                        'API Secrets vault.',
+                    docUrl: TWILIO_CREDS_DOCS.apiKeySid
+                },
+                {
+                    label: 'API Key Secret pointer',
+                    value: snap.apiSecretId || '',
+                    help: 'NetSuite script-id (custsecret_…) of the API Secret. ' +
+                        'The secret value itself never leaves NetSuite\'s vault.',
+                    docUrl: TWILIO_CREDS_DOCS.apiSecret
+                }
+            ];
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Open NetSuite API Secrets", startIcon: core__namespace.SystemIcon.LOCK, action: this.handleOpenSecrets }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "The Account SID + API Key SID are public identifiers \u2014 they're safe to display here. The actual API Secret value is held opaque by NetSuite's API Secrets vault (Setup > Company > API Secrets) and never travels through the SPA." }) }), rows.map((spec) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(CredentialRow, { spec: spec }) }, spec.label))), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XS, rootStyle: {
+                                padding: '12px 16px',
+                                border: '1px solid #E2E3E5',
+                                borderRadius: '4px',
+                                background: '#F7F8F9'
+                            }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Rotation runbook" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: "1. Mint a new API Key Secret in the Twilio Console (Account > API Keys & tokens)." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: "2. Update the secret value in NetSuite (Setup > Company > API Secrets) \u2014 keep the same script id so the wizard pointer above stays valid." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: "3. Revoke the old Twilio API Key once you've verified call placement works with the new secret." }) })] }) })] }));
+        }
+    }
+
+    const statusToBadge = (status) => {
+        switch (status) {
+            case 'pass': return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
+            case 'fail': return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
+            case 'warn': return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
+            case 'info_enabled': return { text: 'Enabled', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
+            case 'info_disabled': return { text: 'Disabled', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+        }
+    };
+    const statusIcon = (status) => {
+        switch (status) {
+            case 'pass': return { icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED, color: core__namespace.ImageConstant.Color.SUCCESS };
+            case 'fail': return { icon: core__namespace.SystemIcon.STATUS_ERROR_FILLED, color: core__namespace.ImageConstant.Color.DANGER };
+            case 'warn': return { icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED, color: core__namespace.ImageConstant.Color.WARNING };
+            case 'info_enabled': return { icon: core__namespace.SystemIcon.STATUS_INFO_FILLED, color: core__namespace.ImageConstant.Color.INFO };
+            default: return { icon: core__namespace.SystemIcon.STATUS_INFO, color: core__namespace.ImageConstant.Color.NEUTRAL };
+        }
+    };
+    const CheckRowItem = (props) => {
+        const { check } = props;
+        const status = check.status || 'info_enabled';
+        const si = statusIcon(status);
+        const sb = statusToBadge(status);
+        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, alignment: component__namespace.StackPanel.Alignment.START, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Image, { image: si.icon, size: component__namespace.Image.Size.M, color: si.color, presentation: true }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: check.label || '(unlabeled check)' }) }), check.detail ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: check.detail }) })) : null] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Badge, { content: sb.text, type: component__namespace.Badge.Type.SUBTLE, rootStyle: {
+                            backgroundColor: sb.palette.bg,
+                            color: sb.palette.fg,
+                            border: '1px solid ' + sb.palette.border
+                        } }) })] }));
+    };
+    class HealthPage extends core.PureComponent {
+        rerunPreflight = async () => {
+            store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true }));
+            try {
+                const payload = await wizardCall('wizardRunPreflight', {});
+                const checks = payload && payload.checks;
+                store.dispatch(Action.consoleLoadSuccess({
+                    preflight: Array.isArray(checks) ? checks : []
+                }));
+            }
+            catch (e) {
+                const err = e;
+                store.dispatch(Action.actionErrorSet('Preflight failed: ' + (err.message || String(e))));
+            }
+            finally {
+                store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: false }));
+            }
+        };
+        cancelDeactivateConfirm = () => {
+            store.dispatch(Action.deactivateSuccess());
+        };
+        requestDeactivate = () => {
+            store.dispatch(Action.deactivateRequest());
+        };
+        confirmDeactivate = () => {
+            deactivate();
+        };
+        render() {
+            const state = store.getState();
+            const c = state.console;
+            const preflight = c.preflight;
+            const drift = (c.drift || {});
+            const snap = (c.snapshot || {});
+            const isPaused = snap.active === false;
+            const refreshing = !!c.preflightRefreshing;
+            const driftRows = [
+                { label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'pass', detail: drift.voiceUrl === 'fail' ? 'VoiceUrl does not match the wizard\'s expected Suitelet URL' : '' },
+                { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
+                { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
+            ];
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Re-running…' : 'Re-run', startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { this.rerunPreflight(); } }) }), preflight === null || preflight === undefined ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Click \"Re-run\" to evaluate." }) })) : preflight.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No checks returned." }) })) : (preflight.map((check, idx) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(CheckRowItem, { check: check }) }, 'pf-' + (check.id || idx)))))] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Drift detection" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Compares the saved wizard config against the live Twilio account. Re-runs each time the console mounts." }) }), driftRows.map((row, idx) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(CheckRowItem, { check: row }) }, 'drift-' + idx)))] }) }), !isPaused ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
+                                border: '1px solid #D33A2C',
+                                borderRadius: '8px',
+                                backgroundColor: '#FDF4F3',
+                                padding: '16px 20px'
+                            }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Danger zone" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Deactivate Click-to-Call: reps lose phone-icon access across all roles. In-progress calls finish normally; new calls cannot be placed. Reactivate any time." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: c.pendingDeactivateConfirm ? (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", action: this.cancelDeactivateConfirm }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Confirm deactivate", type: component__namespace.Button.Type.DANGER, action: this.confirmDeactivate }) })] })) : (jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, action: this.requestDeactivate })) }), c.deactivateError ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Deactivate failed: ", c.deactivateError] }) })) : null] }) })) : null, c.actionError ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.actionError] }) })) : null] }));
+        }
+    }
+
+    const NavRail = () => {
+        const state = store.getState();
+        const assignments = state.console.assignments;
+        const assignmentBadge = assignments ? String(assignments.length) : undefined;
+        const navItems = [
+            { value: 'overview', label: 'Overview', icon: core__namespace.SystemIcon.HOME },
+            { value: 'phones', label: 'Phones & reps', icon: core__namespace.SystemIcon.CALL,
+                badge: assignmentBadge },
+            { value: 'voice', label: 'Voice config', icon: core__namespace.SystemIcon.SETTINGS },
+            { value: 'credentials', label: 'Credentials', icon: core__namespace.SystemIcon.LOCK },
+            { value: 'health', label: 'Health', icon: core__namespace.SystemIcon.HEART_FILLED },
+            { value: 're-run', label: 'Re-run wizard', icon: core__namespace.SystemIcon.REFRESH,
+                separatorTop: true,
+                action: () => { goToStep(1); } }
+        ];
+        const selectedVal = state.mode === 'stepper' ? 're-run' : state.selectedSection;
+        return (jsxRuntime.jsx(component__namespace.NavigationDrawer, { items: navItems, selectedValue: selectedVal, width: 240, visualStyle: component__namespace.NavigationDrawer.VisualStyle.DARK, onSelectedValueChanged: (args) => {
+                const value = args && args.value;
+                if (!value)
+                    return;
+                if (value === 're-run') {
+                    goToStep(1);
+                    return;
+                }
+                goToSection(value);
+            } }));
+    };
+
+    const RailContentShell = (props) => {
+        return (jsxRuntime.jsx(component__namespace.ScrollPanel, { orientation: component__namespace.ScrollPanel.Orientation.VERTICAL, children: jsxRuntime.jsx(component__namespace.ContentPanel, { horizontalAlignment: component__namespace.ContentPanel.HorizontalAlignment.STRETCH, outerGap: {
+                    start: component__namespace.ContentPanel.GapSize.XXL,
+                    end: component__namespace.ContentPanel.GapSize.XXL,
+                    vertical: component__namespace.ContentPanel.GapSize.M
+                }, children: props.children }) }));
+    };
+
+    const PausedBanner = (props) => {
+        const handleReactivate = props.onReactivate || (() => { reactivate(); });
+        const contentRow = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.L, alignment: component__namespace.StackPanel.Alignment.CENTER, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { children: "Reps cannot place calls until you reactivate. All config is preserved." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reactivate", type: component__namespace.Button.Type.PRIMARY, action: handleReactivate }) })] }));
+        return (jsxRuntime.jsx(component__namespace.BannerMessage, { title: "Click-to-Call is paused", content: contentRow, type: component__namespace.BannerMessage.Type.WARNING, showCloseButton: false }));
+    };
+
+    const subtitleFor = (section) => {
+        switch (section) {
+            case 'overview': return 'Overview';
+            case 'phones': return 'Phones & reps';
+            case 'voice': return 'Voice config';
+            case 'credentials': return 'Credentials';
+            case 'health': return 'Health';
+        }
+    };
+    const ConsoleShell = (props) => {
+        const state = store.getState();
+        const snap = state.console.snapshot;
+        const isPaused = snap?.active === false;
+        const subtitle = subtitleFor(state.selectedSection);
+        const contentColumn = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.ApplicationHeader, { title: "Click-to-Call Admin Console", subtitle: subtitle }) }), isPaused ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PausedBanner, {}) })) : null, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { children: props.children }) })] }));
+        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, {}) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: contentColumn })] }));
+    };
+
+    const STEPS = [
         { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
         { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
         { num: 3, label: 'Voice config', sub: 'TwiML & caller ID' },
         { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
         { num: 5, label: 'Test & activate', sub: 'Review & go live' }
     ];
-    var bodyContainer = null;
-    var enums = null;
-    var rerenderHook = function () { };
-    var router = null;
-    var mountRouting = true;
-    function setRerenderHook(fn) {
-        rerenderHook = fn;
-    }
-    function initializeApp() {
-        try {
-            var SP = component__namespace.StackPanel;
-            var CP = component__namespace.ContentPanel;
-            var H = component__namespace.Heading;
-            var T = component__namespace.Text;
-            var Stp = component__namespace.Stepper;
-            var SI = component__namespace.StepperItem;
-            var ND = component__namespace.NavigationDrawer;
-            var GP = component__namespace.GridPanel;
-            var Bn = component__namespace.Banner;
-            var Cd = component__namespace.Card;
-            var Tb = component__namespace.ToolBar;
-            var Sp = component__namespace.ScrollPanel;
-            var DG = component__namespace.DataGrid;
-            var TC = component__namespace.TemplatedColumn;
-            var MDC = component__namespace.MultiselectDropdownColumn;
-            var Bdg = component__namespace.Badge;
-            var Ads = core__namespace.ArrayDataSource;
-            var SP_Orient = SP.Orientation;
-            var SP_Gap = SP.GapSize;
-            var CP_Gap = CP.GapSize;
-            var CP_HAlign = CP.HorizontalAlignment;
-            var H_Type = H.Type;
-            var T_Type = T.Type;
-            var Stp_Orient = Stp.Orientation;
-            var Bn_Color = Bn.Color;
-            var GP_Gap = GP.GapSize;
-            var SysIcon = core__namespace.SystemIcon;
-            enums = {
-                SP: SP, CP: CP, H: H, T: T, Stp: Stp, SI: SI,
-                ND: ND, GP: GP, Bn: Bn, Cd: Cd, Tb: Tb,
-                Sp: Sp,
-                DG: DG, TC: TC, MDC: MDC, Bdg: Bdg, Ads: Ads,
-                SP_Orient: SP_Orient,
-                SP_Gap: SP_Gap,
-                CP_Gap: CP_Gap,
-                CP_HAlign: CP_HAlign,
-                H_Type: H_Type,
-                T_Type: T_Type,
-                Stp_Orient: Stp_Orient,
-                Bn_Color: Bn_Color,
-                GP_Gap: GP_Gap,
-                SysIcon: SysIcon
-            };
-            router = createRouter({
-                rerender: rerender,
-                loadConsole: loadConsole,
-                loadPhonesData: loadPhonesData,
-                loadPrereqs: loadPrereqs,
-                totalSteps: STEPS.length
-            });
-            store.subscribe(() => rerender());
-            rerender();
-            wizardCall('wizardSnapshot', {}).then(function (payload) {
-                var resp = payload;
-                var snap = (resp && resp.snapshot);
-                if (!snap) {
-                    mountRouting = false;
-                    rerender();
-                    loadPrereqs();
-                    return;
-                }
-                var target = router.determineLandingStep(snap);
-                mountRouting = false;
-                if (target === 'console') {
-                    console.log('[CTC Setup Wizard] resumability — routing to Admin Console');
-                    router.goToConsole();
-                }
-                else {
-                    console.log('[CTC Setup Wizard] resumability — routing to step ' + target);
-                    router.goToStep(target);
-                }
-            }).catch(function (e) {
-                console.warn('[CTC Setup Wizard] resumability snapshot ' +
-                    'failed; falling back to Step 1:', e);
-                mountRouting = false;
-                rerender();
-                loadPrereqs();
-            });
+    const StepPill = (props) => {
+        const { spec, currentStep } = props;
+        const isCurrent = spec.num === currentStep;
+        const isDone = spec.num < currentStep;
+        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, alignment: component__namespace.StackPanel.Alignment.CENTER, itemGap: component__namespace.StackPanel.GapSize.XS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Badge, { content: isDone ? '✓' : String(spec.num), type: isCurrent || isDone
+                            ? component__namespace.Badge.Type.SOLID
+                            : component__namespace.Badge.Type.SUBTLE, size: component__namespace.Badge.Size.DEFAULT }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: isCurrent ? component__namespace.Text.Type.STRONG : component__namespace.Text.Type.DEFAULT, children: spec.label }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: spec.sub }) })] }));
+    };
+    const Stepper = (props) => {
+        return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, justification: component__namespace.StackPanel.Justification.SPACE_BETWEEN, itemGap: component__namespace.StackPanel.GapSize.M, children: STEPS.map((spec) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(StepPill, { spec: spec, currentStep: props.currentStep }) }, 'step-' + spec.num))) }));
+    };
+
+    const StepperShell = (props) => {
+        const state = store.getState();
+        const step = state.currentStep;
+        const stepLabel = STEPS[step - 1]?.label || '';
+        const subtitle = 'Step ' + step + ' of ' + STEPS.length + ' — ' + stepLabel;
+        const contentColumn = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.ApplicationHeader, { title: "Click-to-Call Setup Wizard", subtitle: subtitle }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.ContentPanel, { horizontalAlignment: component__namespace.ContentPanel.HorizontalAlignment.STRETCH, outerGap: component__namespace.ContentPanel.GapSize.M, children: jsxRuntime.jsx(Stepper, { currentStep: step }) }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { children: props.children }) })] }));
+        if (state.railVisible) {
+            return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, {}) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: contentColumn })] }));
         }
-        catch (e) {
-            console.error("[CTC Setup Wizard] initializeApp() threw:", e);
-        }
-    }
-    function rerender() {
-        try {
-            rerenderHook();
-        }
-        catch (e) {
-            console.error("[CTC Setup Wizard] rerender hook threw:", e);
-        }
-    }
-    function renderRoot() {
-        if (!enums) {
-            return null;
-        }
-        try {
-            if (mountRouting) {
-                var loader = safeNew(component__namespace.Loader, {
-                    label: 'Loading…',
-                    indeterminate: true
-                }, 'Loader(mount-routing)');
-                var loaderRoot = safeNew(enums.CP, {
-                    content: loader,
-                    horizontalAlignment: enums.CP_HAlign.CENTER,
-                    outerGap: enums.CP_Gap.XL
-                }, 'ContentPanel(mount-routing)') || loader;
-                return loaderRoot;
-            }
-            console.log("[CTC Setup Wizard] renderRoot — step " + CURRENT_STEP);
-            return buildRoot(enums);
-        }
-        catch (e) {
-            console.error("[CTC Setup Wizard] renderRoot threw:", e);
-            return null;
-        }
-    }
-    function loadConsole() {
-        STATE.console.loading = true;
-        STATE.console.snapshot = null;
-        STATE.console.assignments = null;
-        STATE.console.preflight = null;
-        STATE.console.recentCalls = null;
-        STATE.console.drift = null;
-        rerender();
-        var settled = 0;
-        var TARGET = 5;
-        function onSettled() {
-            settled += 1;
-            if (settled >= TARGET) {
-                STATE.console.drift = computeDrift(STATE.console.snapshot);
-                STATE.console.loading = false;
-                rerender();
-            }
-        }
-        wizardCall('wizardSnapshot', {})
-            .then(function (p) {
-            var resp = p;
-            STATE.console.snapshot = (resp && resp.snapshot) || null;
-        })
-            .catch(function () { STATE.console.snapshot = null; })
-            .then(onSettled);
-        wizardCall('wizardLoadAssignments', {})
-            .then(function (p) {
-            var resp = p;
-            STATE.console.assignments = (resp && resp.items) || [];
-            STATE.console.phonesByPhone =
-                groupAssignmentsByPhone(STATE.console.assignments);
-        })
-            .catch(function () {
-            STATE.console.assignments = [];
-            STATE.console.phonesByPhone = [];
-        })
-            .then(onSettled);
-        wizardCall('wizardRunPreflight', {})
-            .then(function (p) {
-            var resp = p;
-            STATE.console.preflight = (resp && resp.checks) || [];
-        })
-            .catch(function () { STATE.console.preflight = []; })
-            .then(onSettled);
-        wizardCall('wizardListRecentCalls', { limit: 10 })
-            .then(function (p) {
-            var resp = p;
-            STATE.console.recentCalls = (resp && resp.items) || [];
-        })
-            .catch(function () { STATE.console.recentCalls = []; })
-            .then(onSettled);
-        wizardCall('wizardListEmployees', {})
-            .then(function (p) {
-            var resp = p;
-            var items = (resp && resp.items) || [];
-            STATE.console.phonesEmployees = items.map(function (e) {
-                var emp = e;
-                return {
-                    id: Number(emp.id),
-                    name: emp.name || '(no name)',
-                    email: emp.email || ''
-                };
-            });
-        })
-            .catch(function () { STATE.console.phonesEmployees = []; })
-            .then(onSettled);
-    }
-    function computeDrift(snapshot, _assignments) {
-        if (!snapshot)
-            return { phoneNumbers: 'unknown', voiceUrl: 'unknown',
-                intelService: 'unknown' };
-        var snap = snapshot;
-        return {
-            phoneNumbers: 'in-sync',
-            voiceUrl: 'in-sync',
-            intelService: snap.intelServiceSid ? 'in-sync' : 'not-configured'
-        };
-    }
-    function groupAssignmentsByPhone(flatRows) {
-        var grouped = {};
-        (flatRows || []).forEach(function (r) {
-            if (!r.phoneSid)
-                return;
-            if (!grouped[r.phoneSid]) {
-                grouped[r.phoneSid] = {
-                    phoneSid: r.phoneSid,
-                    phoneNumber: r.phoneNumber || '',
-                    employeeIds: [],
-                    primaryEmployeeId: null
-                };
-            }
-            var bucket = grouped[r.phoneSid];
-            var empId = Number(r.employeeId);
-            if (empId && bucket.employeeIds.indexOf(empId) === -1) {
-                bucket.employeeIds.push(empId);
-            }
-            if (r.isPrimary && !bucket.primaryEmployeeId) {
-                bucket.primaryEmployeeId = empId;
-            }
-        });
-        Object.keys(grouped).forEach(function (sid) {
-            var b = grouped[sid];
-            if (!b.primaryEmployeeId && b.employeeIds.length > 0) {
-                b.primaryEmployeeId = b.employeeIds[0];
-            }
-        });
-        return Object.keys(grouped).map(function (sid) { return grouped[sid]; });
-    }
-    function loadPhonesData() {
-        STATE.console.phonesLoading = true;
-        STATE.console.phonesError = null;
-        rerender();
-        wizardCall('wizardListPhoneNumbers', {})
-            .then(function (p) {
-            var resp = p;
-            STATE.console.phonesNumbers = (resp && resp.items) || [];
-        })
-            .catch(function (e) {
-            var err = e;
-            STATE.console.phonesNumbers = [];
-            STATE.console.phonesError = 'Could not load phone numbers: ' +
-                (err && err.message ? err.message : String(e));
-        })
-            .then(function () {
-            STATE.console.phonesLoading = false;
-            rerender();
-        });
-    }
-    function onPhonesRowSelectionChanged(phoneSid, newEmployeeIds) {
-        STATE.console.phonesSaving[phoneSid] = true;
-        STATE.console.phonesError = null;
-        var grouped = (STATE.console.phonesByPhone || []);
-        for (var i = 0; i < grouped.length; i++) {
-            if (grouped[i].phoneSid === phoneSid) {
-                grouped[i].employeeIds = newEmployeeIds;
-                var current = grouped[i].primaryEmployeeId;
-                if (!current || newEmployeeIds.indexOf(current) === -1) {
-                    grouped[i].primaryEmployeeId = newEmployeeIds.length > 0
-                        ? newEmployeeIds[0] : null;
-                }
-                break;
-            }
-        }
-        rerender();
-        var payload = {
-            assignments: grouped.map(function (g) {
-                return {
-                    phoneSid: g.phoneSid,
-                    phoneNumber: g.phoneNumber || '',
-                    employeeIds: g.employeeIds || [],
-                    primaryEmployeeId: g.primaryEmployeeId || null
-                };
-            })
-        };
-        wizardCall('wizardSaveAssignments', payload)
-            .then(function (resp) {
-            var r = resp;
-            STATE.console.phonesSaving[phoneSid] = false;
-            if (!r || r.ok === false || r.error) {
-                STATE.console.phonesError =
-                    'Save failed: ' + ((r && r.error) || 'unknown');
-                wizardCall('wizardLoadAssignments', {}).then(function (p2) {
-                    var r2 = p2;
-                    STATE.console.assignments = (r2 && r2.items) || [];
-                    STATE.console.phonesByPhone =
-                        groupAssignmentsByPhone(STATE.console.assignments);
-                    rerender();
-                });
-            }
-            rerender();
-        })
-            .catch(function (e) {
-            var err = e;
-            STATE.console.phonesSaving[phoneSid] = false;
-            STATE.console.phonesError = 'Network: ' +
-                (err && err.message ? err.message : String(e));
-            rerender();
-        });
-    }
-    function onDeactivateClick() {
-        if (!STATE.console.pendingDeactivateConfirm) {
-            STATE.console.pendingDeactivateConfirm = true;
-            STATE.console.actionError = null;
-            if (SELECTED_SECTION !== 'health') {
-                setSelectedSection('health');
-                if (MODE === 'stepper')
-                    setMode('console');
-            }
-            rerender();
-            return;
-        }
-        STATE.console.deactivateError = null;
-        wizardCall('wizardActivate', { deactivate: true })
-            .then(function (payload) {
-            var resp = payload;
-            if (resp && resp.deactivated) {
-                STATE.console.pendingDeactivateConfirm = false;
-                if (STATE.console.snapshot) {
-                    STATE.console.snapshot.active = false;
-                }
-                rerender();
-            }
-            else {
-                STATE.console.deactivateError =
-                    (resp && resp.error) || 'unknown_error';
-                rerender();
-            }
-        })
-            .catch(function (e) {
-            var err = e;
-            STATE.console.deactivateError = 'Network: ' +
-                (err && err.message ? err.message : String(e));
-            rerender();
-        });
-    }
-    function onReactivateClick() {
-        STATE.console.actionError = null;
-        wizardCall('wizardActivate', {})
-            .then(function (payload) {
-            var resp = payload;
-            if (resp && (resp.activated || resp.alreadyActive)) {
-                if (STATE.console.snapshot) {
-                    STATE.console.snapshot.active = true;
-                }
-                rerender();
-            }
-            else {
-                STATE.console.actionError =
-                    (resp && resp.error) || 'reactivate_failed';
-                if (resp && resp.failedChecks) {
-                    STATE.console.preflight = resp.failedChecks;
-                }
-                rerender();
-            }
-        })
-            .catch(function (e) {
-            var err = e;
-            STATE.console.actionError = 'Network: ' +
-                (err && err.message ? err.message : String(e));
-            rerender();
-        });
-    }
-    function loadPrereqs() {
-        if (!bodyContainer) {
-            console.warn("[CTC Setup Wizard] bodyContainer missing — " +
-                "cannot render prereqs");
-            return;
-        }
-        console.log("[CTC Setup Wizard] Calling wizardPrereqs...");
-        wizardCall('wizardPrereqs', {}).then(function (payload) {
-            var resp = payload;
-            var body;
-            if (resp && resp.ok && resp.checks) {
-                body = buildPrereqsList(resp.checks);
-            }
-            else if (resp && resp.error) {
-                body = buildErrorBox(resp.error);
-            }
-            else {
-                body = buildErrorBox('unexpected response shape — see console');
-            }
-            var stack = safeNew(component__namespace.StackPanel, {
-                items: [body, buildNavFooter(enums)]
-                    .filter(function (c) { return c != null; }),
-                orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-                itemGap: component__namespace.StackPanel.GapSize.L
-            }, "StackPanel(prereqs+footer)") || body;
-            try {
-                bodyContainer.setContent(stack);
-            }
-            catch (e) {
-                console.error("[CTC Setup Wizard] bodyContainer.setContent " +
-                    "failed:", e);
-            }
-        }).catch(function (err) {
-            console.error("[CTC Setup Wizard] wizardPrereqs Ajax failed:", err);
-            try {
-                bodyContainer.setContent(buildErrorBox('Network or server error calling wizardPrereqs — ' +
-                    'check browser DevTools Network tab and the NetSuite ' +
-                    'Script Execution Log for details.'));
-            }
-            catch (e) { }
-        });
-    }
-    function buildRoot(d) {
-        var railVisible = MODE === 'console' ||
-            (MODE === 'stepper' && RAIL_VISIBLE);
-        if (railVisible) {
-            var drawer = buildConsoleNavDrawer(d);
-            var contentPane = buildRailContentPane(d);
-            var rootChildren = [drawer, contentPane]
-                .filter(function (c) { return c != null; });
-            if (d.GP && rootChildren.length === 2) {
-                var GP_Gap = d.GP_Gap || (d.GP && d.GP.GapSize) || {};
-                var rootGrid = safeNew(d.GP, {
-                    columns: 'auto 1fr',
-                    rows: '100%',
-                    items: rootChildren,
-                    columnGap: GP_Gap.NONE
-                }, "GridPanel(root-rail)");
-                if (rootGrid)
-                    return rootGrid;
-            }
-            return safeNew(d.SP, {
-                items: rootChildren,
-                orientation: d.SP_Orient.VERTICAL,
-                itemGap: d.SP_Gap.M
-            }, "StackPanel(root-rail-fallback)") || rootChildren[0];
-        }
-        var title = safeNew(d.H, {
-            content: "Click-to-Call Setup Wizard",
-            type: d.H_Type.PAGE_TITLE
-        }, "Heading(title)");
-        var subtitle = safeNew(d.T, {
-            text: "Step " + CURRENT_STEP + " of " + STEPS.length + " — " +
-                STEPS[CURRENT_STEP - 1].label
-        }, "Text(subtitle)");
-        var stepper = buildStepper(d);
-        var stepperBox = null;
-        if (stepper) {
-            stepperBox = safeNew(d.CP, {
-                content: stepper,
-                horizontalAlignment: d.CP_HAlign.STRETCH,
-                outerGap: d.CP_Gap.M
-            }, "ContentPanel(stepper, STRETCH)") || stepper;
-        }
-        var bodyBox = buildStepBodyContainer(d);
-        var children = [title, subtitle, stepperBox, bodyBox]
-            .filter(function (c) { return c != null; });
-        var stack = safeNew(d.SP, {
-            items: children,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(outer)");
-        if (!stack)
-            return title || subtitle;
-        var page = safeNew(d.CP, {
-            content: stack,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            outerGap: d.CP_Gap.L
-        }, "ContentPanel(page)");
-        return page || stack;
-    }
-    function buildRailContentPane(d) {
-        if (STATE.console.loading && MODE === 'console') {
-            var loader = safeNew(component__namespace.Loader, {
-                label: "Loading console…",
-                indeterminate: true
-            }, "Loader(console)");
-            return wrapContent(d, loader || safeNew(d.T, { text: "Loading…" }, "Text(loading)"));
-        }
-        var items = [];
-        var titleText = MODE === 'console'
-            ? "Click-to-Call Admin Console"
-            : "Click-to-Call Setup Wizard";
-        var subtitleText;
-        if (MODE === 'console') {
-            subtitleText =
-                SELECTED_SECTION === 'phones' ? 'Phones & reps' :
-                    SELECTED_SECTION === 'voice' ? 'Voice config' :
-                        SELECTED_SECTION === 'credentials' ? 'Credentials' :
-                            SELECTED_SECTION === 'health' ? 'Health' :
-                                'Overview';
-        }
-        else {
-            subtitleText = 'Step ' + CURRENT_STEP + ' of ' + STEPS.length +
-                ' — ' + STEPS[CURRENT_STEP - 1].label;
-        }
-        var appHeader = safeNew(component__namespace.ApplicationHeader, {
-            title: titleText,
-            subtitle: subtitleText
-        }, 'ApplicationHeader(page-root)') || safeNew(d.H, {
-            content: titleText,
-            type: d.H_Type.PAGE_TITLE
-        }, 'Heading(content-title-fallback)');
-        if (appHeader)
-            items.push(appHeader);
-        if (MODE === 'console' && STATE.console.snapshot
-            && STATE.console.snapshot.active === false) {
-            var paused = buildPausedBanner(d, onReactivateClick);
-            if (paused)
-                items.push(paused);
-        }
-        if (MODE === 'console') {
-            var section = buildSectionContent(d);
-            if (section)
-                items.push(section);
-        }
-        else {
-            var stepperWidget = buildStepper(d);
-            if (stepperWidget) {
-                var stepperBox = safeNew(d.CP, {
-                    content: stepperWidget,
-                    horizontalAlignment: d.CP_HAlign.STRETCH,
-                    outerGap: d.CP_Gap.M
-                }, "ContentPanel(rail-stepper)") || stepperWidget;
-                items.push(stepperBox);
-            }
-            var stepBody = buildStepBodyContainer(d);
-            if (stepBody)
-                items.push(stepBody);
-        }
-        if (items.length === 0) {
-            return wrapContent(d, safeNew(d.T, {
-                text: "Admin Console — no content rendered."
-            }, "Text(console-empty)"));
-        }
-        var stack = safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(rail-content)");
-        return wrapContent(d, stack || items[0]);
-    }
-    function buildConsoleNavDrawer(d) {
-        if (!d.ND) {
-            return buildNavFallback(d);
-        }
-        var assignmentBadge = STATE.console.assignments
-            ? String(STATE.console.assignments.length)
-            : null;
-        var SysIcon = d.SysIcon || {};
-        var navItems = [
-            { value: 'overview', label: 'Overview', icon: SysIcon.HOME },
-            { value: 'phones', label: 'Phones & reps', icon: SysIcon.CALL,
-                badge: assignmentBadge || undefined },
-            { value: 'voice', label: 'Voice config', icon: SysIcon.SETTINGS },
-            { value: 'credentials', label: 'Credentials', icon: SysIcon.LOCK },
-            { value: 'health', label: 'Health', icon: SysIcon.HEART_FILLED },
-            { value: 're-run', label: 'Re-run wizard', icon: SysIcon.REFRESH,
-                separatorTop: true,
-                action: function () { router.goToStep(1); } }
-        ];
-        var selectedVal = MODE === 'stepper' ? 're-run' : SELECTED_SECTION;
-        var VisualStyle = (d.ND && d.ND.VisualStyle) || {};
-        return safeNew(d.ND, {
-            items: navItems,
-            selectedValue: selectedVal,
-            width: 240,
-            visualStyle: VisualStyle.DARK,
-            onSelectedValueChanged: function (args) {
-                var value = args && args.value;
-                if (!value)
-                    return;
-                if (value === 're-run') {
-                    router.goToStep(1);
-                    return;
-                }
-                router.goToSection(value);
-            }
-        }, "NavigationDrawer(console)");
-    }
-    function buildNavFallback(d) {
-        var ButtonType = component__namespace.Button.Type;
-        var navSpecs = [
-            { value: 'overview', label: 'Overview' },
-            { value: 'phones', label: 'Phones & reps' },
-            { value: 'voice', label: 'Voice config' },
-            { value: 'credentials', label: 'Credentials' },
-            { value: 'health', label: 'Health' },
-            { value: 're-run', label: '↻ Re-run wizard' }
-        ];
-        var buttons = navSpecs.map(function (spec) {
-            return safeNew(component__namespace.Button, {
-                label: spec.label,
-                type: spec.value === SELECTED_SECTION
-                    ? ButtonType.PRIMARY
-                    : ButtonType.DEFAULT,
-                action: function () {
-                    if (spec.value === 're-run')
-                        router.goToStep(1);
-                    else
-                        router.goToSection(spec.value);
-                }
-            }, "Button(nav-" + spec.value + ")");
-        }).filter(function (b) { return b != null; });
-        if (buttons.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: buttons,
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.XS
-        }, "StackPanel(nav-fallback)");
-    }
-    function buildSectionContent(d) {
-        switch (SELECTED_SECTION) {
-            case 'overview': return buildOverviewSection(d, {
-                goToSection: router.goToSection,
-                onDeactivateClick: onDeactivateClick
-            });
-            case 'phones': return buildPhonesSection(d, {
-                loadPhonesData: loadPhonesData,
-                goToStep: router.goToStep,
-                onPhonesRowSelectionChanged: onPhonesRowSelectionChanged
-            });
-            case 'voice': return buildVoiceSection(d, { rerender: rerender });
-            case 'credentials': return buildCredentialsSection(d);
-            case 'health': return buildHealthSection(d, {
-                rerender: rerender,
-                onDeactivateClick: onDeactivateClick
-            });
-            default: return buildOverviewSection(d, {
-                goToSection: router.goToSection,
-                onDeactivateClick: onDeactivateClick
-            });
-        }
-    }
-    function buildStepBodyContainer(d) {
-        var initial;
-        if (CURRENT_STEP === 1) {
-            initial = safeNew(component__namespace.Loader, {
-                label: "Running prerequisite checks…",
-                indeterminate: true
-            }, "Loader(prereqs)") || safeNew(d.T, {
-                text: "Loading prerequisite checks…"
-            }, "Text(loading-fallback)");
-        }
-        else if (CURRENT_STEP === 2) {
-            initial = buildStep2Form(d);
-        }
-        else if (CURRENT_STEP === 3) {
-            initial = buildStep3Form(d);
-        }
-        else if (CURRENT_STEP === 4) {
-            initial = buildStep4Form(d);
-        }
-        else if (CURRENT_STEP === 5) {
-            initial = buildStep5Activate(d, {
-                rerender: rerender,
-                goToConsole: router.goToConsole
-            });
-        }
-        else {
-            initial = safeNew(d.T, {
-                text: "Step " + CURRENT_STEP + " not implemented.",
-                type: d.T_Type.WEAK
-            }, "Text(stub-step-" + CURRENT_STEP + ")");
-        }
-        var stack = safeNew(d.SP, {
-            items: [initial, buildNavFooter(d)]
-                .filter(function (c) { return c != null; }),
-            orientation: d.SP_Orient.VERTICAL,
-            itemGap: d.SP_Gap.L
-        }, "StackPanel(body+footer)");
-        var box = safeNew(d.CP, {
-            content: stack || initial,
-            horizontalAlignment: d.CP_HAlign.STRETCH,
-            outerGap: d.CP_Gap.L
-        }, "ContentPanel(body)");
-        bodyContainer = box;
-        return box;
-    }
-    function buildNavFooter(d) {
-        var ButtonType = component__namespace.Button.Type;
-        var backBtn = (CURRENT_STEP > 1) ? safeNew(component__namespace.Button, {
-            label: "Back",
-            type: ButtonType.DEFAULT,
-            action: function () { router.goToStep(CURRENT_STEP - 1); }
-        }, "Button(back)") : null;
-        var nextBtn = (CURRENT_STEP < STEPS.length) ? safeNew(component__namespace.Button, {
-            label: "Continue",
-            type: ButtonType.PRIMARY,
-            action: function () { onContinueClick(); }
-        }, "Button(continue)") : null;
-        var items = [backBtn, nextBtn]
-            .filter(function (c) { return c != null; });
-        if (items.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: items,
-            orientation: d.SP_Orient.HORIZONTAL,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(nav-footer)");
-    }
-    function onContinueClick() {
-        if (CURRENT_STEP === 1) {
-            router.goToStep(2);
-            return;
-        }
-        if (CURRENT_STEP === 2) {
-            wizardCall('wizardSavePublicIds', {
-                accountSid: STATE.step2.accountSid,
-                apiKeySid: STATE.step2.apiKeySid,
-                apiSecretId: STATE.step2.apiSecretId
-            }).then(function (payload) {
-                if (payload && payload.saved)
-                    router.goToStep(3);
-                else
-                    alert("Save failed: " +
-                        ((payload && payload.error) || 'unknown'));
-            }).catch(function (e) {
-                alert("Network error saving Step 2: " +
-                    (e && e.message ? e.message : String(e)));
-            });
-            return;
-        }
-        if (CURRENT_STEP === 3) {
-            wizardCall('wizardSaveVoice', {
-                twimlAppSid: STATE.step3.twimlAppSid,
-                phoneNumber: STATE.step3.phoneNumber,
-                intelServiceSid: STATE.step3.intelServiceSid
-            }).then(function (payload) {
-                if (payload && payload.saved)
-                    router.goToStep(4);
-                else
-                    alert("Save failed: " +
-                        ((payload && payload.error) || 'unknown'));
-            }).catch(function (e) {
-                alert("Network error saving Step 3: " +
-                    (e && e.message ? e.message : String(e)));
-            });
-            return;
-        }
-        if (CURRENT_STEP === 4) {
-            var rows = [];
-            var phoneNumbers = (STATE.step4.phoneNumbers || []);
-            var assignmentsMap = STATE.step4.assignments;
-            for (var i = 0; i < phoneNumbers.length; i++) {
-                var pn = phoneNumbers[i];
-                var assignment = assignmentsMap[pn.sid] || {};
-                var employeeIds = assignment.employeeIds || [];
-                if (employeeIds.length === 0)
-                    continue;
-                rows.push({
-                    phoneSid: pn.sid,
-                    phoneNumber: pn.phoneNumber,
-                    label: assignment.label || pn.friendlyName || '',
-                    employeeIds: employeeIds,
-                    primaryEmployeeId: assignment.primaryEmployeeId || employeeIds[0]
-                });
-            }
-            console.log("[CTC Setup Wizard] Step 4 Continue — STATE.step4.assignments:", STATE.step4.assignments);
-            console.log("[CTC Setup Wizard] Step 4 Continue — payload rows (" +
-                rows.length + "):", rows);
-            wizardCall('wizardSaveAssignments', { assignments: rows })
-                .then(function (payload) {
-                console.log("[CTC Setup Wizard] saveAssignments response:", payload);
-                if (payload && payload.saved)
-                    router.goToStep(5);
-                else
-                    alert("Save failed: " +
-                        ((payload && payload.error) || 'unknown'));
-            }).catch(function (e) {
-                alert("Network error saving Step 4: " +
-                    (e && e.message ? e.message : String(e)));
-            });
-            return;
-        }
-        router.goToStep(CURRENT_STEP + 1);
-    }
-    function buildStepper(d) {
-        var Badge = component__namespace.Badge;
-        var BadgeType = Badge.Type;
-        var BadgeSize = Badge.Size;
-        var TextType = d.T.Type;
-        var TextSize = d.T.Size;
-        var SPAlign = d.SP.Alignment;
-        var SPJust = d.SP.Justification;
-        var pills = STEPS.map(function (s) {
-            var isCurrent = (s.num === CURRENT_STEP);
-            var isDone = (s.num < CURRENT_STEP);
-            var badge = safeNew(Badge, {
-                content: isDone ? "✓" : String(s.num),
-                type: isCurrent || isDone
-                    ? BadgeType.SOLID
-                    : BadgeType.SUBTLE,
-                size: BadgeSize.DEFAULT
-            }, "Badge(" + s.num + ")");
-            var label = safeNew(d.T, {
-                text: s.label,
-                type: isCurrent ? TextType.STRONG : TextType.DEFAULT
-            }, "Text(label-" + s.num + ")");
-            var sublabel = safeNew(d.T, {
-                text: s.sub,
-                type: TextType.WEAK,
-                size: TextSize.S
-            }, "Text(sub-" + s.num + ")");
-            var pillItems = [badge, label, sublabel]
-                .filter(function (c) { return c != null; });
-            return safeNew(d.SP, {
-                items: pillItems,
-                orientation: d.SP_Orient.VERTICAL,
-                alignment: SPAlign.CENTER,
-                itemGap: d.SP_Gap.XS
-            }, "StackPanel(pill-" + s.num + ")");
-        }).filter(function (p) { return p != null; });
-        if (pills.length === 0)
-            return null;
-        return safeNew(d.SP, {
-            items: pills,
-            orientation: d.SP_Orient.HORIZONTAL,
-            justification: SPJust.SPACE_BETWEEN,
-            itemGap: d.SP_Gap.M
-        }, "StackPanel(stepper-strip)");
-    }
+        return contentColumn;
+    };
 
     class App extends core.PureComponent {
         storeUnsubscribe = null;
@@ -3437,19 +1704,68 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             this.setState({ tick: this.state.tick + 1 });
         };
         componentDidMount() {
-            setRerenderHook(this.forceRerender);
             this.storeUnsubscribe = store.subscribe(this.forceRerender);
-            initializeApp();
+            this.initializeApp();
         }
         componentWillUnmount() {
             if (this.storeUnsubscribe) {
                 this.storeUnsubscribe();
                 this.storeUnsubscribe = null;
             }
-            setRerenderHook(() => { });
+        }
+        async initializeApp() {
+            store.dispatch(Action.setMountRouting(true));
+            try {
+                const payload = await wizardCall('wizardSnapshot', {});
+                const snap = (payload && payload.snapshot) || {};
+                store.dispatch(Action.consoleLoadSuccess({ snapshot: snap }));
+                const target = determineLandingStep(snap);
+                if (target === 'console') {
+                    goToConsole();
+                }
+                else {
+                    goToStep(target);
+                }
+            }
+            catch (e) {
+                goToStep(1);
+            }
+            finally {
+                store.dispatch(Action.setMountRouting(false));
+            }
+        }
+        renderStep(stepNum) {
+            switch (stepNum) {
+                case 1: return jsxRuntime.jsx(Step1, {});
+                case 2: return jsxRuntime.jsx(Step2, {});
+                case 3: return jsxRuntime.jsx(Step3, {});
+                case 4: return jsxRuntime.jsx(Step4, {});
+                case 5: return jsxRuntime.jsx(Step5, {});
+                default: return jsxRuntime.jsx(Step1, {});
+            }
+        }
+        renderSection(section) {
+            switch (section) {
+                case 'overview': return jsxRuntime.jsx(OverviewPage, {});
+                case 'phones': return jsxRuntime.jsx(PhonesPage, {});
+                case 'voice': return jsxRuntime.jsx(VoicePage, {});
+                case 'credentials': return jsxRuntime.jsx(CredentialsPage, {});
+                case 'health': return jsxRuntime.jsx(HealthPage, {});
+                default: return jsxRuntime.jsx(OverviewPage, {});
+            }
         }
         render() {
-            return renderRoot();
+            const state = store.getState();
+            if (state.mountRouting) {
+                return (jsxRuntime.jsx(component__namespace.ContentPanel, { horizontalAlignment: component__namespace.ContentPanel.HorizontalAlignment.CENTER, outerGap: component__namespace.ContentPanel.GapSize.XL, children: new component__namespace.Loader({
+                        label: 'Loading…',
+                        indeterminate: true
+                    }) }));
+            }
+            if (state.mode === 'console') {
+                return (jsxRuntime.jsx(ConsoleShell, { children: this.renderSection(state.selectedSection) }));
+            }
+            return (jsxRuntime.jsx(StepperShell, { children: this.renderStep(state.currentStep) }));
         }
     }
 

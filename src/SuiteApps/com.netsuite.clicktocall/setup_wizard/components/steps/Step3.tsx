@@ -130,7 +130,10 @@ export default class Step3 extends PureComponent<unknown, unknown> {
                     {heading}
                     {intro}
                     <component.StackPanel.Item>
-                        <component.Loader label="Loading from Twilio…" indeterminate={true} />
+                        {new component.Loader({
+                            label: 'Loading from Twilio…',
+                            indeterminate: true
+                        } as never) as never}
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
