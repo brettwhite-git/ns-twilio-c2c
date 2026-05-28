@@ -14,6 +14,7 @@ import type {
     Step2State,
     Step3State,
     Step4State,
+    Step5State,
     ConsoleState
 } from './InitialState';
 
@@ -33,6 +34,7 @@ const ActionType = {
     STEP2_FIELD_CHANGE: Symbol('step2FieldChange'),
     STEP3_FIELD_CHANGE: Symbol('step3FieldChange'),
     STEP4_FIELD_CHANGE: Symbol('step4FieldChange'),
+    STEP5_FIELD_CHANGE: Symbol('step5FieldChange'),
 
     // Prereqs (Step 1)
     PREREQS_LOAD_START: Symbol('prereqsLoadStart'),
@@ -108,6 +110,11 @@ interface Step3FieldChangeAction {
 interface Step4FieldChangeAction {
     type: typeof ActionType.STEP4_FIELD_CHANGE;
     payload: { field: keyof Step4State; value: unknown };
+}
+
+interface Step5FieldChangeAction {
+    type: typeof ActionType.STEP5_FIELD_CHANGE;
+    payload: { field: keyof Step5State; value: unknown };
 }
 
 interface PrereqsLoadStartAction {
@@ -232,6 +239,7 @@ export type AppAction =
     | Step2FieldChangeAction
     | Step3FieldChangeAction
     | Step4FieldChangeAction
+    | Step5FieldChangeAction
     | PrereqsLoadStartAction
     | PrereqsLoadSuccessAction
     | PrereqsLoadFailureAction
@@ -281,6 +289,9 @@ const Action = {
     },
     step4FieldChange(field: keyof Step4State, value: unknown): Step4FieldChangeAction {
         return { type: ActionType.STEP4_FIELD_CHANGE, payload: { field, value } };
+    },
+    step5FieldChange(field: keyof Step5State, value: unknown): Step5FieldChangeAction {
+        return { type: ActionType.STEP5_FIELD_CHANGE, payload: { field, value } };
     },
 
     prereqsLoadStart(): PrereqsLoadStartAction {

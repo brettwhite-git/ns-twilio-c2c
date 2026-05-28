@@ -57,6 +57,10 @@ export default function reducer(state: AppState, action: AppAction): AppState {
             const p = a.payload as { field: keyof AppState['step4']; value: unknown };
             (d.step4 as unknown as Record<string, unknown>)[p.field as string] = p.value;
         })],
+        [ActionType.STEP5_FIELD_CHANGE, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as { field: keyof AppState['step5']; value: unknown };
+            (d.step5 as unknown as Record<string, unknown>)[p.field as string] = p.value;
+        })],
 
         // ── Prereqs (Step 1) ───────────────────────────────────────
         [ActionType.PREREQS_LOAD_START, (s) => ImmutableUpdate.of(s, (d) => {
