@@ -138,6 +138,16 @@ The `npm run deploy` script chains `gulp bundle` (TS → AMD JS) then
 `SpaServer.js`) is committed to git alongside its TypeScript source so a
 fresh `git clone` + `npm run deploy` works without an extra bundle step.
 
+### Twilio Configuration
+
+Before the first deploy, set up Twilio:
+
+1. **Purchase a phone number** with Voice capability
+2. **Create an API Key** (Standard) — save the SID and Secret
+3. **Create a TwiML Bin** with call recording and consent disclosure
+4. **Create a TwiML App** pointing to the TwiML Bin URL
+5. **Enable Conversational Intelligence** with auto-transcribe
+
 ### NetSuite Configuration
 
 After first deploy:
