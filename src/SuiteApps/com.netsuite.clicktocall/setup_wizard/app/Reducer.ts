@@ -156,6 +156,15 @@ export default function reducer(state: AppState, action: AppAction): AppState {
                 d.console.voiceEditing = null;
                 d.console.voicePendingValue = null;
                 d.console.voiceError = null;
+                // Merge the saved field into console.snapshot so the
+                // row re-renders with the new value. Without this the
+                // UI reverts visually to the pre-save snapshot even
+                // though the server has the new value.
+                if (p.field && p.value !== undefined) {
+                    const snap = (d.console.snapshot || {}) as Record<string, unknown>;
+                    snap[p.field] = p.value;
+                    d.console.snapshot = snap as never;
+                }
             } else if (p.phase === 'failure') {
                 d.console.voiceSaving = false;
                 d.console.voiceError = p.error ?? 'Voice save failed';

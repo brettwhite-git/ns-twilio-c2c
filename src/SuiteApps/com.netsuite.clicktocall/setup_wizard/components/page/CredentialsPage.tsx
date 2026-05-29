@@ -146,16 +146,27 @@ export default class CredentialsPage extends PureComponent<PageTickProps, unknow
         const columns = this.buildColumns();
         const rowsDs = new core.ArrayDataSource(rows);
 
+        // CTC brand navy used between the credentials table and the
+        // rotation runbook. Matches the NavigationDrawer's dark navy
+        // (#1F2F4D — same color used by the softphone shell) so the
+        // button visually anchors to the same chrome as the side rail.
+        const openSecretsButton = (
+            <component.StackPanel.Item>
+                <component.Button
+                    label="Open NetSuite API Secrets"
+                    type={component.Button.Type.PRIMARY}
+                    startIcon={core.SystemIcon.LOCK as never}
+                    action={this.handleOpenSecrets}
+                    rootStyle={{
+                        backgroundColor: '#2D4458',
+                        color: '#FFFFFF',
+                        borderColor: '#2D4458'
+                    } as never}
+                />
+            </component.StackPanel.Item>
+        );
+
         const items = [
-            (
-                <component.StackPanel.Item>
-                    <component.Button
-                        label="Open NetSuite API Secrets"
-                        startIcon={core.SystemIcon.LOCK as never}
-                        action={this.handleOpenSecrets}
-                    />
-                </component.StackPanel.Item>
-            ),
             (
                 <component.StackPanel.Item>
                     <component.Text type={component.Text.Type.WEAK}>
@@ -181,6 +192,7 @@ export default class CredentialsPage extends PureComponent<PageTickProps, unknow
                     } as never) as never}
                 </component.StackPanel.Item>
             ),
+            openSecretsButton,
             (
                 <component.StackPanel.Item>
                     <component.StackPanel

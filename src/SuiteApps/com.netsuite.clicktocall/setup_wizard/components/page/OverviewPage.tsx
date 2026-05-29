@@ -511,15 +511,18 @@ export default class OverviewPage extends PureComponent<PageTickProps, OverviewP
                     </component.GridPanel>
                 </component.StackPanel.Item>
 
-                {/* Quick actions */}
+                {/* Quick actions — wrapped in a soft bordered card to match the wireframe */}
                 <component.StackPanel.Item>
                     <component.StackPanel
                         orientation={component.StackPanel.Orientation.VERTICAL}
                         itemGap={component.StackPanel.GapSize.S}
+                        rootStyle={{
+                            border: '1px solid #E2E3E5',
+                            borderRadius: '8px',
+                            padding: '18px 22px',
+                            background: '#FAFAFB'
+                        } as never}
                     >
-                        <component.StackPanel.Item>
-                            <component.Heading level={3}>Quick actions</component.Heading>
-                        </component.StackPanel.Item>
                         <component.StackPanel.Item>
                             <component.Text
                                 type={component.Text.Type.WEAK}

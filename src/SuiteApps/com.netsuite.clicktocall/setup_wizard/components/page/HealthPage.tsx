@@ -181,7 +181,12 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
             { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
         ];
 
-        const dangerZoneItems = [
+        // Danger zone — flat items list. The red-bordered card wrapper
+        // is added downstream in `outerItems` (this avoids the doubled-
+        // border bug where both this list AND the outer wrapper carried
+        // border styling). Hidden entirely when CTC is already paused —
+        // the top banner already surfaces a Reactivate path.
+        const dangerZoneItems = isPaused ? [] : [
             (
                 <component.StackPanel.Item>
                     <component.Heading level={3}>Danger zone</component.Heading>
@@ -193,11 +198,9 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
                         type={component.Text.Type.WEAK}
                         size={component.Text.Size.S}
                     >
-                        Deactivate Click-to-Call: reps lose
-                        phone-icon access across all roles.
-                        In-progress calls finish normally; new
-                        calls cannot be placed. Reactivate any
-                        time.
+                        Deactivate cuts rep phone-icon access across all
+                        roles. In-progress calls finish; new calls are
+                        blocked. Reactivate any time.
                     </component.Text>
                 </component.StackPanel.Item>
             ),
@@ -254,18 +257,6 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
                 </component.StackPanel.Item>
             ) as core.VDom.Node
         );
-        preflightContent.push(
-            (
-                <component.StackPanel.Item>
-                    <component.Button
-                        label={refreshing ? 'Re-running…' : 'Re-run'}
-                        startIcon={core.SystemIcon.REFRESH as never}
-                        enabled={!refreshing}
-                        action={(): void => { this.rerunPreflight(); }}
-                    />
-                </component.StackPanel.Item>
-            ) as core.VDom.Node
-        );
         if (preflight === null || preflight === undefined) {
             preflightContent.push(
                 (
@@ -305,6 +296,26 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
                 ) as core.VDom.Node
             );
         }
+        // Re-run button moved BELOW the table per the wireframe; styled
+        // CTC brand navy (#2D4458) to match the credentials/secrets CTA.
+        preflightContent.push(
+            (
+                <component.StackPanel.Item>
+                    <component.Button
+                        label={refreshing ? 'Re-running…' : 'Re-run preflight'}
+                        type={component.Button.Type.PRIMARY}
+                        startIcon={core.SystemIcon.REFRESH as never}
+                        enabled={!refreshing}
+                        action={(): void => { this.rerunPreflight(); }}
+                        rootStyle={{
+                            backgroundColor: '#2D4458',
+                            color: '#FFFFFF',
+                            borderColor: '#2D4458'
+                        } as never}
+                    />
+                </component.StackPanel.Item>
+            ) as core.VDom.Node
+        );
 
         /*
          * Drift content — same flat-array pattern. driftRows always has 3

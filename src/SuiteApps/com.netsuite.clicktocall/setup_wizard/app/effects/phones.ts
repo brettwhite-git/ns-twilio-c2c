@@ -118,9 +118,18 @@ export async function loadPhonesData(): Promise<void> {
  * Save one row of the Phones DataGrid — assign employees to a phone
  * number + set primary + custom label. Refetches phone numbers +
  * assignments + recomputes byPhone after a successful save.
+ *
+ * Server contract: `wizardSaveAssignments` expects
+ * `{assignments: [{phoneSid, phoneNumber, employeeIds, label, primaryEmployeeId}, ...]}`.
+ * Earlier versions of this effect posted a single row directly — the
+ * server returned `{ok: false, error: 'missing_assignments'}` and the
+ * inline-edit silently never persisted. The fix wraps as a one-row
+ * array; the server's delete-then-insert strategy scoped by phoneSid
+ * means the single row only touches THAT phone's assignments.
  */
 export async function savePhonesAssignment(
     phoneSid: string,
+    phoneNumber: string,
     employeeIds: number[],
     label: string,
     primaryEmployeeId: number | null
@@ -129,14 +138,18 @@ export async function savePhonesAssignment(
 
     try {
         const payload = {
-            phoneSid,
-            employeeIds,
-            label,
-            primaryEmployeeId
+            assignments: [{
+                phoneSid,
+                phoneNumber,
+                employeeIds,
+                label,
+                primaryEmployeeId
+            }]
         };
         const result = await wizardCall('wizardSaveAssignments', payload);
-        if (result && (result as { ok?: boolean }).ok === false) {
-            const err = (result as { error?: string }).error || 'Save failed';
+        const ok = result && ((result as { saved?: boolean }).saved === true);
+        if (!ok) {
+            const err = (result && (result as { error?: string }).error) || 'Save failed';
             store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: err }));
             return;
         }

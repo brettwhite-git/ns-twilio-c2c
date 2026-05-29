@@ -41,13 +41,30 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
     const isPaused = snap?.active === false;
     const subtitle = subtitleFor(state.selectedSection);
 
+    // Page header — H2 title + small WEAK subtitle, matching the
+    // Quick actions / Recent activity / preflight section headers so
+    // the page hierarchy reads consistently top-to-bottom.
     const contentItems = [
         (
             <component.StackPanel.Item>
-                <component.ApplicationHeader
-                    title="Click-to-Call Admin Console"
-                    subtitle={subtitle}
-                />
+                <component.StackPanel
+                    orientation={component.StackPanel.Orientation.VERTICAL}
+                    itemGap={component.StackPanel.GapSize.XXS}
+                >
+                    <component.StackPanel.Item>
+                        <component.Heading level={2}>
+                            Click-to-Call Admin Console
+                        </component.Heading>
+                    </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <component.Text
+                            type={component.Text.Type.WEAK}
+                            size={component.Text.Size.S}
+                        >
+                            {subtitle}
+                        </component.Text>
+                    </component.StackPanel.Item>
+                </component.StackPanel>
             </component.StackPanel.Item>
         ),
         isPaused && (

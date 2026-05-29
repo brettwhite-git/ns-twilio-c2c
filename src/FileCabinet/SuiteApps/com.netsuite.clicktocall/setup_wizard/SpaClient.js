@@ -242,6 +242,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         d.console.voiceEditing = null;
                         d.console.voicePendingValue = null;
                         d.console.voiceError = null;
+                        if (p.field && p.value !== undefined) {
+                            const snap = (d.console.snapshot || {});
+                            snap[p.field] = p.value;
+                            d.console.snapshot = snap;
+                        }
                     }
                     else if (p.phase === 'failure') {
                         d.console.voiceSaving = false;
@@ -510,18 +515,22 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             }));
         }
     }
-    async function savePhonesAssignment(phoneSid, employeeIds, label, primaryEmployeeId) {
+    async function savePhonesAssignment(phoneSid, phoneNumber, employeeIds, label, primaryEmployeeId) {
         store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: true, error: null }));
         try {
             const payload = {
-                phoneSid,
-                employeeIds,
-                label,
-                primaryEmployeeId
+                assignments: [{
+                        phoneSid,
+                        phoneNumber,
+                        employeeIds,
+                        label,
+                        primaryEmployeeId
+                    }]
             };
             const result = await wizardCall('wizardSaveAssignments', payload);
-            if (result && result.ok === false) {
-                const err = result.error || 'Save failed';
+            const ok = result && (result.saved === true);
+            if (!ok) {
+                const err = (result && result.error) || 'Save failed';
                 store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: err }));
                 return;
             }
@@ -1685,7 +1694,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                                             ? preflightPassed + ' of ' + preflightTotal
                                             : '—', description: preflightTotal > 0
                                             ? 'See Health for detail'
-                                            : 'Not yet run' }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Quick actions" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add a phone number", startIcon: core__namespace.SystemIcon.ADD, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.REFRESH, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.PLAY, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Rotate API Key Secret", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: snap.active === false ? (jsxRuntime.jsx(component__namespace.Button, { label: "Reactivate", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, action: this.handleReactivate })) : (jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleDeactivate })) })] }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Recent activity" }) }), recentCalls === null ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                                            : 'Not yet run' }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
+                                border: '1px solid #E2E3E5',
+                                borderRadius: '8px',
+                                padding: '18px 22px',
+                                background: '#FAFAFB'
+                            }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add a phone number", startIcon: core__namespace.SystemIcon.ADD, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.REFRESH, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.PLAY, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Rotate API Key Secret", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: snap.active === false ? (jsxRuntime.jsx(component__namespace.Button, { label: "Reactivate", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, action: this.handleReactivate })) : (jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleDeactivate })) })] }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Recent activity" }) }), recentCalls === null ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
                                         label: 'Loading recent activity…',
                                         indeterminate: true
                                     }) })) : recentCalls.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No calls logged yet. Once reps start placing calls through Click-to-Call, recent activity will show up here." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: this.buildRecentCallsGrid(recentCalls) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: this.buildRepChart(recentCalls) })] }) }))] }) })] }));
@@ -1798,9 +1812,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         const emp = employees.find((e) => e.id === id);
                         return emp?.name || '';
                     },
-                    widgetOptions: (row) => {
-                        const dataItem = row?.dataItem || {};
+                    widgetOptions: (args) => {
+                        const dataItem = (args?.cell?.row?.dataItem || {});
                         const phoneSid = dataItem.phoneSid;
+                        const phoneNumber = dataItem.phoneNumber || '';
                         const label = dataItem.label || '';
                         const primary = dataItem.primaryEmployeeId ?? null;
                         return {
@@ -1808,15 +1823,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                             valueMember: 'id',
                             displayMember: 'name',
                             placeholder: 'Pick reps',
-                            onSelectionChanged: (args) => {
-                                const newIds = ((args && args.values) || []).map((v) => {
+                            onSelectionChanged: (sel) => {
+                                const newIds = ((sel && sel.values) || []).map((v) => {
                                     if (v && typeof v === 'object') {
                                         return Number(v.id);
                                     }
                                     return Number(v);
                                 });
                                 if (phoneSid) {
-                                    savePhonesAssignment(phoneSid, newIds, label, primary);
+                                    savePhonesAssignment(phoneSid, phoneNumber, newIds, label, primary);
                                 }
                             }
                         };
@@ -1862,9 +1877,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const columns = this.buildColumns(employees);
             const rowsDs = grouped.length > 0 ? new core__namespace.ArrayDataSource(grouped) : null;
             const items = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Refresh from Twilio", startIcon: core__namespace.SystemIcon.REFRESH, action: () => { loadPhonesData(); } }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add phone number", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.ADD, action: () => { goToStep(4); } }) })] }) })),
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Refresh from Twilio", startIcon: core__namespace.SystemIcon.REFRESH, action: () => { loadPhonesData(); } }) }) }) })),
                 c.phonesError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.phonesError] }) })),
-                grouped.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No phone numbers configured yet. Click \"Add phone number\" above to claim a Twilio number and assign reps." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+                grouped.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No phone numbers found in your Twilio account. Buy one in the Twilio Console (link above) then click \"Refresh from Twilio\" to pick it up and assign reps inline." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
                         dataSource: rowsDs,
                         columns,
                         columnStretch: true,
@@ -1909,11 +1924,19 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     }
     async function saveVoiceField(field, value) {
         store.dispatch(Action.voiceFieldSave({ phase: 'start' }));
+        const state = store.getState();
+        const snap = state.console.snapshot || {};
+        const payload = {
+            twimlAppSid: snap.twimlAppSid || '',
+            phoneNumber: snap.phoneNumber || '',
+            intelServiceSid: snap.intelServiceSid || ''
+        };
+        payload[field] = value;
         try {
-            const payload = { [field]: value };
             const result = await wizardCall('wizardSaveVoice', payload);
-            if (result && result.ok === false) {
-                const err = result.error || 'Voice save failed';
+            const saved = result && (result.saved === true);
+            if (!saved) {
+                const err = (result && result.error) || 'Voice save failed';
                 store.dispatch(Action.voiceFieldSave({ phase: 'failure', error: err }));
                 return;
             }
@@ -2273,8 +2296,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             ];
             const columns = this.buildColumns();
             const rowsDs = new core__namespace.ArrayDataSource(rows);
+            const openSecretsButton = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Open NetSuite API Secrets", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.LOCK, action: this.handleOpenSecrets, rootStyle: {
+                        backgroundColor: '#2D4458',
+                        color: '#FFFFFF',
+                        borderColor: '#2D4458'
+                    } }) }));
             const items = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Open NetSuite API Secrets", startIcon: core__namespace.SystemIcon.LOCK, action: this.handleOpenSecrets }) })),
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "The Account SID + API Key SID are public identifiers \u2014 they're safe to display here. The actual API Secret value is held opaque by NetSuite's API Secrets vault (Setup > Company > API Secrets) and never travels through the SPA." }) })),
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
                         dataSource: rowsDs,
@@ -2286,6 +2313,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         headerRowHeight: 40,
                         rootStyle: { width: '100%' }
                     }) })),
+                openSecretsButton,
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XS, rootStyle: {
                             padding: '12px 16px',
                             border: '1px solid #E2E3E5',
@@ -2426,16 +2454,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
                 { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
             ];
-            const dangerZoneItems = [
+            const dangerZoneItems = isPaused ? [] : [
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Danger zone" }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Deactivate Click-to-Call: reps lose phone-icon access across all roles. In-progress calls finish normally; new calls cannot be placed. Reactivate any time." }) })),
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Deactivate cuts rep phone-icon access across all roles. In-progress calls finish; new calls are blocked. Reactivate any time." }) })),
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: c.pendingDeactivateConfirm ? (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", action: this.cancelDeactivateConfirm }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Confirm deactivate", type: component__namespace.Button.Type.DANGER, action: this.confirmDeactivate }) })] })) : (jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, action: this.requestDeactivate })) })),
                 c.deactivateError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Deactivate failed: ", c.deactivateError] }) }))
             ].filter(Boolean);
             const columns = this.buildCheckColumns();
             const preflightContent = [];
             preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight" }) })));
-            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Re-running…' : 'Re-run', startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { this.rerunPreflight(); } }) })));
             if (preflight === null || preflight === undefined) {
                 preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Click \"Re-run\" to evaluate." }) })));
             }
@@ -2455,6 +2482,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         rootStyle: { width: '100%' }
                     }) })));
             }
+            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Re-running…' : 'Re-run preflight', type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { this.rerunPreflight(); }, rootStyle: {
+                        backgroundColor: '#2D4458',
+                        color: '#FFFFFF',
+                        borderColor: '#2D4458'
+                    } }) })));
             const driftContent = [];
             driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Drift detection" }) })));
             driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Compares the saved wizard config against the live Twilio account. Re-runs each time the console mounts." }) })));
@@ -2489,7 +2521,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const assignments = state.console.assignments;
         const assignmentBadge = assignments ? String(assignments.length) : undefined;
         const navItems = [
-            { value: 'overview', label: 'Overview', icon: core__namespace.SystemIcon.HOME },
+            { value: 'overview', label: 'Overview', icon: core__namespace.SystemIcon.CARD_VIEW },
             { value: 'phones', label: 'Phones & reps', icon: core__namespace.SystemIcon.CALL,
                 badge: assignmentBadge },
             { value: 'voice', label: 'Voice config', icon: core__namespace.SystemIcon.SETTINGS },
@@ -2569,7 +2601,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const isPaused = snap?.active === false;
         const subtitle = subtitleFor(state.selectedSection);
         const contentItems = [
-            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.ApplicationHeader, { title: "Click-to-Call Admin Console", subtitle: subtitle }) })),
+            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Click-to-Call Admin Console" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: subtitle }) })] }) })),
             isPaused && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PausedBanner, {}) })),
             (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children }))
         ].filter(Boolean);
@@ -2620,7 +2652,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const step = state.currentStep;
         const stepLabel = STEPS[step - 1]?.label || '';
         const subtitle = 'Step ' + step + ' of ' + STEPS.length + ' — ' + stepLabel;
-        const innerStack = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.ApplicationHeader, { title: "Click-to-Call Setup Wizard", subtitle: subtitle }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { grow: 1, children: jsxRuntime.jsx(Stepper, { currentStep: step, tick: props.tick }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children })] }));
+        const innerStack = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Click-to-Call Setup Wizard" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: subtitle }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { grow: 1, children: jsxRuntime.jsx(Stepper, { currentStep: step, tick: props.tick }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children })] }));
         const paddedContent = (jsxRuntime.jsx(RailContentShell, { children: innerStack }));
         if (state.railVisible) {
             return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, {}) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: paddedContent })] }));
