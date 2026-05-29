@@ -58,7 +58,7 @@ export default class Step1 extends PureComponent<PageTickProps, unknown> {
                         } as never) as never}
                     </component.StackPanel.Item>
                     <component.StackPanel.Item>
-                        <WizardNavFooter />
+                        <WizardNavFooter tick={this.props.tick} />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
@@ -76,7 +76,7 @@ export default class Step1 extends PureComponent<PageTickProps, unknown> {
                         <ErrorText message={p.error} />
                     </component.StackPanel.Item>
                     <component.StackPanel.Item>
-                        <WizardNavFooter />
+                        <WizardNavFooter tick={this.props.tick} />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
@@ -95,7 +95,7 @@ export default class Step1 extends PureComponent<PageTickProps, unknown> {
                     <PrereqsList checks={checks} />
                 </component.StackPanel.Item>
                 <component.StackPanel.Item>
-                    <WizardNavFooter />
+                    <WizardNavFooter tick={this.props.tick} />
                 </component.StackPanel.Item>
             </component.StackPanel>
         );

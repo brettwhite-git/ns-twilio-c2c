@@ -155,7 +155,7 @@ export default class Step4 extends PureComponent<PageTickProps, unknown> {
                         } as never) as never}
                     </component.StackPanel.Item>
                     <component.StackPanel.Item>
-                        <WizardNavFooter />
+                        <WizardNavFooter tick={this.props.tick} />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
@@ -176,7 +176,7 @@ export default class Step4 extends PureComponent<PageTickProps, unknown> {
                         </component.Text>
                     </component.StackPanel.Item>
                     <component.StackPanel.Item>
-                        <WizardNavFooter />
+                        <WizardNavFooter tick={this.props.tick} />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
@@ -202,32 +202,42 @@ export default class Step4 extends PureComponent<PageTickProps, unknown> {
                         </component.Text>
                     </component.StackPanel.Item>
                     <component.StackPanel.Item>
-                        <WizardNavFooter />
+                        <WizardNavFooter tick={this.props.tick} />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
         }
 
-        // Loaded — one row per phone number
+        // Loaded — one row per phone number.
+        // Build the items array externally; UIF's StackPanel cannot accept
+        // `.map()` nested arrays as direct JSX children (see
+        // docs/solutions/architecture-patterns/uif-spa-runtime-constraints-2026-05-28.md).
+        const stackItems: core.VDom.Node[] = [];
+        stackItems.push(heading);
+        stackItems.push(intro);
+        for (const pn of phoneNumbers) {
+            stackItems.push(
+                <component.StackPanel.Item key={pn.sid}>
+                    <AssignmentRow
+                        phoneNumber={pn}
+                        employees={employees}
+                        assignment={assignments[pn.sid] || {}}
+                    />
+                </component.StackPanel.Item>
+            );
+        }
+        stackItems.push(
+            <component.StackPanel.Item>
+                <WizardNavFooter tick={this.props.tick} />
+            </component.StackPanel.Item>
+        );
+
         return (
             <component.StackPanel
                 orientation={component.StackPanel.Orientation.VERTICAL}
                 itemGap={component.StackPanel.GapSize.L}
             >
-                {heading}
-                {intro}
-                {phoneNumbers.map((pn) => (
-                    <component.StackPanel.Item key={pn.sid}>
-                        <AssignmentRow
-                            phoneNumber={pn}
-                            employees={employees}
-                            assignment={assignments[pn.sid] || {}}
-                        />
-                    </component.StackPanel.Item>
-                ))}
-                <component.StackPanel.Item>
-                    <WizardNavFooter />
-                </component.StackPanel.Item>
+                {stackItems as never}
             </component.StackPanel>
         );
     }

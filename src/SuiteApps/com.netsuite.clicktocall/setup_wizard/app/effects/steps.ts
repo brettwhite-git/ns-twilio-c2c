@@ -267,24 +267,32 @@ export async function saveStep4(): Promise<SaveResult> {
  * Load Step 5's snapshot + assignments + preflight in parallel. Used by
  * the Test & Activate page to show the current config + preflight result
  * before the admin clicks Activate.
+ *
+ * The server wraps wizardSnapshot as `{snapshot: {...}}` — unwrap before
+ * caching so consumers (Step5, Voice, Credentials, Overview) read the
+ * flat config shape directly via `state.console.snapshot.accountSid`.
+ * App.initializeApp does the same unwrap on cold mount.
  */
 export async function loadStep5(): Promise<void> {
     const safe = <T>(promise: Promise<T>): Promise<T | null> =>
         promise.catch(() => null);
 
-    const [snapshot, assignments, preflight] = await Promise.all([
+    const [snapResp, assignments, preflight] = await Promise.all([
         safe(wizardCall('wizardSnapshot', {})),
         safe(wizardCall('wizardLoadAssignments', {})),
         safe(wizardCall('wizardRunPreflight', {}))
     ]);
 
-    // Step 5 lives on the console slice for the preflight + assignments
-    // reads (matches existing Step5State shape). Dispatch through
-    // consoleLoadSuccess for the shared fields the wizard + console
-    // share.
+    const snapshot = (snapResp && (snapResp as { snapshot?: unknown }).snapshot) || null;
+
     store.dispatch(Action.consoleLoadSuccess({
         snapshot,
-        assignments: (assignments && (assignments as { rows?: unknown[] }).rows) || null,
+        // Server normalizes assignment payloads as `{items: [...]}` —
+        // matches the uniform contract documented in
+        // docs/solutions/architecture-patterns/uif-spa-runtime-constraints
+        // (#6). The earlier `.rows` read silently returned null and
+        // floated 0/0 to the Step 5 review.
+        assignments: (assignments && (assignments as { items?: unknown[] }).items) || null,
         preflight: (preflight && (preflight as { checks?: unknown[] }).checks) || null
     }));
 }

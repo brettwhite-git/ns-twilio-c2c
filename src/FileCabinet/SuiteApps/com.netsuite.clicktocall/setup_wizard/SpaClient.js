@@ -780,14 +780,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     }
     async function loadStep5() {
         const safe = (promise) => promise.catch(() => null);
-        const [snapshot, assignments, preflight] = await Promise.all([
+        const [snapResp, assignments, preflight] = await Promise.all([
             safe(wizardCall('wizardSnapshot', {})),
             safe(wizardCall('wizardLoadAssignments', {})),
             safe(wizardCall('wizardRunPreflight', {}))
         ]);
+        const snapshot = (snapResp && snapResp.snapshot) || null;
         store.dispatch(Action.consoleLoadSuccess({
             snapshot,
-            assignments: (assignments && assignments.rows) || null,
+            assignments: (assignments && assignments.items) || null,
             preflight: (preflight && preflight.checks) || null
         }));
     }
@@ -850,27 +851,31 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return;
         }
     };
-    const WizardNavFooter = () => {
-        const state = store.getState();
-        const currentStep = state.currentStep;
-        const showBack = currentStep > 1;
-        const showContinue = currentStep < TOTAL_STEPS;
-        if (!showBack && !showContinue)
-            return null;
-        const continueEnabled = isStepValid(currentStep, state);
-        const errorMsg = state.console.actionError;
-        const items = [];
-        if (showBack) {
-            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, action: () => { goToStep(currentStep - 1); } }) }));
+    class WizardNavFooter extends core.PureComponent {
+        render() {
+            const state = store.getState();
+            const currentStep = state.currentStep;
+            if (currentStep >= TOTAL_STEPS)
+                return null;
+            const showBack = currentStep > 1;
+            const showContinue = currentStep < TOTAL_STEPS;
+            if (!showBack && !showContinue)
+                return null;
+            const continueEnabled = isStepValid(currentStep, state);
+            const errorMsg = state.console.actionError;
+            const items = [];
+            if (showBack) {
+                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, action: () => { goToStep(currentStep - 1); } }) }));
+            }
+            if (showContinue) {
+                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Continue", type: component__namespace.Button.Type.PRIMARY, enabled: continueEnabled, action: () => { onContinue(currentStep); } }) }));
+            }
+            const row = (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: items }));
+            if (!errorMsg)
+                return row;
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + errorMsg }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: row })] }));
         }
-        if (showContinue) {
-            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Continue", type: component__namespace.Button.Type.PRIMARY, enabled: continueEnabled, action: () => { onContinue(currentStep); } }) }));
-        }
-        const row = (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: items }));
-        if (!errorMsg)
-            return row;
-        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + errorMsg }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: row })] }));
-    };
+    }
 
     class Step1 extends core.PureComponent {
         componentDidMount() {
@@ -885,45 +890,136 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
                                 label: 'Running prerequisite checks…',
                                 indeterminate: true
-                            }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+                            }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
             }
             if (p.error) {
-                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(ErrorText, { message: p.error }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(ErrorText, { message: p.error }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
             }
             const checks = p.checks || [];
-            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PrereqsList, { checks: checks }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PrereqsList, { checks: checks }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
         }
     }
 
-    class Step2Field extends core.PureComponent {
-        handleChange = (args) => {
-            const v = (args && args.text) || '';
-            store.dispatch(Action.step2FieldChange(this.props.field, v));
+    const TWILIO_DOCS$2 = {
+        accountSid: 'https://www.twilio.com/docs/iam/api/account',
+        apiKeySid: 'https://www.twilio.com/docs/iam/api-keys',
+        apiSecret: 'https://www.twilio.com/docs/iam/api-keys'
+    };
+    const ROWS$1 = [
+        {
+            field: 'accountSid',
+            label: 'Account SID',
+            placeholder: 'AC...',
+            docUrl: TWILIO_DOCS$2.accountSid,
+            description: 'Public identifier for your Twilio account. Found in the ' +
+                'Twilio Console under Account Info. Safe to display — the ' +
+                'matching Auth Token never leaves Twilio.'
+        },
+        {
+            field: 'apiKeySid',
+            label: 'API Key SID',
+            placeholder: 'SK...',
+            docUrl: TWILIO_DOCS$2.apiKeySid,
+            description: 'Identifies which Twilio API Key the wizard authenticates ' +
+                'with. Create one at Account > API keys & tokens. The ' +
+                'matching Secret is held by NetSuite (next field).'
+        },
+        {
+            field: 'apiSecretId',
+            label: 'API Key Secret script ID',
+            placeholder: 'custsecret_...',
+            docUrl: TWILIO_DOCS$2.apiSecret,
+            description: 'Script ID of the NetSuite API Secret holding the Twilio ' +
+                'Secret value. Create the secret at Setup > Company > API ' +
+                'Secrets, then paste its custsecret_... script ID here. The ' +
+                'value itself never leaves NetSuite\'s vault.'
+        }
+    ];
+    class Step2 extends core.PureComponent {
+        dispatchField = (field, value) => {
+            store.dispatch(Action.step2FieldChange(field, value));
         };
         render() {
             const state = store.getState();
-            const value = state.step2[this.props.field] || '';
-            return (jsxRuntime.jsx(component__namespace.Field, { label: this.props.label, orientation: component__namespace.Field.Orientation.VERTICAL, children: jsxRuntime.jsx(component__namespace.TextBox, { text: value, placeholder: this.props.placeholder, onTextChanged: this.handleChange }) }));
-        }
-    }
-    class Step2 extends core.PureComponent {
-        render() {
-            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Connect to your Twilio account" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { children: "Enter your Twilio Account SID and API Key SID. The API Key Secret must already exist in NetSuite API Secrets (Setup > Company > API Secrets) \u2014 paste its script ID below. Live validation against Twilio runs at Step 5 (Test & activate) using the configured secret pointer \u2014 no need to paste the secret value here." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(Step2Field, { label: "Account SID", placeholder: "AC...", field: "accountSid" }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(Step2Field, { label: "API Key SID", placeholder: "SK...", field: "apiKeySid" }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(Step2Field, { label: "API Key Secret script ID", placeholder: "custsecret_...", field: "apiSecretId" }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+            const s = state.step2;
+            const pushHeader = (cells, text) => {
+                cells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }) }));
+            };
+            const allCells = [];
+            pushHeader(allCells, 'Field');
+            pushHeader(allCells, 'Docs');
+            pushHeader(allCells, 'Description');
+            pushHeader(allCells, 'Value');
+            ROWS$1.forEach((row) => {
+                const value = s[row.field] || '';
+                allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: row.label }) }));
+                const docLink = new component__namespace.Link({
+                    content: 'Twilio docs ↗',
+                    url: row.docUrl,
+                    target: component__namespace.Link.Target.BLANK
+                });
+                allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: docLink }));
+                allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: row.description }) }));
+                allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.TextBox, { text: value, placeholder: row.placeholder, onTextChanged: (args) => {
+                            this.dispatchField(row.field, (args && args.text) || '');
+                        }, rootStyle: { width: '100%' } }) }));
+            });
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Connect to your Twilio account" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { children: "Enter your Twilio Account SID and API Key SID. The API Key Secret must already exist in NetSuite API Secrets (Setup > Company > API Secrets) \u2014 paste its script ID below. Live validation against Twilio runs at Step 5 using the configured secret pointer \u2014 no need to paste the secret value here." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.GridPanel, { columns: "180px 110px 1fr 360px", rows: "auto auto auto auto", columnGap: component__namespace.GridPanel.GapSize.M, rowGap: component__namespace.GridPanel.GapSize.M, children: allCells }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
         }
     }
 
-    class DropdownField extends core.PureComponent {
-        render() {
-            const { label, options, selectedValue, allowEmpty } = this.props;
-            if (options.length === 0) {
-                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: label }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no items found in Twilio for this account)" }) })] }));
-            }
-            const ds = new core__namespace.ArrayDataSource(options);
-            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: label }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: ds, valueMember: "value", displayMember: "label", selectedValue: selectedValue || (allowEmpty ? null : options[0].value), allowEmpty: !!allowEmpty, placeholder: allowEmpty ? '(none)' : 'Select…', onSelectionChanged: (args) => {
-                                this.props.onChange((args && args.value) || '');
-                            } }) })] }));
+    const TWILIO_DOCS$1 = {
+        twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
+        phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
+        intelService: 'https://www.twilio.com/docs/voice/intelligence'
+    };
+    const ROWS = [
+        {
+            field: 'twimlAppSid',
+            label: 'TwiML Application',
+            description: 'The Twilio application that handles outbound call routing. ' +
+                'The wizard registers this app\'s VoiceUrl with the CTC ' +
+                'Suitelet on activate.',
+            docUrl: TWILIO_DOCS$1.twimlApp,
+            allowEmpty: false,
+            listKey: 'twimlApps',
+            toOption: (ti) => ({
+                value: ti.sid || '',
+                label: (ti.friendlyName || '(unnamed)') +
+                    (ti.sid ? '  [' + ti.sid + ']' : '')
+            })
+        },
+        {
+            field: 'phoneNumber',
+            label: 'Default outbound caller ID',
+            description: 'The number reps see as their caller ID when placing a call. ' +
+                'Specific rep-to-number assignments in Step 4 override this ' +
+                'default.',
+            docUrl: TWILIO_DOCS$1.phoneNumber,
+            allowEmpty: false,
+            listKey: 'phoneNumbers',
+            toOption: (n) => ({
+                value: n.phoneNumber || '',
+                label: (n.phoneNumber || '') +
+                    (n.friendlyName ? ' — ' + n.friendlyName : '')
+            })
+        },
+        {
+            field: 'intelServiceSid',
+            label: 'Conversational Intelligence',
+            description: 'Optional. Twilio Voice Intelligence service that produces ' +
+                'transcripts and AI summaries. Leave blank to disable post-' +
+                'call analysis.',
+            docUrl: TWILIO_DOCS$1.intelService,
+            allowEmpty: true,
+            listKey: 'intelServices',
+            toOption: (ti) => ({
+                value: ti.sid || '',
+                label: (ti.friendlyName || '(unnamed)') +
+                    (ti.sid ? '  [' + ti.sid + ']' : '')
+            })
         }
-    }
+    ];
     class Step3 extends core.PureComponent {
         componentDidMount() {
             loadStep3Lists();
@@ -940,24 +1036,43 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
                                 label: 'Loading from Twilio…',
                                 indeterminate: true
-                            }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+                            }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
             }
             if (s.listLoadError) {
-                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Could not load Twilio lists: ", s.listLoadError, ". Verify the API Secret value is set at Setup > Company > API Secrets, then go back to Step 2 and Continue again to retry."] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Could not load Twilio lists: ", s.listLoadError, ". Verify the API Secret value is set at Setup > Company > API Secrets, then go back to Step 2 and Continue again to retry."] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
             }
-            const twimlOptions = s.twimlApps.map((ti) => ({
-                value: ti.sid || '',
-                label: (ti.friendlyName || '(unnamed)') + (ti.sid ? '  [' + ti.sid + ']' : '')
-            }));
-            const phoneOptions = s.phoneNumbers.map((n) => ({
-                value: n.phoneNumber || '',
-                label: (n.phoneNumber || '') + (n.friendlyName ? ' — ' + n.friendlyName : '')
-            }));
-            const intelOptions = s.intelServices.map((ti) => ({
-                value: ti.sid || '',
-                label: (ti.friendlyName || '(unnamed)') + (ti.sid ? '  [' + ti.sid + ']' : '')
-            }));
-            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(DropdownField, { label: "TwiML Application", options: twimlOptions, selectedValue: s.twimlAppSid, onChange: (v) => this.dispatchField('twimlAppSid', v) }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(DropdownField, { label: "Default outbound caller ID", options: phoneOptions, selectedValue: s.phoneNumber, onChange: (v) => this.dispatchField('phoneNumber', v) }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(DropdownField, { label: "Conversational Intelligence Service", options: intelOptions, selectedValue: s.intelServiceSid, onChange: (v) => this.dispatchField('intelServiceSid', v) }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+            const pushHeader = (cells, text) => {
+                cells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }) }));
+            };
+            const allCells = [];
+            pushHeader(allCells, 'Field');
+            pushHeader(allCells, 'Docs');
+            pushHeader(allCells, 'Description');
+            pushHeader(allCells, 'Value');
+            ROWS.forEach((row) => {
+                const items = s[row.listKey] || [];
+                const options = items.map(row.toOption);
+                const selectedValue = s[row.field] ||
+                    (row.allowEmpty ? '' : (options[0]?.value || ''));
+                allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: row.label }) }));
+                const docLink = new component__namespace.Link({
+                    content: 'Twilio docs ↗',
+                    url: row.docUrl,
+                    target: component__namespace.Link.Target.BLANK
+                });
+                allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: docLink }));
+                allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: row.description }) }));
+                if (options.length === 0) {
+                    allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no items found in Twilio for this account)" }) }));
+                }
+                else {
+                    const ds = new core__namespace.ArrayDataSource(options);
+                    allCells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: ds, valueMember: "value", displayMember: "label", selectedValue: selectedValue || (row.allowEmpty ? null : options[0].value), allowEmpty: row.allowEmpty, placeholder: row.allowEmpty ? '(none)' : 'Select…', onSelectionChanged: (args) => {
+                                this.dispatchField(row.field, (args && args.value) || '');
+                            }, rootStyle: { width: '100%' } }) }));
+                }
+            });
+            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.GridPanel, { columns: "220px 110px 1fr 360px", rows: "auto auto auto auto", columnGap: component__namespace.GridPanel.GapSize.M, rowGap: component__namespace.GridPanel.GapSize.M, children: allCells }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
         }
     }
 
@@ -1016,53 +1131,46 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
                                 label: 'Loading phone numbers and employees…',
                                 indeterminate: true
-                            }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+                            }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
             }
             if (s.listLoadError) {
-                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", s.listLoadError] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", s.listLoadError] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
             }
             const phoneNumbers = s.phoneNumbers || [];
             const employees = s.employees || [];
             const assignments = s.assignments;
             if (phoneNumbers.length === 0) {
-                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no phone numbers owned by this Twilio account \u2014 buy one in Twilio Console before continuing)" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, intro, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no phone numbers owned by this Twilio account \u2014 buy one in Twilio Console before continuing)" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) })] }));
             }
-            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [heading, intro, phoneNumbers.map((pn) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(AssignmentRow, { phoneNumber: pn, employees: employees, assignment: assignments[pn.sid] || {} }) }, pn.sid))), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, {}) })] }));
+            const stackItems = [];
+            stackItems.push(heading);
+            stackItems.push(intro);
+            for (const pn of phoneNumbers) {
+                stackItems.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(AssignmentRow, { phoneNumber: pn, employees: employees, assignment: assignments[pn.sid] || {} }) }, pn.sid));
+            }
+            stackItems.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(WizardNavFooter, { tick: this.props.tick }) }));
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: stackItems }));
         }
     }
 
-    const CheckRowItem = (props) => {
-        const { check } = props;
-        const status = check.status || 'info_enabled';
-        let icon;
-        let color;
+    const statusToBadge$1 = (status) => {
         switch (status) {
-            case 'pass':
-                icon = core__namespace.SystemIcon.STATUS_SUCCESS_FILLED;
-                color = core__namespace.ImageConstant.Color.SUCCESS;
-                break;
-            case 'fail':
-                icon = core__namespace.SystemIcon.STATUS_ERROR_FILLED;
-                color = core__namespace.ImageConstant.Color.DANGER;
-                break;
-            case 'warn':
-                icon = core__namespace.SystemIcon.STATUS_WARNING_FILLED;
-                color = core__namespace.ImageConstant.Color.WARNING;
-                break;
-            case 'info_enabled':
-                icon = core__namespace.SystemIcon.STATUS_INFO_FILLED;
-                color = core__namespace.ImageConstant.Color.INFO;
-                break;
-            default:
-                icon = core__namespace.SystemIcon.STATUS_INFO;
-                color = core__namespace.ImageConstant.Color.NEUTRAL;
+            case 'pass': return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
+            case 'fail': return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
+            case 'warn': return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
+            case 'info_enabled': return { text: 'Enabled', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
+            case 'info_disabled': return { text: 'Disabled', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
         }
-        const textColumnItems = [
-            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: check.label || '' }) })),
-            check.detail && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: check.detail }) })),
-            check.repairHint && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '→ ' + check.repairHint }) }))
-        ].filter(Boolean);
-        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, alignment: component__namespace.StackPanel.Alignment.START, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Image, { image: icon, size: component__namespace.Image.Size.M, color: color, presentation: true }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: textColumnItems }) })] }));
+    };
+    const statusIcon$1 = (status) => {
+        switch (status) {
+            case 'pass': return { icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED, color: core__namespace.ImageConstant.Color.SUCCESS };
+            case 'fail': return { icon: core__namespace.SystemIcon.STATUS_ERROR_FILLED, color: core__namespace.ImageConstant.Color.DANGER };
+            case 'warn': return { icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED, color: core__namespace.ImageConstant.Color.WARNING };
+            case 'info_enabled': return { icon: core__namespace.SystemIcon.STATUS_INFO_FILLED, color: core__namespace.ImageConstant.Color.INFO };
+            default: return { icon: core__namespace.SystemIcon.STATUS_INFO, color: core__namespace.ImageConstant.Color.NEUTRAL };
+        }
     };
     class Step5 extends core.PureComponent {
         componentDidMount() {
@@ -1101,53 +1209,160 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 store.dispatch(Action.step5FieldChange('activateError', 'Network: ' + (err.message || String(e))));
             }
         };
+        buildCheckColumns() {
+            const CT = component__namespace.DataGrid.ColumnType;
+            const BdgType = component__namespace.Badge.Type;
+            return [
+                {
+                    type: CT.TEMPLATED,
+                    name: 'statusIcon',
+                    label: '',
+                    stretchFactor: 1,
+                    content: (args) => {
+                        const status = args?.cell?.row?.dataItem?.status || 'info_enabled';
+                        const si = statusIcon$1(status);
+                        return new component__namespace.Image({
+                            image: si.icon,
+                            size: component__namespace.Image.Size.M,
+                            color: si.color,
+                            presentation: true
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'check',
+                    label: 'Check',
+                    stretchFactor: 5,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({
+                            text: row?.label || '(unlabeled check)',
+                            type: component__namespace.Text.Type.STRONG
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'detail',
+                    label: 'Detail',
+                    stretchFactor: 7,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        const text = row?.detail ||
+                            (row?.repairHint ? '→ ' + row.repairHint : '—');
+                        return new component__namespace.Text({
+                            text,
+                            type: component__namespace.Text.Type.WEAK,
+                            size: component__namespace.Text.Size.S
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'status',
+                    label: 'Status',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const status = args?.cell?.row?.dataItem?.status || 'info_enabled';
+                        const sb = statusToBadge$1(status);
+                        return new component__namespace.Badge({
+                            content: sb.text,
+                            type: BdgType.SUBTLE,
+                            rootStyle: {
+                                backgroundColor: sb.palette.bg,
+                                color: sb.palette.fg,
+                                border: '1px solid ' + sb.palette.border
+                            }
+                        });
+                    }
+                }
+            ];
+        }
+        renderReviewGrid(snap, assignments) {
+            const phoneSet = {};
+            assignments.forEach((a) => { if (a.phoneSid)
+                phoneSet[a.phoneSid] = true; });
+            const phoneCount = Object.keys(phoneSet).length;
+            const rows = [
+                { label: 'ACCOUNT SID', value: snap.accountSid || '(not set)', mono: true, weak: !snap.accountSid },
+                { label: 'API KEY SID', value: snap.apiKeySid || '(not set)', mono: true, weak: !snap.apiKeySid },
+                { label: 'API KEY SECRET', value: snap.apiSecretId || '(not set)', mono: true, weak: !snap.apiSecretId },
+                { label: 'TWIML APPLICATION', value: snap.twimlAppSid || '(not set)', mono: true, weak: !snap.twimlAppSid },
+                { label: 'DEFAULT CALLER ID', value: snap.phoneNumber || '(not set)', mono: true, weak: !snap.phoneNumber },
+                { label: 'INTEL SERVICE', value: snap.intelServiceSid || '(none)', mono: true, weak: !snap.intelServiceSid },
+                { label: 'PHONE ASSIGNMENTS', value: assignments.length + ' rep(s) across ' + phoneCount + ' number(s)', mono: false, weak: assignments.length === 0 }
+            ];
+            const cells = [];
+            rows.forEach((r) => {
+                cells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: r.label }) }));
+                cells.push(jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: r.weak ? component__namespace.Text.Type.WEAK : component__namespace.Text.Type.DEFAULT, rootStyle: {
+                            fontFamily: r.mono
+                                ? 'ui-monospace, SF Mono, Menlo, Consolas, monospace'
+                                : 'inherit',
+                            fontSize: r.mono ? '12.5px' : '13px',
+                            wordBreak: 'break-all'
+                        }, children: r.value }) }));
+            });
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.NONE, rootStyle: {
+                    background: '#F7F8F9',
+                    border: '1px solid #E2E3E5',
+                    borderRadius: '10px',
+                    padding: '18px 22px'
+                }, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.GridPanel, { columns: "220px 1fr", rows: "auto auto auto auto auto auto auto", columnGap: component__namespace.GridPanel.GapSize.M, rowGap: component__namespace.GridPanel.GapSize.S, children: cells }) }) }));
+        }
         render() {
             const state = store.getState();
             const s = state.step5;
-            const heading = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Test & activate" }) }));
+            const consoleState = state.console;
+            const snap = consoleState.snapshot || {};
+            const assignments = consoleState.assignments || [];
+            const preflight = consoleState.preflight;
             if (s.activated) {
-                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "\u2713 Click-to-Call is active. Sales reps can now use the phone icon on Customer, Lead, and Contact records." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Go to Admin Console", type: component__namespace.Button.Type.PRIMARY, action: () => { goToConsole(); } }) })] }));
+                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "\u2713 Click-to-Call is active. Sales reps can now use the phone icon on Customer, Lead, and Contact records." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Go to Admin Console", type: component__namespace.Button.Type.PRIMARY, action: () => { goToConsole(); } }) })] }));
             }
             if (s.loading) {
-                return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [heading, jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
-                                label: 'Running preflight checks…',
-                                indeterminate: true
-                            }) })] }));
+                return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
+                            label: 'Running preflight checks…',
+                            indeterminate: true
+                        }) }) }));
             }
-            const consoleState = state.console;
-            const snap = consoleState.snapshot || null;
-            const assignments = consoleState.assignments || [];
-            const preflight = consoleState.preflight || null;
-            const phoneNumbersWithReps = {};
-            assignments.forEach((a) => {
-                if (a.phoneSid)
-                    phoneNumbersWithReps[a.phoneSid] = true;
-            });
-            const reviewLines = snap ? [
-                'Account SID:        ' + (snap.accountSid || '(not set)'),
-                'API Key SID:        ' + (snap.apiKeySid || '(not set)'),
-                'API Key Secret:     ' + (snap.apiSecretId || '(not set)'),
-                'TwiML Application:  ' + (snap.twimlAppSid || '(not set)'),
-                'Default caller ID:  ' + (snap.phoneNumber || '(not set)'),
-                'Intel Service:      ' + (snap.intelServiceSid || '(none)'),
-                'Phone assignments:  ' + assignments.length + ' rep(s) across ' +
-                    Object.keys(phoneNumbersWithReps).length + ' number(s)'
-            ] : [];
             const allPassed = preflight !== null &&
-                preflight.every((c) => c.status === 'pass');
-            const items = [
-                heading,
-                snap && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Configuration review" }) })),
-                ...reviewLines.map((line, idx) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: line }) }, 'review-' + idx))),
-                preflight && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight checks" }) })),
-                ...(preflight || []).map((check, idx) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(CheckRowItem, { check: check }) }, 'pf-' + (check.id || idx)))),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: allPassed
-                            ? 'Activate Click-to-Call'
-                            : 'Activate Click-to-Call (fix preflight first)', type: component__namespace.Button.Type.PRIMARY, enabled: allPassed, action: () => { this.activate(); } }) })),
-                s.activateError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Activation failed: ", s.activateError] }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, action: () => { goToStep(4); } }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Re-run preflight", type: component__namespace.Button.Type.DEFAULT, action: this.rerunPreflight }) })] }) }))
-            ].filter(Boolean);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.M, children: items }));
+                (preflight || []).every((c) => c.status === 'pass');
+            const leftCol = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Configuration review" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: this.renderReviewGrid(snap, assignments) })] }));
+            const rightItems = [];
+            rightItems.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight checks" }) }));
+            if (preflight === null) {
+                rightItems.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(preflight has not run \u2014 click \"Re-run preflight\" below)" }) }));
+            }
+            else if (preflight.length === 0) {
+                rightItems.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "(no checks returned)" }) }));
+            }
+            else {
+                const columns = this.buildCheckColumns();
+                const ds = new core__namespace.ArrayDataSource(preflight);
+                rightItems.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+                        dataSource: ds,
+                        columns,
+                        columnStretch: true,
+                        highlightRowsOnHover: true,
+                        stripedRows: true,
+                        dataRowHeight: 56,
+                        headerRowHeight: 36,
+                        rootStyle: { width: '100%' }
+                    }) }));
+            }
+            const rightCol = (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: rightItems }));
+            const items = [];
+            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: leftCol }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: rightCol })] }) }));
+            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: allPassed
+                        ? 'Activate Click-to-Call'
+                        : 'Activate Click-to-Call (fix preflight first)', type: component__namespace.Button.Type.PRIMARY, enabled: allPassed, action: () => { this.activate(); } }) }));
+            if (s.activateError) {
+                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Activation failed: ", s.activateError] }) }));
+            }
+            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, action: () => { goToStep(4); } }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Re-run preflight", type: component__namespace.Button.Type.DEFAULT, action: this.rerunPreflight }) })] }) }));
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: items }));
         }
     }
 
@@ -2362,31 +2577,42 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     };
 
     const STEPS = [
-        { num: 1, label: 'Prerequisites', sub: 'Setup checks' },
-        { num: 2, label: 'Connect Twilio', sub: 'SIDs & secrets' },
-        { num: 3, label: 'Voice config', sub: 'TwiML & caller ID' },
-        { num: 4, label: 'Phone numbers', sub: 'Claim & assign' },
-        { num: 5, label: 'Test & activate', sub: 'Review & go live' }
+        { label: 'Prerequisites', sub: 'Setup checks' },
+        { label: 'Connect Twilio', sub: 'SIDs & secrets' },
+        { label: 'Voice config', sub: 'TwiML & caller ID' },
+        { label: 'Phone numbers', sub: 'Claim & assign' },
+        { label: 'Test & activate', sub: 'Review & go live' }
     ];
-    const StepPill = (props) => {
-        const { spec, currentStep } = props;
-        const isCurrent = spec.num === currentStep;
-        const isDone = spec.num < currentStep;
-        const badge = new component__namespace.Badge({
-            content: isDone ? '✓' : String(spec.num),
-            type: isCurrent || isDone
-                ? component__namespace.Badge.Type.SOLID
-                : component__namespace.Badge.Type.SUBTLE,
-            size: component__namespace.Badge.Size.DEFAULT
-        });
-        return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, alignment: component__namespace.StackPanel.Alignment.CENTER, itemGap: component__namespace.StackPanel.GapSize.XS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: badge }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: isCurrent ? component__namespace.Text.Type.STRONG : component__namespace.Text.Type.DEFAULT, children: spec.label }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: spec.sub }) })] }));
-    };
     const Stepper = (props) => {
-        const pills = [];
-        for (const spec of STEPS) {
-            pills.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(StepPill, { spec: spec, currentStep: props.currentStep }) }, 'step-' + spec.num));
-        }
-        return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, justification: component__namespace.StackPanel.Justification.SPACE_BETWEEN, itemGap: component__namespace.StackPanel.GapSize.M, children: pills }));
+        const state = store.getState();
+        const activated = !!state.step5.activated;
+        const current0 = Math.max(1, Math.min(STEPS.length, props.currentStep)) - 1;
+        const itemType = (i0) => {
+            if (i0 === 4 && activated)
+                return component__namespace.Stepper.ItemType.SUCCESS;
+            if (i0 < current0)
+                return component__namespace.Stepper.ItemType.SUCCESS;
+            if (i0 === current0)
+                return component__namespace.Stepper.ItemType.PRIMARY;
+            return component__namespace.Stepper.ItemType.DEFAULT;
+        };
+        const items = [];
+        STEPS.forEach((spec, i0) => {
+            const enabled = i0 <= current0 || (i0 === 4 && activated);
+            const description = spec.label + ' • ' + spec.sub;
+            items.push(jsxRuntime.jsx(component__namespace.Stepper.Item, { index: i0, type: itemType(i0), enabled: enabled, descriptionMaxWidth: 200, children: description }));
+        });
+        const selected = (activated && current0 === 4) ? null : current0;
+        return (jsxRuntime.jsx(component__namespace.Stepper, { selectedStepIndex: selected, descriptionPosition: component__namespace.Stepper.DescriptionPosition.BOTTOM, separatorSize: component__namespace.Stepper.SeparatorSize.STRETCH, rootStyle: { width: '100%' }, onSelectionChanged: (args) => {
+                const liveState = store.getState();
+                if (liveState.step5.activated)
+                    return;
+                const liveCurrent0 = Math.max(1, Math.min(STEPS.length, liveState.currentStep)) - 1;
+                if (args.stepIndex === liveCurrent0)
+                    return;
+                const target = Math.min(liveCurrent0, args.stepIndex);
+                goToStep(target + 1);
+            }, children: items }));
     };
 
     const StepperShell = (props) => {
@@ -2394,7 +2620,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const step = state.currentStep;
         const stepLabel = STEPS[step - 1]?.label || '';
         const subtitle = 'Step ' + step + ' of ' + STEPS.length + ' — ' + stepLabel;
-        const innerStack = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.ApplicationHeader, { title: "Click-to-Call Setup Wizard", subtitle: subtitle }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(Stepper, { currentStep: step }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children })] }));
+        const innerStack = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.ApplicationHeader, { title: "Click-to-Call Setup Wizard", subtitle: subtitle }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { grow: 1, children: jsxRuntime.jsx(Stepper, { currentStep: step, tick: props.tick }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children })] }));
         const paddedContent = (jsxRuntime.jsx(RailContentShell, { children: innerStack }));
         if (state.railVisible) {
             return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, {}) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: paddedContent })] }));

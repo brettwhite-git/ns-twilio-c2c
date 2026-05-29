@@ -38,8 +38,8 @@ export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
                     subtitle={subtitle}
                 />
             </component.StackPanel.Item>
-            <component.StackPanel.Item>
-                <Stepper currentStep={step} />
+            <component.StackPanel.Item grow={1 as never}>
+                <Stepper currentStep={step} tick={props.tick} />
             </component.StackPanel.Item>
             <component.StackPanel.Item>
                 {props.children as never}
