@@ -16,8 +16,9 @@ import {PrereqsList} from '../shared/PrereqsList';
 import {ErrorText} from '../shared/ErrorText';
 import type {AppState} from '../../app/InitialState';
 import type {CheckRowData} from '../shared/CheckRow';
+import type {PageTickProps} from '../../App';
 
-export default class Step1 extends PureComponent<unknown, unknown> {
+export default class Step1 extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
         loadPrereqs();
     }

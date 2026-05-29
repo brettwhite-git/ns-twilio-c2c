@@ -32,10 +32,14 @@ export async function loadVoiceLists(): Promise<void> {
             safe(wizardCall('wizardListIntelServices', {}))
         ]);
 
+        // All three Twilio list endpoints wrap results as { items: [...] }
+        // — matches the legacy step3.ts loadStep3Lists extraction. Default
+        // to [] (not null) so the dropdown opens to an empty state
+        // instead of staying in the "loading" branch.
         const voiceLists = {
-            twimlApps: (twiml && (twiml as { apps?: unknown[] }).apps) || null,
-            phoneNumbers: (phones && (phones as { phones?: unknown[] }).phones) || null,
-            intelServices: (intel && (intel as { services?: unknown[] }).services) || null
+            twimlApps: (twiml && (twiml as { items?: unknown[] }).items) || [],
+            phoneNumbers: (phones && (phones as { items?: unknown[] }).items) || [],
+            intelServices: (intel && (intel as { items?: unknown[] }).items) || []
         };
 
         store.dispatch(Action.consoleLoadSuccess({

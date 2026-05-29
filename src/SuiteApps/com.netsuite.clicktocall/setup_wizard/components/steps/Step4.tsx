@@ -16,6 +16,7 @@ import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadStep4Lists} from '../../app/effects/steps';
 import type {AppState} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 interface PhoneNumber {
     sid: string;
@@ -110,7 +111,7 @@ class AssignmentRow extends PureComponent<AssignmentRowProps, unknown> {
     }
 }
 
-export default class Step4 extends PureComponent<unknown, unknown> {
+export default class Step4 extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
         loadStep4Lists();
     }

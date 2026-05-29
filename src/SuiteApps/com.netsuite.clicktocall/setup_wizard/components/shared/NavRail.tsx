@@ -1,15 +1,17 @@
 /**
  * NavRail — left-side NavigationDrawer for the admin console.
  *
- * Phase 6 (2026-05-28) — JSX replacement for the legacy
- * `buildConsoleNavDrawer` in AppController.tsx. NavigationDrawer with
- * 5 section items + a "Re-run wizard" item separated below.
+ * Phase 7 fix (2026-05-28) — switched from `<NavigationDrawer items={...}>`
+ * JSX prop form to imperative `new NavigationDrawer({items: [...]})` plus
+ * the spike-validated `{instance}` child-expression escape pattern.
  *
- * Highlights:
- *   - In console mode, the active section item is selected
- *   - In stepper mode (post-console Re-run flow), "re-run" is selected
- *   - Dark visual style (NetSuite navy)
- *   - Phones item shows assignment count badge when assignments loaded
+ * Reason: NavigationDrawer's ItemOptions catalog interface omits `label`
+ * (the catalog only lists it on NavigationDrawerItem.Options), but the
+ * runtime accepts label on the plain options array. The JSX prop form
+ * apparently re-validates the items shape and rejects/strips `label`,
+ * leaving the drawer chrome visible but no items rendered. The imperative
+ * constructor bypasses that and matches the legacy AppController code
+ * exactly.
  */
 
 import * as core from '@uif-js/core';
@@ -18,21 +20,12 @@ import {store} from '../../app/Store';
 import {goToSection, goToStep} from '../../app/effects/navigation';
 import type {AppState, SectionName} from '../../app/InitialState';
 
-interface NavItemSpec {
-    value: string;
-    label: string;
-    icon: unknown;
-    badge?: string;
-    separatorTop?: boolean;
-    action?: () => void;
-}
-
 export const NavRail = (): core.VDom.Node => {
     const state = store.getState() as AppState;
     const assignments = state.console.assignments;
     const assignmentBadge = assignments ? String(assignments.length) : undefined;
 
-    const navItems: NavItemSpec[] = [
+    const navItems = [
         { value: 'overview',    label: 'Overview',          icon: core.SystemIcon.HOME },
         { value: 'phones',      label: 'Phones & reps',     icon: core.SystemIcon.CALL,
           badge: assignmentBadge },
@@ -46,23 +39,23 @@ export const NavRail = (): core.VDom.Node => {
 
     const selectedVal = state.mode === 'stepper' ? 're-run' : state.selectedSection;
 
-    return (
-        <component.NavigationDrawer
-            items={navItems as never}
-            selectedValue={selectedVal}
-            width={240}
-            visualStyle={component.NavigationDrawer.VisualStyle.DARK}
-            onSelectedValueChanged={(args: { value?: string }): void => {
-                const value = args && args.value;
-                if (!value) return;
-                if (value === 're-run') {
-                    goToStep(1);
-                    return;
-                }
-                goToSection(value as SectionName);
-            }}
-        />
-    );
+    const drawer = new component.NavigationDrawer({
+        items: navItems,
+        selectedValue: selectedVal,
+        width: 240,
+        visualStyle: component.NavigationDrawer.VisualStyle.DARK,
+        onSelectedValueChanged: (args: { value?: string }): void => {
+            const value = args && args.value;
+            if (!value) return;
+            if (value === 're-run') {
+                goToStep(1);
+                return;
+            }
+            goToSection(value as SectionName);
+        }
+    } as never);
+
+    return drawer as never;
 };
 
 export default NavRail;

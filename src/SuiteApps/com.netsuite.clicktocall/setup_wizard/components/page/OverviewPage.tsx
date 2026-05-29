@@ -13,8 +13,9 @@ import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {goToSection} from '../../app/effects/navigation';
-import {deactivate} from '../../app/effects/console';
+import {deactivate, reactivate} from '../../app/effects/console';
 import type {AppState, SectionName} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 interface ConsoleSnapshot {
     active?: boolean;
@@ -43,7 +44,8 @@ interface RecentCallRow {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// StatCard — 4 columns share this shape
+// StatCard — uses UIF Card.metric() for proper KPI styling (padding,
+// border, baseline). Matches the legacy buildStatCard exactly.
 // ─────────────────────────────────────────────────────────────────────
 
 interface StatCardProps {
@@ -54,69 +56,89 @@ interface StatCardProps {
     tone?: 'success' | 'warning' | 'info' | 'neutral';
 }
 
-const StatCard = (props: StatCardProps): core.VDom.Node => {
-    const toneColor = (() => {
-        switch (props.tone) {
-            case 'success': return core.ImageConstant.Color.SUCCESS;
-            case 'warning': return core.ImageConstant.Color.WARNING;
-            case 'info': return core.ImageConstant.Color.INFO;
-            default: return core.ImageConstant.Color.NEUTRAL;
-        }
-    })();
-
-    return (
-        <component.StackPanel
-            orientation={component.StackPanel.Orientation.VERTICAL}
-            itemGap={component.StackPanel.GapSize.XS}
-            rootStyle={{
-                padding: '16px',
-                border: '1px solid #E2E3E5',
-                borderRadius: '6px',
-                background: '#FFFFFF'
-            }}
-        >
-            <component.StackPanel.Item>
-                <component.Text
-                    type={component.Text.Type.WEAK}
-                    size={component.Text.Size.S}
-                >
-                    {props.title}
-                </component.Text>
-            </component.StackPanel.Item>
-            <component.StackPanel.Item>
-                <component.StackPanel
-                    orientation={component.StackPanel.Orientation.HORIZONTAL}
-                    alignment={component.StackPanel.Alignment.CENTER}
-                    itemGap={component.StackPanel.GapSize.XS}
-                >
-                    {props.icon ? (
-                        <component.StackPanel.Item>
-                            <component.Image
-                                image={props.icon as never}
-                                size={component.Image.Size.M}
-                                color={toneColor as never}
-                                presentation={true}
-                            />
-                        </component.StackPanel.Item>
-                    ) : null}
-                    <component.StackPanel.Item>
-                        <component.Heading level={3}>
-                            {props.metric}
-                        </component.Heading>
-                    </component.StackPanel.Item>
-                </component.StackPanel>
-            </component.StackPanel.Item>
-            <component.StackPanel.Item>
-                <component.Text
-                    type={component.Text.Type.WEAK}
-                    size={component.Text.Size.S}
-                >
-                    {props.description}
-                </component.Text>
-            </component.StackPanel.Item>
-        </component.StackPanel>
-    );
+const toneToImageColor = (tone: StatCardProps['tone']): unknown => {
+    switch (tone) {
+        case 'success': return core.ImageConstant.Color.SUCCESS;
+        case 'warning': return core.ImageConstant.Color.WARNING;
+        case 'info':    return core.ImageConstant.Color.INFO;
+        case 'neutral': return core.ImageConstant.Color.NEUTRAL;
+        default: return undefined;
+    }
 };
+
+const buildIconedDescription = (props: StatCardProps): unknown => {
+    const iconColor = toneToImageColor(props.tone);
+    const icon = new component.Image({
+        image: props.icon,
+        size: component.Image.Size.S,
+        color: iconColor,
+        presentation: true
+    } as never);
+    const descText = props.description
+        ? new component.Text({
+            text: props.description,
+            type: component.Text.Type.WEAK,
+            size: component.Text.Size.S
+        })
+        : null;
+    // StackPanel `items` accepts Component instances directly OR
+    // StructuredItemConfiguration { component, options? } — both are
+    // valid ItemConfiguration shapes per the catalog.
+    const items = [
+        icon,
+        descText
+    ].filter(Boolean);
+    return new component.StackPanel({
+        items,
+        orientation: component.StackPanel.Orientation.HORIZONTAL,
+        itemGap: component.StackPanel.GapSize.XS,
+        alignment: component.StackPanel.Alignment.CENTER
+    } as never);
+};
+
+const buildStatCard = (props: StatCardProps): core.VDom.Node => {
+    // Card.metric is the canonical UIF KPI card factory — provides title,
+    // metric value, and description slots with built-in styling. Matches
+    // legacy buildStatCard in _archive/.../components/shared/shell.ts.
+    try {
+        const card = (component.Card as unknown as {
+            metric: (opts: object) => unknown;
+        }).metric({
+            title: props.title,
+            metric: props.metric,
+            description: props.icon
+                ? buildIconedDescription(props)
+                : props.description
+        });
+        return card as never;
+    } catch (e) {
+        // Fallback to hand-rolled stack if Card.metric throws.
+        const titleText = new component.Text({
+            text: props.title,
+            type: component.Text.Type.WEAK,
+            size: component.Text.Size.S
+        });
+        const metricText = new component.Text({
+            text: props.metric,
+            type: component.Text.Type.STRONG
+        });
+        const descText = props.description
+            ? new component.Text({
+                text: props.description,
+                type: component.Text.Type.WEAK,
+                size: component.Text.Size.S
+            })
+            : null;
+        const items = [titleText, metricText, descText].filter(Boolean);
+        return new component.StackPanel({
+            items,
+            orientation: component.StackPanel.Orientation.VERTICAL,
+            itemGap: component.StackPanel.GapSize.XXS
+        } as never) as never;
+    }
+};
+
+const StatCard = (props: StatCardProps): core.VDom.Node => buildStatCard(props);
 
 // ─────────────────────────────────────────────────────────────────────
 // Helpers (status formatting)
@@ -155,14 +177,25 @@ const statusBadgePalette = (status: string): { bg: string; fg: string; border: s
 // OverviewPage
 // ─────────────────────────────────────────────────────────────────────
 
-export default class OverviewPage extends PureComponent<unknown, unknown> {
+interface OverviewPageState {
+    /** 0-based current page index for the Recent activity DataGrid. */
+    currentPage: number;
+}
+
+const ROWS_PER_PAGE = 10;
+
+export default class OverviewPage extends PureComponent<PageTickProps, OverviewPageState> {
     private recentCallsColumns: unknown[];
 
-    constructor(props: unknown, context: unknown) {
+    constructor(props: PageTickProps, context: unknown) {
         super(props, context);
+        this.state = { currentPage: 0 };
         const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
         const BdgType = component.Badge.Type;
 
+        // Recent activity grid — 5 columns (Date, Customer, Rep, Status,
+        // open-call action). Sits on the LEFT half of a 2-col GridPanel
+        // paired with the rep-activity chart on the right.
         this.recentCallsColumns = [
             {
                 type: CT.TEMPLATED,
@@ -171,23 +204,16 @@ export default class OverviewPage extends PureComponent<unknown, unknown> {
                 stretchFactor: 2,
                 content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
                     const row = args?.cell?.row?.dataItem;
-                    return new component.Text({ text: row?.date || '—' });
-                }
-            },
-            {
-                type: CT.TEMPLATED,
-                name: 'rep',
-                label: 'Rep',
-                stretchFactor: 2,
-                content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
-                    const row = args?.cell?.row?.dataItem;
-                    return new component.Text({ text: row?.repName || '(unassigned)' });
+                    return new component.Text({
+                        text: row?.date || '—',
+                        size: component.Text.Size.S
+                    });
                 }
             },
             {
                 type: CT.TEMPLATED,
                 name: 'contact',
-                label: 'Contact',
+                label: 'Customer',
                 stretchFactor: 3,
                 content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
                     const row = args?.cell?.row?.dataItem;
@@ -197,18 +223,18 @@ export default class OverviewPage extends PureComponent<unknown, unknown> {
             },
             {
                 type: CT.TEMPLATED,
-                name: 'duration',
-                label: 'Duration',
-                stretchFactor: 1,
+                name: 'rep',
+                label: 'Sales rep',
+                stretchFactor: 2,
                 content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
                     const row = args?.cell?.row?.dataItem;
-                    return new component.Text({ text: row ? formatDuration(row.duration) : '—' });
+                    return new component.Text({ text: row?.repName || '(unassigned)' });
                 }
             },
             {
                 type: CT.TEMPLATED,
                 name: 'status',
-                label: 'AI Status',
+                label: 'Status',
                 stretchFactor: 2,
                 content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
                     const row = args?.cell?.row?.dataItem;
@@ -224,13 +250,177 @@ export default class OverviewPage extends PureComponent<unknown, unknown> {
                         }
                     });
                 }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'open',
+                label: '',
+                stretchFactor: 1,
+                content: (args: { cell?: { row?: { dataItem?: RecentCallRow } } }): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    if (!row?.id) return new component.Text({ text: '' });
+                    return new component.Button({
+                        label: '',
+                        startIcon: core.SystemIcon.CALL,
+                        action: (): void => {
+                            try {
+                                window.open(
+                                    '/app/crm/calendar/call.nl?id=' +
+                                        encodeURIComponent(String(row.id)),
+                                    '_blank'
+                                );
+                            } catch (e) { /* ignore */ }
+                        }
+                    } as never);
+                }
             }
         ];
+    }
+
+    private handlePageChange = (args: { index?: number }): void => {
+        // UIF Pagination.onPageSelected fires with
+        // { page, index, previousPage, previousIndex, reason }.
+        // The 0-based current page lives on .index — NOT
+        // .selectedPageIndex (that was an incorrect guess from the
+        // component property name and silently fell back to page 0,
+        // so clicking next/prev never advanced).
+        const next = (args && typeof args.index === 'number') ? args.index : 0;
+        this.setState({ currentPage: next });
+    };
+
+    /**
+     * Build the left-side paginated grid block: header row containing
+     * a "Recent calls" title (left) + Pagination strip (right), with
+     * the DataGrid below.
+     */
+    private buildRecentCallsGrid(allCalls: RecentCallRow[]): unknown {
+        const totalRows = allCalls.length;
+        const start = this.state.currentPage * ROWS_PER_PAGE;
+        const pageSlice = allCalls.slice(start, start + ROWS_PER_PAGE);
+        const pageRowsDs = new core.ArrayDataSource(pageSlice);
+
+        const headerTitle = new component.Text({
+            text: 'Recent calls',
+            type: component.Text.Type.STRONG
+        });
+
+        const pagination = new component.Pagination({
+            pages: { rowsCount: totalRows, rowsPerPage: ROWS_PER_PAGE },
+            selectedPageIndex: this.state.currentPage,
+            rowsCounter: totalRows,
+            navigation: {
+                type: (component.Pagination as unknown as { NavigationType: { DEFAULT: unknown } })
+                    .NavigationType.DEFAULT,
+                buttons: {
+                    firstPage: true,
+                    previousPage: true,
+                    nextPage: true,
+                    lastPage: true
+                },
+                pageIndicator: true
+            },
+            onPageSelected: this.handlePageChange
+        } as never);
+
+        const headerRow = new component.StackPanel({
+            items: [headerTitle, pagination],
+            orientation: component.StackPanel.Orientation.HORIZONTAL,
+            justification: component.StackPanel.Justification.SPACE_BETWEEN,
+            alignment: component.StackPanel.Alignment.CENTER,
+            itemGap: component.StackPanel.GapSize.M
+        } as never);
+
+        // Cap the DataGrid to ~440px so [headerRow ~40px + grid 440px]
+        // totals ~480px and matches the chart's height on the right. The
+        // DataGrid scrolls internally when the 10-row page exceeds the
+        // visible window.
+        const grid = new component.DataGrid({
+            dataSource: pageRowsDs,
+            columns: this.recentCallsColumns,
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            stripedRows: true,
+            dataRowHeight: 48,
+            headerRowHeight: 40,
+            onRowClick: this.handleRowClick,
+            rootStyle: { width: '100%', height: '440px' }
+        } as never);
+
+        return new component.StackPanel({
+            items: [headerRow, grid],
+            orientation: component.StackPanel.Orientation.VERTICAL,
+            itemGap: component.StackPanel.GapSize.S,
+            rootStyle: { width: '100%' }
+        } as never);
+    }
+
+    /**
+     * Aggregate the recent-calls list by sales rep for the chart on the
+     * right half of the Recent activity block. Returns { categories,
+     * callCounts, durationMinutes } in matched-index order.
+     */
+    private aggregateByRep(calls: RecentCallRow[]): {
+        categories: string[];
+        callCounts: number[];
+        durationMinutes: number[];
+    } {
+        const buckets: Record<string, { calls: number; seconds: number }> = {};
+        for (const c of calls) {
+            const key = c.repName || '(unassigned)';
+            if (!buckets[key]) buckets[key] = { calls: 0, seconds: 0 };
+            buckets[key].calls += 1;
+            buckets[key].seconds += c.duration || 0;
+        }
+        const categories = Object.keys(buckets);
+        const callCounts = categories.map((k) => buckets[k].calls);
+        const durationMinutes = categories.map((k) =>
+            Math.round((buckets[k].seconds / 60) * 10) / 10);
+        return { categories, callCounts, durationMinutes };
+    }
+
+    /**
+     * Build the right-side rep-activity chart. Column for call counts on
+     * the primary axis, line for duration (minutes) on the opposite y2.
+     * Height capped at 480px so the chart and the paired DataGrid stay
+     * in visual balance and the whole Recent activity block doesn't push
+     * the page below the viewport fold.
+     */
+    private buildRepChart(calls: RecentCallRow[]): unknown {
+        const {categories, callCounts, durationMinutes} = this.aggregateByRep(calls);
+        return new component.Chart({
+            title: 'Sales rep activity',
+            subtitle: 'From the ' + calls.length + ' most recent calls',
+            xAxis: {
+                categories,
+                title: 'Sales rep'
+            },
+            yAxis: [
+                { title: 'Calls' },
+                { title: 'Duration (min)', opposite: true }
+            ],
+            series: [
+                {
+                    name: 'Calls',
+                    type: component.Chart.Type.COLUMN,
+                    yAxis: 0,
+                    data: callCounts
+                },
+                {
+                    name: 'Duration (min)',
+                    color: component.Chart.Color.YELLOW,
+                    yAxis: 1,
+                    data: durationMinutes
+                }
+            ],
+            rootStyle: { width: '100%', height: '480px' }
+        } as never);
     }
 
     private handleNav = (section: SectionName): void => goToSection(section);
 
     private handleDeactivate = (): void => { deactivate(); };
+
+    private handleReactivate = (): void => { reactivate(); };
 
     private handleRowClick = (args: { row?: { dataItem?: RecentCallRow } }): void => {
         const dataItem = args?.row?.dataItem;
@@ -265,10 +455,6 @@ export default class OverviewPage extends PureComponent<unknown, unknown> {
             : core.SystemIcon.STATUS_INFO_FILLED;
         const statusTone: StatCardProps['tone'] =
             snap.active === true ? 'success' : snap.active === false ? 'warning' : 'info';
-
-        const recentCallsDs = recentCalls && recentCalls.length > 0
-            ? new core.ArrayDataSource(recentCalls)
-            : null;
 
         return (
             <component.StackPanel
@@ -376,54 +562,65 @@ export default class OverviewPage extends PureComponent<unknown, unknown> {
                                     />
                                 </component.StackPanel.Item>
                                 <component.StackPanel.Item>
-                                    <component.Button
-                                        label="Deactivate"
-                                        type={component.Button.Type.DANGER}
-                                        startIcon={core.SystemIcon.STOP as never}
-                                        action={this.handleDeactivate}
-                                    />
+                                    {snap.active === false ? (
+                                        <component.Button
+                                            label="Reactivate"
+                                            type={component.Button.Type.PRIMARY}
+                                            startIcon={core.SystemIcon.PLAY as never}
+                                            action={this.handleReactivate}
+                                        />
+                                    ) : (
+                                        <component.Button
+                                            label="Deactivate"
+                                            type={component.Button.Type.DANGER}
+                                            startIcon={core.SystemIcon.STOP as never}
+                                            action={this.handleDeactivate}
+                                        />
+                                    )}
                                 </component.StackPanel.Item>
                             </component.StackPanel>
                         </component.StackPanel.Item>
                     </component.StackPanel>
                 </component.StackPanel.Item>
 
-                {/* Recent calls */}
+                {/* Recent activity — 2-col grid: DataGrid (left) + Chart (right) */}
                 <component.StackPanel.Item>
                     <component.StackPanel
                         orientation={component.StackPanel.Orientation.VERTICAL}
                         itemGap={component.StackPanel.GapSize.S}
                     >
                         <component.StackPanel.Item>
-                            <component.Heading level={3}>Recent calls</component.Heading>
+                            <component.Heading level={3}>Recent activity</component.Heading>
                         </component.StackPanel.Item>
                         {recentCalls === null ? (
                             <component.StackPanel.Item>
                                 {new component.Loader({
-                                    label: 'Loading recent calls…',
+                                    label: 'Loading recent activity…',
                                     indeterminate: true
                                 } as never) as never}
                             </component.StackPanel.Item>
                         ) : recentCalls.length === 0 ? (
                             <component.StackPanel.Item>
                                 <component.Text type={component.Text.Type.WEAK}>
-                                    No calls logged yet. Once reps start placing
-                                    calls through Click-to-Call, the 10 most
-                                    recent will show up here.
+                                    No calls logged yet. Once reps start
+                                    placing calls through Click-to-Call,
+                                    recent activity will show up here.
                                 </component.Text>
                             </component.StackPanel.Item>
                         ) : (
                             <component.StackPanel.Item>
-                                {new component.DataGrid({
-                                    dataSource: recentCallsDs,
-                                    columns: this.recentCallsColumns,
-                                    columnStretch: true,
-                                    highlightRowsOnHover: true,
-                                    stripedRows: true,
-                                    dataRowHeight: 56,
-                                    headerRowHeight: 40,
-                                    onRowClick: this.handleRowClick
-                                } as never) as never}
+                                <component.GridPanel
+                                    columns="1fr 1fr"
+                                    rows="auto"
+                                    columnGap={component.GridPanel.GapSize.L}
+                                >
+                                    <component.GridPanel.Item>
+                                        {this.buildRecentCallsGrid(recentCalls) as never}
+                                    </component.GridPanel.Item>
+                                    <component.GridPanel.Item>
+                                        {this.buildRepChart(recentCalls) as never}
+                                    </component.GridPanel.Item>
+                                </component.GridPanel>
                             </component.StackPanel.Item>
                         )}
                     </component.StackPanel>

@@ -20,6 +20,7 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import type {AppState, Step2State} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 interface Step2FieldProps {
     label: string;
@@ -51,7 +52,7 @@ class Step2Field extends PureComponent<Step2FieldProps, unknown> {
     }
 }
 
-export default class Step2 extends PureComponent<unknown, unknown> {
+export default class Step2 extends PureComponent<PageTickProps, unknown> {
     render(): core.VDom.Node {
         return (
             <component.StackPanel

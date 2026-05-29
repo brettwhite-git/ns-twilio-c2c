@@ -17,6 +17,7 @@ import {store} from '../../app/Store';
 import {loadPhonesData, savePhonesAssignment} from '../../app/effects/phones';
 import {goToStep} from '../../app/effects/navigation';
 import type {AppState} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 interface EmployeeRow {
     id: number;
@@ -42,7 +43,14 @@ const truncSid = (sid: string | undefined): string => {
     return sid.slice(0, 6) + '…' + sid.slice(-4);
 };
 
-export default class PhonesPage extends PureComponent<unknown, unknown> {
+export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
+    componentDidMount(): void {
+        const state = store.getState() as AppState;
+        if (state.console.phonesNumbers === null) {
+            loadPhonesData();
+        }
+    }
+
     private buildColumns(employees: EmployeeRow[]): unknown[] {
         const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
         const IM = (component.DataGrid as unknown as { InputMode: Record<string, unknown> }).InputMode;
@@ -212,11 +220,8 @@ export default class PhonesPage extends PureComponent<unknown, unknown> {
         const columns = this.buildColumns(employees);
         const rowsDs = grouped.length > 0 ? new core.ArrayDataSource(grouped) : null;
 
-        return (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.VERTICAL}
-                itemGap={component.StackPanel.GapSize.XL}
-            >
+        const items = [
+            (
                 <component.StackPanel.Item>
                     <component.StackPanel
                         orientation={component.StackPanel.Orientation.HORIZONTAL}
@@ -239,36 +244,45 @@ export default class PhonesPage extends PureComponent<unknown, unknown> {
                         </component.StackPanel.Item>
                     </component.StackPanel>
                 </component.StackPanel.Item>
-                {c.phonesError ? (
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.STRONG}>
-                            ✕ {c.phonesError}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                ) : null}
-                {grouped.length === 0 ? (
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.WEAK}>
-                            No phone numbers configured yet. Click "Add
-                            phone number" above to claim a Twilio number
-                            and assign reps.
-                        </component.Text>
-                    </component.StackPanel.Item>
-                ) : (
-                    <component.StackPanel.Item>
-                        {new component.DataGrid({
-                            dataSource: rowsDs,
-                            columns,
-                            columnStretch: true,
-                            highlightRowsOnHover: true,
-                            stripedRows: true,
-                            dataRowHeight: 72,
-                            headerRowHeight: 44,
-                            editable: true,
-                            rootStyle: { width: '100%' }
-                        } as never) as never}
-                    </component.StackPanel.Item>
-                )}
+            ),
+            c.phonesError && (
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        ✕ {c.phonesError}
+                    </component.Text>
+                </component.StackPanel.Item>
+            ),
+            grouped.length === 0 ? (
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.WEAK}>
+                        No phone numbers configured yet. Click "Add
+                        phone number" above to claim a Twilio number
+                        and assign reps.
+                    </component.Text>
+                </component.StackPanel.Item>
+            ) : (
+                <component.StackPanel.Item>
+                    {new component.DataGrid({
+                        dataSource: rowsDs,
+                        columns,
+                        columnStretch: true,
+                        highlightRowsOnHover: true,
+                        stripedRows: true,
+                        dataRowHeight: 72,
+                        headerRowHeight: 44,
+                        editable: true,
+                        rootStyle: { width: '100%' }
+                    } as never) as never}
+                </component.StackPanel.Item>
+            )
+        ].filter(Boolean);
+
+        return (
+            <component.StackPanel
+                orientation={component.StackPanel.Orientation.VERTICAL}
+                itemGap={component.StackPanel.GapSize.XL}
+            >
+                {items as never}
             </component.StackPanel>
         );
     }

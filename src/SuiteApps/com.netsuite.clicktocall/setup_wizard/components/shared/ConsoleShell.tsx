@@ -2,15 +2,14 @@
  * ConsoleShell — rail + ApplicationHeader + page wrapper for the
  * admin console mode.
  *
- * Phase 6 (2026-05-28) — wraps a Page component (OverviewPage / PhonesPage
- * / etc.) with the chrome: NavigationDrawer on the left, ApplicationHeader
- * + (optional) PausedBanner + RailContentShell with the page content on
- * the right.
+ * Phase 7 fix (2026-05-28) — moved ApplicationHeader + PausedBanner
+ * INSIDE the RailContentShell wrapper so they share the same XXL outer
+ * padding as the page content. Previously the header sat flush at the
+ * left edge while the content was indented 48px — visual misalignment.
  *
- * Root layout is a CSS-grid GridPanel `columns: 'auto 1fr'` so the rail
- * auto-sizes to its rendered width and the content fills the remaining
- * width. This requires the SPA's outer container to have an explicit
- * height (set via `scriptContext.setLayout('application')` in SpaClient).
+ * Matches the legacy AppController.buildRailContentPane structure where
+ * `wrapContent(d, stack)` wrapped the ENTIRE content stack (title +
+ * banner + body) in one padded ContentPanel.
  */
 
 import * as core from '@uif-js/core';
@@ -33,6 +32,7 @@ const subtitleFor = (section: SectionName): string => {
 
 interface ConsoleShellProps {
     children?: core.VDom.Node | core.VDom.Node[];
+    tick?: number;
 }
 
 export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
@@ -41,27 +41,26 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
     const isPaused = snap?.active === false;
     const subtitle = subtitleFor(state.selectedSection);
 
-    const contentColumn = (
-        <component.StackPanel
-            orientation={component.StackPanel.Orientation.VERTICAL}
-            itemGap={component.StackPanel.GapSize.L}
-        >
+    const contentItems = [
+        (
             <component.StackPanel.Item>
                 <component.ApplicationHeader
                     title="Click-to-Call Admin Console"
                     subtitle={subtitle}
                 />
             </component.StackPanel.Item>
-            {isPaused ? (
-                <component.StackPanel.Item>
-                    <PausedBanner />
-                </component.StackPanel.Item>
-            ) : null}
+        ),
+        isPaused && (
             <component.StackPanel.Item>
-                <RailContentShell>{props.children}</RailContentShell>
+                <PausedBanner />
             </component.StackPanel.Item>
-        </component.StackPanel>
-    );
+        ),
+        (
+            <component.StackPanel.Item>
+                {props.children as never}
+            </component.StackPanel.Item>
+        )
+    ].filter(Boolean);
 
     return (
         <component.GridPanel
@@ -72,7 +71,16 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
             <component.GridPanel.Item>
                 <NavRail />
             </component.GridPanel.Item>
-            <component.GridPanel.Item>{contentColumn}</component.GridPanel.Item>
+            <component.GridPanel.Item>
+                <RailContentShell>
+                    <component.StackPanel
+                        orientation={component.StackPanel.Orientation.VERTICAL}
+                        itemGap={component.StackPanel.GapSize.L}
+                    >
+                        {contentItems as never}
+                    </component.StackPanel>
+                </RailContentShell>
+            </component.GridPanel.Item>
         </component.GridPanel>
     );
 };

@@ -17,6 +17,7 @@ import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadStep3Lists} from '../../app/effects/steps';
 import type {AppState, Step3State} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 interface TwilioItem {
     sid?: string;
@@ -90,7 +91,7 @@ class DropdownField extends PureComponent<DropdownFieldProps, unknown> {
     }
 }
 
-export default class Step3 extends PureComponent<unknown, unknown> {
+export default class Step3 extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
         loadStep3Lists();
     }

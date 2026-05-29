@@ -1,13 +1,12 @@
 /**
  * Stepper — horizontal step progress indicator.
  *
- * Phase 6 (2026-05-28) — JSX replacement for the legacy `buildStepper`
- * helper in AppController.tsx. 5 pills laid out SPACE_BETWEEN; each pill
- * is a Badge + label + sublabel column.
- *
- * Note: legacy uses primitives instead of `component.Stepper` because
- * the native Stepper component rendered silently invisible in 3 prior
- * attempts. Pattern preserved.
+ * Phase 7 fix (2026-05-28) — switched Badge construction from JSX form
+ * to imperative `new Badge({...})` returned via `{instance}` JSX child
+ * expression. The JSX `<component.Badge content={...} />` form apparently
+ * doesn't pass `content` through correctly (badges render as content-less
+ * dots); the imperative form matches the legacy AppController.buildStepper
+ * pattern exactly. Pattern proven via Phase 6 spike findings.
  */
 
 import * as core from '@uif-js/core';
@@ -36,6 +35,15 @@ const StepPill = (props: { spec: StepSpec; currentStep: number }): core.VDom.Nod
     const isCurrent = spec.num === currentStep;
     const isDone = spec.num < currentStep;
 
+    // Imperative Badge construction — JSX form doesn't render `content`.
+    const badge = new component.Badge({
+        content: isDone ? '✓' : String(spec.num),
+        type: isCurrent || isDone
+            ? component.Badge.Type.SOLID
+            : component.Badge.Type.SUBTLE,
+        size: component.Badge.Size.DEFAULT
+    });
+
     return (
         <component.StackPanel
             orientation={component.StackPanel.Orientation.VERTICAL}
@@ -43,13 +51,7 @@ const StepPill = (props: { spec: StepSpec; currentStep: number }): core.VDom.Nod
             itemGap={component.StackPanel.GapSize.XS}
         >
             <component.StackPanel.Item>
-                <component.Badge
-                    content={isDone ? '✓' : String(spec.num)}
-                    type={isCurrent || isDone
-                        ? component.Badge.Type.SOLID
-                        : component.Badge.Type.SUBTLE}
-                    size={component.Badge.Size.DEFAULT}
-                />
+                {badge as never}
             </component.StackPanel.Item>
             <component.StackPanel.Item>
                 <component.Text
@@ -71,17 +73,22 @@ const StepPill = (props: { spec: StepSpec; currentStep: number }): core.VDom.Nod
 };
 
 export const Stepper = (props: StepperProps): core.VDom.Node => {
+    const pills: core.VDom.Node[] = [];
+    for (const spec of STEPS) {
+        pills.push(
+            <component.StackPanel.Item key={'step-' + spec.num}>
+                <StepPill spec={spec} currentStep={props.currentStep} />
+            </component.StackPanel.Item>
+        );
+    }
+
     return (
         <component.StackPanel
             orientation={component.StackPanel.Orientation.HORIZONTAL}
             justification={component.StackPanel.Justification.SPACE_BETWEEN}
             itemGap={component.StackPanel.GapSize.M}
         >
-            {STEPS.map((spec) => (
-                <component.StackPanel.Item key={'step-' + spec.num}>
-                    <StepPill spec={spec} currentStep={props.currentStep} />
-                </component.StackPanel.Item>
-            ))}
+            {pills as never}
         </component.StackPanel>
     );
 };

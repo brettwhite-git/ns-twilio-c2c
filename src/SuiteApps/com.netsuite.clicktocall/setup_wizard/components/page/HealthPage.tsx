@@ -3,9 +3,13 @@
  *
  * Phase 4 (2026-05-28) — JSX rewrite of components/sections/health.ts.
  * Three sub-blocks stacked vertically:
- *   1. Preflight    — re-run button + check rows
- *   2. Drift        — 3 client-computed detector rows
+ *   1. Preflight    — re-run button + DataGrid of check rows
+ *   2. Drift        — DataGrid of 3 client-computed detector rows
  *   3. Danger zone  — Deactivate flow with two-click confirm
+ *
+ * Spike (2026-05-28) — DataGrid layout. Preflight + Drift now use the same
+ * 4-column DataGrid pattern (Status icon / Check / Detail / Status badge),
+ * matching the table-style of CredentialsPage / PhonesPage / VoicePage.
  */
 
 import {PureComponent} from '@uif-js/core';
@@ -16,6 +20,7 @@ import {Action} from '../../app/Action';
 import {deactivate} from '../../app/effects/console';
 import {wizardCall} from '../../services/wizardApi';
 import type {AppState} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 interface CheckItem {
     id?: string;
@@ -28,6 +33,10 @@ interface DriftSnapshot {
     voiceUrl?: string;
     phoneNumbers?: string;
     intelService?: string;
+}
+
+interface CellArgs {
+    cell?: { row?: { dataItem?: CheckItem } };
 }
 
 const statusToBadge = (status: string): { text: string; palette: { bg: string; fg: string; border: string } } => {
@@ -51,68 +60,7 @@ const statusIcon = (status: string): { icon: unknown; color: unknown } => {
     }
 };
 
-interface CheckRowProps {
-    check: CheckItem;
-}
-
-const CheckRowItem = (props: CheckRowProps): core.VDom.Node => {
-    const {check} = props;
-    const status = check.status || 'info_enabled';
-    const si = statusIcon(status);
-    const sb = statusToBadge(status);
-
-    return (
-        <component.StackPanel
-            orientation={component.StackPanel.Orientation.HORIZONTAL}
-            alignment={component.StackPanel.Alignment.START}
-            itemGap={component.StackPanel.GapSize.M}
-        >
-            <component.StackPanel.Item>
-                <component.Image
-                    image={si.icon as never}
-                    size={component.Image.Size.M}
-                    color={si.color as never}
-                    presentation={true}
-                />
-            </component.StackPanel.Item>
-            <component.StackPanel.Item>
-                <component.StackPanel
-                    orientation={component.StackPanel.Orientation.VERTICAL}
-                    itemGap={component.StackPanel.GapSize.XXS}
-                >
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.STRONG}>
-                            {check.label || '(unlabeled check)'}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                    {check.detail ? (
-                        <component.StackPanel.Item>
-                            <component.Text
-                                type={component.Text.Type.WEAK}
-                                size={component.Text.Size.S}
-                            >
-                                {check.detail}
-                            </component.Text>
-                        </component.StackPanel.Item>
-                    ) : null}
-                </component.StackPanel>
-            </component.StackPanel.Item>
-            <component.StackPanel.Item>
-                <component.Badge
-                    content={sb.text}
-                    type={component.Badge.Type.SUBTLE}
-                    rootStyle={{
-                        backgroundColor: sb.palette.bg,
-                        color: sb.palette.fg,
-                        border: '1px solid ' + sb.palette.border
-                    }}
-                />
-            </component.StackPanel.Item>
-        </component.StackPanel>
-    );
-};
-
-export default class HealthPage extends PureComponent<unknown, unknown> {
+export default class HealthPage extends PureComponent<PageTickProps, unknown> {
     private rerunPreflight = async (): Promise<void> => {
         store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true } as never));
         try {
@@ -146,6 +94,78 @@ export default class HealthPage extends PureComponent<unknown, unknown> {
         deactivate();
     };
 
+    private buildCheckColumns(): unknown[] {
+        const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
+        const BdgType = component.Badge.Type;
+
+        return [
+            {
+                type: CT.TEMPLATED,
+                name: 'statusIcon',
+                label: '',
+                stretchFactor: 1,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    const status = row?.status || 'info_enabled';
+                    const si = statusIcon(status);
+                    return new component.Image({
+                        image: si.icon,
+                        size: component.Image.Size.M,
+                        color: si.color,
+                        presentation: true
+                    } as never);
+                }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'check',
+                label: 'Check',
+                stretchFactor: 4,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    return new component.Text({
+                        text: row?.label || '(unlabeled check)',
+                        type: component.Text.Type.STRONG
+                    });
+                }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'detail',
+                label: 'Detail',
+                stretchFactor: 6,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    return new component.Text({
+                        text: row?.detail || '—',
+                        type: component.Text.Type.WEAK,
+                        size: component.Text.Size.S
+                    });
+                }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'status',
+                label: 'Status',
+                stretchFactor: 2,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    const status = row?.status || 'info_enabled';
+                    const sb = statusToBadge(status);
+                    return new component.Badge({
+                        content: sb.text,
+                        type: BdgType.SUBTLE,
+                        rootStyle: {
+                            backgroundColor: sb.palette.bg,
+                            color: sb.palette.fg,
+                            border: '1px solid ' + sb.palette.border
+                        }
+                    });
+                }
+            }
+        ];
+    }
+
     render(): core.VDom.Node {
         const state = store.getState() as AppState;
         const c = state.console;
@@ -161,151 +181,230 @@ export default class HealthPage extends PureComponent<unknown, unknown> {
             { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
         ];
 
+        const dangerZoneItems = [
+            (
+                <component.StackPanel.Item>
+                    <component.Heading level={3}>Danger zone</component.Heading>
+                </component.StackPanel.Item>
+            ),
+            (
+                <component.StackPanel.Item>
+                    <component.Text
+                        type={component.Text.Type.WEAK}
+                        size={component.Text.Size.S}
+                    >
+                        Deactivate Click-to-Call: reps lose
+                        phone-icon access across all roles.
+                        In-progress calls finish normally; new
+                        calls cannot be placed. Reactivate any
+                        time.
+                    </component.Text>
+                </component.StackPanel.Item>
+            ),
+            (
+                <component.StackPanel.Item>
+                    {c.pendingDeactivateConfirm ? (
+                        <component.StackPanel
+                            orientation={component.StackPanel.Orientation.HORIZONTAL}
+                            itemGap={component.StackPanel.GapSize.S}
+                        >
+                            <component.StackPanel.Item>
+                                <component.Button
+                                    label="Cancel"
+                                    action={this.cancelDeactivateConfirm}
+                                />
+                            </component.StackPanel.Item>
+                            <component.StackPanel.Item>
+                                <component.Button
+                                    label="Confirm deactivate"
+                                    type={component.Button.Type.DANGER}
+                                    action={this.confirmDeactivate}
+                                />
+                            </component.StackPanel.Item>
+                        </component.StackPanel>
+                    ) : (
+                        <component.Button
+                            label="Deactivate"
+                            type={component.Button.Type.DANGER}
+                            action={this.requestDeactivate}
+                        />
+                    )}
+                </component.StackPanel.Item>
+            ),
+            c.deactivateError && (
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        ✕ Deactivate failed: {c.deactivateError}
+                    </component.Text>
+                </component.StackPanel.Item>
+            )
+        ].filter(Boolean);
+
+        const columns = this.buildCheckColumns();
+
+        /*
+         * Preflight content — flat array of <StackPanel.Item> elements.
+         * UIF's StackPanel rejects nested arrays-as-children.
+         */
+        const preflightContent: core.VDom.Node[] = [];
+        preflightContent.push(
+            (
+                <component.StackPanel.Item>
+                    <component.Heading level={3}>Preflight</component.Heading>
+                </component.StackPanel.Item>
+            ) as core.VDom.Node
+        );
+        preflightContent.push(
+            (
+                <component.StackPanel.Item>
+                    <component.Button
+                        label={refreshing ? 'Re-running…' : 'Re-run'}
+                        startIcon={core.SystemIcon.REFRESH as never}
+                        enabled={!refreshing}
+                        action={(): void => { this.rerunPreflight(); }}
+                    />
+                </component.StackPanel.Item>
+            ) as core.VDom.Node
+        );
+        if (preflight === null || preflight === undefined) {
+            preflightContent.push(
+                (
+                    <component.StackPanel.Item>
+                        <component.Text type={component.Text.Type.WEAK}>
+                            Click "Re-run" to evaluate.
+                        </component.Text>
+                    </component.StackPanel.Item>
+                ) as core.VDom.Node
+            );
+        } else if (preflight.length === 0) {
+            preflightContent.push(
+                (
+                    <component.StackPanel.Item>
+                        <component.Text type={component.Text.Type.WEAK}>
+                            No checks returned.
+                        </component.Text>
+                    </component.StackPanel.Item>
+                ) as core.VDom.Node
+            );
+        } else {
+            const preflightDs = new core.ArrayDataSource(preflight);
+            preflightContent.push(
+                (
+                    <component.StackPanel.Item>
+                        {new component.DataGrid({
+                            dataSource: preflightDs,
+                            columns,
+                            columnStretch: true,
+                            highlightRowsOnHover: true,
+                            stripedRows: true,
+                            dataRowHeight: 64,
+                            headerRowHeight: 40,
+                            rootStyle: { width: '100%' }
+                        } as never) as never}
+                    </component.StackPanel.Item>
+                ) as core.VDom.Node
+            );
+        }
+
+        /*
+         * Drift content — same flat-array pattern. driftRows always has 3
+         * entries so always renders the DataGrid.
+         */
+        const driftContent: core.VDom.Node[] = [];
+        driftContent.push(
+            (
+                <component.StackPanel.Item>
+                    <component.Heading level={3}>Drift detection</component.Heading>
+                </component.StackPanel.Item>
+            ) as core.VDom.Node
+        );
+        driftContent.push(
+            (
+                <component.StackPanel.Item>
+                    <component.Text
+                        type={component.Text.Type.WEAK}
+                        size={component.Text.Size.S}
+                    >
+                        Compares the saved wizard config against the
+                        live Twilio account. Re-runs each time the
+                        console mounts.
+                    </component.Text>
+                </component.StackPanel.Item>
+            ) as core.VDom.Node
+        );
+        const driftDs = new core.ArrayDataSource(driftRows);
+        driftContent.push(
+            (
+                <component.StackPanel.Item>
+                    {new component.DataGrid({
+                        dataSource: driftDs,
+                        columns,
+                        columnStretch: true,
+                        highlightRowsOnHover: true,
+                        stripedRows: true,
+                        dataRowHeight: 64,
+                        headerRowHeight: 40,
+                        rootStyle: { width: '100%' }
+                    } as never) as never}
+                </component.StackPanel.Item>
+            ) as core.VDom.Node
+        );
+
+        const outerItems = [
+            /* Preflight block */
+            (
+                <component.StackPanel.Item>
+                    <component.StackPanel
+                        orientation={component.StackPanel.Orientation.VERTICAL}
+                        itemGap={component.StackPanel.GapSize.S}
+                    >
+                        {preflightContent as never}
+                    </component.StackPanel>
+                </component.StackPanel.Item>
+            ),
+            /* Drift block */
+            (
+                <component.StackPanel.Item>
+                    <component.StackPanel
+                        orientation={component.StackPanel.Orientation.VERTICAL}
+                        itemGap={component.StackPanel.GapSize.S}
+                    >
+                        {driftContent as never}
+                    </component.StackPanel>
+                </component.StackPanel.Item>
+            ),
+            /* Danger zone (hidden when paused) */
+            !isPaused && (
+                <component.StackPanel.Item>
+                    <component.StackPanel
+                        orientation={component.StackPanel.Orientation.VERTICAL}
+                        itemGap={component.StackPanel.GapSize.S}
+                        rootStyle={{
+                            border: '1px solid #D33A2C',
+                            borderRadius: '8px',
+                            backgroundColor: '#FDF4F3',
+                            padding: '16px 20px'
+                        }}
+                    >
+                        {dangerZoneItems as never}
+                    </component.StackPanel>
+                </component.StackPanel.Item>
+            ),
+            c.actionError && (
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        ✕ {c.actionError}
+                    </component.Text>
+                </component.StackPanel.Item>
+            )
+        ].filter(Boolean);
+
         return (
             <component.StackPanel
                 orientation={component.StackPanel.Orientation.VERTICAL}
                 itemGap={component.StackPanel.GapSize.L}
             >
-                {/* Preflight block */}
-                <component.StackPanel.Item>
-                    <component.StackPanel
-                        orientation={component.StackPanel.Orientation.VERTICAL}
-                        itemGap={component.StackPanel.GapSize.S}
-                    >
-                        <component.StackPanel.Item>
-                            <component.Heading level={3}>Preflight</component.Heading>
-                        </component.StackPanel.Item>
-                        <component.StackPanel.Item>
-                            <component.Button
-                                label={refreshing ? 'Re-running…' : 'Re-run'}
-                                startIcon={core.SystemIcon.REFRESH as never}
-                                enabled={!refreshing}
-                                action={(): void => { this.rerunPreflight(); }}
-                            />
-                        </component.StackPanel.Item>
-                        {preflight === null || preflight === undefined ? (
-                            <component.StackPanel.Item>
-                                <component.Text type={component.Text.Type.WEAK}>
-                                    Click "Re-run" to evaluate.
-                                </component.Text>
-                            </component.StackPanel.Item>
-                        ) : preflight.length === 0 ? (
-                            <component.StackPanel.Item>
-                                <component.Text type={component.Text.Type.WEAK}>
-                                    No checks returned.
-                                </component.Text>
-                            </component.StackPanel.Item>
-                        ) : (
-                            preflight.map((check, idx) => (
-                                <component.StackPanel.Item key={'pf-' + (check.id || idx)}>
-                                    <CheckRowItem check={check} />
-                                </component.StackPanel.Item>
-                            ))
-                        )}
-                    </component.StackPanel>
-                </component.StackPanel.Item>
-
-                {/* Drift block */}
-                <component.StackPanel.Item>
-                    <component.StackPanel
-                        orientation={component.StackPanel.Orientation.VERTICAL}
-                        itemGap={component.StackPanel.GapSize.S}
-                    >
-                        <component.StackPanel.Item>
-                            <component.Heading level={3}>Drift detection</component.Heading>
-                        </component.StackPanel.Item>
-                        <component.StackPanel.Item>
-                            <component.Text
-                                type={component.Text.Type.WEAK}
-                                size={component.Text.Size.S}
-                            >
-                                Compares the saved wizard config against the
-                                live Twilio account. Re-runs each time the
-                                console mounts.
-                            </component.Text>
-                        </component.StackPanel.Item>
-                        {driftRows.map((row, idx) => (
-                            <component.StackPanel.Item key={'drift-' + idx}>
-                                <CheckRowItem check={row} />
-                            </component.StackPanel.Item>
-                        ))}
-                    </component.StackPanel>
-                </component.StackPanel.Item>
-
-                {/* Danger zone (hidden when paused) */}
-                {!isPaused ? (
-                    <component.StackPanel.Item>
-                        <component.StackPanel
-                            orientation={component.StackPanel.Orientation.VERTICAL}
-                            itemGap={component.StackPanel.GapSize.S}
-                            rootStyle={{
-                                border: '1px solid #D33A2C',
-                                borderRadius: '8px',
-                                backgroundColor: '#FDF4F3',
-                                padding: '16px 20px'
-                            }}
-                        >
-                            <component.StackPanel.Item>
-                                <component.Heading level={3}>Danger zone</component.Heading>
-                            </component.StackPanel.Item>
-                            <component.StackPanel.Item>
-                                <component.Text
-                                    type={component.Text.Type.WEAK}
-                                    size={component.Text.Size.S}
-                                >
-                                    Deactivate Click-to-Call: reps lose
-                                    phone-icon access across all roles.
-                                    In-progress calls finish normally; new
-                                    calls cannot be placed. Reactivate any
-                                    time.
-                                </component.Text>
-                            </component.StackPanel.Item>
-                            <component.StackPanel.Item>
-                                {c.pendingDeactivateConfirm ? (
-                                    <component.StackPanel
-                                        orientation={component.StackPanel.Orientation.HORIZONTAL}
-                                        itemGap={component.StackPanel.GapSize.S}
-                                    >
-                                        <component.StackPanel.Item>
-                                            <component.Button
-                                                label="Cancel"
-                                                action={this.cancelDeactivateConfirm}
-                                            />
-                                        </component.StackPanel.Item>
-                                        <component.StackPanel.Item>
-                                            <component.Button
-                                                label="Confirm deactivate"
-                                                type={component.Button.Type.DANGER}
-                                                action={this.confirmDeactivate}
-                                            />
-                                        </component.StackPanel.Item>
-                                    </component.StackPanel>
-                                ) : (
-                                    <component.Button
-                                        label="Deactivate"
-                                        type={component.Button.Type.DANGER}
-                                        action={this.requestDeactivate}
-                                    />
-                                )}
-                            </component.StackPanel.Item>
-                            {c.deactivateError ? (
-                                <component.StackPanel.Item>
-                                    <component.Text type={component.Text.Type.STRONG}>
-                                        ✕ Deactivate failed: {c.deactivateError}
-                                    </component.Text>
-                                </component.StackPanel.Item>
-                            ) : null}
-                        </component.StackPanel>
-                    </component.StackPanel.Item>
-                ) : null}
-
-                {c.actionError ? (
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.STRONG}>
-                            ✕ {c.actionError}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                ) : null}
+                {outerItems as never}
             </component.StackPanel>
         );
     }

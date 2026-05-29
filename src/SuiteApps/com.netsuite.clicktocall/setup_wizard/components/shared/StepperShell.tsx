@@ -2,13 +2,10 @@
  * StepperShell — ApplicationHeader + Stepper strip + page wrapper for
  * the wizard's stepper mode.
  *
- * Phase 6 (2026-05-28) — wraps a Step component (Step1/Step2/.../Step5)
- * with the chrome: ApplicationHeader title + step subtitle, full-width
- * Stepper progress strip, RailContentShell with the step content below.
- *
- * If the admin has previously activated and chosen "Re-run wizard" from
- * the console (state.railVisible === true), the NavRail also shows on
- * the left so the admin can navigate back to the console at any time.
+ * Phase 7 fix (2026-05-28) — moved ApplicationHeader + Stepper INSIDE
+ * the RailContentShell wrapper so they share the same XXL outer padding
+ * as the step content. Mirrors the ConsoleShell fix and the legacy
+ * AppController.buildRailContentPane structure.
  */
 
 import * as core from '@uif-js/core';
@@ -21,6 +18,7 @@ import type {AppState} from '../../app/InitialState';
 
 interface StepperShellProps {
     children?: core.VDom.Node | core.VDom.Node[];
+    tick?: number;
 }
 
 export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
@@ -29,7 +27,7 @@ export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
     const stepLabel = STEPS[step - 1]?.label || '';
     const subtitle = 'Step ' + step + ' of ' + STEPS.length + ' — ' + stepLabel;
 
-    const contentColumn = (
+    const innerStack = (
         <component.StackPanel
             orientation={component.StackPanel.Orientation.VERTICAL}
             itemGap={component.StackPanel.GapSize.L}
@@ -41,17 +39,18 @@ export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
                 />
             </component.StackPanel.Item>
             <component.StackPanel.Item>
-                <component.ContentPanel
-                    horizontalAlignment={component.ContentPanel.HorizontalAlignment.STRETCH}
-                    outerGap={component.ContentPanel.GapSize.M}
-                >
-                    <Stepper currentStep={step} />
-                </component.ContentPanel>
+                <Stepper currentStep={step} />
             </component.StackPanel.Item>
             <component.StackPanel.Item>
-                <RailContentShell>{props.children}</RailContentShell>
+                {props.children as never}
             </component.StackPanel.Item>
         </component.StackPanel>
+    );
+
+    const paddedContent = (
+        <RailContentShell>
+            {innerStack}
+        </RailContentShell>
     );
 
     // If railVisible (post-activation Re-run flow), include the NavRail.
@@ -65,12 +64,12 @@ export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
                 <component.GridPanel.Item>
                     <NavRail />
                 </component.GridPanel.Item>
-                <component.GridPanel.Item>{contentColumn}</component.GridPanel.Item>
+                <component.GridPanel.Item>{paddedContent}</component.GridPanel.Item>
             </component.GridPanel>
         );
     }
 
-    return contentColumn;
+    return paddedContent;
 };
 
 export default StepperShell;

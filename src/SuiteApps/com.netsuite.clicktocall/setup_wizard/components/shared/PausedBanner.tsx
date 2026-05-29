@@ -1,12 +1,13 @@
 /**
  * PausedBanner — warning banner shown when snapshot.active === false.
  *
- * Phase 5 (2026-05-28) — JSX replacement for the legacy `buildPausedBanner`
- * helper in components/shared/shell.ts. Uses component.BannerMessage
- * with Type.WARNING (Oracle-canonical semantic notification component).
- *
- * The Reactivate button rides inside the banner's `content` slot since
- * BannerMessage has no built-in action slot.
+ * Phase 7 fix (2026-05-28) — switched to fully imperative construction
+ * (`new BannerMessage({content: new StackPanel(...)})`) returned via the
+ * spike-validated `{instance}` JSX child pattern. The JSX prop form
+ * `<BannerMessage content={JSXElement} />` apparently doesn't serialize
+ * the content JSX through to the runtime — only the title shows.
+ * Matches the legacy buildPausedBanner in
+ * `_archive/.../components/shared/shell.ts` exactly.
  */
 
 import * as core from '@uif-js/core';
@@ -21,36 +22,33 @@ interface PausedBannerProps {
 export const PausedBanner = (props: PausedBannerProps): core.VDom.Node => {
     const handleReactivate = props.onReactivate || ((): void => { reactivate(); });
 
-    const contentRow = (
-        <component.StackPanel
-            orientation={component.StackPanel.Orientation.HORIZONTAL}
-            itemGap={component.StackPanel.GapSize.L}
-            alignment={component.StackPanel.Alignment.CENTER}
-        >
-            <component.StackPanel.Item>
-                <component.Text>
-                    Reps cannot place calls until you reactivate. All
-                    config is preserved.
-                </component.Text>
-            </component.StackPanel.Item>
-            <component.StackPanel.Item>
-                <component.Button
-                    label="Reactivate"
-                    type={component.Button.Type.PRIMARY}
-                    action={handleReactivate}
-                />
-            </component.StackPanel.Item>
-        </component.StackPanel>
-    );
+    const bodyText = new component.Text({
+        text: 'Reps cannot place calls until you reactivate. All ' +
+              'config is preserved.'
+    });
 
-    return (
-        <component.BannerMessage
-            title="Click-to-Call is paused"
-            content={contentRow as never}
-            type={component.BannerMessage.Type.WARNING}
-            showCloseButton={false}
-        />
-    );
+    const reactivateBtn = new component.Button({
+        label: 'Reactivate',
+        type: component.Button.Type.PRIMARY,
+        action: handleReactivate
+    });
+
+    const contentRow = new component.StackPanel({
+        items: [bodyText, reactivateBtn],
+        orientation: component.StackPanel.Orientation.HORIZONTAL,
+        itemGap: component.StackPanel.GapSize.L,
+        justification: component.StackPanel.Justification.SPACE_BETWEEN,
+        alignment: component.StackPanel.Alignment.CENTER
+    } as never);
+
+    const banner = new component.BannerMessage({
+        title: 'Click-to-Call is paused',
+        content: contentRow,
+        type: component.BannerMessage.Type.WARNING,
+        showCloseButton: false
+    } as never);
+
+    return banner as never;
 };
 
 export default PausedBanner;

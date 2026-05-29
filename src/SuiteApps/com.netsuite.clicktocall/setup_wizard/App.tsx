@@ -44,6 +44,26 @@ interface AppInternalState {
     tick: number;
 }
 
+/**
+ * Phase 7 fix — UIF's PureComponent shallow-compares props between
+ * renders and SKIPS re-rendering when props look identical. Pages with
+ * NO props that read from the store directly never see prop changes,
+ * so the store dispatch → App.setState → child re-render chain breaks
+ * at the page boundary.
+ *
+ * Workaround: pass a `tick` prop to every store-reading PureComponent.
+ * The tick changes on every dispatch (App.forceRerender increments a
+ * counter), so PureComponent's shallow compare always detects a change
+ * and re-renders the page. The page doesn't have to do anything with
+ * the prop — just having it change is enough.
+ *
+ * Phase 8 cleanup: subscribe to the store in each page individually so
+ * they self-manage. For now this works and is minimal-touch.
+ */
+export interface PageTickProps {
+    tick: number;
+}
+
 interface SnapshotForRouting {
     accountSid?: string;
     apiKeySid?: string;
@@ -109,25 +129,25 @@ export default class App extends PureComponent<unknown, AppInternalState> {
         }
     }
 
-    private renderStep(stepNum: number): core.VDom.Node {
+    private renderStep(stepNum: number, tick: number): core.VDom.Node {
         switch (stepNum) {
-            case 1: return <Step1 />;
-            case 2: return <Step2 />;
-            case 3: return <Step3 />;
-            case 4: return <Step4 />;
-            case 5: return <Step5 />;
-            default: return <Step1 />;
+            case 1: return <Step1 tick={tick} />;
+            case 2: return <Step2 tick={tick} />;
+            case 3: return <Step3 tick={tick} />;
+            case 4: return <Step4 tick={tick} />;
+            case 5: return <Step5 tick={tick} />;
+            default: return <Step1 tick={tick} />;
         }
     }
 
-    private renderSection(section: AppState['selectedSection']): core.VDom.Node {
+    private renderSection(section: AppState['selectedSection'], tick: number): core.VDom.Node {
         switch (section) {
-            case 'overview':    return <OverviewPage />;
-            case 'phones':      return <PhonesPage />;
-            case 'voice':       return <VoicePage />;
-            case 'credentials': return <CredentialsPage />;
-            case 'health':      return <HealthPage />;
-            default:            return <OverviewPage />;
+            case 'overview':    return <OverviewPage tick={tick} />;
+            case 'phones':      return <PhonesPage tick={tick} />;
+            case 'voice':       return <VoicePage tick={tick} />;
+            case 'credentials': return <CredentialsPage tick={tick} />;
+            case 'health':      return <HealthPage tick={tick} />;
+            default:            return <OverviewPage tick={tick} />;
         }
     }
 
@@ -149,17 +169,19 @@ export default class App extends PureComponent<unknown, AppInternalState> {
             ) as VDom.Node;
         }
 
+        const tick = this.state.tick;
+
         if (state.mode === 'console') {
             return (
-                <ConsoleShell>
-                    {this.renderSection(state.selectedSection)}
+                <ConsoleShell tick={tick}>
+                    {this.renderSection(state.selectedSection, tick)}
                 </ConsoleShell>
             ) as VDom.Node;
         }
 
         return (
-            <StepperShell>
-                {this.renderStep(state.currentStep)}
+            <StepperShell tick={tick}>
+                {this.renderStep(state.currentStep, tick)}
             </StepperShell>
         ) as VDom.Node;
     }

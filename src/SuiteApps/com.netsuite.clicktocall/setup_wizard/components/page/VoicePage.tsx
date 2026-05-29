@@ -6,6 +6,10 @@
  *   - twimlAppSid
  *   - phoneNumber
  *   - intelServiceSid
+ *
+ * Spike (2026-05-28) — DataGrid layout. The three voice fields now render in
+ * a single DataGrid. The Value + Action cells switch into edit mode for the
+ * row whose field matches state.console.voiceEditing.
  */
 
 import {PureComponent} from '@uif-js/core';
@@ -15,6 +19,7 @@ import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadVoiceLists, saveVoiceField} from '../../app/effects/voice';
 import type {AppState, ConsoleState} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 type VoiceField = NonNullable<ConsoleState['voiceEditing']>;
 type VoiceListKey = 'twimlApps' | 'phoneNumbers' | 'intelServices';
@@ -37,6 +42,10 @@ interface VoiceFieldSpec {
     helpText: string;
     docUrl?: string;
     allowEmpty?: boolean;
+}
+
+interface CellArgs {
+    cell?: { row?: { dataItem?: VoiceFieldSpec } };
 }
 
 const TWILIO_DOCS = {
@@ -78,217 +87,220 @@ const listKeyFor = (field: VoiceField): VoiceListKey => {
     }
 };
 
-class VoiceFieldRow extends PureComponent<{ spec: VoiceFieldSpec }, unknown> {
-    private handleEdit = (): void => {
-        const {spec} = this.props;
-        const state = store.getState() as AppState;
-        const snap = (state.console.snapshot || {}) as VoiceSnapshot;
-        const current = snap[spec.field] || '';
-        store.dispatch(Action.voiceFieldEdit(spec.field, current));
-        loadVoiceLists();
-    };
+const handleEdit = (spec: VoiceFieldSpec): void => {
+    const state = store.getState() as AppState;
+    const snap = (state.console.snapshot || {}) as VoiceSnapshot;
+    const current = snap[spec.field] || '';
+    store.dispatch(Action.voiceFieldEdit(spec.field, current));
+    loadVoiceLists();
+};
 
-    private handleCancel = (): void => {
-        store.dispatch(Action.voiceFieldEdit(null, null));
-    };
+const handleCancel = (): void => {
+    store.dispatch(Action.voiceFieldEdit(null, null));
+};
 
-    private handlePendingChange = (args: { value?: string }): void => {
-        const value = (args && args.value) || null;
-        const state = store.getState() as AppState;
-        store.dispatch(Action.voiceFieldEdit(
-            state.console.voiceEditing,
-            value
-        ));
-    };
+const handlePendingChange = (args: { value?: string }): void => {
+    const value = (args && args.value) || null;
+    const state = store.getState() as AppState;
+    store.dispatch(Action.voiceFieldEdit(
+        state.console.voiceEditing,
+        value
+    ));
+};
 
-    private handleSave = (): void => {
-        const {spec} = this.props;
-        const state = store.getState() as AppState;
-        const pending = state.console.voicePendingValue;
-        if (pending !== null && pending !== undefined) {
-            saveVoiceField(spec.field, pending);
-        }
-    };
-
-    render(): core.VDom.Node {
-        const {spec} = this.props;
-        const state = store.getState() as AppState;
-        const snap = (state.console.snapshot || {}) as VoiceSnapshot;
-        const isEditing = state.console.voiceEditing === spec.field;
-        const value = snap[spec.field];
-
-        const labelCell = (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.VERTICAL}
-                itemGap={component.StackPanel.GapSize.XXS}
-            >
-                <component.StackPanel.Item>
-                    <component.Text type={component.Text.Type.STRONG}>
-                        {spec.label}
-                    </component.Text>
-                </component.StackPanel.Item>
-                {spec.docUrl ? (
-                    <component.StackPanel.Item>
-                        <component.Link
-                            content="Twilio docs ↗"
-                            url={spec.docUrl}
-                            target={component.Link.Target.BLANK}
-                        />
-                    </component.StackPanel.Item>
-                ) : null}
-            </component.StackPanel>
-        );
-
-        const helpCell = (
-            <component.Text
-                type={component.Text.Type.WEAK}
-                size={component.Text.Size.S}
-            >
-                {spec.helpText}
-            </component.Text>
-        );
-
-        const rightCell = isEditing
-            ? this.renderEditControls(spec)
-            : this.renderViewControls(spec, value);
-
-        return (
-            <component.GridPanel
-                columns="1fr 3fr 2fr"
-                rows="auto"
-                columnGap={component.GridPanel.GapSize.L}
-            >
-                <component.GridPanel.Item>{labelCell}</component.GridPanel.Item>
-                <component.GridPanel.Item>{helpCell}</component.GridPanel.Item>
-                <component.GridPanel.Item>{rightCell}</component.GridPanel.Item>
-            </component.GridPanel>
-        );
+const handleSave = (spec: VoiceFieldSpec): void => {
+    const state = store.getState() as AppState;
+    const pending = state.console.voicePendingValue;
+    if (pending !== null && pending !== undefined) {
+        saveVoiceField(spec.field, pending);
     }
+};
 
-    private renderViewControls(spec: VoiceFieldSpec, value: string | undefined): core.VDom.Node {
-        return (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.HORIZONTAL}
-                itemGap={component.StackPanel.GapSize.M}
-            >
-                <component.StackPanel.Item>
-                    {value ? (
-                        <component.Text>{value}</component.Text>
-                    ) : (
-                        <component.Text type={component.Text.Type.WEAK}>
-                            (not configured)
-                        </component.Text>
-                    )}
-                </component.StackPanel.Item>
-                <component.StackPanel.Item>
-                    <component.Button
-                        label="Change"
-                        action={this.handleEdit}
-                    />
-                </component.StackPanel.Item>
-            </component.StackPanel>
-        );
-    }
+export default class VoicePage extends PureComponent<PageTickProps, unknown> {
+    private buildColumns(): unknown[] {
+        const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
 
-    private renderEditControls(spec: VoiceFieldSpec): core.VDom.Node {
-        const state = store.getState() as AppState;
-        const c = state.console;
-        const listKey = listKeyFor(spec.field);
-        const list = c.voiceLists[listKey] as TwilioListItem[] | null;
-        const saving = c.voiceSaving;
-        const pending = c.voicePendingValue;
+        return [
+            {
+                type: CT.TEMPLATED,
+                name: 'field',
+                label: 'Field',
+                stretchFactor: 2,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    return new component.Text({
+                        text: row?.label || '',
+                        type: component.Text.Type.STRONG
+                    });
+                }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'docs',
+                label: 'Docs',
+                stretchFactor: 1,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    if (!row?.docUrl) return new component.Text({ text: '' });
+                    return new component.Link({
+                        content: 'Twilio docs ↗',
+                        url: row.docUrl,
+                        target: component.Link.Target.BLANK
+                    } as never);
+                }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'description',
+                label: 'Description',
+                stretchFactor: 3,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    return new component.Text({
+                        text: row?.helpText || '',
+                        type: component.Text.Type.WEAK,
+                        size: component.Text.Size.S
+                    });
+                }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'value',
+                label: 'Current value',
+                stretchFactor: 3,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    if (!row) return new component.Text({ text: '' });
+                    const state = store.getState() as AppState;
+                    const c = state.console;
+                    const snap = (c.snapshot || {}) as VoiceSnapshot;
+                    const isEditing = c.voiceEditing === row.field;
 
-        if (list === null || c.voiceListsLoading) {
-            return (
-                <component.StackPanel.Item>
-                    {new component.Loader({
-                        label: 'Loading from Twilio…',
-                        indeterminate: true
-                    } as never) as never}
-                </component.StackPanel.Item>
-            );
-        }
+                    if (!isEditing) {
+                        const value = snap[row.field];
+                        if (value) return new component.Text({ text: value });
+                        return new component.Text({
+                            text: '(not configured)',
+                            type: component.Text.Type.WEAK
+                        });
+                    }
 
-        if (list.length === 0) {
-            return (
-                <component.StackPanel
-                    orientation={component.StackPanel.Orientation.HORIZONTAL}
-                    itemGap={component.StackPanel.GapSize.M}
-                >
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.WEAK}>
-                            (no items found in Twilio for this account)
-                        </component.Text>
-                    </component.StackPanel.Item>
-                    <component.StackPanel.Item>
-                        <component.Button label="Cancel" action={this.handleCancel} />
-                    </component.StackPanel.Item>
-                </component.StackPanel>
-            );
-        }
+                    // Edit mode — dropdown
+                    const listKey = listKeyFor(row.field);
+                    const list = c.voiceLists[listKey] as TwilioListItem[] | null;
 
-        const normalized = list.map((it) => {
-            if (spec.field === 'phoneNumber') {
-                return {
-                    value: it.phoneNumber || '',
-                    label: (it.phoneNumber || '') +
-                        (it.friendlyName ? '  —  ' + it.friendlyName : '')
-                };
+                    if (list === null || c.voiceListsLoading) {
+                        return new component.Loader({
+                            label: 'Loading from Twilio…',
+                            indeterminate: true
+                        } as never);
+                    }
+
+                    if (list.length === 0) {
+                        return new component.Text({
+                            text: '(no items found in Twilio for this account)',
+                            type: component.Text.Type.WEAK
+                        });
+                    }
+
+                    const normalized = list.map((it) => {
+                        if (row.field === 'phoneNumber') {
+                            return {
+                                value: it.phoneNumber || '',
+                                label: (it.phoneNumber || '') +
+                                    (it.friendlyName ? '  —  ' + it.friendlyName : '')
+                            };
+                        }
+                        return {
+                            value: it.sid || '',
+                            label: (it.friendlyName || '(unnamed)') +
+                                (it.sid ? '  [' + it.sid + ']' : '')
+                        };
+                    });
+                    const ds = new core.ArrayDataSource(normalized);
+                    const pending = c.voicePendingValue;
+
+                    return new component.Dropdown({
+                        dataSource: ds,
+                        valueMember: 'value',
+                        displayMember: 'label',
+                        selectedValue: pending || (row.allowEmpty ? null : normalized[0].value),
+                        allowEmpty: !!row.allowEmpty,
+                        placeholder: row.allowEmpty ? '(none)' : 'Select…',
+                        onSelectionChanged: handlePendingChange
+                    } as never);
+                }
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'action',
+                label: 'Action',
+                stretchFactor: 2,
+                content: (args: CellArgs): unknown => {
+                    const row = args?.cell?.row?.dataItem;
+                    if (!row) return new component.Text({ text: '' });
+                    const state = store.getState() as AppState;
+                    const c = state.console;
+                    const isEditing = c.voiceEditing === row.field;
+
+                    if (!isEditing) {
+                        return new component.Button({
+                            label: 'Change',
+                            action: (): void => { handleEdit(row); }
+                        } as never);
+                    }
+
+                    const listKey = listKeyFor(row.field);
+                    const list = c.voiceLists[listKey] as TwilioListItem[] | null;
+                    const saving = c.voiceSaving;
+
+                    // While loading lists, just show cancel
+                    if (list === null || c.voiceListsLoading) {
+                        return new component.Button({
+                            label: 'Cancel',
+                            action: handleCancel
+                        } as never);
+                    }
+
+                    // Empty list — only cancel makes sense
+                    if (list.length === 0) {
+                        return new component.Button({
+                            label: 'Cancel',
+                            action: handleCancel
+                        } as never);
+                    }
+
+                    const saveBtn = new component.Button({
+                        label: saving ? 'Saving…' : 'Save',
+                        type: component.Button.Type.PRIMARY,
+                        enabled: !saving,
+                        action: (): void => { handleSave(row); }
+                    } as never);
+                    const cancelBtn = new component.Button({
+                        label: 'Cancel',
+                        enabled: !saving,
+                        action: handleCancel
+                    } as never);
+
+                    return new component.StackPanel({
+                        orientation: component.StackPanel.Orientation.HORIZONTAL,
+                        itemGap: component.StackPanel.GapSize.S,
+                        items: [saveBtn, cancelBtn]
+                    } as never);
+                }
             }
-            return {
-                value: it.sid || '',
-                label: (it.friendlyName || '(unnamed)') +
-                    (it.sid ? '  [' + it.sid + ']' : '')
-            };
-        });
-        const ds = new core.ArrayDataSource(normalized);
-
-        return (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.HORIZONTAL}
-                itemGap={component.StackPanel.GapSize.S}
-            >
-                <component.StackPanel.Item>
-                    <component.Dropdown
-                        dataSource={ds as never}
-                        valueMember="value"
-                        displayMember="label"
-                        selectedValue={pending || (spec.allowEmpty ? null : normalized[0].value)}
-                        allowEmpty={!!spec.allowEmpty}
-                        placeholder={spec.allowEmpty ? '(none)' : 'Select…'}
-                        onSelectionChanged={this.handlePendingChange}
-                    />
-                </component.StackPanel.Item>
-                <component.StackPanel.Item>
-                    <component.Button
-                        label={saving ? 'Saving…' : 'Save'}
-                        type={component.Button.Type.PRIMARY}
-                        enabled={!saving}
-                        action={this.handleSave}
-                    />
-                </component.StackPanel.Item>
-                <component.StackPanel.Item>
-                    <component.Button
-                        label="Cancel"
-                        enabled={!saving}
-                        action={this.handleCancel}
-                    />
-                </component.StackPanel.Item>
-            </component.StackPanel>
-        );
+        ];
     }
-}
 
-export default class VoicePage extends PureComponent<unknown, unknown> {
     render(): core.VDom.Node {
         const state = store.getState() as AppState;
         const c = state.console;
 
-        return (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.VERTICAL}
-                itemGap={component.StackPanel.GapSize.L}
-            >
+        const columns = this.buildColumns();
+        const rowsDs = new core.ArrayDataSource(FIELD_SPECS);
+
+        const items = [
+            (
                 <component.StackPanel.Item>
                     <component.Text type={component.Text.Type.WEAK}>
                         Manage TwiML application, default outbound
@@ -297,18 +309,36 @@ export default class VoicePage extends PureComponent<unknown, unknown> {
                         apply to the next call placed.
                     </component.Text>
                 </component.StackPanel.Item>
-                {c.voiceError ? (
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.STRONG}>
-                            ✕ {c.voiceError}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                ) : null}
-                {FIELD_SPECS.map((spec) => (
-                    <component.StackPanel.Item key={spec.field}>
-                        <VoiceFieldRow spec={spec} />
-                    </component.StackPanel.Item>
-                ))}
+            ),
+            c.voiceError && (
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        ✕ {c.voiceError}
+                    </component.Text>
+                </component.StackPanel.Item>
+            ),
+            (
+                <component.StackPanel.Item>
+                    {new component.DataGrid({
+                        dataSource: rowsDs,
+                        columns,
+                        columnStretch: true,
+                        highlightRowsOnHover: true,
+                        stripedRows: true,
+                        dataRowHeight: 80,
+                        headerRowHeight: 40,
+                        rootStyle: { width: '100%' }
+                    } as never) as never}
+                </component.StackPanel.Item>
+            )
+        ].filter(Boolean);
+
+        return (
+            <component.StackPanel
+                orientation={component.StackPanel.Orientation.VERTICAL}
+                itemGap={component.StackPanel.GapSize.L}
+            >
+                {items as never}
             </component.StackPanel>
         );
     }

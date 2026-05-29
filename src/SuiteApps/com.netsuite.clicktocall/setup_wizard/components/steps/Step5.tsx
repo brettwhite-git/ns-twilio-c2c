@@ -21,6 +21,7 @@ import {loadStep5} from '../../app/effects/steps';
 import {goToConsole} from '../../app/effects/navigation';
 import {wizardCall} from '../../services/wizardApi';
 import type {AppState} from '../../app/InitialState';
+import type {PageTickProps} from '../../App';
 
 interface ConfigSnapshot {
     accountSid?: string;
@@ -75,6 +76,33 @@ const CheckRowItem = (props: { check: PreflightCheck }): core.VDom.Node => {
             color = core.ImageConstant.Color.NEUTRAL;
     }
 
+    const textColumnItems = [
+        (
+            <component.StackPanel.Item>
+                <component.Text type={component.Text.Type.STRONG}>
+                    {check.label || ''}
+                </component.Text>
+            </component.StackPanel.Item>
+        ),
+        check.detail && (
+            <component.StackPanel.Item>
+                <component.Text
+                    type={component.Text.Type.WEAK}
+                    size={component.Text.Size.S}
+                >
+                    {check.detail}
+                </component.Text>
+            </component.StackPanel.Item>
+        ),
+        check.repairHint && (
+            <component.StackPanel.Item>
+                <component.Text size={component.Text.Size.S}>
+                    {'→ ' + check.repairHint}
+                </component.Text>
+            </component.StackPanel.Item>
+        )
+    ].filter(Boolean);
+
     return (
         <component.StackPanel
             orientation={component.StackPanel.Orientation.HORIZONTAL}
@@ -94,35 +122,14 @@ const CheckRowItem = (props: { check: PreflightCheck }): core.VDom.Node => {
                     orientation={component.StackPanel.Orientation.VERTICAL}
                     itemGap={component.StackPanel.GapSize.XXS}
                 >
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.STRONG}>
-                            {check.label || ''}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                    {check.detail ? (
-                        <component.StackPanel.Item>
-                            <component.Text
-                                type={component.Text.Type.WEAK}
-                                size={component.Text.Size.S}
-                            >
-                                {check.detail}
-                            </component.Text>
-                        </component.StackPanel.Item>
-                    ) : null}
-                    {check.repairHint ? (
-                        <component.StackPanel.Item>
-                            <component.Text size={component.Text.Size.S}>
-                                {'→ ' + check.repairHint}
-                            </component.Text>
-                        </component.StackPanel.Item>
-                    ) : null}
+                    {textColumnItems as never}
                 </component.StackPanel>
             </component.StackPanel.Item>
         </component.StackPanel>
     );
 };
 
-export default class Step5 extends PureComponent<unknown, unknown> {
+export default class Step5 extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
         store.dispatch(Action.step5FieldChange('loading', true));
         store.dispatch(Action.step5FieldChange('activateError', null));
@@ -247,38 +254,35 @@ export default class Step5 extends PureComponent<unknown, unknown> {
         const allPassed = preflight !== null &&
             preflight.every((c) => c.status === 'pass');
 
-        return (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.VERTICAL}
-                itemGap={component.StackPanel.GapSize.M}
-            >
-                {heading}
-                {snap ? (
-                    <component.StackPanel.Item>
-                        <component.Heading level={3}>
-                            Configuration review
-                        </component.Heading>
-                    </component.StackPanel.Item>
-                ) : null}
-                {reviewLines.map((line, idx) => (
-                    <component.StackPanel.Item key={'review-' + idx}>
-                        <component.Text size={component.Text.Size.S}>
-                            {line}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                ))}
-                {preflight ? (
-                    <component.StackPanel.Item>
-                        <component.Heading level={3}>
-                            Preflight checks
-                        </component.Heading>
-                    </component.StackPanel.Item>
-                ) : null}
-                {(preflight || []).map((check, idx) => (
-                    <component.StackPanel.Item key={'pf-' + (check.id || idx)}>
-                        <CheckRowItem check={check} />
-                    </component.StackPanel.Item>
-                ))}
+        const items = [
+            heading,
+            snap && (
+                <component.StackPanel.Item>
+                    <component.Heading level={3}>
+                        Configuration review
+                    </component.Heading>
+                </component.StackPanel.Item>
+            ),
+            ...reviewLines.map((line, idx) => (
+                <component.StackPanel.Item key={'review-' + idx}>
+                    <component.Text size={component.Text.Size.S}>
+                        {line}
+                    </component.Text>
+                </component.StackPanel.Item>
+            )),
+            preflight && (
+                <component.StackPanel.Item>
+                    <component.Heading level={3}>
+                        Preflight checks
+                    </component.Heading>
+                </component.StackPanel.Item>
+            ),
+            ...(preflight || []).map((check, idx) => (
+                <component.StackPanel.Item key={'pf-' + (check.id || idx)}>
+                    <CheckRowItem check={check} />
+                </component.StackPanel.Item>
+            )),
+            (
                 <component.StackPanel.Item>
                     <component.Button
                         label={allPassed
@@ -289,13 +293,15 @@ export default class Step5 extends PureComponent<unknown, unknown> {
                         action={(): void => { this.activate(); }}
                     />
                 </component.StackPanel.Item>
-                {s.activateError ? (
-                    <component.StackPanel.Item>
-                        <component.Text type={component.Text.Type.STRONG}>
-                            ✕ Activation failed: {s.activateError}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                ) : null}
+            ),
+            s.activateError && (
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        ✕ Activation failed: {s.activateError}
+                    </component.Text>
+                </component.StackPanel.Item>
+            ),
+            (
                 <component.StackPanel.Item>
                     <component.Button
                         label="Re-run preflight"
@@ -303,6 +309,15 @@ export default class Step5 extends PureComponent<unknown, unknown> {
                         action={this.rerunPreflight}
                     />
                 </component.StackPanel.Item>
+            )
+        ].filter(Boolean);
+
+        return (
+            <component.StackPanel
+                orientation={component.StackPanel.Orientation.VERTICAL}
+                itemGap={component.StackPanel.GapSize.M}
+            >
+                {items as never}
             </component.StackPanel>
         );
     }
