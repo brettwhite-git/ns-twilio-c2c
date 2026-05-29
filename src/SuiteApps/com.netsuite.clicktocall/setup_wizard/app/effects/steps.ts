@@ -153,6 +153,116 @@ export async function loadStep4Lists(): Promise<void> {
     await Promise.all([numbersTask, employeesTask, assignmentsTask]);
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Save effects — per-step Continue handlers
+// ─────────────────────────────────────────────────────────────────────
+
+export interface SaveResult {
+    ok: boolean;
+    error?: string;
+}
+
+interface SaveResponse {
+    saved?: boolean;
+    error?: string;
+}
+
+const callSave = async (action: string, payload: Record<string, unknown>): Promise<SaveResult> => {
+    try {
+        const resp = (await wizardCall(action, payload)) as SaveResponse | null;
+        if (resp && resp.saved) return {ok: true};
+        return {ok: false, error: (resp && resp.error) || 'unknown'};
+    } catch (e) {
+        const err = e as { message?: string };
+        return {ok: false, error: 'Network: ' + (err.message || String(e))};
+    }
+};
+
+interface Step2Slice {
+    accountSid: string;
+    apiKeySid: string;
+    apiSecretId: string;
+}
+
+interface Step3Slice {
+    twimlAppSid: string;
+    phoneNumber: string;
+    intelServiceSid: string;
+}
+
+interface Step4PhoneNumber {
+    sid: string;
+    phoneNumber?: string;
+    friendlyName?: string;
+}
+
+interface Step4Assignment {
+    employeeIds?: number[];
+    label?: string;
+    primaryEmployeeId?: number | null;
+}
+
+interface Step4Slice {
+    phoneNumbers: Step4PhoneNumber[] | null;
+    assignments: Record<string, Step4Assignment>;
+}
+
+export async function saveStep2(): Promise<SaveResult> {
+    const s = (store.getState() as { step2: Step2Slice }).step2;
+    return callSave('wizardSavePublicIds', {
+        accountSid: s.accountSid,
+        apiKeySid: s.apiKeySid,
+        apiSecretId: s.apiSecretId
+    });
+}
+
+export async function saveStep3(): Promise<SaveResult> {
+    const s = (store.getState() as { step3: Step3Slice }).step3;
+    return callSave('wizardSaveVoice', {
+        twimlAppSid: s.twimlAppSid,
+        phoneNumber: s.phoneNumber,
+        intelServiceSid: s.intelServiceSid
+    });
+}
+
+export async function saveStep4(): Promise<SaveResult> {
+    const s = (store.getState() as { step4: Step4Slice }).step4;
+    const phoneNumbers = s.phoneNumbers || [];
+    const assignmentsMap = s.assignments || {};
+    const rows: Array<{
+        phoneSid: string;
+        phoneNumber: string | undefined;
+        label: string;
+        employeeIds: number[];
+        primaryEmployeeId: number | null;
+    }> = [];
+
+    phoneNumbers.forEach((pn) => {
+        const a: Step4Assignment = assignmentsMap[pn.sid] || {};
+        const employeeIds = a.employeeIds || [];
+        if (employeeIds.length === 0) return;
+        rows.push({
+            phoneSid: pn.sid,
+            phoneNumber: pn.phoneNumber,
+            label: a.label || pn.friendlyName || '',
+            employeeIds: employeeIds,
+            primaryEmployeeId: a.primaryEmployeeId || employeeIds[0]
+        });
+    });
+
+    // U9b diagnostic — surfaces whether MultiselectDropdown's
+    // onSelectionChanged actually captured the picked employees. Empty
+    // rows here but tags visible in the UI = picker → STATE plumbing
+    // regression. Populated rows but 0 rows on next snapshot load =
+    // save/load field-ID misalignment on the server.
+    // eslint-disable-next-line no-console
+    console.log('[CTC Setup Wizard] Step 4 Continue — assignments map:', assignmentsMap);
+    // eslint-disable-next-line no-console
+    console.log('[CTC Setup Wizard] Step 4 Continue — payload rows (' + rows.length + '):', rows);
+
+    return callSave('wizardSaveAssignments', {assignments: rows});
+}
+
 /**
  * Load Step 5's snapshot + assignments + preflight in parallel. Used by
  * the Test & Activate page to show the current config + preflight result

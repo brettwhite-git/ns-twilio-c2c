@@ -19,6 +19,7 @@ import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
+import {WizardNavFooter} from '../shared/WizardNavFooter';
 import type {AppState, Step2State} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 
@@ -103,6 +104,9 @@ export default class Step2 extends PureComponent<PageTickProps, unknown> {
                             />
                         </component.GridPanel.Item>
                     </component.GridPanel>
+                </component.StackPanel.Item>
+                <component.StackPanel.Item>
+                    <WizardNavFooter />
                 </component.StackPanel.Item>
             </component.StackPanel>
         );

@@ -15,6 +15,7 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadStep4Lists} from '../../app/effects/steps';
+import {WizardNavFooter} from '../shared/WizardNavFooter';
 import type {AppState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 
@@ -153,6 +154,9 @@ export default class Step4 extends PureComponent<PageTickProps, unknown> {
                             indeterminate: true
                         } as never) as never}
                     </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <WizardNavFooter />
+                    </component.StackPanel.Item>
                 </component.StackPanel>
             );
         }
@@ -170,6 +174,9 @@ export default class Step4 extends PureComponent<PageTickProps, unknown> {
                         <component.Text type={component.Text.Type.STRONG}>
                             ✕ {s.listLoadError}
                         </component.Text>
+                    </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <WizardNavFooter />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
@@ -194,6 +201,9 @@ export default class Step4 extends PureComponent<PageTickProps, unknown> {
                             — buy one in Twilio Console before continuing)
                         </component.Text>
                     </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <WizardNavFooter />
+                    </component.StackPanel.Item>
                 </component.StackPanel>
             );
         }
@@ -215,6 +225,9 @@ export default class Step4 extends PureComponent<PageTickProps, unknown> {
                         />
                     </component.StackPanel.Item>
                 ))}
+                <component.StackPanel.Item>
+                    <WizardNavFooter />
+                </component.StackPanel.Item>
             </component.StackPanel>
         );
     }

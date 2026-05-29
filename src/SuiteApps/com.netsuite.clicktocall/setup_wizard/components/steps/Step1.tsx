@@ -14,6 +14,7 @@ import {store} from '../../app/Store';
 import {loadPrereqs} from '../../app/effects/prereqs';
 import {PrereqsList} from '../shared/PrereqsList';
 import {ErrorText} from '../shared/ErrorText';
+import {WizardNavFooter} from '../shared/WizardNavFooter';
 import type {AppState} from '../../app/InitialState';
 import type {CheckRowData} from '../shared/CheckRow';
 import type {PageTickProps} from '../../App';
@@ -56,6 +57,9 @@ export default class Step1 extends PureComponent<PageTickProps, unknown> {
                             indeterminate: true
                         } as never) as never}
                     </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <WizardNavFooter />
+                    </component.StackPanel.Item>
                 </component.StackPanel>
             );
         }
@@ -70,6 +74,9 @@ export default class Step1 extends PureComponent<PageTickProps, unknown> {
                     {intro}
                     <component.StackPanel.Item>
                         <ErrorText message={p.error} />
+                    </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <WizardNavFooter />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
@@ -86,6 +93,9 @@ export default class Step1 extends PureComponent<PageTickProps, unknown> {
                 {intro}
                 <component.StackPanel.Item>
                     <PrereqsList checks={checks} />
+                </component.StackPanel.Item>
+                <component.StackPanel.Item>
+                    <WizardNavFooter />
                 </component.StackPanel.Item>
             </component.StackPanel>
         );

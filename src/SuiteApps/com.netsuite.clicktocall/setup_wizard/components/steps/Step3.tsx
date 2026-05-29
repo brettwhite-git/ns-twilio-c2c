@@ -16,6 +16,7 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadStep3Lists} from '../../app/effects/steps';
+import {WizardNavFooter} from '../shared/WizardNavFooter';
 import type {AppState, Step3State} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 
@@ -136,6 +137,9 @@ export default class Step3 extends PureComponent<PageTickProps, unknown> {
                             indeterminate: true
                         } as never) as never}
                     </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <WizardNavFooter />
+                    </component.StackPanel.Item>
                 </component.StackPanel>
             );
         }
@@ -156,6 +160,9 @@ export default class Step3 extends PureComponent<PageTickProps, unknown> {
                             Company &gt; API Secrets, then go back to Step 2
                             and Continue again to retry.
                         </component.Text>
+                    </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <WizardNavFooter />
                     </component.StackPanel.Item>
                 </component.StackPanel>
             );
@@ -205,6 +212,9 @@ export default class Step3 extends PureComponent<PageTickProps, unknown> {
                         selectedValue={s.intelServiceSid}
                         onChange={(v): void => this.dispatchField('intelServiceSid', v)}
                     />
+                </component.StackPanel.Item>
+                <component.StackPanel.Item>
+                    <WizardNavFooter />
                 </component.StackPanel.Item>
             </component.StackPanel>
         );

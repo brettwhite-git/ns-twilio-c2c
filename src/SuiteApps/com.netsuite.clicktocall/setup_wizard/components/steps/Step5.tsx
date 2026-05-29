@@ -18,7 +18,7 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadStep5} from '../../app/effects/steps';
-import {goToConsole} from '../../app/effects/navigation';
+import {goToConsole, goToStep} from '../../app/effects/navigation';
 import {wizardCall} from '../../services/wizardApi';
 import type {AppState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
@@ -303,11 +303,25 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
             ),
             (
                 <component.StackPanel.Item>
-                    <component.Button
-                        label="Re-run preflight"
-                        type={component.Button.Type.DEFAULT}
-                        action={this.rerunPreflight}
-                    />
+                    <component.StackPanel
+                        orientation={component.StackPanel.Orientation.HORIZONTAL}
+                        itemGap={component.StackPanel.GapSize.M}
+                    >
+                        <component.StackPanel.Item>
+                            <component.Button
+                                label="Back"
+                                type={component.Button.Type.DEFAULT}
+                                action={(): void => { goToStep(4); }}
+                            />
+                        </component.StackPanel.Item>
+                        <component.StackPanel.Item>
+                            <component.Button
+                                label="Re-run preflight"
+                                type={component.Button.Type.DEFAULT}
+                                action={this.rerunPreflight}
+                            />
+                        </component.StackPanel.Item>
+                    </component.StackPanel>
                 </component.StackPanel.Item>
             )
         ].filter(Boolean);
