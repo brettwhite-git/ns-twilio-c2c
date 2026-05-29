@@ -106,65 +106,19 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     const wizardPrereqs = () => {
         const checks = [];
 
-        // SuiteScript 2.1 — implicit since this script runs at 2.1.
-        // Useful primarily as a "first row is green" baseline so admins
-        // see the table working.
-        checks.push({
-            id: 'suitescript_21',
-            label: 'SuiteScript 2.1 available',
-            status: 'pass',
-            detail: 'Running on SuiteScript 2.1 — this Suitelet executed.'
-        });
-
-        // SERVERSIDESCRIPTING — required for the SuiteApp's scripts to
-        // execute at all. If we got here, it's enabled; this is the
-        // proof-of-truth check.
-        checks.push(featureCheck('SERVERSIDESCRIPTING',
-            'Server-side scripting',
-            'Setup > Company > Enable Features > SuiteCloud > ' +
-            'SuiteScript > Server SuiteScript'));
-
-        // CUSTOMRECORDS — required for customrecord_ctc_config + the
-        // future customrecord_ctc_rep_assignment.
-        checks.push(featureCheck('CUSTOMRECORDS',
-            'Custom records',
-            'Setup > Company > Enable Features > SuiteCloud > ' +
-            'SuiteBuilder > Custom Records'));
-
-        // API Secrets — managed at Setup > Company > API Secrets and
-        // accessed at runtime via N/secrets. Functional check rather
-        // than a feature-flag check, because NetSuite's feature ID for
-        // this surface isn't reliably `SUITESCRIPTSECRETS` (that returned
-        // false on a sandbox that has API Secrets demonstrably working).
-        // Instead: verify the N/secrets module loaded AND that any
-        // already-configured CTC secret resolves cleanly.
+        // API Secrets — functional N/secrets check. This is the only
+        // mandatory feature the admin actually has to set up before
+        // proceeding (the wizard cannot create the API Secret for them).
+        // SuiteScript 2.1 / SERVERSIDESCRIPTING / CUSTOMRECORDS / admin
+        // role / SuiteApp installation are all tautologies (we wouldn't
+        // be executing if any of them weren't true) — excluded so the
+        // admin's eye lands on the items that actually need attention.
         checks.push(apiSecretsCheck());
 
-        // Admin role check — defense in depth. The Suitelet-level
-        // isAdmin() gate already enforced this; surfacing it in the
-        // checks list is a visible confirmation for the admin.
-        checks.push({
-            id: 'admin_role',
-            label: 'Administrator role',
-            status: 'pass',
-            detail: 'Current user role ID is 3 (Administrator).'
-        });
-
         // Config singleton — create on fresh installs so subsequent
-        // wizard steps have a target record to write to.
+        // wizard steps have a target record to write to. Surfaces as
+        // a green confirmation row once created.
         checks.push(configSingletonCheck());
-
-        // CTC SuiteApp installed — verify via script ID namespace.
-        // Every CTC script ID starts with `customscript_ctc_` so we
-        // can detect the SuiteApp by looking at the current script.
-        const currentScriptId = runtime.getCurrentScript().id || '';
-        checks.push({
-            id: 'ctc_installed',
-            label: 'Click-to-Call SuiteApp installed',
-            status: currentScriptId.indexOf('customscript_ctc_') === 0
-                ? 'pass' : 'warn',
-            detail: 'Current script ID: ' + currentScriptId
-        });
 
         // INFORMATIONAL checks — don't gate activation; just inform
         // the admin about feature availability that affects CTC behavior

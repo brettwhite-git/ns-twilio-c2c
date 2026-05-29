@@ -1,59 +1,79 @@
-// @ts-check
 /**
  * App — root PureComponent for the Setup Wizard SPA.
  *
- * Path D-Store-3a (2026-05-27) — replaces the legacy
- * `scriptContext.setContent(buildRoot())` full-tree teardown rerender model
- * with UIF's canonical PureComponent + setState pattern. Subscribes to:
- *
- *   1. The Store (Path D-Store-2) — every dispatched action fires this
- *      component's setState, which re-evaluates render() and lets UIF
- *      diff the component tree (preserves focus, scroll, input transients
- *      that the old full-tree teardown lost on every state change).
- *
- *   2. The rerenderHook in AppController (also fires on STATE.console.*
- *      mutations from loaders + handlers that haven't yet been folded
- *      into the Store). D-Store-3 expands this when STATE.console becomes
- *      reducer-managed too.
- *
- * Both subscriptions call this.setState({tick: tick+1}) — a sentinel
- * state mutation that forces render() to re-run. UIF doesn't expose
- * PureComponent.forceUpdate(), so the increment-a-tick pattern is the
- * canonical way to trigger a render without a meaningful state change.
- *
- * The actual render output comes from AppController.renderRoot(), which
- * holds the bulk of the imperative UI logic (build* functions, handlers,
- * loaders). D-Store-3b will migrate those builders to JSX.
+ * Phase 6 (2026-05-28) — atomic JSX shell. Replaces the legacy
+ * `AppController.renderRoot()` imperative tree with a declarative
+ * JSX render that maps state.mode + state.currentStep + state.selectedSection
+ * to one of the new Step{1..5} / *Page components, wrapped in
+ * StepperShell or ConsoleShell.
  *
  * Lifecycle:
  *   constructor          — set initial state (tick: 0)
- *   componentDidMount    — register rerender hook + subscribe to store +
- *                          fire initializeApp (wizardSnapshot resumability)
- *   componentWillUnmount — clear subscriptions + reset hook
- *   render               — return AppController.renderRoot()
+ *   componentDidMount    — subscribe to Store + fire initializeApp
+ *                          (wizardSnapshot resumability routing)
+ *   componentWillUnmount — clear store subscription
+ *   render               — store-driven JSX render
  */
 
-import { PureComponent, VDom } from '@uif-js/core';
-import { store } from './app/Store';
+import {PureComponent, VDom} from '@uif-js/core';
+import * as core from '@uif-js/core';
+import * as component from '@uif-js/component';
+import {store} from './app/Store';
+import {Action} from './app/Action';
+import {wizardCall} from './services/wizardApi';
 import {
-    initializeApp,
-    renderRoot,
-    setRerenderHook
-} from './AppController';
+    determineLandingStep,
+    goToConsole,
+    goToStep
+} from './app/effects/navigation';
+import type {AppState} from './app/InitialState';
+import Step1 from './components/steps/Step1';
+import Step2 from './components/steps/Step2';
+import Step3 from './components/steps/Step3';
+import Step4 from './components/steps/Step4';
+import Step5 from './components/steps/Step5';
+import OverviewPage from './components/page/OverviewPage';
+import PhonesPage from './components/page/PhonesPage';
+import VoicePage from './components/page/VoicePage';
+import CredentialsPage from './components/page/CredentialsPage';
+import HealthPage from './components/page/HealthPage';
+import {ConsoleShell} from './components/shared/ConsoleShell';
+import {StepperShell} from './components/shared/StepperShell';
 
-interface AppState {
-    /**
-     * Sentinel counter incremented to force re-renders. The actual app
-     * state lives in the Store (dispatch state) + STATE.console (transient
-     * data state); this tick is just a "something changed, re-render"
-     * signal. UIF doesn't expose forceUpdate() on PureComponent, so
-     * setState({tick: tick+1}) is the canonical way to trigger render()
-     * without a meaningful state change.
-     */
+interface AppInternalState {
     tick: number;
 }
 
-export default class App extends PureComponent<unknown, AppState> {
+/**
+ * Phase 7 fix — UIF's PureComponent shallow-compares props between
+ * renders and SKIPS re-rendering when props look identical. Pages with
+ * NO props that read from the store directly never see prop changes,
+ * so the store dispatch → App.setState → child re-render chain breaks
+ * at the page boundary.
+ *
+ * Workaround: pass a `tick` prop to every store-reading PureComponent.
+ * The tick changes on every dispatch (App.forceRerender increments a
+ * counter), so PureComponent's shallow compare always detects a change
+ * and re-renders the page. The page doesn't have to do anything with
+ * the prop — just having it change is enough.
+ *
+ * Phase 8 cleanup: subscribe to the store in each page individually so
+ * they self-manage. For now this works and is minimal-touch.
+ */
+export interface PageTickProps {
+    tick: number;
+}
+
+interface SnapshotForRouting {
+    accountSid?: string;
+    apiKeySid?: string;
+    apiSecretId?: string;
+    twimlAppSid?: string;
+    phoneNumber?: string;
+    active?: boolean;
+}
+
+export default class App extends PureComponent<unknown, AppInternalState> {
     private storeUnsubscribe: (() => void) | null = null;
 
     constructor(props: unknown, context: unknown) {
@@ -62,30 +82,12 @@ export default class App extends PureComponent<unknown, AppState> {
     }
 
     private forceRerender = (): void => {
-        // UIF's PureComponent.setState only accepts a Partial<State> object
-        // (no functional updater form like React's). Reading this.state.tick
-        // is safe here because subscription callbacks fire synchronously
-        // after dispatch — no batching window where stale state could be read.
         this.setState({ tick: this.state.tick + 1 });
     };
 
     componentDidMount(): void {
-        // Register rerender hook FIRST so AppController.rerender() calls
-        // (fired during initializeApp's wizardSnapshot resolution) update
-        // this component instead of no-op'ing.
-        setRerenderHook(this.forceRerender);
-
-        // Subscribe to Store dispatches (Path D-Store-2 wired this from
-        // SpaClient.ts before; now it lives here in App so the subscription
-        // lifecycle is tied to the component mount lifecycle, not module
-        // load).
         this.storeUnsubscribe = store.subscribe(this.forceRerender);
-
-        // Fire the wizardSnapshot resumability flow. Sets up router +
-        // enums + routes the user to console or the right step based on
-        // their snapshot state. Was the body of run(scriptContext) before
-        // D-Store-3a.
-        initializeApp();
+        this.initializeApp();
     }
 
     componentWillUnmount(): void {
@@ -93,16 +95,94 @@ export default class App extends PureComponent<unknown, AppState> {
             this.storeUnsubscribe();
             this.storeUnsubscribe = null;
         }
-        // Reset the hook to a no-op so any in-flight async callbacks
-        // calling rerender() after unmount don't try to update a dead
-        // component.
-        setRerenderHook(() => { /* unmounted */ });
+    }
+
+    /**
+     * Fire the wizardSnapshot resumability flow on mount. Determines
+     * whether the admin lands on the console (post-activation) or on
+     * a specific step (fresh install or mid-wizard).
+     *
+     * While the snapshot is in-flight, state.mountRouting === true so
+     * render() shows a centered Loader instead of flashing Step 1
+     * for returning admins whose target is the console.
+     */
+    private async initializeApp(): Promise<void> {
+        store.dispatch(Action.setMountRouting(true));
+        try {
+            const payload = await wizardCall('wizardSnapshot', {});
+            const snap = (payload && (payload as { snapshot?: SnapshotForRouting }).snapshot) || {};
+            // Cache the snapshot for downstream consumers (Step5 review,
+            // Voice/Credentials/Overview rendering, Paused banner gate).
+            store.dispatch(Action.consoleLoadSuccess({ snapshot: snap as never }));
+
+            const target = determineLandingStep(snap);
+            if (target === 'console') {
+                goToConsole();
+            } else {
+                goToStep(target);
+            }
+        } catch (e) {
+            // Snapshot failed — land on Step 1 (fresh install path).
+            goToStep(1);
+        } finally {
+            store.dispatch(Action.setMountRouting(false));
+        }
+    }
+
+    private renderStep(stepNum: number, tick: number): core.VDom.Node {
+        switch (stepNum) {
+            case 1: return <Step1 tick={tick} />;
+            case 2: return <Step2 tick={tick} />;
+            case 3: return <Step3 tick={tick} />;
+            case 4: return <Step4 tick={tick} />;
+            case 5: return <Step5 tick={tick} />;
+            default: return <Step1 tick={tick} />;
+        }
+    }
+
+    private renderSection(section: AppState['selectedSection'], tick: number): core.VDom.Node {
+        switch (section) {
+            case 'overview':    return <OverviewPage tick={tick} />;
+            case 'phones':      return <PhonesPage tick={tick} />;
+            case 'voice':       return <VoicePage tick={tick} />;
+            case 'credentials': return <CredentialsPage tick={tick} />;
+            case 'health':      return <HealthPage tick={tick} />;
+            default:            return <OverviewPage tick={tick} />;
+        }
     }
 
     render(): VDom.Node {
-        // AppController.renderRoot() returns a Component instance (or null
-        // during mount-routing). Component is in VDom.Node's union, so the
-        // cast is safe at the type-system boundary.
-        return renderRoot() as VDom.Node;
+        const state = store.getState() as AppState;
+
+        // Pre-route loader — avoids the Step 1 flash for returning admins.
+        if (state.mountRouting) {
+            return (
+                <component.ContentPanel
+                    horizontalAlignment={component.ContentPanel.HorizontalAlignment.CENTER}
+                    outerGap={component.ContentPanel.GapSize.XL}
+                >
+                    {new component.Loader({
+                        label: 'Loading…',
+                        indeterminate: true
+                    } as never) as never}
+                </component.ContentPanel>
+            ) as VDom.Node;
+        }
+
+        const tick = this.state.tick;
+
+        if (state.mode === 'console') {
+            return (
+                <ConsoleShell tick={tick}>
+                    {this.renderSection(state.selectedSection, tick)}
+                </ConsoleShell>
+            ) as VDom.Node;
+        }
+
+        return (
+            <StepperShell tick={tick}>
+                {this.renderStep(state.currentStep, tick)}
+            </StepperShell>
+        ) as VDom.Node;
     }
 }
