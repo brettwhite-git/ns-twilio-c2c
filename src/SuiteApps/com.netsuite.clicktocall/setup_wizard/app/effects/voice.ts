@@ -10,7 +10,13 @@
 import {store} from '../Store';
 import {Action} from '../Action';
 import {wizardCall} from '../../services/wizardApi';
-import type {ConsoleState} from '../InitialState';
+import type {AppState, ConsoleState} from '../InitialState';
+
+interface VoiceSnapshot {
+    twimlAppSid?: string;
+    phoneNumber?: string;
+    intelServiceSid?: string;
+}
 
 /**
  * Load the three Voice-section dropdown source lists in parallel:
@@ -59,8 +65,13 @@ export async function loadVoiceLists(): Promise<void> {
  * Save one Voice field (TwiML App SID / Phone Number / Intel Service
  * SID). Mirrors AppController.handleSaveVoiceField (paths 1279-1320).
  *
- * The server action `wizardSaveVoice` accepts a single field update
- * and persists it to the config record.
+ * The server action `wizardSaveVoice` requires BOTH `twimlAppSid` and
+ * `phoneNumber` in every payload (it was originally designed for Step 3
+ * which posts all three voice SIDs at once). When the user edits a
+ * single field on the admin console, we still have to bundle the
+ * current snapshot for the other fields — otherwise the server rejects
+ * with `missing_twimlAppSid` (or `missing_phone_number`). The store's
+ * console.snapshot holds the live config; merge the new value over it.
  */
 export async function saveVoiceField(
     field: NonNullable<ConsoleState['voiceEditing']>,
@@ -68,11 +79,21 @@ export async function saveVoiceField(
 ): Promise<void> {
     store.dispatch(Action.voiceFieldSave({ phase: 'start' }));
 
+    const state = store.getState() as AppState;
+    const snap = (state.console.snapshot as VoiceSnapshot | null) || {};
+
+    const payload: Record<string, unknown> = {
+        twimlAppSid: snap.twimlAppSid || '',
+        phoneNumber: snap.phoneNumber || '',
+        intelServiceSid: snap.intelServiceSid || ''
+    };
+    payload[field] = value;
+
     try {
-        const payload: Record<string, unknown> = { [field]: value };
         const result = await wizardCall('wizardSaveVoice', payload);
-        if (result && (result as { ok?: boolean }).ok === false) {
-            const err = (result as { error?: string }).error || 'Voice save failed';
+        const saved = result && ((result as { saved?: boolean }).saved === true);
+        if (!saved) {
+            const err = (result && (result as { error?: string }).error) || 'Voice save failed';
             store.dispatch(Action.voiceFieldSave({ phase: 'failure', error: err }));
             return;
         }

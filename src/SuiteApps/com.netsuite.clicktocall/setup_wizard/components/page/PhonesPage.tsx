@@ -15,7 +15,6 @@ import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {loadPhonesData, savePhonesAssignment} from '../../app/effects/phones';
-import {goToStep} from '../../app/effects/navigation';
 import type {AppState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 
@@ -144,9 +143,22 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
                     const emp = employees.find((e) => e.id === id);
                     return emp?.name || '';
                 },
-                widgetOptions: (row: { dataItem?: PhoneRow }): object => {
-                    const dataItem = row?.dataItem || {};
+                // UIF DataGrid invokes widgetOptions with
+                // `{cell, external, columnOptions}` — NOT `{dataItem}`
+                // as I initially assumed. Per @oracle/netsuite-uif-types
+                // (`GridColumn.WidgetOptionsCallback<T>` at
+                // component.d.ts:8236): the per-row data lives at
+                // `args.cell.row.dataItem`. Treating `args` as
+                // `{dataItem}` left `phoneSid` undefined for every row,
+                // which silently no-op'd the save call in
+                // onSelectionChanged below — the inline-edit appeared
+                // to do nothing despite the dropdown looking active.
+                widgetOptions: (args: {
+                    cell?: { row?: { dataItem?: PhoneRow } };
+                }): object => {
+                    const dataItem = (args?.cell?.row?.dataItem || {}) as PhoneRow;
                     const phoneSid = dataItem.phoneSid;
+                    const phoneNumber = dataItem.phoneNumber || '';
                     const label = dataItem.label || '';
                     const primary = dataItem.primaryEmployeeId ?? null;
                     return {
@@ -154,15 +166,15 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
                         valueMember: 'id',
                         displayMember: 'name',
                         placeholder: 'Pick reps',
-                        onSelectionChanged: (args: { values?: unknown[] }): void => {
-                            const newIds = ((args && args.values) || []).map((v) => {
+                        onSelectionChanged: (sel: { values?: unknown[] }): void => {
+                            const newIds = ((sel && sel.values) || []).map((v) => {
                                 if (v && typeof v === 'object') {
                                     return Number((v as { id?: unknown }).id);
                                 }
                                 return Number(v);
                             });
                             if (phoneSid) {
-                                savePhonesAssignment(phoneSid, newIds, label, primary);
+                                savePhonesAssignment(phoneSid, phoneNumber, newIds, label, primary);
                             }
                         }
                     };
@@ -234,14 +246,6 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
                                 action={(): void => { loadPhonesData(); }}
                             />
                         </component.StackPanel.Item>
-                        <component.StackPanel.Item>
-                            <component.Button
-                                label="Add phone number"
-                                type={component.Button.Type.PRIMARY}
-                                startIcon={core.SystemIcon.ADD as never}
-                                action={(): void => { goToStep(4); }}
-                            />
-                        </component.StackPanel.Item>
                     </component.StackPanel>
                 </component.StackPanel.Item>
             ),
@@ -255,9 +259,10 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
             grouped.length === 0 ? (
                 <component.StackPanel.Item>
                     <component.Text type={component.Text.Type.WEAK}>
-                        No phone numbers configured yet. Click "Add
-                        phone number" above to claim a Twilio number
-                        and assign reps.
+                        No phone numbers found in your Twilio account.
+                        Buy one in the Twilio Console (link above) then
+                        click "Refresh from Twilio" to pick it up and
+                        assign reps inline.
                     </component.Text>
                 </component.StackPanel.Item>
             ) : (

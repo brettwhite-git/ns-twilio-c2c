@@ -58,3 +58,9 @@ tasks/
 
 # Unit tests + mocks tracked so CI can run them
 # (Previously gitignored — caused CI Jest step to find 0 tests; see fix on 2026-05-28)
+
+# Pre-JSX legacy archive — kept on disk for local reference but not
+# tracked in git. Recovery: git history preserves the original
+# locations via the Phase 4-6 JSX rewrite commits (7ec5c64, add234a,
+# a1c3824, 53d1861).
+_archive/

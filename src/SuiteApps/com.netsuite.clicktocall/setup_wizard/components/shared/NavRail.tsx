@@ -26,7 +26,7 @@ export const NavRail = (): core.VDom.Node => {
     const assignmentBadge = assignments ? String(assignments.length) : undefined;
 
     const navItems = [
-        { value: 'overview',    label: 'Overview',          icon: core.SystemIcon.HOME },
+        { value: 'overview',    label: 'Overview',          icon: core.SystemIcon.CARD_VIEW },
         { value: 'phones',      label: 'Phones & reps',     icon: core.SystemIcon.CALL,
           badge: assignmentBadge },
         { value: 'voice',       label: 'Voice config',      icon: core.SystemIcon.SETTINGS },

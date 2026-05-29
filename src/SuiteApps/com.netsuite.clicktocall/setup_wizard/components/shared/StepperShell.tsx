@@ -33,10 +33,24 @@ export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
             itemGap={component.StackPanel.GapSize.L}
         >
             <component.StackPanel.Item>
-                <component.ApplicationHeader
-                    title="Click-to-Call Setup Wizard"
-                    subtitle={subtitle}
-                />
+                <component.StackPanel
+                    orientation={component.StackPanel.Orientation.VERTICAL}
+                    itemGap={component.StackPanel.GapSize.XXS}
+                >
+                    <component.StackPanel.Item>
+                        <component.Heading level={2}>
+                            Click-to-Call Setup Wizard
+                        </component.Heading>
+                    </component.StackPanel.Item>
+                    <component.StackPanel.Item>
+                        <component.Text
+                            type={component.Text.Type.WEAK}
+                            size={component.Text.Size.S}
+                        >
+                            {subtitle}
+                        </component.Text>
+                    </component.StackPanel.Item>
+                </component.StackPanel>
             </component.StackPanel.Item>
             <component.StackPanel.Item grow={1 as never}>
                 <Stepper currentStep={step} tick={props.tick} />
