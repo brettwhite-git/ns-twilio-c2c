@@ -33,6 +33,11 @@ build
 .DS_Store
 Thumbs.db
 
+# Raw (unredacted) README screenshots — local-only source images.
+# Redacted versions are committed to assets/screenshots/ for the README;
+# the originals with real customer/phone/account data stay out of git.
+assets/screenshots/_raw/
+
 # Output of 'npm pack'
 *.tgz
 
@@ -56,8 +61,14 @@ CLAUDE.md
 docs/
 tasks/
 
-# Unit tests + mocks tracked so CI can run them
-# (Previously gitignored — caused CI Jest step to find 0 tests; see fix on 2026-05-28)
+# Unit tests + mocks — kept local-only, not for public GitHub view (like docs/,
+# tasks/, CLAUDE.md above). Tests are gated by a local pre-push git hook
+# (.git/hooks/pre-push runs `npm test`) instead of GitHub Actions, so they
+# never enter the pushed tree. The CI Jest step was removed in the same change.
+# NOTE: a fresh clone won't have these files or the hook — recover from a
+# machine that has them, or from git history prior to this change.
+__tests__/
+__mocks__/
 
 # Pre-JSX legacy archive — kept on disk for local reference but not
 # tracked in git. Recovery: git history preserves the original
