@@ -19,6 +19,52 @@ and action items.
 SuiteScript 2.1; everything else is Twilio's managed platform. No middleware,
 no Node.js server, no external services.
 
+> [!IMPORTANT]
+> **SuiteApp — verify in your account before production use**
+>
+> This repository is an open-source **example** of a NetSuite + Twilio
+> click-to-call integration with AI call analysis. It is provided for
+> educational and demonstration purposes only. There is **no warranty** of any
+> kind; **use it at your own risk**. The code is not certified for quality,
+> security, correctness, or production readiness in your environment.
+>
+> Twilio usage incurs real costs (Voice, Recording, Conversational
+> Intelligence) and calls are recorded — ensure you meet consent and
+> data-handling requirements for your jurisdiction. Configure the CTC
+> Configuration record, test with the same roles that will place calls, and
+> review execution logs in a **sandbox** before relying on this in production.
+
+## Screenshots
+
+### Admin Console
+
+The Click-to-Call Admin Console (Setup Wizard SPA) — deployment status,
+provisioned phone numbers, assigned reps, preflight checks, and recent call
+activity with a per-rep breakdown.
+
+![Click-to-Call Admin Console](assets/screenshots/c2c-console.jpg)
+
+### Softphone
+
+The softphone popup launched from a Customer record — contact info, dialpad,
+and one-click calling via Twilio Voice, all same-origin with NetSuite.
+
+![Softphone popup on a Customer record](assets/screenshots/softphone.jpg)
+
+### Phone Call Activities
+
+Completed calls land as Phone Call activity records, enriched with AI briefs,
+tone keywords, satisfaction scores, and duration.
+
+![Phone Call activity records with AI fields](assets/screenshots/activities.jpg)
+
+### Call Intelligence
+
+The Call Intelligence panel on a Phone Call record — an N/llm-generated summary,
+satisfaction score, full transcript, and extracted action items.
+
+![Call Intelligence panel on a Phone Call record](assets/screenshots/phone-llm.jpg)
+
 ## Features
 
 - **One-click calling** from Customer, Contact, and Lead records
@@ -169,17 +215,18 @@ npm test -- --watch       # watch mode
 ```
 
 Tests use `@oracle/suitecloud-unit-testing` for SuiteScript module stubs, plus
-a custom `N/llm` mock at `__mocks__/llm.js`.
+a custom `N/llm` mock at `__mocks__/llm.js`. The `__tests__/` and `__mocks__/`
+folders are kept local-only and are not included in the published repository.
 
 ## CI
 
 GitHub Actions runs on every PR + push to main:
 - ESLint (`eslint-plugin-suitescript`)
 - TypeScript typecheck (`tsc --noEmit`)
-- Jest (524 tests)
 - Bundle drift gate (regenerates SPA and fails if committed bundle is stale)
 
-See `.github/workflows/ci.yml`.
+The Jest suite runs locally (`npm test`), not in CI — the test files are kept
+local-only (see Testing). See `.github/workflows/ci.yml`.
 
 ## Cost Estimate
 

@@ -14,7 +14,7 @@ on:
 
 jobs:
   verify:
-    name: Lint + Typecheck + Tests + Bundle Drift
+    name: Lint + Typecheck + Bundle Drift
     runs-on: ubuntu-latest
 
     steps:
@@ -36,8 +36,9 @@ jobs:
       - name: TypeScript typecheck
         run: npm run typecheck
 
-      - name: Jest
-        run: npm test
+      # Note: Jest tests are NOT run in CI. Test files (__tests__/, __mocks__/)
+      # are kept local-only and gitignored, so they aren't in the checkout.
+      # Tests are gated by a local pre-push git hook (`npm test`) instead.
 
       # Rebundle the SPA and assert no drift between committed bundle output
       # and what gulp + rollup produce from the .ts(x) source. Bundle output
