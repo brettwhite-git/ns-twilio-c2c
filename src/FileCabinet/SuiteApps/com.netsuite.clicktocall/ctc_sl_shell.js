@@ -398,6 +398,37 @@ ${debugHtml}
     }
   }
 
+  // ---- Keep NetSuite navigation inside the frame ----
+  // NetSuite's main menu does not navigate its own page: it replaces the TOP
+  // page (top.location.replace). Inside phone mode that would throw the tab
+  // out of the shell and restart the phone. The Navigation API lets the top
+  // page see that navigation; cancel it and load the URL in the frame
+  // instead. Left alone: navigations the user starts from the browser UI
+  // (address bar, reload, back/forward are not cancelable or are traverses),
+  // login pages (Oracle forbids framing them), other sites, the shell's own
+  // URL, and our own Exit phone mode.
+  var allowTopNav = false;
+  var shellScriptId = '';
+  try { shellScriptId = new URL(CFG.shellBase, location.href).searchParams.get('script') || ''; } catch (e) { shellScriptId = ''; }
+  if (window.navigation && typeof window.navigation.addEventListener === 'function') {
+    window.navigation.addEventListener('navigate', function (e) {
+      if (allowTopNav || !e.cancelable || e.hashChange || e.downloadRequest) return;
+      if (e.navigationType !== 'push' && e.navigationType !== 'replace') return;
+      var dest;
+      try { dest = new URL(e.destination.url); } catch (err) { return; }
+      if (dest.origin !== location.origin || dest.pathname.indexOf('/app/') !== 0) return;
+      if (isLoginPath(dest.pathname)) return;
+      if (shellScriptId && dest.searchParams.get('script') === shellScriptId) return;
+      if (dest.pathname === location.pathname && dest.search === location.search) return; // our own replaceState
+      e.preventDefault();
+      var path = dest.pathname + dest.search + dest.hash;
+      logEvent('kept in frame', path);
+      nsFrame.src = path;
+    });
+  } else {
+    logEvent('navigation api missing', 'NetSuite menu clicks will leave phone mode');
+  }
+
   // ---- Call-aware guard ----
   function onBeforeUnload(e) {
     e.preventDefault();
@@ -440,6 +471,7 @@ ${debugHtml}
     setGuard(false); // the rep already confirmed; skip the second browser prompt
     try { window.sessionStorage.setItem(CFG.exitKey, '1'); } catch (e) { /* storage blocked */ }
     logEvent('exit phone mode', currentFramePath());
+    allowTopNav = true;
     window.location.href = currentFramePath();
   }
   window.__ctcShell.exit = exitPhoneMode;
