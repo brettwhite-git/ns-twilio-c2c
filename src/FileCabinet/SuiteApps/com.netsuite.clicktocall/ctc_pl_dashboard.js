@@ -30,10 +30,9 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
-    // Iteration B Phase 1: popup dimensions live in ctc_entity.js so the
-    // portlet, the UE phone button, and any future launcher all open the
-    // softphone at the same 380 × 640 emulator size.
-    const POPUP_OPTS = ctcEntity.SOFTPHONE_POPUP_OPTIONS;
+    // Calls live only in the phone mode shell (ctc_sl_shell.js). Launchers
+    // here ask the shell's dialer when the dashboard runs inside it, and move
+    // the tab into the shell otherwise. No popup window.
     const POPUP_NAME = ctcEntity.SOFTPHONE_POPUP_NAME;
 
     // Modern handset SVG (Heroicons solid `phone`). fill='currentColor' so the icon
@@ -55,22 +54,18 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
         const userId = runtime.getCurrentUser().id;
 
-        let softphoneUrl = '';
+        let shellUrl = '';
         let restletUrl = '';
         let workspaceUrl = '';
 
         try {
-            // Iteration B Phase 2: every portlet softphone launch passes
-            // entryPoint=dashboard so the Suitelet defaults to the Search
-            // tab (no record context → can't pre-fill Dial). The redial
-            // launcher overrides entryPoint=record when it has phone+entity.
-            softphoneUrl = url.resolveScript({
-                scriptId: 'customscript_ctc_sl_softphone',
-                deploymentId: 'customdeploy_ctc_sl_softphone',
-                params: { entryPoint: 'dashboard' }
+            shellUrl = url.resolveScript({
+                scriptId: 'customscript_ctc_sl_shell',
+                deploymentId: 'customdeploy_ctc_sl_shell',
+                returnExternalUrl: false
             });
         } catch (e) {
-            log.error({ title: 'CTC Portlet — softphone URL resolve failed', details: e.message || e });
+            log.error({ title: 'CTC Portlet — shell URL resolve failed', details: e.message || e });
         }
 
         try {
@@ -97,7 +92,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const stats         = workspaceQueries.computeStats(historyResult.rows || []);
 
         portlet.html = buildHtml({
-            softphoneUrl,
+            shellUrl,
             restletUrl,
             workspaceUrl,
             rows: historyResult.rows || [],
@@ -106,26 +101,29 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             stats: stats,
             historyError: historyResult.error || '',
             tasksError: tasksResult.error || ''
-        }) + buildDockLoader(softphoneUrl, restletUrl);
+        }) + buildDockLoader(shellUrl, restletUrl);
     };
 
     /**
      * Telephony Dock loader (see buildDockLoaderHtml in lib/ctc_dock.js for
-     * why an <img onerror> and not a <script>). The dashboard has no record,
-     * so the dock opens on Search. A missing dock file never breaks the portlet.
-     * @param {string} softphoneUrl
+     * why an <img onerror> and not a <script>). Inside the shell the dock
+     * stays silent (frame mode). Outside it, the dock moves the tab into the
+     * shell by itself (autoEnter) unless the rep left phone mode in this tab
+     * or another tab holds the phone. A missing dock file never breaks the
+     * portlet.
+     * @param {string} shellUrl
      * @param {string} restletUrl
      * @returns {string}
      */
-    const buildDockLoader = (softphoneUrl, restletUrl) => {
-        if (!softphoneUrl || !restletUrl) return '';
+    const buildDockLoader = (shellUrl, restletUrl) => {
+        if (!shellUrl) return '';
         try {
             return ctcDock.buildDockLoaderHtml({
                 assetUrl: file.load({ id: ctcDock.DOCK_ASSET_PATH }).url,
                 dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
-                anchorUrl: softphoneUrl,
+                shellUrl: shellUrl,
+                autoEnter: true,
                 popupName: POPUP_NAME,
-                popupOptions: POPUP_OPTS,
                 restletUrl: restletUrl
             });
         } catch (e) {
@@ -140,25 +138,34 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     // Uses only built-in DOM APIs and `fetch`. Never references parent globals.
     // ─────────────────────────────────────────────────────────────────────────
 
-    const buildPlaceCallOnclick = (softphoneUrl) => {
-        if (!softphoneUrl) return '';
-        return "window.open('" + escapeJs(softphoneUrl) + "','" + POPUP_NAME + "','" + POPUP_OPTS + "')";
+    // JS that starts a call. Inside phone mode (the dashboard runs in the
+    // shell's frame): the shell's dialer opens on Dial with ctxJs loaded; it
+    // never dials by itself. Outside: the tab moves into the shell on this
+    // page (the rep presses Call there). ctxJs is a JS expression.
+    const buildShellCallJs = (shellUrl, ctxJs) => {
+        const prefix = shellUrl + (shellUrl.indexOf('?') >= 0 ? '&' : '?') + 'u=';
+        return "var c=" + ctxJs + ";var s=null;try{s=window.top.__ctcShell}catch(e){}" +
+            "if(s&&s.call){s.call(c)}else{" +
+                "try{window.sessionStorage.removeItem('" + escapeJs(ctcDock.EXIT_KEY) + "')}catch(e){}" +
+                "window.top.location.href='" + escapeJs(prefix) + "'+encodeURIComponent(location.pathname+location.search)" +
+            "}";
     };
 
-    const buildRedialOnclick = (softphoneUrl, phone, entityId) => {
-        if (!softphoneUrl) return '';
-        // Lenient: open softphone with whatever context we have. Customer ID alone is
-        // useful (loads related contacts), phone alone is useful (prefills dialer),
-        // and neither is acceptable (softphone shows blank dialer for manual dialing).
-        const parts = [];
-        if (phone) parts.push('phone=' + encodeURIComponent(phone));
-        if (entityId) {
-            parts.push('entityId=' + encodeURIComponent(entityId));
-            parts.push('entityType=customer');
-        }
-        const sep = softphoneUrl.indexOf('?') >= 0 ? '&' : '?';
-        const u = parts.length ? softphoneUrl + sep + parts.join('&') : softphoneUrl;
-        return "window.open('" + escapeJs(u) + "','" + POPUP_NAME + "','" + POPUP_OPTS + "')";
+    const buildPlaceCallOnclick = (shellUrl) => {
+        if (!shellUrl) return '';
+        return buildShellCallJs(shellUrl, 'null');
+    };
+
+    const buildRedialOnclick = (shellUrl, phone, entityId, entityName) => {
+        if (!shellUrl) return '';
+        // Lenient: whatever context we have. Customer ID alone is useful
+        // (loads related contacts), phone alone is useful (prefills the
+        // number), neither leaves a blank dialer for manual dialing.
+        const ctxJs = "{entityId:'" + escapeJs(String(entityId || '')) + "'," +
+            "entityName:'" + escapeJs(String(entityName || '')) + "'," +
+            "entityType:'" + (entityId ? 'customer' : '') + "'," +
+            "phone:'" + escapeJs(String(phone || '')) + "'}";
+        return buildShellCallJs(shellUrl, ctxJs);
     };
 
     const buildTabOnclick = (tabName) => {
@@ -245,7 +252,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         return months[d.getMonth()] + ' ' + d.getDate();
     };
 
-    const buildCallRowHtml = (r, softphoneUrl) => {
+    const buildCallRowHtml = (r, shellUrl) => {
         const time = escapeHtml(fmtTime(r.date) || '—');
         const companyId = encodeURIComponent(r.companyId || '');
         const callId = encodeURIComponent(r.id || '');
@@ -255,7 +262,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const briefAttr = escapeHtml(r.brief || '');
         const sat = r.satisfaction ? String(r.satisfaction) : '—';
         const dur = escapeHtml(fmtDuration(r.duration));
-        const redialOnclick = buildRedialOnclick(softphoneUrl, r.phone, r.companyId);
+        const redialOnclick = buildRedialOnclick(shellUrl, r.phone, r.companyId, r.companyName);
         // Standard NetSuite Phone Call record URL — the ctc_ue_transcript_viewer
         // UE script adds the Call Intelligence (transcript + AI summary) panel.
         const callRecordUrl = '/app/crm/calendar/call.nl?id=' + callId;
@@ -270,7 +277,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             '<a class="ctc-pl-view-call" href="' + callRecordUrl + '" target="_blank" rel="noopener" title="Open Phone Call record (transcript + AI summary)">📋</a>' +
             (redialOnclick
                 ? '<button class="ctc-pl-redial" type="button" title="Call this contact" onclick="' + escapeHtml(redialOnclick) + '">' + PHONE_SVG + '</button>'
-                : '<span class="ctc-pl-redial-disabled" title="Softphone unavailable">' + PHONE_SVG + '</span>'
+                : '<span class="ctc-pl-redial-disabled" title="Phone unavailable">' + PHONE_SVG + '</span>'
             ) +
         '</div>';
     };
@@ -278,7 +285,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     // Inline onclick for a date-filter chip on Today's Calls.
     // Fetches the calls for the chosen range, then re-renders the rows in-place.
     // Self-contained — uses only built-in DOM APIs + fetch.
-    const buildChipOnclick = (range, restletUrl, softphoneUrl) => {
+    const buildChipOnclick = (range, restletUrl, shellUrl) => {
         if (!restletUrl) return '';
         return "var b=this;" +
             "var chips=document.querySelectorAll('.ctc-pl-chip');" +
@@ -351,15 +358,12 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                     // Closure-based onclick (NOT setAttribute string) so `r.phone` / `r.companyId`
                     // are captured by the function's scope at row-build time. Mirrors the
                     // server-side `buildRedialOnclick` logic (lenient: phone / companyId / both / neither).
-                    "if(" + (softphoneUrl ? 'true' : 'false') + "){" +
-                        "var parts=[];" +
-                        "if(r.phone)parts.push('phone='+encodeURIComponent(r.phone));" +
-                        "if(r.companyId){parts.push('entityId='+encodeURIComponent(r.companyId));parts.push('entityType=customer')}" +
-                        "var sfu='" + escapeJs(softphoneUrl || '') + "';" +
-                        "var u=parts.length?(sfu+(sfu.indexOf('?')>=0?'&':'?')+parts.join('&')):sfu;" +
-                        "rd.onclick=function(){window.open(u,'" + POPUP_NAME + "','" + POPUP_OPTS + "')};" +
+                    "if(" + (shellUrl ? 'true' : 'false') + "){" +
+                        "rd.onclick=function(){" + buildShellCallJs(shellUrl || '',
+                            "{entityId:String(r.companyId||''),entityName:String(r.companyName||'')," +
+                            "entityType:r.companyId?'customer':'',phone:String(r.phone||'')}") + "};" +
                     "}else{" +
-                        "rd.disabled=true;rd.title='Softphone unavailable';" +
+                        "rd.disabled=true;rd.title='Phone unavailable';" +
                     "}" +
                     "row.appendChild(rd);" +
                     "container.appendChild(row);" +
@@ -370,7 +374,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             "});";
     };
 
-    const buildChipsHtml = (restletUrl, softphoneUrl) => {
+    const buildChipsHtml = (restletUrl, shellUrl) => {
         const chips = [
             { range: 'today',     label: 'Today',     active: true },
             { range: 'yesterday', label: 'Yesterday', active: false },
@@ -379,7 +383,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         ];
         return '<div class="ctc-pl-chips">' +
             chips.map((c) => {
-                const onclick = buildChipOnclick(c.range, restletUrl, softphoneUrl);
+                const onclick = buildChipOnclick(c.range, restletUrl, shellUrl);
                 const cls = 'ctc-pl-chip' + (c.active ? ' ctc-pl-chip-active' : '');
                 return onclick
                     ? '<button class="' + cls + '" type="button" data-range="' + c.range + '" onclick="' + escapeHtml(onclick) + '">' + c.label + '</button>'
@@ -565,17 +569,17 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const groups = opts.groups || [];
         const totalTasks = opts.totalTasks || 0;
         const stats = opts.stats || {};
-        const softphoneUrl = opts.softphoneUrl || '';
+        const shellUrl = opts.shellUrl || '';
         const restletUrl = opts.restletUrl || '';
         const workspaceUrl = opts.workspaceUrl || '';
 
-        const placeCallOnclick = buildPlaceCallOnclick(softphoneUrl);
+        const placeCallOnclick = buildPlaceCallOnclick(shellUrl);
         const todayTabOnclick = buildTabOnclick('today');
         const tasksTabOnclick = buildTabOnclick('tasks');
 
         // Today's-calls section — chip strip is always rendered first so users can
         // switch to Yesterday / This Week / Last Week even when today is empty.
-        const chipsHtml = buildChipsHtml(restletUrl, softphoneUrl);
+        const chipsHtml = buildChipsHtml(restletUrl, shellUrl);
         let todayContentHtml;
         if (opts.historyError) {
             todayContentHtml = chipsHtml + '<div class="ctc-pl-error">Failed to load today\'s calls: ' + escapeHtml(opts.historyError) + '</div>';
@@ -583,7 +587,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             todayContentHtml = chipsHtml + '<div class="ctc-pl-empty">No calls yet today — start with the button above.</div>';
         } else {
             todayContentHtml = chipsHtml + buildCallsColumnHeaderHtml() +
-                               rows.map((r) => buildCallRowHtml(r, softphoneUrl)).join('');
+                               rows.map((r) => buildCallRowHtml(r, shellUrl)).join('');
         }
 
         // Pending-tasks section. Order inside the container:
@@ -635,7 +639,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 '<span class="ctc-pl-call-icon" aria-hidden="true">' + PHONE_SVG + '</span>' +
               '</button>'
             : '<button class="ctc-pl-call-btn ctc-pl-call-btn-disabled" type="button" disabled ' +
-              'aria-label="Place a Call (unavailable)" title="Softphone Suitelet not deployed — check CTC Configuration">' +
+              'aria-label="Place a Call (unavailable)" title="Phone mode Suitelet not deployed — check CTC Configuration">' +
                 '<span class="ctc-pl-call-icon" aria-hidden="true">' + PHONE_SVG + '</span>' +
               '</button>';
 

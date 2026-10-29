@@ -4,11 +4,14 @@
  * @NModuleScope SameAccount
  *
  * Telephony Dock constants + mount builders.
- * The softphone popup is the "anchor": the only window that holds audio and
- * call state. The dock (ctc_dock_client.js + ctc_dock_dialer.js) is plain
- * browser JS that runs the softphone UI on NetSuite pages and talks to the
- * anchor over BroadcastChannel(BUS_CHANNEL). Data (search, contacts, recents,
- * snapshot) comes straight from the ctc_rl_token RESTlet, same session.
+ * Phone mode: the shell Suitelet (ctc_sl_shell.js) is the tab's top page and
+ * never reloads. Its hidden #ctc-phone-frame runs the softphone Suitelet, the
+ * "anchor": the only window that holds audio and call state. Exactly one
+ * shell per browser holds the phone (Web Lock PHONE_LOCK_NAME). The dock
+ * (ctc_dock_client.js + ctc_dock_dialer.js) is plain browser JS that draws
+ * the pill and dialer and talks to the anchor over BroadcastChannel
+ * (BUS_CHANNEL). Data (search, contacts, recents, snapshot) comes straight
+ * from the ctc_rl_token RESTlet, same session. No popup window anywhere.
  */
 define(['./ctc_html'], (ctcHtml) => {
 
@@ -21,25 +24,47 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '2';
+    const DOCK_ASSET_VERSION = '4';
 
-    // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js) and
-    // every dock tab. Message shapes (all carry v: 1):
-    //   tab → anchor: { type: 'hello' }
-    //                 { type: 'request', action: 'mute' | 'unmute' | 'hangup' }
-    //                 { type: 'request', action: 'digits', d }
-    //                 { type: 'request', action: 'dial', to, entityId, entityName, entityType, contactId, contactName }
-    //   anchor → tabs: { type: 'snapshot', snap: { phase, entityId, entityType, entityName,
-    //                    contactName, number, startedAt, muted, lastLog } }
+    // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
+    // shell's #ctc-phone-frame) and every dock. Message shapes (all carry v: 1):
+    //   dock → anchor: { type: 'hello' }
+    //                  { type: 'request', action: 'mute' | 'unmute' | 'hangup' }
+    //                  { type: 'request', action: 'digits', d }
+    //                  { type: 'request', action: 'dial', to, entityId, entityName, entityType, contactId, contactName }
+    //                  { type: 'request', action: 'setInput' | 'setOutput', id }  (refused during a call)
+    //   anchor → docks: { type: 'snapshot', snap: { phase, entityId, entityType, entityName,
+    //                     contactName, number, startedAt, muted, lastLog, audio } }
     // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'connected' | 'error'
     // lastLog: null | { status: 'saved' | 'skipped' | 'error', message, recordUrl }
+    // audio: null (no device yet) | { inputs: [{ id, label }], outputs: [{ id, label }],
+    //        input, output, outputSupported }
+    //
+    // Dock modes (ctc_dock_client.js picks one at load):
+    //   shell   - top page is the shell (window.__ctcShell set before the dock
+    //             scripts). Pill + dialer; talks to the anchor over the bus.
+    //   frame   - a NetSuite page inside the shell. Draws nothing; exposes
+    //             window.__ctcDock.call() → top.__ctcShell.call(ctx) and
+    //             window.__ctcRecordContext for the shell to read on load.
+    //   outside - a normal NetSuite tab. Chip only. Another tab holds
+    //             PHONE_LOCK_NAME → mirror its call read-only (End/Mute
+    //             allowed). Else "Open phone" → top navigates to the shell
+    //             with u=<this page>. With data-auto-enter="1" (dashboard
+    //             portlet) it goes there by itself unless the rep left phone
+    //             mode in this tab (sessionStorage EXIT_KEY = '1').
     const BUS_CHANNEL = 'ctc-bus';
+
+    // Web Lock the shell holds for its whole life while it runs the phone.
+    const PHONE_LOCK_NAME = 'ctc-phone-anchor';
+    // sessionStorage key set when the rep leaves phone mode; stops auto-enter.
+    const EXIT_KEY = 'ctc-phone-exit';
 
     /**
      * @typedef {Object} DockMountOptions
-     * @property {string} anchorUrl - Softphone Suitelet URL the anchor opens with
-     * @property {string} popupName - window.open name of the anchor
-     * @property {string} popupOptions - window.open features of the anchor
+     * @property {string} [shellUrl] - phone mode shell Suitelet URL (same origin)
+     * @property {boolean} [autoEnter] - outside phone mode, go to the shell by itself (dashboard portlet only)
+     * @property {string} [popupName] - name of the shell's phone frame
+     * @property {string} [popupOptions] - legacy popup features (unused by the dock)
      * @property {string} [restletUrl] - ctc_rl_token RESTlet URL (same origin)
      * @property {{entityId?: string, entityName?: string, entityType?: string, phone?: string}} [context] - Record the page shows
      * @property {string} [assetUrl] - media URL of ctc_dock_client.js
@@ -56,9 +81,10 @@ define(['./ctc_html'], (ctcHtml) => {
      */
     const dockAttributes = (opts) => {
         const ctx = opts.context || {};
-        return [
+        /** @type {Array<[string, string]>} */
+        const attrs = [
             ['data-bus', BUS_CHANNEL],
-            ['data-anchor-url', opts.anchorUrl || ''],
+            ['data-shell-url', opts.shellUrl || ''],
             ['data-popup-name', opts.popupName || ''],
             ['data-popup-options', opts.popupOptions || ''],
             ['data-restlet-url', opts.restletUrl || ''],
@@ -67,6 +93,8 @@ define(['./ctc_html'], (ctcHtml) => {
             ['data-entity-type', String(ctx.entityType || '')],
             ['data-phone', String(ctx.phone || '')]
         ];
+        if (opts.autoEnter) attrs.push(['data-auto-enter', '1']);
+        return attrs;
     };
 
     /**
@@ -114,6 +142,8 @@ define(['./ctc_html'], (ctcHtml) => {
         DIALER_ASSET_PATH,
         DOCK_ASSET_VERSION,
         BUS_CHANNEL,
+        PHONE_LOCK_NAME,
+        EXIT_KEY,
         dockAttributes,
         buildDockScriptTag,
         buildDockLoaderHtml

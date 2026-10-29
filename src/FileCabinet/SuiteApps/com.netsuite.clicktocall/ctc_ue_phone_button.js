@@ -5,9 +5,14 @@
  *
  * Adds a Click-to-Call button to Customer, Contact, and Lead forms.
  * Visible in both view and edit mode.
+ *
+ * Calls live only in the phone mode shell (ctc_sl_shell.js). Inside the
+ * shell the button opens the shell's dialer with this record loaded.
+ * Outside it, the button moves the tab into the shell on this same record;
+ * the rep presses Call there. No popup window.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_config', './lib/ctc_dock'], (url, runtime, log, file, ctcEntity, ctcConfig, ctcDock) => {
+define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_config', './lib/ctc_dock', './lib/ctc_html'], (url, runtime, log, file, ctcEntity, ctcConfig, ctcDock, ctcHtml) => {
 
     const resolveEntityName = ctcEntity.resolveEntityName;
 
@@ -60,35 +65,31 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_
 
         const entityName = resolveEntityName(rec, recType);
 
-        let softphoneUrl = '';
+        let shellUrl = '';
         try {
-            softphoneUrl = url.resolveScript({
-                scriptId: 'customscript_ctc_sl_softphone',
-                deploymentId: 'customdeploy_ctc_sl_softphone',
-                params: {
-                    phone: phone,
-                    entityId: recId,
-                    entityName: entityName,
-                    entityType: recType,
-                    // Iteration B Phase 2: tells the Suitelet which default tab to open.
-                    // 'record' → Dial tab pre-filled (this path). 'dashboard' → Search tab
-                    // default (passed by the portlet's softphone launchers).
-                    entryPoint: 'record'
-                }
+            shellUrl = url.resolveScript({
+                scriptId: 'customscript_ctc_sl_shell',
+                deploymentId: 'customdeploy_ctc_sl_shell',
+                returnExternalUrl: false
             });
         } catch (e) {
             log.error({ title: 'CTC UE — Failed to resolve Suitelet URL', details: e.message || e });
             return;
         }
+        if (!shellUrl) return;
 
-        const escapedUrl = softphoneUrl.replace(/'/g, "\\'");
-        const openPopup = "window.open('" + escapedUrl + "','" + ctcEntity.SOFTPHONE_POPUP_NAME + "','" + ctcEntity.SOFTPHONE_POPUP_OPTIONS + "')";
-        // With the dock mounted, the button goes through it so a live call is
-        // focused instead of reloaded. Without it, the plain popup opens.
+        // With the dock mounted, the button goes through it (frame mode:
+        // shell dialer; outside: into the shell). Without it: inside the
+        // shell, ask the shell (never reload it: that would end a call);
+        // outside, the tab moves into the shell on this record directly.
+        const shellPrefix = shellUrl + (shellUrl.indexOf('?') === -1 ? '?' : '&') + 'u=';
         context.form.addButton({
             id: 'custpage_ctc_call',
             label: 'Call ' + capitalize(recType),
-            functionName: "(window.__ctcDock ? window.__ctcDock.call('" + escapedUrl + "') : " + openPopup + ")"
+            functionName: "(window.__ctcDock ? window.__ctcDock.call()"
+                + " : window.top.__ctcShell ? window.top.__ctcShell.call()"
+                + " : (window.top.location.href = '" + ctcHtml.escapeJs(shellPrefix)
+                + "' + encodeURIComponent(location.pathname + location.search)))"
         });
 
         // Inject CSS that promotes the toolbar Call button to NetSuite's primary blue
@@ -98,7 +99,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_
             type: 'INLINEHTML',
             label: ' '
         });
-        inlineField.defaultValue = buildCallButtonStyle() + buildDockTag(softphoneUrl, {
+        inlineField.defaultValue = buildCallButtonStyle() + buildDockTag(shellUrl, {
             entityId: recId, entityName: entityName, entityType: recType, phone: phone
         });
     };
@@ -106,12 +107,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_
     /**
      * Script tags that mount the Telephony Dock (lib/ctc_dock_client.js +
      * lib/ctc_dock_dialer.js). A missing dock file must never break the
-     * record page — the Call button still opens the popup on its own.
-     * @param {string} softphoneUrl
+     * record page — the Call button still reaches the shell on its own.
+     * @param {string} shellUrl
      * @param {{entityId: string, entityName: string, entityType: string, phone: string}} dockContext
      * @returns {string}
      */
-    const buildDockTag = (softphoneUrl, dockContext) => {
+    const buildDockTag = (shellUrl, dockContext) => {
         try {
             const restletUrl = url.resolveScript({
                 scriptId: 'customscript_ctc_rl_token',
@@ -121,7 +122,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_
             return ctcDock.buildDockScriptTag({
                 assetUrl: file.load({ id: ctcDock.DOCK_ASSET_PATH }).url,
                 dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
-                anchorUrl: softphoneUrl,
+                shellUrl: shellUrl,
                 popupName: ctcEntity.SOFTPHONE_POPUP_NAME,
                 popupOptions: ctcEntity.SOFTPHONE_POPUP_OPTIONS,
                 restletUrl: restletUrl,

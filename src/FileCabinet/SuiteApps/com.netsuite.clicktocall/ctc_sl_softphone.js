@@ -1951,9 +1951,60 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     number: formatPhone(PHONE),
                     startedAt: callStartTime,
                     muted: !!(activeCall && activeCall.isMuted()),
-                    lastLog: dockLastLog
+                    lastLog: dockLastLog,
+                    audio: dockAudio()
                 }
             });
+        }
+
+        // Audio devices for the dock: the same lists and selection the
+        // #inputDevice / #outputDevice selects show. null before the device
+        // exists. Blank labels (no mic permission yet) get the same
+        // 'Microphone N' / 'Speaker N' names populateDevices uses.
+        function dockAudio() {
+            if (!device || !device.audio) return null;
+            var inputs = [];
+            var outputs = [];
+            device.audio.availableInputDevices.forEach(function (info, id) {
+                inputs.push({ id: id, label: info.label || 'Microphone ' + (inputs.length + 1) });
+            });
+            var outputSupported = device.audio.availableOutputDevices.size > 0;
+            if (outputSupported) {
+                device.audio.availableOutputDevices.forEach(function (info, id) {
+                    outputs.push({ id: id, label: info.label || 'Speaker ' + (outputs.length + 1) });
+                });
+            }
+            return {
+                inputs: inputs,
+                outputs: outputs,
+                input: (inputSelect && inputSelect.value) || '',
+                output: (outputSupported && outputSelect && outputSelect.value) || '',
+                outputSupported: outputSupported
+            };
+        }
+
+        // A dock picks a mic or speaker. Runs the same path as the audio
+        // overlay selects: set the select, call the shared apply function,
+        // and save the choice to the overlay defaults (localStorage) so it
+        // survives a reload. Refused mid-call, as the UI hides the gear
+        // then. Unknown ids are ignored. The snapshot sent back on refusal
+        // tells the dock nothing changed.
+        function dockSetInput(id) {
+            id = String(id || '');
+            if (activeCall || !device || !device.audio
+                    || !device.audio.availableInputDevices.has(id)) { publishDock(); return; }
+            inputSelect.value = id;
+            applyInputDevice(id);
+            persistAudioPref('inputDeviceId', id);
+        }
+
+        function dockSetOutput(id) {
+            id = String(id || '');
+            if (activeCall || !device || !device.audio
+                    || !device.audio.availableOutputDevices.has(id)) { publishDock(); return; }
+            outputSelect.value = id;
+            applyOutputDevice(id);
+            persistAudioPref('outputDeviceId', id);
         }
 
         function setDockLog(status, message, recordId) {
@@ -1995,6 +2046,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         if (activeCall && /^[0-9*#]$/.test(String(m.d))) appendDialDigit(String(m.d));
                     } else if (m.action === 'hangup') {
                         hangUp();
+                    } else if (m.action === 'setInput') {
+                        dockSetInput(m.id);
+                    } else if (m.action === 'setOutput') {
+                        dockSetOutput(m.id);
                     } else if ((m.action === 'mute' || m.action === 'unmute')
                             && activeCall && activeCall.isMuted() !== (m.action === 'mute')) {
                         toggleMute();
@@ -2553,6 +2608,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             // Phase 4: device selects now live inside the audio-overlay (no
             // separate device-selectors wrapper to flip visible). The overlay
             // itself controls visibility — see openAudioOverlay/closeAudioOverlay.
+
+            // Docks show the device lists; send the new ones.
+            publishDock();
         }
 
         // --- Twilio Device setup ---
@@ -2602,18 +2660,29 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         // --- Audio device change handlers ---
-        inputSelect.addEventListener('change', function () {
+        // applyInputDevice / applyOutputDevice are shared by the overlay
+        // selects and the dock bus (dockSetInput / dockSetOutput). A
+        // successful set publishes a snapshot so docks see the new choice.
+        function applyInputDevice(id) {
             if (!device) return;
-            device.audio.setInputDevice(this.value)
-                .then(function () { console.log('[CTC] Input device set'); })
+            device.audio.setInputDevice(id)
+                .then(function () { console.log('[CTC] Input device set'); publishDock(); })
                 .catch(function (err) { showError('Mic error: ' + err.message); });
+        }
+
+        function applyOutputDevice(id) {
+            if (!device) return;
+            device.audio.speakerDevices.set(id)
+                .then(function () { console.log('[CTC] Output device set'); publishDock(); })
+                .catch(function (err) { showError('Speaker error: ' + err.message); });
+        }
+
+        inputSelect.addEventListener('change', function () {
+            applyInputDevice(this.value);
         });
 
         outputSelect.addEventListener('change', function () {
-            if (!device) return;
-            device.audio.speakerDevices.set(this.value)
-                .then(function () { console.log('[CTC] Output device set'); })
-                .catch(function (err) { showError('Speaker error: ' + err.message); });
+            applyOutputDevice(this.value);
         });
 
         // --- Call management ---
@@ -3390,6 +3459,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     }
                 }
             }
+            // Docks see the remembered selection.
+            publishDock();
         }
 
         // Phase 6 fix: the overlay now position-absolute covers the entire

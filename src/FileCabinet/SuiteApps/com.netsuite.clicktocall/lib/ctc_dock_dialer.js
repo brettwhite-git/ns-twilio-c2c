@@ -1,11 +1,14 @@
 /**
  * Telephony Dock — dialer panel (browser script, NOT a SuiteScript module).
  *
- * Loads after ctc_dock_client.js and registers the full softphone panel that
- * opens out of the pill: Dial, Search, Recents, and the in-call screen. Data
+ * Loads after ctc_dock_client.js and, in the phone mode shell only, registers
+ * the full softphone panel that opens out of the pill: Dial, Search, Recents,
+ * the in-call screen, and audio settings. The panel runs full height on the
+ * left or right screen edge (placement and drag live in the client). Data
  * comes from the ctc_rl_token RESTlet over same-session fetch (the same
- * actions the anchor popup uses). Call control goes to the anchor over the
- * dock bus: the anchor is still the only window with audio.
+ * actions the anchor uses). Call control and audio device changes go to the
+ * anchor (the shell's hidden #ctc-phone-frame) over the dock bus: the anchor
+ * is the only window with audio.
  */
 (function () {
     'use strict';
@@ -40,13 +43,18 @@
     var STROKE = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 
     host.css([
-        '.dl{width:380px;max-height:calc(100vh - 96px);display:flex;flex-direction:column;color:#FFFFFF}',
-        '.dl-head{display:flex;align-items:center;gap:8px;padding:12px 14px 0}',
+        // Position and size come from the client (placePanel). The panel is not
+        // inside .dock, so it restates the dock's font and pointer rules.
+        '.dl{position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        '.dl.closed{opacity:0;transform:translateX(12px);pointer-events:none}',
+        '.dl[data-side="l"].closed{transform:translateX(-12px)}',
+        '.dl-head{display:flex;align-items:center;gap:8px;padding:12px 14px 0;flex-shrink:0;user-select:none;-webkit-user-select:none}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:11.5px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-status .dot{width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
         '.dl-icon{width:32px;height:32px;border-radius:10px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-icon:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
-        '.dl-note{margin:10px 14px 0;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.06);display:flex;align-items:center;gap:8px;font-size:12px}',
+        '.dl-icon[aria-pressed="true"]{background:rgba(255,255,255,0.12);color:#FFFFFF}',
+        '.dl-note{flex-shrink:0;margin:10px 14px 0;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.06);display:flex;align-items:center;gap:8px;font-size:12px}',
         '.dl-note a{color:#B6DCFA;text-decoration:none;margin-left:auto}',
         '.dl-note a:hover{text-decoration:underline}',
         '.dl-body{flex:1;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
@@ -81,7 +89,7 @@
         '.dl-key:hover{background:rgba(255,255,255,0.10)}',
         '.dl-key b{font-size:15px;font-weight:500;line-height:1}',
         '.dl-key i{font-style:normal;font-size:7px;letter-spacing:0.14em;font-weight:600;color:#94A6BF;min-height:7px;line-height:1}',
-        '.dl-foot{margin-top:10px;padding:12px 14px 14px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.12);display:flex;justify-content:center;align-items:flex-start;gap:28px}',
+        '.dl-foot{flex-shrink:0;margin-top:10px;padding:12px 14px 14px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.12);display:flex;justify-content:center;align-items:flex-start;gap:28px}',
         '.dl-act{display:flex;flex-direction:column;align-items:center;gap:5px;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF}',
         '.dl-btn{width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.10);color:#FFFFFF;display:flex;align-items:center;justify-content:center}',
         '.dl-btn:hover{background:rgba(255,255,255,0.18)}',
@@ -117,7 +125,18 @@
         '.dl-live-time{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;font-size:26px;font-weight:300;letter-spacing:0.04em;margin-top:8px;min-height:32px}',
         '.dl-live .dl-tiles{width:100%;margin-top:18px}',
         '.dl-live .dl-pad{width:100%;margin-top:14px}',
-        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}}'
+        '.dl-audio-top{display:flex;align-items:center;gap:8px}',
+        '.dl-audio-title{font-size:14px;font-weight:600}',
+        '.dl-text{background:transparent;color:#B6DCFA;font-size:12.5px;padding:6px 8px;border-radius:8px}',
+        '.dl-text:hover{background:rgba(255,255,255,0.06)}',
+        '.dl-afield{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#94A6BF}',
+        '.dl-afield select{width:100%;height:36px;padding:0 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px;cursor:pointer}',
+        '.dl-afield select option{color:#161513}',
+        '.dl-afield select:focus-visible{outline:2px solid #74C0FC;outline-offset:1px}',
+        '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
+        '.dl-audio-msg{text-align:left;padding:0}',
+        '.dl-exit{align-self:flex-start;margin-top:8px}',
+        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl.closed,.dl[data-side="l"].closed{transform:none}}'
     ].join('\n'));
 
     // --- Markup (static; data goes in with textContent) ---
@@ -133,7 +152,7 @@
         + '<div class="dl-head">'
         +   '<span class="dl-status"><span class="dot"></span><span class="dl-status-label"></span></span>'
         +   '<span class="spacer"></span>'
-        +   '<button type="button" class="dl-icon dl-gear" aria-label="Open phone window and audio settings"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>'
+        +   '<button type="button" class="dl-icon dl-gear" aria-label="Audio settings" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>'
         +   '<button type="button" class="dl-icon dl-close" aria-label="Collapse phone"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 9l6 6 6-6"></path></svg></button>'
         + '</div>'
         + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span><a class="dl-note-link" href="#" target="_top">Open record →</a></div>'
@@ -200,6 +219,16 @@
         +     '<span class="dl-act"><button type="button" class="dl-btn big end dl-end" aria-label="End call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>END</span>'
         +     '<span class="dl-act"><button type="button" class="dl-btn dl-keys" aria-label="Show keypad" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '><circle cx="6" cy="5" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="18" cy="5" r="1"></circle><circle cx="6" cy="11" r="1"></circle><circle cx="12" cy="11" r="1"></circle><circle cx="18" cy="11" r="1"></circle><circle cx="6" cy="17" r="1"></circle><circle cx="12" cy="17" r="1"></circle><circle cx="18" cy="17" r="1"></circle><circle cx="12" cy="22" r="1"></circle></svg></button>KEYPAD</span>'
         +   '</div>'
+        + '</div>'
+        // Audio settings (gear)
+        + '<div class="dl-audio-wrap" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">'
+        +   '<div class="dl-body" style="padding-bottom:14px">'
+        +     '<div class="dl-audio-top"><button type="button" class="dl-text dl-audio-back">Back</button><span class="dl-audio-title">Audio</span></div>'
+        +     '<div class="dl-msg dl-audio-msg" role="status"></div>'
+        +     '<label class="dl-afield dl-in-row">Microphone<select class="dl-in"></select></label>'
+        +     '<label class="dl-afield dl-out-row">Speaker<select class="dl-out"></select></label>'
+        +     '<button type="button" class="dl-text dl-exit">Exit phone mode</button>'
+        +   '</div>'
         + '</div>';
 
     var q = function (sel) { return el.querySelector(sel); };
@@ -220,7 +249,9 @@
         recents: q('.dl-recent-list'), recentMsg: q('.dl-recent-msg'),
         liveAv: q('.dl-live-av'), liveName: q('.dl-live-name'), liveSub: q('.dl-live-sub'), liveTime: q('.dl-live-time'),
         liveTiles: q('.dl-live-tiles'), liveBal: q('.dl-live-bal'), liveOpps: q('.dl-live-opps'),
-        dtmf: q('.dl-dtmf'), mute: q('.dl-mute'), muteLabel: q('.dl-mute-label'), end: q('.dl-end'), keys: q('.dl-keys')
+        dtmf: q('.dl-dtmf'), mute: q('.dl-mute'), muteLabel: q('.dl-mute-label'), end: q('.dl-end'), keys: q('.dl-keys'),
+        head: q('.dl-head'), audio: q('.dl-audio-wrap'), audioBack: q('.dl-audio-back'), audioMsg: q('.dl-audio-msg'),
+        inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit')
     };
 
     // --- State ---
@@ -228,6 +259,9 @@
     var target = null;      // { entityId, entityName, entityType, contacts: [] }
     var manual = false;     // display edited by hand since the last pick
     var pending = null;     // dial request kept until the anchor is ready
+    var audioOpen = false;  // audio settings view in front of Dial / in-call
+    var deferredCtx = null; // { ctx } the frame moved to during a call
+    var wasActive = false;
     var snap = null;
     var liveTimer = null;
     var snapshotCache = {};
@@ -484,22 +518,14 @@
             host.send('dial', req);
             return;
         }
-        // No ready anchor. Open it now, inside this click, so the popup
-        // blocker lets it through; send the request once it reports ready.
+        // The phone frame is still starting: keep the request and send it
+        // once the anchor reports ready.
         pending = { req: req, at: Date.now() };
-        if (!snap || snap.phase === 'offline' || snap.phase === 'error') {
-            if (!host.openAnchor(cfg.anchorUrl)) {
-                pending = null;
-                showNote('error', 'The browser blocked the phone window. Allow pop-ups for NetSuite, then try again.');
-                return;
-            }
-            try { window.focus(); } catch (e) { /* the popup may keep focus */ }
-        }
         render(snap);
         window.setTimeout(function () {
             if (pending && Date.now() - pending.at >= PENDING_TIMEOUT_MS) {
                 pending = null;
-                showNote('error', 'The phone window did not start. Open it from the gear button and check the microphone.');
+                showNote('error', 'The phone did not start. Reload the page, then try again.');
                 render(snap);
             }
         }, PENDING_TIMEOUT_MS + 50);
@@ -707,7 +733,61 @@
         ui.note.setAttribute('data-kind', kind);
     }
 
-    ui.gear.addEventListener('click', function () { host.openAnchor(cfg.anchorUrl); });
+    // --- Audio settings ---
+    // Rebuild a select only when its options or value changed, so a snapshot
+    // never closes a list the rep has open.
+    function fillSelect(sel, items, value) {
+        var key = JSON.stringify([items, value]);
+        if (sel.getAttribute('data-key') === key) return;
+        sel.setAttribute('data-key', key);
+        clear(sel);
+        (items || []).forEach(function (d) {
+            var o = document.createElement('option');
+            o.value = String(d.id);
+            o.textContent = d.label || String(d.id);
+            sel.appendChild(o);
+        });
+        if (value) sel.value = String(value);
+    }
+
+    function renderAudio() {
+        var a = snap && snap.audio;
+        var active = isActive();
+        var msg = !a ? 'Audio settings open after the phone starts.' : active ? 'Change audio between calls.' : '';
+        ui.audioMsg.textContent = msg;
+        ui.audioMsg.hidden = !msg;
+        ui.inRow.hidden = !a;
+        ui.outRow.hidden = !a || !a.outputSupported;
+        if (a) {
+            fillSelect(ui.inSel, a.inputs, a.input);
+            if (a.outputSupported) fillSelect(ui.outSel, a.outputs, a.output);
+        }
+        ui.inSel.disabled = !a || active;
+        ui.outSel.disabled = !a || active;
+        var shell = window.__ctcShell;
+        ui.exit.hidden = !(shell && typeof shell.exit === 'function');
+    }
+
+    function setAudioOpen(open) {
+        audioOpen = open;
+        ui.gear.setAttribute('aria-pressed', open ? 'true' : 'false');
+        render(snap);
+    }
+
+    ui.gear.addEventListener('click', function () {
+        setAudioOpen(!audioOpen);
+        if (audioOpen) ui.audioBack.focus();
+    });
+    ui.audioBack.addEventListener('click', function () {
+        setAudioOpen(false);
+        ui.gear.focus();
+    });
+    ui.inSel.addEventListener('change', function () { host.send('setInput', { id: ui.inSel.value }); });
+    ui.outSel.addEventListener('change', function () { host.send('setOutput', { id: ui.outSel.value }); });
+    ui.exit.addEventListener('click', function () {
+        var shell = window.__ctcShell;
+        if (shell && typeof shell.exit === 'function') shell.exit();
+    });
     ui.close.addEventListener('click', function () { host.collapse(); });
     el.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') { e.stopPropagation(); host.collapse(); }
@@ -729,9 +809,20 @@
             host.send('dial', req);
         }
 
+        // Every snapshot sets all three views, so the panel can never stay on
+        // Dial while the anchor is on a call.
         var active = isActive();
-        ui.idle.hidden = active;
-        ui.live.hidden = !active;
+        // The call ended: the Dial tab catches up with the page the rep is on.
+        if (wasActive && !active && deferredCtx) {
+            var later = deferredCtx.ctx;
+            deferredCtx = null;
+            followContext(later);
+        }
+        wasActive = active;
+        ui.idle.hidden = audioOpen || active;
+        ui.live.hidden = audioOpen || !active;
+        ui.audio.hidden = !audioOpen;
+        if (audioOpen) renderAudio();
         if (active) {
             renderLive();
             ui.note.hidden = true;
@@ -750,16 +841,41 @@
         syncCallButton();
     }
 
-    function focusPanel() {
+    function focusPanel(what) {
+        if (audioOpen) { ui.audioBack.focus(); return; }
         if (isActive()) { ui.end.focus(); return; }
+        if (what === 'call' && tab === 'dial' && !ui.call.disabled) { ui.call.focus(); return; }
         if (tab === 'search') ui.query.focus();
         else if (tab === 'recents') ui.tabs[2].focus();
         else ui.display.focus();
     }
 
+    // Clear the Dial tab's record (the frame left the record page).
+    function clearEntity() {
+        target = null;
+        ui.entity.hidden = true;
+        ui.tiles.hidden = true;
+        clear(ui.contact);
+        clear(ui.number);
+        setDisplay('', false);
+    }
+
+    function hasRecord(c) { return !!(c && (c.entityId || c.phone)); }
+
+    // Follow the NetSuite frame's record, unless the rep typed a number.
+    function followContext(c) {
+        if (manual) return;
+        if (hasRecord(c)) {
+            loadEntity(c);
+            if (el.hidden) setTab('dial');
+        } else if (target) {
+            clearEntity();
+        }
+    }
+
     // --- Initial state from the page ---
-    var ctx = cfg.context || {};
-    if (ctx.entityId || ctx.phone) {
+    var ctx = cfg.context || null;
+    if (hasRecord(ctx)) {
         loadEntity(ctx);
         setTab('dial');
     } else {
@@ -768,16 +884,32 @@
 
     host.registerPanel({
         el: el,
+        handle: ui.head,
         render: function (next) {
             if (ui.note.getAttribute('data-kind') === 'error' && next && next.phase === 'ready' && !pending) {
                 ui.note.removeAttribute('data-kind');
             }
             render(next);
         },
+        // From a Call click: load the record (if any) on Dial. Never dials.
         open: function (opts) {
-            if (opts && opts.fromRecord && (ctx.entityId || ctx.phone)) loadEntity(ctx);
-            if (opts && opts.tab) setTab(opts.tab);
+            var c = opts && opts.ctx;
+            audioOpen = false;
+            ui.gear.setAttribute('aria-pressed', 'false');
+            if (!isActive() && hasRecord(c)) {
+                loadEntity(c);
+                setTab('dial');
+            }
+            render(snap);
         },
-        focus: function () { window.setTimeout(focusPanel, 0); }
+        // The NetSuite frame moved to another page. Follow it only between
+        // calls (a page reached during a call applies when it ends) and only
+        // when the rep has not typed a number by hand.
+        setContext: function (c) {
+            if (isActive()) { deferredCtx = { ctx: c }; return; }
+            deferredCtx = null;
+            followContext(c);
+        },
+        focus: function (what) { window.setTimeout(function () { focusPanel(what); }, 0); }
     });
 })();
