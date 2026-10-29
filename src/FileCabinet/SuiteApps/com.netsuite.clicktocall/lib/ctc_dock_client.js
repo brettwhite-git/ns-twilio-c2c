@@ -9,6 +9,10 @@
  * Views: chip (collapsed pill), card (expanded call), offline pill.
  * The dock sits in one of four corners; the corner is shared by every tab
  * through localStorage.
+ *
+ * ctc_dock_dialer.js loads after this file and registers a full softphone
+ * panel through window.__ctcDock.host.registerPanel(). With a panel, the
+ * chip opens the panel instead of the compact card or the anchor window.
  */
 (function () {
     'use strict';
@@ -23,7 +27,15 @@
         bus: attr('data-bus', 'ctc-bus'),
         anchorUrl: attr('data-anchor-url', ''),
         popupName: attr('data-popup-name', 'ctc_softphone'),
-        popupOptions: attr('data-popup-options', '')
+        popupOptions: attr('data-popup-options', ''),
+        restletUrl: attr('data-restlet-url', ''),
+        // The record this page shows, if any (empty on the dashboard).
+        context: {
+            entityId: attr('data-entity-id', ''),
+            entityName: attr('data-entity-name', ''),
+            entityType: attr('data-entity-type', ''),
+            phone: attr('data-phone', '')
+        }
     };
 
     var CORNER_KEY = 'ctc-dock';
@@ -130,6 +142,7 @@
     // --- State ---
     var snap = null; // null until the anchor answers (or the hello times out)
     var expanded = false;
+    var panel = null; // { el, render(snap), open(opts), focus() } from ctc_dock_dialer.js
     var corner = readCorner();
     var pos = { x: 0, y: 0 };
     var drag = null;
@@ -216,6 +229,7 @@
     var PHASE_VIEW = {
         offline: { dot: '#8B8780', label: 'Phone offline' },
         error: { dot: '#EE6E5C', label: 'Phone error' },
+        starting: { dot: '#F4C76A', label: 'Starting phone\u2026' },
         ready: { dot: '#94A6BF', label: 'Ready' },
         dialing: { dot: '#F4C76A', label: 'Calling…' },
         ringing: { dot: '#F4C76A', label: 'Ringing…' },
@@ -232,7 +246,7 @@
         var sub = snap.entityName && snap.contactName ? snap.contactName : (snap.number || '');
         if (sub === name) sub = '';
 
-        if (!active) expanded = false;
+        if (!active && !panel) expanded = false;
 
         dockEl.hidden = false;
         dockEl.style.setProperty('--dot', view.dot);
@@ -245,7 +259,7 @@
         chipEnd.hidden = !active;
         chipMain.setAttribute('aria-label', active
             ? name + ', ' + view.label.replace(' ↗', '') + '. Open call card. Arrow keys move the dock.'
-            : view.label + '. Open softphone. Arrow keys move the dock.');
+            : view.label + '. Open ' + (panel ? 'phone' : 'softphone') + '. Arrow keys move the dock.');
 
         avatarEl.textContent = initials(name);
         whoName.textContent = name;
@@ -262,6 +276,7 @@
         if (snap.startedAt && !timerId) timerId = window.setInterval(tick, 1000);
         if (!snap.startedAt && timerId) { window.clearInterval(timerId); timerId = null; }
 
+        if (panel) panel.render(snap);
         setExpanded(expanded, false);
     }
 
@@ -273,19 +288,21 @@
     }
 
     function setExpanded(next, animate) {
-        var wasOpen = !cardEl.hidden;
+        var view = panel ? panel.el : cardEl;
+        var wasOpen = !view.hidden;
         expanded = next;
         chipEl.hidden = next;
-        cardEl.hidden = !next;
+        cardEl.hidden = panel ? true : !next;
+        if (panel) panel.el.hidden = !next;
         place(false);
         if (next && !wasOpen) {
             if (animate) {
-                cardEl.classList.add('closed');
-                void cardEl.offsetWidth; // commit the closed state so the transition runs
+                view.classList.add('closed');
+                void view.offsetWidth; // commit the closed state so the transition runs
             }
-            cardEl.classList.remove('closed');
+            view.classList.remove('closed');
         } else if (!next) {
-            cardEl.classList.add('closed');
+            view.classList.add('closed');
         }
     }
 
@@ -323,6 +340,7 @@
         pos.y = xy.y;
         var origin = (corner.charAt(1) === 'r' ? 'right ' : 'left ') + (corner.charAt(0) === 'b' ? 'bottom' : 'top');
         cardEl.style.transformOrigin = origin;
+        if (panel) panel.el.style.transformOrigin = origin;
         if (animate && !(reducedMotion && reducedMotion.matches)) {
             dockEl.style.transition = 'transform 300ms cubic-bezier(0.32, 0.72, 0, 1)';
             window.setTimeout(function () { dockEl.style.transition = ''; }, 320);
@@ -407,7 +425,10 @@
     // --- Actions ---
     chipMain.addEventListener('click', function () {
         if (suppressClick) { suppressClick = false; return; }
-        if (isActive()) {
+        if (panel) {
+            setExpanded(true, true);
+            panel.focus();
+        } else if (isActive()) {
             setExpanded(true, true);
             cardTop.focus();
         } else {
@@ -466,12 +487,43 @@
          * @param {string} url - Softphone Suitelet URL with the record's params
          */
         call: function (url) {
+            if (panel) {
+                panel.open({ tab: 'dial', fromRecord: true });
+                setExpanded(true, true);
+                panel.focus();
+                return;
+            }
             if (isActive()) {
                 openAnchor('');
                 setExpanded(true, true);
                 return;
             }
             window.open(url, cfg.popupName, cfg.popupOptions);
+        },
+
+        // Extension surface for ctc_dock_dialer.js. Not a public API.
+        host: {
+            cfg: cfg,
+            css: function (text) {
+                var st = document.createElement('style');
+                st.textContent = text;
+                root.appendChild(st);
+            },
+            getSnap: function () { return snap; },
+            send: function (action, extra) {
+                var m = { v: 1, type: 'request', action: action };
+                if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) m[k] = extra[k];
+                bus.postMessage(m);
+            },
+            openAnchor: openAnchor,
+            collapse: function () { setExpanded(false, false); chipMain.focus(); },
+            registerPanel: function (p) {
+                panel = p;
+                p.el.hidden = true;
+                p.el.classList.add('closed');
+                dockEl.appendChild(p.el);
+                if (snap) render();
+            }
         }
     };
 

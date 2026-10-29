@@ -39,7 +39,9 @@ define(['N/search', 'N/log'], (search, log) => {
     // contactSelect element.
     // v7 (Telephony Dock): popup now hosts the ctc-bus BroadcastChannel.
     // Force fresh popup so dock tabs find an anchor that answers them.
-    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v7';
+    // v8 (Dock dialer): anchor accepts dial / digits requests and reports
+    // the 'starting' phase + lastLog. Force fresh popup for the new bus.
+    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v8';
 
     /**
      * Resolve a display name from a NetSuite record by type.

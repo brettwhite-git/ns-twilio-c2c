@@ -98,23 +98,34 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_
             type: 'INLINEHTML',
             label: ' '
         });
-        inlineField.defaultValue = buildCallButtonStyle() + buildDockTag(softphoneUrl);
+        inlineField.defaultValue = buildCallButtonStyle() + buildDockTag(softphoneUrl, {
+            entityId: recId, entityName: entityName, entityType: recType, phone: phone
+        });
     };
 
     /**
-     * Script tag that mounts the Telephony Dock (lib/ctc_dock_client.js).
-     * A missing dock file must never break the record page — the Call
-     * button still opens the popup on its own.
+     * Script tags that mount the Telephony Dock (lib/ctc_dock_client.js +
+     * lib/ctc_dock_dialer.js). A missing dock file must never break the
+     * record page — the Call button still opens the popup on its own.
      * @param {string} softphoneUrl
+     * @param {{entityId: string, entityName: string, entityType: string, phone: string}} dockContext
      * @returns {string}
      */
-    const buildDockTag = (softphoneUrl) => {
+    const buildDockTag = (softphoneUrl, dockContext) => {
         try {
+            const restletUrl = url.resolveScript({
+                scriptId: 'customscript_ctc_rl_token',
+                deploymentId: 'customdeploy_ctc_rl_token',
+                returnExternalUrl: false
+            });
             return ctcDock.buildDockScriptTag({
                 assetUrl: file.load({ id: ctcDock.DOCK_ASSET_PATH }).url,
+                dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
                 anchorUrl: softphoneUrl,
                 popupName: ctcEntity.SOFTPHONE_POPUP_NAME,
-                popupOptions: ctcEntity.SOFTPHONE_POPUP_OPTIONS
+                popupOptions: ctcEntity.SOFTPHONE_POPUP_OPTIONS,
+                restletUrl: restletUrl,
+                context: dockContext
             });
         } catch (e) {
             log.error({ title: 'CTC UE — Failed to load dock script file', details: e.message || e });

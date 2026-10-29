@@ -1932,8 +1932,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             '': 'ready', connecting: 'dialing', ringing: 'ringing',
             connected: 'connected', ended: 'ready', error: 'error'
         };
-        var dockPhase = 'offline';
+        var dockPhase = 'starting';
         var dockContactName = '';
+        var dockLastLog = null;
         var dockBus = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('${escapeJs(ctcDock.BUS_CHANNEL)}') : null;
 
         function publishDock() {
@@ -1943,13 +1944,42 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 type: 'snapshot',
                 snap: {
                     phase: dockPhase,
+                    entityId: ENTITY_ID,
+                    entityType: ENTITY_TYPE,
                     entityName: ENTITY_NAME,
                     contactName: dockContactName,
                     number: formatPhone(PHONE),
                     startedAt: callStartTime,
-                    muted: !!(activeCall && activeCall.isMuted())
+                    muted: !!(activeCall && activeCall.isMuted()),
+                    lastLog: dockLastLog
                 }
             });
+        }
+
+        function setDockLog(status, message, recordId) {
+            dockLastLog = status ? {
+                status: status,
+                message: message || '',
+                recordUrl: recordId ? '/app/crm/calendar/call.nl?id=' + encodeURIComponent(recordId) : ''
+            } : null;
+            publishDock();
+        }
+
+        // A dock asks to place a call. The dock already chose the entity,
+        // contact, and number, so load them as a picker selection would and
+        // dial. Refused while a call is live or before the device is ready;
+        // the snapshot sent back tells the dock why.
+        function dockDial(m) {
+            if (activeCall || !device || dockPhase !== 'ready') { publishDock(); return; }
+            ENTITY_ID = String(m.entityId || '');
+            ENTITY_NAME = String(m.entityName || '');
+            ENTITY_TYPE = String(m.entityType || '');
+            window.__CTC_ENTITY_TYPE__ = ENTITY_TYPE;
+            setDialedNumber(String(m.to || ''), { resetFresh: true, fromPicker: true });
+            SELECTED_CONTACT_ID = String(m.contactId || '');
+            dockContactName = String(m.contactName || '');
+            if (!PHONE) { publishDock(); return; }
+            makeCall();
         }
 
         if (dockBus) {
@@ -1959,7 +1989,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 if (m.type === 'hello') {
                     publishDock();
                 } else if (m.type === 'request') {
-                    if (m.action === 'hangup') {
+                    if (m.action === 'dial') {
+                        dockDial(m);
+                    } else if (m.action === 'digits') {
+                        if (activeCall && /^[0-9*#]$/.test(String(m.d))) appendDialDigit(String(m.d));
+                    } else if (m.action === 'hangup') {
                         hangUp();
                     } else if ((m.action === 'mute' || m.action === 'unmute')
                             && activeCall && activeCall.isMuted() !== (m.action === 'mute')) {
@@ -2331,10 +2365,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 if (data.error === 'duration_below_threshold') {
                     logStatusEl.textContent = 'Call too brief to log';
                     logStatusEl.className = 'log-status';
+                    setDockLog('skipped', 'Call too brief to log');
                 } else if (data.error) {
                     logStatusEl.textContent = 'Failed to log call';
                     logStatusEl.className = 'log-status error';
+                    setDockLog('error', 'Failed to log call');
                 } else {
+                    setDockLog('saved', 'Phone Call saved', data.recordId);
                     logStatusEl.textContent = data.duplicate
                         ? 'Call already logged \\u2714 \\u2014 Fetching transcript\\u2026'
                         : 'Call logged \\u2714 \\u2014 Fetching transcript\\u2026';
@@ -2350,9 +2387,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     logCallPending = false;
                     logStatusEl.textContent = 'Call queued for logging';
                     logStatusEl.className = 'log-status';
+                    setDockLog('saved', 'Call queued for logging');
                 } else {
                     logStatusEl.textContent = 'Failed to log call';
                     logStatusEl.className = 'log-status error';
+                    setDockLog('error', 'Failed to log call');
                 }
             });
         }
@@ -2581,6 +2620,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function makeCall() {
             if (!device || activeCall) return;
             clearError();
+            dockLastLog = null;
             setStatus('Connecting\\u2026', 'connecting');
             setButtons(false, false, false);
             setCallView('active');
@@ -2626,6 +2666,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         // Connected but too brief for Twilio to transcribe. Skip logging.
                         logStatusEl.textContent = 'Call too brief to log (' + duration + 's)';
                         logStatusEl.className = 'log-status';
+                        setDockLog('skipped', 'Call too brief to log');
                         return;
                     }
                     logCallToNetSuite(callSid, duration);

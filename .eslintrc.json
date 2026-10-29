@@ -1,6 +1,10 @@
 {
-  "extends": ["plugin:suitescript/recommended"],
-  "plugins": ["suitescript"],
+  "extends": [
+    "plugin:suitescript/recommended"
+  ],
+  "plugins": [
+    "suitescript"
+  ],
   "parserOptions": {
     "ecmaVersion": 2020,
     "sourceType": "module"
@@ -11,10 +15,20 @@
   },
   "overrides": [
     {
-      "files": ["src/FileCabinet/SuiteApps/com.netsuite.clicktocall/lib/ctc_dock_client.js"],
-      "extends": ["eslint:recommended"],
-      "parserOptions": { "sourceType": "script" },
-      "env": { "browser": true, "amd": false },
+      "files": [
+        "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/lib/ctc_dock_client.js",
+        "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/lib/ctc_dock_dialer.js"
+      ],
+      "extends": [
+        "eslint:recommended"
+      ],
+      "parserOptions": {
+        "sourceType": "script"
+      },
+      "env": {
+        "browser": true,
+        "amd": false
+      },
       "rules": {
         "suitescript/api-version": "off",
         "suitescript/entry-points": "off",

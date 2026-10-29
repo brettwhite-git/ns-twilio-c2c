@@ -25,8 +25,8 @@
  * Reference: /Users/brettwhite/Projects/opportunity-kanban (proven pattern).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_entity'],
-       (url, log, runtime, ctcHtml, workspaceQueries, ctcEntity) => {
+define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_dock'],
+       (url, log, runtime, file, ctcHtml, workspaceQueries, ctcEntity, ctcDock) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
@@ -106,7 +106,32 @@ define(['N/url', 'N/log', 'N/runtime', './lib/ctc_html', './lib/ctc_workspace_qu
             stats: stats,
             historyError: historyResult.error || '',
             tasksError: tasksResult.error || ''
-        });
+        }) + buildDockLoader(softphoneUrl, restletUrl);
+    };
+
+    /**
+     * Telephony Dock loader (see buildDockLoaderHtml in lib/ctc_dock.js for
+     * why an <img onerror> and not a <script>). The dashboard has no record,
+     * so the dock opens on Search. A missing dock file never breaks the portlet.
+     * @param {string} softphoneUrl
+     * @param {string} restletUrl
+     * @returns {string}
+     */
+    const buildDockLoader = (softphoneUrl, restletUrl) => {
+        if (!softphoneUrl || !restletUrl) return '';
+        try {
+            return ctcDock.buildDockLoaderHtml({
+                assetUrl: file.load({ id: ctcDock.DOCK_ASSET_PATH }).url,
+                dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
+                anchorUrl: softphoneUrl,
+                popupName: POPUP_NAME,
+                popupOptions: POPUP_OPTS,
+                restletUrl: restletUrl
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Portlet — dock script file load failed', details: e.message || e });
+            return '';
+        }
     };
 
     // ─────────────────────────────────────────────────────────────────────────
