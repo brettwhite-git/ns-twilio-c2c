@@ -7,7 +7,7 @@
  * Visible in both view and edit mode.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity', './lib/ctc_config'], (url, runtime, log, ctcEntity, ctcConfig) => {
+define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_config', './lib/ctc_dock'], (url, runtime, log, file, ctcEntity, ctcConfig, ctcDock) => {
 
     const resolveEntityName = ctcEntity.resolveEntityName;
 
@@ -82,10 +82,13 @@ define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity', './lib/ctc_config'], 
         }
 
         const escapedUrl = softphoneUrl.replace(/'/g, "\\'");
+        const openPopup = "window.open('" + escapedUrl + "','" + ctcEntity.SOFTPHONE_POPUP_NAME + "','" + ctcEntity.SOFTPHONE_POPUP_OPTIONS + "')";
+        // With the dock mounted, the button goes through it so a live call is
+        // focused instead of reloaded. Without it, the plain popup opens.
         context.form.addButton({
             id: 'custpage_ctc_call',
             label: 'Call ' + capitalize(recType),
-            functionName: "window.open('" + escapedUrl + "','" + ctcEntity.SOFTPHONE_POPUP_NAME + "','" + ctcEntity.SOFTPHONE_POPUP_OPTIONS + "')"
+            functionName: "(window.__ctcDock ? window.__ctcDock.call('" + escapedUrl + "') : " + openPopup + ")"
         });
 
         // Inject CSS that promotes the toolbar Call button to NetSuite's primary blue
@@ -95,7 +98,28 @@ define(['N/url', 'N/runtime', 'N/log', './lib/ctc_entity', './lib/ctc_config'], 
             type: 'INLINEHTML',
             label: ' '
         });
-        inlineField.defaultValue = buildCallButtonStyle();
+        inlineField.defaultValue = buildCallButtonStyle() + buildDockTag(softphoneUrl);
+    };
+
+    /**
+     * Script tag that mounts the Telephony Dock (lib/ctc_dock_client.js).
+     * A missing dock file must never break the record page — the Call
+     * button still opens the popup on its own.
+     * @param {string} softphoneUrl
+     * @returns {string}
+     */
+    const buildDockTag = (softphoneUrl) => {
+        try {
+            return ctcDock.buildDockScriptTag({
+                assetUrl: file.load({ id: ctcDock.DOCK_ASSET_PATH }).url,
+                anchorUrl: softphoneUrl,
+                popupName: ctcEntity.SOFTPHONE_POPUP_NAME,
+                popupOptions: ctcEntity.SOFTPHONE_POPUP_OPTIONS
+            });
+        } catch (e) {
+            log.error({ title: 'CTC UE — Failed to load dock script file', details: e.message || e });
+            return '';
+        }
     };
 
     /**

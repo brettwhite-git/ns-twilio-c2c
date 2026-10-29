@@ -7,7 +7,7 @@
  * Receives phone, entityId, entityName as URL parameters.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_entity'], (url, runtime, log, file, search, ctcHtml, ctcEntity) => {
+define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock'], (url, runtime, log, file, search, ctcHtml, ctcEntity, ctcDock) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs = ctcHtml.escapeJs;
@@ -1922,12 +1922,68 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             return d;
         }
 
+        // --- Telephony Dock bus host ---
+        // This popup is the anchor: the only window with audio and call
+        // state. Dock tabs (lib/ctc_dock_client.js) mirror it over a
+        // BroadcastChannel. They send 'hello' (asks for a snapshot) and
+        // 'request' (mute / unmute / hangup); only this window changes call
+        // state. Message shapes: see BUS_CHANNEL in lib/ctc_dock.js.
+        var DOCK_PHASE_BY_PILL = {
+            '': 'ready', connecting: 'dialing', ringing: 'ringing',
+            connected: 'connected', ended: 'ready', error: 'error'
+        };
+        var dockPhase = 'offline';
+        var dockContactName = '';
+        var dockBus = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('${escapeJs(ctcDock.BUS_CHANNEL)}') : null;
+
+        function publishDock() {
+            if (!dockBus) return;
+            dockBus.postMessage({
+                v: 1,
+                type: 'snapshot',
+                snap: {
+                    phase: dockPhase,
+                    entityName: ENTITY_NAME,
+                    contactName: dockContactName,
+                    number: formatPhone(PHONE),
+                    startedAt: callStartTime,
+                    muted: !!(activeCall && activeCall.isMuted())
+                }
+            });
+        }
+
+        if (dockBus) {
+            dockBus.onmessage = function (e) {
+                var m = e.data;
+                if (!m || m.v !== 1) return;
+                if (m.type === 'hello') {
+                    publishDock();
+                } else if (m.type === 'request') {
+                    if (m.action === 'hangup') {
+                        hangUp();
+                    } else if ((m.action === 'mute' || m.action === 'unmute')
+                            && activeCall && activeCall.isMuted() !== (m.action === 'mute')) {
+                        toggleMute();
+                    }
+                }
+            };
+            window.addEventListener('pagehide', function () {
+                dockPhase = 'offline';
+                publishDock();
+            });
+        }
+
         // --- UI helpers ---
         // setStatus(text, pillClass)
         //   pillClass: '' (idle) | 'connecting' | 'ringing' | 'connected' | 'ended' | 'error'
+        //   Omitted pillClass (e.g. 'Fetching token') leaves the dock phase as is.
         function setStatus(text, pillClass) {
             statusEl.textContent = text;
             statusEl.className = 'status-pill' + (pillClass ? ' ' + pillClass : '');
+            if (pillClass !== undefined && DOCK_PHASE_BY_PILL.hasOwnProperty(pillClass)) {
+                dockPhase = DOCK_PHASE_BY_PILL[pillClass];
+                publishDock();
+            }
         }
 
         function showError(msg) {
@@ -1997,6 +2053,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 var secs = String(elapsed % 60).padStart(2, '0');
                 timerEl.textContent = mins + ':' + secs;
             }, 1000);
+            // Docks run their own timer from startedAt; send it now.
+            publishDock();
         }
 
         // Dialpad behavior:
@@ -2063,6 +2121,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             // caller — it owns SELECTED_CONTACT_ID via selectPickerPhone.
             if (!(opts && opts.fromPicker)) {
                 SELECTED_CONTACT_ID = '';
+                dockContactName = '';
             }
             // opts.resetFresh marks this call as a context-load (picker,
             // search, recents, breadcrumb, initial). Three things happen:
@@ -2608,6 +2667,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             btnMute.classList.toggle('active', muted);
             if (muteLabel) muteLabel.textContent = muted ? 'Unmute' : 'Mute';
             console.log('[CTC] Mute:', muted);
+            publishDock();
         }
 
         function hangUp() {
@@ -2967,6 +3027,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function updatePickerLabels(contactName, phoneNumber) {
             if (pickerContactName) pickerContactName.textContent = contactName || '—';
+            dockContactName = contactName || '';
             if (pickerNumberValue) pickerNumberValue.textContent = formatPhone(phoneNumber) || phoneNumber || '—';
         }
 

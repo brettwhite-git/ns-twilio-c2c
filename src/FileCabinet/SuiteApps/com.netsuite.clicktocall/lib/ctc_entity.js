@@ -37,7 +37,9 @@ define(['N/search', 'N/log'], (search, log) => {
     // VU meter added to audio overlay. Force fresh popup so reps see the
     // new meter and don't end up running JS that references the now-deleted
     // contactSelect element.
-    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v6';
+    // v7 (Telephony Dock): popup now hosts the ctc-bus BroadcastChannel.
+    // Force fresh popup so dock tabs find an anchor that answers them.
+    const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v7';
 
     /**
      * Resolve a display name from a NetSuite record by type.

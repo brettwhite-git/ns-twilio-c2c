@@ -8,5 +8,25 @@
   "env": {
     "amd": true,
     "es6": true
-  }
+  },
+  "overrides": [
+    {
+      "files": ["src/FileCabinet/SuiteApps/com.netsuite.clicktocall/lib/ctc_dock_client.js"],
+      "extends": ["eslint:recommended"],
+      "parserOptions": { "sourceType": "script" },
+      "env": { "browser": true, "amd": false },
+      "rules": {
+        "suitescript/api-version": "off",
+        "suitescript/entry-points": "off",
+        "suitescript/log-args": "off",
+        "suitescript/module-vars": "off",
+        "suitescript/no-amd-name": "off",
+        "suitescript/no-extra-modules": "off",
+        "suitescript/no-invalid-modules": "off",
+        "suitescript/no-log-module": "off",
+        "suitescript/no-module-extensions": "off",
+        "suitescript/script-type": "off"
+      }
+    }
+  ]
 }
