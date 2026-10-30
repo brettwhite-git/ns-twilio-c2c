@@ -20,7 +20,8 @@
  * The pill sits on one of eight edge points; the point is shared by every
  * tab through localStorage. In the shell the dialer panel registers through
  * window.__ctcDock.host.registerPanel() and opens on the left or right edge,
- * as tall as its content, level with the pill's row. On the left and right
+ * one fixed size for every view (PANEL_W x PANEL_H, the Search view's full
+ * size), level with the pill's row. On the left and right
  * middle points (ml, mr) the pill stands vertical.
  */
 (function () {
@@ -118,6 +119,9 @@
     var DEFAULT_CORNER = 'bc';
     var PANEL_SIDE_KEY = 'ctc-dock-panel-side';
     var PANEL_W = 380;
+    // One panel height for every view: the Search view at full size. Views
+    // that need less leave room at the bottom; views that need more scroll.
+    var PANEL_H = 620;
     var EDGE = 16;
     var BOTTOM_GAP = 24; // bottom row sits a little higher than the side margin
     var DRAG_THRESHOLD = 4;
@@ -858,10 +862,9 @@
         var s = el.style;
         s.left = b.x + 'px';
         s.width = b.w + 'px';
-        s.height = '';
-        s.maxHeight = b.avail + 'px';
+        var h = Math.min(PANEL_H, b.avail);
+        s.height = h + 'px';
         el.setAttribute('data-side', b.side);
-        var h = Math.min(el.offsetHeight, b.avail);
         var row = corner.charAt(0);
         var y = row === 'b' ? b.top + b.avail - h : row === 'm' ? b.top + (b.avail - h) / 2 : b.top;
         s.top = Math.round(y) + 'px';
@@ -1168,13 +1171,6 @@
                 p.el.classList.add('closed');
                 root.appendChild(p.el);
                 if (p.handle) bindPanelDrag(p.handle);
-                // The panel is as tall as its content: re-place it when the
-                // content changes height (tab, note, results, keypad).
-                if (typeof ResizeObserver !== 'undefined') {
-                    new ResizeObserver(function () {
-                        if (expanded && !p.el.hidden) placePanel();
-                    }).observe(p.el);
-                }
                 if (snap) render();
             }
         }

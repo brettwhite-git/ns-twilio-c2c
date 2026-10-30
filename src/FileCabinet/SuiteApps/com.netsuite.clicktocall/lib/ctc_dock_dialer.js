@@ -4,8 +4,9 @@
  * Loads after ctc_dock_client.js and, in the phone mode shell only, registers
  * the full softphone panel that opens out of the pill: Dial, Search, Recents,
  * the in-call screen, and audio settings. The panel sits on the left or right
- * screen edge, as tall as its content up to the available height (placement
- * and drag live in the client). Data
+ * screen edge at one fixed size for every view, capped by the screen; the
+ * grip in the header drags it to the other side (placement and drag live in
+ * the client). Data
  * comes from the ctc_rl_token RESTlet over same-session fetch (the same
  * actions the anchor uses). Call control and audio device changes go to the
  * anchor (the shell's hidden #ctc-phone-frame) over the dock bus: the anchor
@@ -48,14 +49,19 @@
     var STROKE = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 
     host.css([
-        // Position, width and max-height come from the client (placePanel); the
-        // height follows the content. Header and footer stay; the body scrolls
-        // when the max-height is hit. The panel is not inside .dock, so it
-        // restates the dock's font and pointer rules.
+        // Position, width and height come from the client (placePanel): one
+        // size for every view. Header and footer stay; the body fills the
+        // rest and scrolls. The panel is not inside .dock, so it restates the
+        // dock's font and pointer rules.
         '.dl{position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         '.dl.closed{opacity:0;transform:translateX(12px);pointer-events:none}',
         '.dl[data-side="l"].closed{transform:translateX(-12px)}',
-        '.dl-head{display:flex;align-items:center;gap:8px;padding:12px 14px 0;flex-shrink:0;user-select:none;-webkit-user-select:none}',
+        '.dl-head{position:relative;display:flex;align-items:center;gap:8px;padding:18px 14px 0;flex-shrink:0;cursor:grab;user-select:none;-webkit-user-select:none}',
+        '.dl-head:active{cursor:grabbing}',
+        '.dl-head button{cursor:pointer}',
+        // The grip says the panel can be dragged (same dots as the pill grip).
+        '.dl-grip{position:absolute;top:6px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(3,3px);gap:3px;pointer-events:none}',
+        '.dl-grip i{width:3px;height:3px;border-radius:999px;background:rgba(255,255,255,0.32)}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:11.5px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-status .dot{width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
         // incoming: the status dot rings like the pill dot (keyframes in the client CSS)
@@ -123,9 +129,10 @@
         '.dl-chip em{font-style:normal;margin-left:4px;opacity:0.8}',
         '.dl-sect{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
         '.dl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}',
-        // Lists scroll on their own, so a long list does not stretch the panel.
+        // Lists fill the rest of the body and scroll on their own.
         // The 3 px padding keeps the rows' focus rings inside the scroll box.
-        '.dl-results,.dl-recent-list{flex-shrink:0;max-height:360px;overflow:auto;padding:3px;margin:-3px}',
+        '.dl-view{flex:1 1 auto;min-height:0}',
+        '.dl-results,.dl-recent-list{flex:1 1 auto;min-height:0;overflow:auto;padding:3px;margin:-3px}',
         '.dl-row{width:100%;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;gap:10px;text-align:left}',
         '.dl-row:hover{background:rgba(255,255,255,0.08)}',
         '.dl-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
@@ -165,7 +172,8 @@
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-label', 'Phone');
     el.innerHTML = ''
-        + '<div class="dl-head">'
+        + '<div class="dl-head" title="Drag to move the phone">'
+        +   '<span class="dl-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>'
         +   '<span class="dl-status"><span class="dot"></span><span class="dl-status-label"></span></span>'
         +   '<span class="spacer"></span>'
         +   '<button type="button" class="dl-icon dl-gear" aria-label="Audio settings" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>'
