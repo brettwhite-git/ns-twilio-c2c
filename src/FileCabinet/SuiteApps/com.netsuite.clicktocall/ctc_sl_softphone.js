@@ -2458,6 +2458,40 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // The mic permission nudge + device list fill runs on the FIRST
         // registration only; re-registers after a token update skip it.
         var audioPrimed = false;
+        // Whether the current token lets Twilio ring this phone. An admin
+        // can turn inbound on or off while the phone is open; the device
+        // stays registered with the old grant, so a renewal that flips the
+        // grant registers again (on) or unregisters (off).
+        var incomingGranted = false;
+
+        // Reads grants.voice.incoming.allow from the JWT payload. The token
+        // is only decoded here, never trusted for anything else.
+        function tokenAllowsIncoming(token) {
+            try {
+                var part = String(token || '').split('.')[1] || '';
+                part = part.replace(/-/g, '+').replace(/_/g, '/');
+                while (part.length % 4) part += '=';
+                var payload = JSON.parse(atob(part));
+                var voice = payload && payload.grants && payload.grants.voice;
+                return !!(voice && voice.incoming && voice.incoming.allow === true);
+            } catch (e) {
+                return false;
+            }
+        }
+
+        function applyIncomingGrant(allow) {
+            if (allow === incomingGranted) return;
+            incomingGranted = allow;
+            if (!device || device.state === 'unregistered') return;
+            console.log('[CTC] Incoming grant changed to ' + allow + '; updating registration');
+            var p = device.unregister();
+            if (!allow) return;
+            Promise.resolve(p)
+                .then(function () { return device.register(); })
+                .catch(function (err) {
+                    console.error('[CTC] Re-register failed:', err && err.message);
+                });
+        }
 
         function isTokenExpiryError(err) {
             return !!err && TOKEN_EXPIRY_CODES.indexOf(Number(err.code)) !== -1;
@@ -2479,6 +2513,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     tokenRefreshInFlight = false;
                     tokenExpired = false;
                     console.log('[CTC] Token refreshed');
+                    applyIncomingGrant(tokenAllowsIncoming(result.token));
                     if (device.state === 'unregistered') {
                         console.log('[CTC] Re-registering device after token refresh');
                         var p = device.register();
@@ -2508,6 +2543,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         function initDevice(token) {
+            incomingGranted = tokenAllowsIncoming(token);
             device = new Twilio.Device(token, {
                 codecPreferences: ['opus', 'pcmu'],
                 logLevel: 1,
