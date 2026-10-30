@@ -54,14 +54,21 @@
         // rest and scrolls. The panel is not inside .dock, so it restates the
         // dock's font and pointer rules.
         '.dl{position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        // Open / close: fade + 12 px slide from the panel's edge (data-side
+        // from the client: l, r, else the row's t or b).
         '.dl.closed{opacity:0;transform:translateX(12px);pointer-events:none}',
         '.dl[data-side="l"].closed{transform:translateX(-12px)}',
+        '.dl[data-side="t"].closed{transform:translateY(-12px)}',
+        '.dl[data-side="b"].closed{transform:translateY(12px)}',
         '.dl-head{position:relative;display:flex;align-items:center;gap:8px;padding:18px 14px 0;flex-shrink:0;cursor:grab;user-select:none;-webkit-user-select:none}',
         '.dl-head:active{cursor:grabbing}',
         '.dl-head button{cursor:pointer}',
         // The grip says the panel can be dragged (same dots as the pill grip).
         '.dl-grip{position:absolute;top:6px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(3,3px);gap:3px;pointer-events:none}',
         '.dl-grip i{width:3px;height:3px;border-radius:999px;background:rgba(255,255,255,0.32)}',
+        // The status badge sits in the middle of the header, level with the
+        // gear and collapse buttons (head padding-top 18 + half of 32 px).
+        '.dl-head .dl-status{position:absolute;left:50%;top:34px;transform:translate(-50%,-50%)}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:11.5px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-status .dot{width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
         // incoming: the status dot rings like the pill dot (keyframes in the client CSS)
@@ -120,14 +127,14 @@
         '.dl-btn[aria-pressed="true"]{background:#F4C76A;color:#1F2F4D;box-shadow:0 4px 12px rgba(244,199,106,0.4)}',
         '.dl-keys[aria-pressed="true"]{background:rgba(255,255,255,0.24);color:#FFFFFF;box-shadow:none}',
         '.dl-btn[disabled]{opacity:0.4;cursor:default;box-shadow:none}',
-        '.dl-q{width:100%;height:36px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px}',
+        '.dl-q{width:100%;height:44px;flex-shrink:0;padding:0 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px}',
         '.dl-q::placeholder{color:#94A6BF}',
         '.dl-q:focus-visible{outline:2px solid #74C0FC;outline-offset:1px}',
         '.dl-chips{display:flex;flex-wrap:wrap;gap:6px}',
         '.dl-chip{padding:4px 10px;border-radius:999px;font-size:11px;color:#94A6BF;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-chip[aria-pressed="true"]{color:#FFFFFF;background:rgba(255,255,255,0.16)}',
         '.dl-chip em{font-style:normal;margin-left:4px;opacity:0.8}',
-        '.dl-sect{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
+        '.dl-sect{text-align:center;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
         '.dl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}',
         // Lists fill the rest of the body and scroll on their own.
         // The 3 px padding keeps the rows' focus rings inside the scroll box.
@@ -159,7 +166,7 @@
         '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
         '.dl-audio-msg{text-align:left;padding:0}',
         '.dl-exit{align-self:flex-start;margin-top:8px}',
-        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot{animation:none}.dl.closed,.dl[data-side="l"].closed{transform:none}}'
+        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot{animation:none}.dl.closed,.dl[data-side].closed{transform:none}}'
     ].join('\n'));
 
     // --- Markup (static; data goes in with textContent) ---

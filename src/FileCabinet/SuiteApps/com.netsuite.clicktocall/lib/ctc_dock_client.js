@@ -19,10 +19,11 @@
  *
  * The pill sits on one of eight edge points; the point is shared by every
  * tab through localStorage. In the shell the dialer panel registers through
- * window.__ctcDock.host.registerPanel() and opens on the left or right edge,
- * one fixed size for every view (PANEL_W x PANEL_H, the Search view's full
- * size), level with the pill's row. On the left and right
- * middle points (ml, mr) the pill stands vertical.
+ * window.__ctcDock.host.registerPanel() and opens on the pill's point, one
+ * fixed size for every view (PANEL_W x PANEL_H, the Search view's full
+ * size). Pill and panel are one unit: dragging the panel's header snaps it
+ * to one of the same eight points, and the pill comes back there. On the
+ * left and right middle points (ml, mr) the pill stands vertical.
  */
 (function () {
     'use strict';
@@ -117,7 +118,6 @@
     var CORNER_KEY = 'ctc-dock-pos';
     var CORNERS = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br'];
     var DEFAULT_CORNER = 'bc';
-    var PANEL_SIDE_KEY = 'ctc-dock-panel-side';
     var PANEL_W = 380;
     // One panel height for every view: the Search view at full size. Views
     // that need less leave room at the bottom; views that need more scroll.
@@ -128,8 +128,17 @@
     var FLICK_SPEED = 0.11; // px/ms
     var FLICK_PROJECT_MS = 200;
     var SETTLE = '300ms cubic-bezier(0.32, 0.72, 0, 1)';
+    var SETTLE_MS = 320; // SETTLE plus a frame
+    var RUBBER = 0.3; // past the screen edge a dragged panel moves at 0.3 of the pointer, slowing to a stop
+    var LIFT = 0.02; // lifted panel: scale 1.02
+    var ENTER_MS = 260;
+    var ENTER_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+    var ENTER_SHIFT = 6; // px the pill travels in from its edge
     var PANEL_FADE_MS = 200;
     var HELLO_TIMEOUT_MS = 600;
+    // Shell: the phone frame loads after the dock. While it boots (up to
+    // this long) a silent bus means "starting", not "offline".
+    var SHELL_BOOT_MS = 15000;
     var PING_INTERVAL_MS = 15000;
     var ACTIVE = { dialing: true, ringing: true, connected: true };
     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -237,7 +246,15 @@
         '.key.end{background:#EE6E5C}',
         '.key.end:hover{background:#D85440}',
         '.key[disabled]{opacity:0.4;cursor:default}',
-        '@media (prefers-reduced-motion: reduce){.card,button{transition:opacity 200ms linear}.card.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot{animation:none}}'
+
+        /* dialer panel (.card.dl, ctc_dock_dialer.js) while dragged: the open /
+           close fade keeps transform; the drag moves translate and lifts with
+           scale (1.02, eased in) and a deeper shadow; .settling glides
+           translate to the snap point. */
+        '.card.dl{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out}',
+        '.card.dl.settling{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out,translate ' + SETTLE + '}',
+        '.card.dl.lifted{scale:' + (1 + LIFT) + ';box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 24px 56px rgba(15,27,48,0.36)}',
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button{transition:opacity 200ms linear}.card.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot{animation:none}}'
     ].join('\n');
 
     var HTML = ''
@@ -289,8 +306,14 @@
     var pos = { x: 0, y: 0 };
     var drag = null;
     var panelDrag = null;
+    var panelSettleTimer = null;
     var panelHideTimer = null;
     var suppressClick = false;
+    var panelSuppressClick = false;
+    var entering = false; // the pill's entrance runs (no size ease meanwhile)
+    var enterTimer = null;
+    var gotSnapshot = false; // the anchor (or another tab's) answered at least once
+    var mountedAt = 0;
     var timerId = null;
     var orientTimer = null; // pending vertical/horizontal switch after a snap
     // Last settled pill size along its long axis (width when horizontal,
@@ -343,24 +366,9 @@
         }
     }
 
-    // The pill moved. A pill on the left or right edge also takes the panel
-    // to that side (the rep's latest choice wins).
+    // The pill (or the panel, which shares its point) moved.
     function saveCorner(c) {
         try { window.localStorage.setItem(CORNER_KEY, c); } catch (e) { /* private mode */ }
-        var col = c.charAt(1);
-        if (col === 'l' || col === 'r') savePanelSide(col);
-    }
-
-    function readPanelSide() {
-        try {
-            var s = window.localStorage.getItem(PANEL_SIDE_KEY);
-            if (s === 'l' || s === 'r') return s;
-        } catch (e) { /* private mode */ }
-        return corner.charAt(1) === 'l' ? 'l' : 'r';
-    }
-
-    function savePanelSide(s) {
-        try { window.localStorage.setItem(PANEL_SIDE_KEY, s); } catch (e) { /* private mode */ }
     }
 
     function reduced() { return !!(reducedMotion && reducedMotion.matches); }
@@ -427,6 +435,7 @@
         // it on a stale view.
         if (panel && snap) panel.render(snap);
 
+        var wasHidden = dockEl.hidden;
         if (mode === 'outside') renderOutside();
         else if (!snap) dockEl.hidden = true;
         else {
@@ -434,7 +443,31 @@
             renderCard();
             setExpanded(expanded, false);
         }
+        // First show on this page (load, login, after the lock check):
+        // the entrance, at the pill's final size and place.
+        if (wasHidden && !dockEl.hidden) enter();
         fitPill();
+    }
+
+    // Entrance: 260 ms fade + scale 0.96 -> 1 + a few px in from the pill's
+    // edge, on the pill itself (the dock's transform holds its place).
+    // Reduced motion: fade only. Called only when the dock goes from hidden
+    // to shown, so in-shell re-renders and cross-tab moves never run it.
+    function enter() {
+        if (vchipEl.hidden || typeof vchipEl.animate !== 'function') return;
+        // Middle points come in from their side, the rest from their row's edge.
+        var row = corner.charAt(0);
+        var dx = row !== 'm' ? 0 : corner.charAt(1) === 'l' ? -ENTER_SHIFT : ENTER_SHIFT;
+        var dy = row === 't' ? -ENTER_SHIFT : row === 'b' ? ENTER_SHIFT : 0;
+        var from = reduced()
+            ? { opacity: 0 }
+            : { opacity: 0, transform: 'translate(' + dx + 'px,' + dy + 'px) scale(0.96)' };
+        var to = reduced() ? { opacity: 1 } : { opacity: 1, transform: 'none' };
+        vchipEl.getAnimations().forEach(function (a) { a.cancel(); });
+        vchipEl.animate([from, to], { duration: ENTER_MS, easing: ENTER_EASE });
+        entering = true;
+        window.clearTimeout(enterTimer);
+        enterTimer = window.setTimeout(function () { entering = false; }, ENTER_MS);
     }
 
     function renderOutside() {
@@ -619,7 +652,7 @@
         if (!shown) { pillFit.size = 0; return; }
         var to = vert ? vchipEl.offsetHeight : vchipEl.offsetWidth;
         pillFit = { vert: vert, size: to };
-        if (!from || from === to || reduced()) {
+        if (!from || from === to || reduced() || entering) {
             if (from !== to) place(false);
             return;
         }
@@ -836,38 +869,95 @@
         }
     }
 
-    // Panel: 380 px wide, 16 px from the left or right screen edge, as tall
-    // as its content but no taller than the area from the safe top to 24 px
-    // above the bottom (avail).
-    function panelBox() {
+    // Panel size: 380 x 620, capped by the screen (16 px each side, safe
+    // top to 24 px above the bottom).
+    function panelSize() {
+        var avail = Math.max(0, window.innerHeight - safeTop() - BOTTOM_GAP);
+        return { w: Math.min(PANEL_W, window.innerWidth - 2 * EDGE), h: Math.min(PANEL_H, avail) };
+    }
+
+    // Panel placement at snap point `c`, by the pill's rule: column l / c / r
+    // at the left edge, centred, right edge; row t at the safe top, m centred
+    // in the area between, b 24 px above the bottom.
+    function panelXY(c, size) {
         var top = safeTop();
-        var w = Math.min(PANEL_W, window.innerWidth - 2 * EDGE);
-        var side = readPanelSide();
+        var bottom = window.innerHeight - size.h - BOTTOM_GAP;
+        var col = c.charAt(1);
+        var row = c.charAt(0);
         return {
-            side: side,
-            x: side === 'l' ? EDGE : window.innerWidth - w - EDGE,
-            top: top,
-            w: w,
-            avail: Math.max(0, window.innerHeight - top - BOTTOM_GAP)
+            x: col === 'l' ? EDGE : col === 'r' ? window.innerWidth - size.w - EDGE : (window.innerWidth - size.w) / 2,
+            y: row === 't' ? top : row === 'b' ? bottom : Math.max(top, (top + bottom) / 2)
         };
     }
 
-    // Vertical position follows the pill's row: top row at the safe top,
-    // middle row centred in the available area, bottom row 24 px above the
-    // bottom. Call with the panel shown (it reads the panel's height).
+    // Snap point whose panel placement is nearest to the panel centre (cx, cy).
+    function nearestPanelCorner(cx, cy, size) {
+        var best = DEFAULT_CORNER;
+        var bestD = Infinity;
+        CORNERS.forEach(function (c) {
+            var xy = panelXY(c, size);
+            var dx = xy.x + size.w / 2 - cx;
+            var dy = xy.y + size.h / 2 - cy;
+            var d = dx * dx + dy * dy;
+            if (d < bestD) { bestD = d; best = c; }
+        });
+        return best;
+    }
+
+    // The panel at the pill's point, settled (no drag offset). left / top
+    // hold the settled place; a drag and its settle move only `translate`.
+    // data-side: the edge the open / close slide comes from (l, r, else
+    // the row's t or b).
     function placePanel() {
         if (!panel || (panelDrag && panelDrag.moved)) return;
-        var b = panelBox();
         var el = panel.el;
         var s = el.style;
-        s.left = b.x + 'px';
-        s.width = b.w + 'px';
-        var h = Math.min(PANEL_H, b.avail);
-        s.height = h + 'px';
-        el.setAttribute('data-side', b.side);
-        var row = corner.charAt(0);
-        var y = row === 'b' ? b.top + b.avail - h : row === 'm' ? b.top + (b.avail - h) / 2 : b.top;
-        s.top = Math.round(y) + 'px';
+        var size = panelSize();
+        var xy = panelXY(corner, size);
+        stopPanelSettle();
+        s.translate = '';
+        s.width = size.w + 'px';
+        s.height = size.h + 'px';
+        s.left = Math.round(xy.x) + 'px';
+        s.top = Math.round(xy.y) + 'px';
+        var col = corner.charAt(1);
+        el.setAttribute('data-side', col === 'c' ? corner.charAt(0) : col);
+    }
+
+    function stopPanelSettle() {
+        window.clearTimeout(panelSettleTimer);
+        panelSettleTimer = null;
+        if (panel) panel.el.classList.remove('settling');
+    }
+
+    // The panel's drag offset as drawn now (mid-settle too).
+    function panelOffset() {
+        var t = window.getComputedStyle(panel.el).translate;
+        var parts = !t || t === 'none' ? [] : t.split(' ');
+        return { x: parseFloat(parts[0]) || 0, y: parseFloat(parts[1]) || 0 };
+    }
+
+    // Rubber band: past [lo, hi] the panel moves at RUBBER of the pointer at
+    // first and never more than `room` px (it stays on the screen).
+    function rubber(v, lo, hi, room) {
+        if (v >= lo && v <= hi) return v;
+        var over = v < lo ? lo - v : v - hi;
+        var d = room > 0 ? room * (1 - 1 / (over * RUBBER / room + 1)) : 0;
+        return v < lo ? lo - d : hi + d;
+    }
+
+    // Flick: how far a release throws ahead (px). The pointer's speed over
+    // its last 100 ms of moves, projected FLICK_PROJECT_MS on, when faster
+    // than FLICK_SPEED. A pointer held still before release throws nothing.
+    function flick(samples, e) {
+        var first = samples[0];
+        var last = samples[samples.length - 1];
+        var now = e.timeStamp || Date.now();
+        if (!first || !last || last.t <= first.t || now - last.t > 100) return { x: 0, y: 0 };
+        var vx = (last.x - first.x) / (last.t - first.t);
+        var vy = (last.y - first.y) / (last.t - first.t);
+        if (Math.sqrt(vx * vx + vy * vy) <= FLICK_SPEED) return { x: 0, y: 0 };
+        return { x: vx * FLICK_PROJECT_MS, y: vy * FLICK_PROJECT_MS };
     }
 
     // --- Drag (pill only) ---
@@ -915,21 +1005,8 @@
         suppressClick = true;
         dockEl.classList.remove('lifted');
 
-        var w = dockEl.offsetWidth;
-        var h = dockEl.offsetHeight;
-        var cx = pos.x + w / 2;
-        var cy = pos.y + h / 2;
-        var first = d.samples[0];
-        var last = d.samples[d.samples.length - 1];
-        if (first && last && last.t > first.t) {
-            var vx = (last.x - first.x) / (last.t - first.t);
-            var vy = (last.y - first.y) / (last.t - first.t);
-            if (Math.sqrt(vx * vx + vy * vy) > FLICK_SPEED) {
-                cx += vx * FLICK_PROJECT_MS;
-                cy += vy * FLICK_PROJECT_MS;
-            }
-        }
-        corner = nearestCorner(cx, cy);
+        var fl = flick(d.samples, e);
+        corner = nearestCorner(pos.x + dockEl.offsetWidth / 2 + fl.x, pos.y + dockEl.offsetHeight / 2 + fl.y);
         saveCorner(corner);
         place(true);
     }
@@ -968,47 +1045,95 @@
     vMain.addEventListener('keydown', onArrow);
     vDecline.addEventListener('keydown', onArrow);
 
-    // --- Drag (panel header): snaps to the nearer screen side ---
+    // --- Drag (panel header) ---
+    // Moves 1:1 with the pointer on both axes (translate only), lifted;
+    // rubber-bands at the screen edge; on release snaps to the nearest of
+    // the pill's eight points (a flick projects ahead like the pill's) and
+    // the pill takes that point. Header buttons never start a drag. A new
+    // press mid-settle catches the panel where it is drawn.
     function bindPanelDrag(handle) {
         var el = panel.el;
         handle.style.touchAction = 'none';
         handle.addEventListener('pointerdown', function (e) {
+            panelSuppressClick = false;
             if (e.button !== 0 || panelDrag) return;
             if (e.target.closest && e.target.closest('button, a, input, select')) return;
-            panelDrag = { id: e.pointerId, x0: e.clientX, left0: parseFloat(el.style.left) || 0, dx: 0, moved: false };
+            var off = panelOffset();
+            stopPanelSettle();
+            el.style.translate = off.x + 'px ' + off.y + 'px';
+            panelDrag = {
+                id: e.pointerId, x0: e.clientX, y0: e.clientY,
+                left: parseFloat(el.style.left) || 0, top: parseFloat(el.style.top) || 0,
+                ox: off.x, oy: off.y, x: off.x, y: off.y, moved: false, samples: []
+            };
             handle.setPointerCapture(e.pointerId);
         });
         handle.addEventListener('pointermove', function (e) {
-            if (!panelDrag || e.pointerId !== panelDrag.id) return;
-            var dx = e.clientX - panelDrag.x0;
-            if (!panelDrag.moved && Math.abs(dx) <= DRAG_THRESHOLD) return;
-            panelDrag.moved = true;
-            panelDrag.dx = dx;
-            el.style.transition = 'none';
-            el.style.translate = Math.round(dx) + 'px';
+            var d = panelDrag;
+            if (!d || e.pointerId !== d.id) return;
+            var dx = e.clientX - d.x0;
+            var dy = e.clientY - d.y0;
+            if (!d.moved && Math.sqrt(dx * dx + dy * dy) <= DRAG_THRESHOLD) return;
+            if (!d.moved) {
+                d.moved = true;
+                if (!reduced()) el.classList.add('lifted');
+            }
+            // Bounds: the snap points' extremes. Room past them: the gap to
+            // the screen edge (above the safe top at most EDGE) less what the
+            // lift adds on each side.
+            var size = panelSize();
+            var grow = reduced() ? 0 : LIFT / 2;
+            var top = safeTop();
+            var rawY = d.top + d.oy + dy;
+            var roomY = (rawY < top ? Math.min(EDGE, top) : BOTTOM_GAP) - size.h * grow;
+            var x = rubber(d.left + d.ox + dx, EDGE, window.innerWidth - size.w - EDGE, EDGE - size.w * grow);
+            var y = rubber(rawY, top, window.innerHeight - size.h - BOTTOM_GAP, roomY);
+            d.x = x - d.left;
+            d.y = y - d.top;
+            el.style.translate = Math.round(d.x) + 'px ' + Math.round(d.y) + 'px';
+            var now = e.timeStamp || Date.now();
+            d.samples.push({ x: e.clientX, y: e.clientY, t: now });
+            while (d.samples.length > 2 && now - d.samples[0].t > 100) d.samples.shift();
         });
         function end(e) {
-            if (!panelDrag || e.pointerId !== panelDrag.id) return;
             var d = panelDrag;
+            if (!d || e.pointerId !== d.id) return;
             panelDrag = null;
             try { handle.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
             if (!d.moved) return;
-            var now = d.left0 + d.dx;
-            var side = now + el.offsetWidth / 2 < window.innerWidth / 2 ? 'l' : 'r';
-            savePanelSide(side);
-            var b = panelBox();
-            // Jump to the new side with an offset that keeps the panel where it
-            // is on screen, then settle the offset to zero.
-            el.style.transition = 'none';
+            // The browser sends the release's click in this same task; no
+            // click (cancel, pointer off the page) must not eat the next one.
+            panelSuppressClick = true;
+            window.setTimeout(function () { panelSuppressClick = false; }, 0);
+            el.classList.remove('lifted');
+
+            var size = panelSize();
+            var vx0 = d.left + d.x; // where it was let go
+            var vy0 = d.top + d.y;
+            var fl = flick(d.samples, e);
+            corner = nearestPanelCorner(vx0 + size.w / 2 + fl.x, vy0 + size.h / 2 + fl.y, size);
+            saveCorner(corner);
+            place(false); // the hidden pill takes the point (and its shape there)
+            // Settle: left / top jump to the target while translate keeps the
+            // panel where it was let go, then translate glides to zero.
             placePanel();
-            el.style.translate = Math.round(now - b.x) + 'px';
-            void el.offsetWidth;
-            if (!reduced()) el.style.transition = 'translate ' + SETTLE;
-            el.style.translate = '0px';
-            window.setTimeout(function () { el.style.transition = ''; }, 320);
+            el.style.translate = Math.round(vx0 - (parseFloat(el.style.left) || 0)) + 'px '
+                + Math.round(vy0 - (parseFloat(el.style.top) || 0)) + 'px';
+            if (reduced()) { el.style.translate = ''; return; }
+            void el.offsetWidth; // commit the start so the glide runs
+            el.classList.add('settling');
+            el.style.translate = '0px 0px';
+            panelSettleTimer = window.setTimeout(stopPanelSettle, SETTLE_MS);
         }
         handle.addEventListener('pointerup', end);
         handle.addEventListener('pointercancel', end);
+        // The click that ends a drag clicks nothing (capture phase).
+        handle.addEventListener('click', function (e) {
+            if (!panelSuppressClick) return;
+            panelSuppressClick = false;
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }, true);
     }
 
     // --- Actions ---
@@ -1054,18 +1179,23 @@
         var m = e.data;
         if (!m || m.v !== 1 || m.type !== 'snapshot' || !m.snap) return;
         window.clearTimeout(helloTimer);
+        gotSnapshot = true;
         snap = m.snap;
         render();
     };
 
     // Ask the anchor for a snapshot. No answer means no anchor: the anchor's
     // own 'offline' message on pagehide is not always delivered (crash,
-    // killed tab), so silence is the reliable signal.
+    // killed tab), so silence is the reliable signal. Except in a shell that
+    // just loaded: its phone frame is still starting (it speaks first when
+    // ready), so the pill shows 'starting' instead of flashing 'offline'.
     function hello() {
         bus.postMessage({ v: 1, type: 'hello' });
         window.clearTimeout(helloTimer);
         helloTimer = window.setTimeout(function () {
-            if (!snap || snap.phase !== 'offline') { snap = { phase: 'offline' }; render(); }
+            var booting = mode === 'shell' && !gotSnapshot && Date.now() - mountedAt < SHELL_BOOT_MS;
+            var phase = booting ? 'starting' : 'offline';
+            if (!snap || snap.phase !== phase) { snap = { phase: phase }; render(); }
         }, HELLO_TIMEOUT_MS);
     }
 
@@ -1100,7 +1230,6 @@
 
     // --- Sync and resize ---
     window.addEventListener('storage', function (e) {
-        if (e.key === PANEL_SIDE_KEY && expanded) { placePanel(); return; }
         if (e.key !== CORNER_KEY || CORNERS.indexOf(e.newValue) === -1) return;
         corner = e.newValue;
         place(true);
@@ -1178,6 +1307,7 @@
 
     function mount() {
         document.body.appendChild(host);
+        mountedAt = Date.now();
         if (mode === 'outside') checkLock(maybeAutoEnter);
         hello();
         window.setInterval(function () {
