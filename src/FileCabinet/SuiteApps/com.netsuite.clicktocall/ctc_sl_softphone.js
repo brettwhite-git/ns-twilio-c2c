@@ -364,6 +364,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
         .status-pill.connecting { color: #F4C76A; }
         .status-pill.ringing { color: #F4C76A; }
+        .status-pill.incoming { color: #14B981; }
         .status-pill.connected { color: #14B981; }
         .status-pill.ended { color: var(--phone-text-faint); }
         .status-pill.error { color: #FCA5A5; }
@@ -1786,15 +1787,25 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // This popup is the anchor: the only window with audio and call
         // state. Dock tabs (lib/ctc_dock_client.js) mirror it over a
         // BroadcastChannel. They send 'hello' (asks for a snapshot) and
-        // 'request' (mute / unmute / hangup); only this window changes call
-        // state. Message shapes: see BUS_CHANNEL in lib/ctc_dock.js.
+        // 'request' (mute / unmute / hangup / answer / decline); only this
+        // window changes call state. Message shapes: see BUS_CHANNEL in
+        // lib/ctc_dock.js.
         var DOCK_PHASE_BY_PILL = {
             '': 'ready', connecting: 'dialing', ringing: 'ringing',
+            incoming: '${escapeJs(ctcDock.PHASE_INCOMING)}',
             connected: 'connected', ended: 'ready', error: 'error'
         };
         var dockPhase = 'starting';
         var dockContactName = '';
         var dockLastLog = null;
+        // Inbound spike. pendingInbound: the one ringing inbound call (not
+        // answered yet). callDirection: 'outbound' | 'inbound' for the
+        // current or last call. dockCaller: { number, name, entityId,
+        // entityType } of the inbound caller (name / entity after lookup).
+        var pendingInbound = null;
+        var callDirection = 'outbound';
+        var dockCaller = null;
+        var screenPopDone = false;
         var dockBus = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('${escapeJs(ctcDock.BUS_CHANNEL)}') : null;
 
         function publishDock() {
@@ -1804,6 +1815,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 type: 'snapshot',
                 snap: {
                     phase: dockPhase,
+                    direction: callDirection,
+                    caller: dockCaller,
                     entityId: ENTITY_ID,
                     entityType: ENTITY_TYPE,
                     entityName: ENTITY_NAME,
@@ -1851,7 +1864,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // tells the dock nothing changed.
         function dockSetInput(id) {
             id = String(id || '');
-            if (activeCall || !device || !device.audio
+            if (activeCall || pendingInbound || !device || !device.audio
                     || !device.audio.availableInputDevices.has(id)) { publishDock(); return; }
             inputSelect.value = id;
             applyInputDevice(id);
@@ -1860,7 +1873,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function dockSetOutput(id) {
             id = String(id || '');
-            if (activeCall || !device || !device.audio
+            if (activeCall || pendingInbound || !device || !device.audio
                     || !device.audio.availableOutputDevices.has(id)) { publishDock(); return; }
             outputSelect.value = id;
             applyOutputDevice(id);
@@ -1906,6 +1919,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         if (activeCall && /^[0-9*#]$/.test(String(m.d))) appendDialDigit(String(m.d));
                     } else if (m.action === 'hangup') {
                         hangUp();
+                    } else if (m.action === '${escapeJs(ctcDock.REQUEST_ANSWER)}') {
+                        answerInbound();
+                    } else if (m.action === '${escapeJs(ctcDock.REQUEST_DECLINE)}') {
+                        declineInbound();
                     } else if (m.action === 'setInput') {
                         dockSetInput(m.id);
                     } else if (m.action === 'setOutput') {
@@ -1924,7 +1941,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         // --- UI helpers ---
         // setStatus(text, pillClass)
-        //   pillClass: '' (idle) | 'connecting' | 'ringing' | 'connected' | 'ended' | 'error'
+        //   pillClass: '' (idle) | 'connecting' | 'ringing' | 'incoming' | 'connected' | 'ended' | 'error'
         //   Omitted pillClass (e.g. 'Fetching token') leaves the dock phase as is.
         function setStatus(text, pillClass) {
             statusEl.textContent = text;
@@ -2212,7 +2229,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 entityType: ENTITY_TYPE,
                 contactId: SELECTED_CONTACT_ID,
                 phone: PHONE,
-                duration: duration
+                duration: duration,
+                direction: callDirection,
+                callerName: callDirection === 'inbound' && dockCaller ? dockCaller.name : ''
             });
             logCallPending = true;
 
@@ -2492,7 +2511,17 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             device = new Twilio.Device(token, {
                 codecPreferences: ['opus', 'pcmu'],
                 logLevel: 1,
-                tokenRefreshMs: TOKEN_REFRESH_MS
+                tokenRefreshMs: TOKEN_REFRESH_MS,
+                // Inbound spike: one call at a time. A second inbound call
+                // while busy is not offered to this phone. The SDK's own
+                // incoming ringtone plays (default sounds).
+                allowIncomingWhileBusy: false
+            });
+
+            // Fires only when the token grants incoming (config
+            // custrecord_ctc_inbound_enabled).
+            device.on('incoming', function (call) {
+                onIncoming(call);
             });
 
             device.on('tokenWillExpire', function () {
@@ -2502,8 +2531,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
             device.on('registered', function () {
                 console.log('[CTC] Device registered');
-                // Never reset the view or status of a live call.
-                if (!activeCall) {
+                // Never reset the view or status of a live or ringing call.
+                if (!activeCall && !pendingInbound) {
                     setStatus('Ready to call', '');
                     setButtons(true, false, false);
                     setCallView('idle');
@@ -2578,10 +2607,65 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         });
 
         // --- Call management ---
+        // Accept / disconnect / error for a call in either direction. After
+        // accept both directions share the same in-call path (timer, mute,
+        // hangup, after-call log).
+        function wireCall(call) {
+            call.on('accept', function () {
+                console.log('[CTC] Call accepted');
+                setStatus('Connected', 'connected');
+                setButtons(false, true, true);
+                startTimer();
+            });
+
+            call.on('disconnect', function () {
+                console.log('[CTC] Call disconnected');
+                if (pendingInbound === call) pendingInbound = null;
+                var callSid = call.parameters ? call.parameters.CallSid : '';
+                var duration = callStartTime ? Math.floor((Date.now() - callStartTime) / 1000) : 0;
+                activeCall = null;
+                resetTimer();
+                setStatus('Call ended \\u2014 ready to redial', 'ended');
+                setButtons(true, false, false);
+                setCallView('idle');
+                btnMute.classList.remove('active');
+                if (muteLabel) muteLabel.textContent = 'Mute';
+                if (device && device.audio) device.audio.unsetInputDevice();
+
+                if (!callSid || duration <= 0) {
+                    // Never connected (no answer / busy / declined) — nothing to log.
+                    return;
+                }
+                if (duration < MIN_LOG_DURATION_SECONDS) {
+                    // Connected but too brief for Twilio to transcribe. Skip logging.
+                    logStatusEl.textContent = 'Call too brief to log (' + duration + 's)';
+                    logStatusEl.className = 'log-status';
+                    setDockLog('skipped', 'Call too brief to log');
+                    return;
+                }
+                logCallToNetSuite(callSid, duration);
+            });
+
+            call.on('error', function (err) {
+                console.error('[CTC] Call error:', err.message);
+                showError('Call error: ' + err.message);
+                if (pendingInbound === call) pendingInbound = null;
+                activeCall = null;
+                resetTimer();
+                setStatus('Error', 'error');
+                setButtons(true, false, false);
+                setCallView('idle');
+                btnMute.classList.remove('active');
+                if (muteLabel) muteLabel.textContent = 'Mute';
+            });
+        }
+
         function makeCall() {
-            if (!device || activeCall) return;
+            if (!device || activeCall || pendingInbound) return;
             clearError();
             dockLastLog = null;
+            callDirection = 'outbound';
+            dockCaller = null;
             setStatus('Connecting\\u2026', 'connecting');
             setButtons(false, false, false);
             setCallView('active');
@@ -2599,51 +2683,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     setButtons(false, false, true);
                 });
 
-                call.on('accept', function () {
-                    console.log('[CTC] Call accepted');
-                    setStatus('Connected', 'connected');
-                    setButtons(false, true, true);
-                    startTimer();
-                });
-
-                call.on('disconnect', function () {
-                    console.log('[CTC] Call disconnected');
-                    var callSid = call.parameters ? call.parameters.CallSid : '';
-                    var duration = callStartTime ? Math.floor((Date.now() - callStartTime) / 1000) : 0;
-                    activeCall = null;
-                    resetTimer();
-                    setStatus('Call ended \\u2014 ready to redial', 'ended');
-                    setButtons(true, false, false);
-                    setCallView('idle');
-                    btnMute.classList.remove('active');
-                    if (muteLabel) muteLabel.textContent = 'Mute';
-                    if (device && device.audio) device.audio.unsetInputDevice();
-
-                    if (!callSid || duration <= 0) {
-                        // Never connected (no answer / busy / declined) — nothing to log.
-                        return;
-                    }
-                    if (duration < MIN_LOG_DURATION_SECONDS) {
-                        // Connected but too brief for Twilio to transcribe. Skip logging.
-                        logStatusEl.textContent = 'Call too brief to log (' + duration + 's)';
-                        logStatusEl.className = 'log-status';
-                        setDockLog('skipped', 'Call too brief to log');
-                        return;
-                    }
-                    logCallToNetSuite(callSid, duration);
-                });
-
-                call.on('error', function (err) {
-                    console.error('[CTC] Call error:', err.message);
-                    showError('Call error: ' + err.message);
-                    activeCall = null;
-                    resetTimer();
-                    setStatus('Error', 'error');
-                    setButtons(true, false, false);
-                    setCallView('idle');
-                    btnMute.classList.remove('active');
-                    if (muteLabel) muteLabel.textContent = 'Mute';
-                });
+                wireCall(call);
 
                 call.on('cancel', function () {
                     console.log('[CTC] Call cancelled');
@@ -2675,8 +2715,145 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function hangUp() {
             if (activeCall) {
                 activeCall.disconnect();
+            } else if (pendingInbound) {
+                declineInbound();
             } else if (device) {
                 device.disconnectAll();
+            }
+        }
+
+        // --- Inbound (spike) ---
+        // Twilio rings this phone's identity (Studio "Connect Call To" the
+        // client). One pending call; the dock shows Answer / Decline over
+        // the bus. Answer runs the same in-call path as outbound (wireCall).
+        function callerLabel() {
+            return (dockCaller && (dockCaller.name || dockCaller.number)) || 'unknown number';
+        }
+
+        function inboundEnded(status, message) {
+            setStatus('Ready to call', '');
+            setButtons(true, false, false);
+            setCallView('idle');
+            setDockLog(status, message);
+        }
+
+        function onIncoming(call) {
+            if (activeCall || pendingInbound) {
+                try { call.reject(); } catch (err) { console.error('[CTC] reject failed', err); }
+                return;
+            }
+            var from = String((call.parameters && call.parameters.From) || '');
+            console.log('[CTC] Incoming call');
+            pendingInbound = call;
+            callDirection = 'inbound';
+            screenPopDone = false;
+            dockCaller = { number: formatPhone(from) || from, name: '', entityId: '', entityType: '' };
+            dockLastLog = null;
+            clearError();
+            ENTITY_ID = '';
+            ENTITY_NAME = '';
+            ENTITY_TYPE = '';
+            window.__CTC_ENTITY_TYPE__ = '';
+            SELECTED_CONTACT_ID = '';
+            dockContactName = '';
+            setDialedNumber(from, { resetFresh: true, fromPicker: true });
+
+            // Caller hung up, or Studio's ring timeout ended the dial.
+            call.on('cancel', function () {
+                if (pendingInbound !== call) return;
+                console.log('[CTC] Incoming call cancelled');
+                pendingInbound = null;
+                inboundEnded('missed', 'Missed call from ' + callerLabel());
+            });
+            call.on('reject', function () {
+                if (pendingInbound !== call) return;
+                pendingInbound = null;
+                inboundEnded('skipped', 'Declined call from ' + callerLabel());
+            });
+            wireCall(call);
+
+            setStatus('Incoming call', 'incoming');
+            setButtons(false, false, false);
+            lookupCaller(from, call);
+        }
+
+        function answerInbound() {
+            if (!pendingInbound || activeCall) { publishDock(); return; }
+            var call = pendingInbound;
+            pendingInbound = null;
+            activeCall = call;
+            setStatus('Answering\\u2026');
+            setButtons(false, false, true);
+            setCallView('active');
+            if (typeof stopMicMeter === 'function') stopMicMeter();
+            try {
+                call.accept();
+            } catch (err) {
+                console.error('[CTC] accept failed', err);
+                activeCall = null;
+                showError('Answer failed: ' + (err && err.message));
+                inboundEnded('error', 'Could not answer the call');
+                return;
+            }
+            screenPop();
+        }
+
+        function declineInbound() {
+            if (!pendingInbound) { publishDock(); return; }
+            var call = pendingInbound;
+            pendingInbound = null;
+            try { call.reject(); } catch (err) { console.error('[CTC] reject failed', err); }
+            inboundEnded('skipped', 'Declined call from ' + callerLabel());
+        }
+
+        // Match the caller to a record (RESTlet lookupCaller). The answer
+        // may land while ringing or after Answer; it is dropped when that
+        // call is already gone.
+        function lookupCaller(from, call) {
+            if (!from) return;
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'lookupCaller', phone: from })
+            })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var m = data && data.match;
+                if (!m || (call !== pendingInbound && call !== activeCall)) return;
+                ENTITY_ID = String(m.entityId || '');
+                ENTITY_NAME = String(m.name || '');
+                ENTITY_TYPE = String(m.entityType || '');
+                window.__CTC_ENTITY_TYPE__ = ENTITY_TYPE;
+                SELECTED_CONTACT_ID = String(m.contactId || '');
+                dockContactName = String(m.contactName || '');
+                dockCaller = {
+                    number: dockCaller ? dockCaller.number : from,
+                    name: ENTITY_NAME,
+                    entityId: ENTITY_ID,
+                    entityType: ENTITY_TYPE
+                };
+                publishDock();
+                if (call === activeCall) {
+                    screenPop();
+                    if (typeof loadAccountSnapshot === 'function' && ENTITY_TYPE !== 'contact') loadAccountSnapshot(ENTITY_ID);
+                }
+            })
+            .catch(function (err) { console.log('[CTC] Caller lookup failed: ' + (err && err.message)); });
+        }
+
+        // Screen-pop: ask the phone mode shell (this frame's parent) to open
+        // the matched record in the NetSuite frame. Once per call.
+        function screenPop() {
+            if (screenPopDone || !ENTITY_ID || window.parent === window) return;
+            screenPopDone = true;
+            try {
+                window.parent.postMessage({
+                    v: 1,
+                    type: '${escapeJs(ctcDock.OPEN_RECORD_MESSAGE)}',
+                    path: clientResolveEntityUrl(ENTITY_TYPE, ENTITY_ID)
+                }, window.location.origin);
+            } catch (err) {
+                console.error('[CTC] Screen-pop failed', err);
             }
         }
 

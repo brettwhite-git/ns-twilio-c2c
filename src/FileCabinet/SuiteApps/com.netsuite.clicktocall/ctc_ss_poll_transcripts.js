@@ -185,12 +185,14 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
 
     const recreatePhoneCallFromOrphan = (orphan) => {
         const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
-        phoneCall.setValue({ fieldId: 'title', value: 'Call to ' + (orphan.phone || 'unknown') });
+        const inbound = orphan.direction === 'inbound';
+        phoneCall.setValue({ fieldId: 'title', value: (inbound ? 'Inbound call from ' : 'Call to ') + (orphan.phone || 'unknown') });
         phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
         phoneCall.setValue({ fieldId: 'phone', value: orphan.phone || '' });
         phoneCall.setValue({ fieldId: 'custevent_ctc_call_sid', value: orphan.callSid });
         phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
         phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
+        if (inbound) phoneCall.setValue({ fieldId: 'custevent_ctc_inbound', value: true });
 
         // Sprint 2 review #3 — wire userId → assigned + restore
         // duration. Without these, recreated Phone Calls have no rep
@@ -268,7 +270,7 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         // forge a row with stolen callSid + attacker userId +
         // target entityId, and we would obligingly create a
         // Phone Call from it — reopening Sprint 1's CRIT-2.
-        const auth = callOwnership.verifyCallOwnership(orphan.callSid, orphan.userId);
+        const auth = callOwnership.verifyCallOwnership(orphan.callSid, orphan.userId, orphan.direction);
         if (!auth.ok) {
             log.audit({
                 title: 'CTC Orphan rejected — verifyCallOwnership failed',

@@ -170,6 +170,10 @@
         '.vchip[data-muted="true"] .v-dot{background:#F4C76A;box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
         '.vchip[data-stage="starting"] .v-dot{animation:ctc-breathe 1.2s ease-in-out infinite alternate}',
         '@keyframes ctc-breathe{from{opacity:0.4}to{opacity:1}}',
+        /* incoming: a soft ring that grows out of the dot and fades (ease-out).
+           Only the dot moves; reduced motion keeps a still halo. */
+        '.vchip[data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px rgba(20,185,129,0.30);animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-ring{0%{box-shadow:0 0 0 0 rgba(20,185,129,0.55)}70%,100%{box-shadow:0 0 0 7px rgba(20,185,129,0)}}',
         /* each shape shows only its own words / timer */
         '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
         '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
@@ -185,14 +189,20 @@
         '.v-mute[aria-pressed="true"]{background:#F4C76A}',
         '.v-mute[aria-pressed="true"] svg{stroke:#1F2F4D}',
         '.v-main{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
-        '.v-main.call{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
+        '.v-main.call,.v-main.answer{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
+        '.v-main.answer:hover{background:#0E9E6D}',
+        /* incoming: Decline (coral, like End) before Answer; vertical puts it under Answer */
+        '.v-decline{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
+        '.v-decline:hover{background:#D85440}',
+        '.v-decline svg{transform:rotate(135deg)}',
+        '.dock.vert .v-decline{order:1}',
         '.v-main.end{background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
         '.v-main.end:hover{background:#D85440}',
         '.v-main.end svg{transform:rotate(135deg)}',
         '.v-main.offline{background:#F4F2EE}',
         '.v-main.retry{width:36px;height:36px;border-radius:12px;background:#FCE9E7}',
         '.v-ico{display:none}',
-        '.v-main.call .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
+        '.v-main.call .ico-call,.v-main.answer .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
         /* offline / error: light pill */
         '.vchip.light{background:#FFFFFF;border:1px solid #E5E2DD;box-shadow:0 6px 16px rgba(22,21,19,0.08)}',
         '.vchip.light .v-grip i{background:#D9D5CF}',
@@ -223,7 +233,7 @@
         '.key.end{background:#EE6E5C}',
         '.key.end:hover{background:#D85440}',
         '.key[disabled]{opacity:0.4;cursor:default}',
-        '@media (prefers-reduced-motion: reduce){.card,button{transition:opacity 200ms linear}.card.closed{transform:none}button:active{transform:none}.vchip .v-dot{animation:none}}'
+        '@media (prefers-reduced-motion: reduce){.card,button{transition:opacity 200ms linear}.card.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot{animation:none}}'
     ].join('\n');
 
     var HTML = ''
@@ -238,6 +248,9 @@
         +     '</button>'
         +     '<button type="button" class="v-mute" aria-label="Mute" aria-pressed="false">'
         +       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_MIC + '</svg>'
+        +     '</button>'
+        +     '<button type="button" class="v-decline" aria-label="Decline call" hidden>'
+        +       '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>'
         +     '</button>'
         +     '<button type="button" class="v-main call">'
         +       '<svg class="v-ico ico-call" width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>'
@@ -305,6 +318,7 @@
     var vSs = $('.v-ss');
     var vMute = $('.v-mute');
     var vMain = $('.v-main');
+    var vDecline = $('.v-decline');
     var cardEl = $('.card');
     var cardTop = $('.card-top');
     var avatarEl = $('.avatar');
@@ -399,6 +413,7 @@
         ready: { dot: '#94A6BF', label: 'Phone ready' }, // aria-label only: the ready pill has no text
         dialing: { dot: '#F4C76A', label: 'Calling…' },
         ringing: { dot: '#F4C76A', label: 'Ringing…' },
+        incoming: { dot: '#14B981', label: 'Incoming call' },
         connected: { dot: '#14B981', label: 'Connected' }
     };
     var ARROWS_HINT = ' Arrow keys move the dock.';
@@ -452,6 +467,28 @@
 
         dockEl.hidden = false;
         dockEl.style.setProperty('--dot', view.dot);
+        if (phase === 'incoming') {
+            // Ringing in: Decline + Answer, here and in a mirror tab (the
+            // anchor answers; the audio plays in the tab that holds the phone).
+            var who = callerText();
+            var words0 = pillWords(phase, mirror, active);
+            renderPill({
+                stage: phase,
+                dot: true,
+                main: 'answer',
+                mainLabel: 'Answer call from ' + who,
+                decline: true,
+                declineLabel: 'Decline call from ' + who,
+                label: 'Incoming call from ' + who + '. Open phone.' + ARROWS_HINT,
+                title: 'Incoming call from ' + who,
+                l1: words0.l1,
+                l2: words0.l2
+            });
+            setOrient();
+            tick();
+            if (timerId) { window.clearInterval(timerId); timerId = null; }
+            return;
+        }
         // Tooltip text. Ready: dot + green phone button only, no label.
         var chipText = active ? name : (!mirror && phase === 'ready' ? '' : idleLabel);
         var label = active
@@ -485,9 +522,17 @@
         return snap.entityName || snap.contactName || snap.number || 'Call';
     }
 
+    // Inbound caller: matched name, else the number in display form.
+    function callerText() {
+        var c = (snap && snap.caller) || {};
+        var number = c.number || (snap && snap.number) || '';
+        return c.name || formatPhone(number) || number || 'Unknown caller';
+    }
+
     // Horizontal pill words (two lines; '' = line not shown). The vertical
-    // pill shows none. Wrap-up and incoming stages slot in here later.
+    // pill shows none. A wrap-up stage slots in here later.
     function pillWords(phase, mirror, active) {
+        if (phase === 'incoming') return { l1: 'Incoming call', l2: callerText() };
         var number = active ? formatPhone(snap.number) || snap.number || '' : '';
         var name = active ? snap.entityName || snap.contactName || number || 'Call' : '';
         if (mirror) return { l1: 'Phone open in another tab', l2: name };
@@ -506,7 +551,9 @@
     // The pill, both shapes. Grip, status dot, words + timer (horizontal) or
     // timer as mm over ss (vertical), Mute while connected, main button last.
     //   main: 'call' (open phone) | 'end' (hang up) | 'offline' (open phone)
-    //         | 'retry' (open phone) | null (no button: starting, mirror idle)
+    //         | 'retry' (open phone) | 'answer' (incoming) | null (no button:
+    //         starting, mirror idle)
+    //   decline: the Decline button before main (incoming only); declineLabel its aria-label
     // The body button opens the phone / call card. When the main button does
     // that same thing, the body leaves the tab order so keyboard users meet
     // one control per action.
@@ -532,8 +579,10 @@
         vMute.querySelector('svg').innerHTML = o.muted ? ICON_MIC_OFF : ICON_MIC;
         vMain.hidden = !o.main;
         vMain.className = 'v-main' + (o.main ? ' ' + o.main : '');
-        vMain.setAttribute('aria-label', o.main === 'end' ? 'End call' : o.label);
-        var bodyIsMain = o.main && o.main !== 'end';
+        vMain.setAttribute('aria-label', o.mainLabel || (o.main === 'end' ? 'End call' : o.label));
+        vDecline.hidden = !o.decline;
+        vDecline.setAttribute('aria-label', o.declineLabel || 'Decline call');
+        var bodyIsMain = o.main && o.main !== 'end' && o.main !== 'answer';
         vBody.tabIndex = bodyIsMain ? -1 : 0;
         if (bodyIsMain) {
             vBody.removeAttribute('aria-label');
@@ -914,6 +963,7 @@
     }
     vBody.addEventListener('keydown', onArrow);
     vMain.addEventListener('keydown', onArrow);
+    vDecline.addEventListener('keydown', onArrow);
 
     // --- Drag (panel header): snaps to the nearer screen side ---
     function bindPanelDrag(handle) {
@@ -980,8 +1030,10 @@
     });
     vMain.addEventListener('click', function () {
         if (vMain.classList.contains('end')) send('hangup');
+        else if (vMain.classList.contains('answer')) send('answer');
         else openFromPill();
     });
+    vDecline.addEventListener('click', function () { send('decline'); });
     vMute.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
     cardTop.addEventListener('click', function () {
         setExpanded(false, false);

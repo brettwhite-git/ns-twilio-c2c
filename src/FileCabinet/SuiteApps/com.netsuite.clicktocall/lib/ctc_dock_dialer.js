@@ -34,6 +34,7 @@
         ready: { dot: '#94A6BF', label: 'Ready to call' },
         dialing: { dot: '#F4C76A', label: 'Calling…' },
         ringing: { dot: '#F4C76A', label: 'Ringing…' },
+        incoming: { dot: '#14B981', label: 'Incoming call' },
         connected: { dot: '#14B981', label: 'Connected' }
     };
     var KEYS = [
@@ -57,6 +58,8 @@
         '.dl-head{display:flex;align-items:center;gap:8px;padding:12px 14px 0;flex-shrink:0;user-select:none;-webkit-user-select:none}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:11.5px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-status .dot{width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
+        // incoming: the status dot rings like the pill dot (keyframes in the client CSS)
+        '.dl[data-phase="incoming"] .dl-status .dot{animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
         '.dl-icon{width:32px;height:32px;border-radius:10px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-icon:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
         '.dl-icon[aria-pressed="true"]{background:rgba(255,255,255,0.12);color:#FFFFFF}',
@@ -149,7 +152,7 @@
         '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
         '.dl-audio-msg{text-align:left;padding:0}',
         '.dl-exit{align-self:flex-start;margin-top:8px}',
-        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl.closed,.dl[data-side="l"].closed{transform:none}}'
+        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot{animation:none}.dl.closed,.dl[data-side="l"].closed{transform:none}}'
     ].join('\n'));
 
     // --- Markup (static; data goes in with textContent) ---
@@ -230,9 +233,11 @@
         +     '<div class="dl-pad dl-dtmf" hidden>' + keyHtml + '</div>'
         +   '</div>'
         +   '<div class="dl-foot">'
-        +     '<span class="dl-act"><button type="button" class="dl-btn dl-mute" aria-label="Mute" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '>' + ICON_MIC + '</svg></button><span class="dl-mute-label">MUTE</span></span>'
-        +     '<span class="dl-act"><button type="button" class="dl-btn big end dl-end" aria-label="End call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>END</span>'
-        +     '<span class="dl-act"><button type="button" class="dl-btn dl-keys" aria-label="Show keypad" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '><circle cx="6" cy="5" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="18" cy="5" r="1"></circle><circle cx="6" cy="11" r="1"></circle><circle cx="12" cy="11" r="1"></circle><circle cx="18" cy="11" r="1"></circle><circle cx="6" cy="17" r="1"></circle><circle cx="12" cy="17" r="1"></circle><circle cx="18" cy="17" r="1"></circle><circle cx="12" cy="22" r="1"></circle></svg></button>KEYPAD</span>'
+        +     '<span class="dl-act dl-ring-act" hidden><button type="button" class="dl-btn big end dl-decline" aria-label="Decline call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>DECLINE</span>'
+        +     '<span class="dl-act dl-ring-act" hidden><button type="button" class="dl-btn big call dl-answer" aria-label="Answer call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg></button>ANSWER</span>'
+        +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn dl-mute" aria-label="Mute" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '>' + ICON_MIC + '</svg></button><span class="dl-mute-label">MUTE</span></span>'
+        +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn big end dl-end" aria-label="End call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>END</span>'
+        +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn dl-keys" aria-label="Show keypad" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '><circle cx="6" cy="5" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="18" cy="5" r="1"></circle><circle cx="6" cy="11" r="1"></circle><circle cx="12" cy="11" r="1"></circle><circle cx="18" cy="11" r="1"></circle><circle cx="6" cy="17" r="1"></circle><circle cx="12" cy="17" r="1"></circle><circle cx="18" cy="17" r="1"></circle><circle cx="12" cy="22" r="1"></circle></svg></button>KEYPAD</span>'
         +   '</div>'
         + '</div>'
         // Audio settings (gear)
@@ -265,6 +270,7 @@
         liveAv: q('.dl-live-av'), liveName: q('.dl-live-name'), liveSub: q('.dl-live-sub'), liveTime: q('.dl-live-time'),
         liveTiles: q('.dl-live-tiles'), liveBal: q('.dl-live-bal'), liveOpps: q('.dl-live-opps'),
         dtmf: q('.dl-dtmf'), mute: q('.dl-mute'), muteLabel: q('.dl-mute-label'), end: q('.dl-end'), keys: q('.dl-keys'),
+        answer: q('.dl-answer'), decline: q('.dl-decline'), ringActs: qa('.dl-ring-act'), callActs: qa('.dl-call-act'),
         head: q('.dl-head'), audio: q('.dl-audio-wrap'), audioBack: q('.dl-audio-back'), audioMsg: q('.dl-audio-msg'),
         inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit')
     };
@@ -344,6 +350,7 @@
     }
 
     function isActive() { return !!(snap && ACTIVE[snap.phase]); }
+    function isIncoming() { return !!(snap && snap.phase === 'incoming'); }
 
     // --- Tabs ---
     function setTab(next) {
@@ -671,9 +678,21 @@
 
     var liveFor = null;
     function renderLive() {
+        var incoming = isIncoming();
         var number = formatPhone(snap.number) || snap.number || '';
         var name = snap.entityName || snap.contactName || number || 'Call';
         var sub = [snap.entityName && snap.contactName ? snap.contactName : '', number].filter(function (x) { return x && x !== name; }).join(' · ');
+        if (incoming) {
+            // Ringing in: caller name (after lookup) or number, Answer / Decline.
+            var c = snap.caller || {};
+            number = formatPhone(c.number || snap.number) || c.number || number;
+            name = c.name || number || 'Unknown caller';
+            sub = ['Incoming call', number !== name ? number : ''].filter(function (x) { return x; }).join(' · ');
+        }
+        ui.ringActs.forEach(function (a) { a.hidden = !incoming; });
+        ui.callActs.forEach(function (a) { a.hidden = incoming; });
+        ui.answer.setAttribute('aria-label', 'Answer call from ' + name);
+        ui.decline.setAttribute('aria-label', 'Decline call from ' + name);
         ui.liveAv.textContent = initials(name);
         ui.liveName.textContent = name;
         ui.liveSub.textContent = sub;
@@ -706,6 +725,8 @@
 
     ui.mute.addEventListener('click', function () { host.send(snap && snap.muted ? 'unmute' : 'mute'); });
     ui.end.addEventListener('click', function () { host.send('hangup'); });
+    ui.answer.addEventListener('click', function () { host.send('answer'); });
+    ui.decline.addEventListener('click', function () { host.send('decline'); });
     ui.keys.addEventListener('click', function () {
         var show = ui.dtmf.hidden;
         ui.dtmf.hidden = !show;
@@ -835,6 +856,7 @@
         var view = PHASE_VIEW[phase];
         if (pending && phase !== 'ready' && !ACTIVE[phase]) view = PHASE_VIEW.starting;
         el.style.setProperty('--dl-dot', view.dot);
+        el.setAttribute('data-phase', phase);
         ui.statusLabel.textContent = view.label;
 
         // A kept dial request goes out as soon as the anchor is ready.
@@ -854,11 +876,13 @@
             followContext(later);
         }
         wasActive = active;
-        ui.idle.hidden = audioOpen || active;
-        ui.live.hidden = audioOpen || !active;
+        // Incoming shows the live view too (caller + Answer / Decline).
+        var live = active || isIncoming();
+        ui.idle.hidden = audioOpen || live;
+        ui.live.hidden = audioOpen || !live;
         ui.audio.hidden = !audioOpen;
         if (audioOpen) renderAudio();
-        if (active) {
+        if (live) {
             renderLive();
             // A new call: its lastLog shows even if it reads like the last one.
             hideNote();
@@ -879,6 +903,7 @@
 
     function focusPanel(what) {
         if (audioOpen) { ui.audioBack.focus(); return; }
+        if (isIncoming()) { ui.answer.focus(); return; }
         if (isActive()) { ui.end.focus(); return; }
         if (what === 'call' && tab === 'dial' && !ui.call.disabled) { ui.call.focus(); return; }
         if (tab === 'search') ui.query.focus();

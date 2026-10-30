@@ -137,7 +137,8 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             softphoneUrl: o.softphoneUrl || '',
             signInUrl: '/app/center/card.nl',
             lockName: ctcDock.PHONE_LOCK_NAME,
-            exitKey: ctcDock.EXIT_KEY
+            exitKey: ctcDock.EXIT_KEY,
+            openRecordType: ctcDock.OPEN_RECORD_MESSAGE
         };
         return `<!DOCTYPE html>
 <html lang="en">
@@ -210,7 +211,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     },
     exit: function () {}
   };
-  var ACTIVE = { dialing: 1, ringing: 1, connected: 1 };
+  var ACTIVE = { incoming: 1, dialing: 1, ringing: 1, connected: 1 };
 
   var nsFrame = document.getElementById('ctc-ns-frame');
   var phoneFrame = document.getElementById('ctc-phone-frame');
@@ -374,6 +375,23 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   } else {
     logEvent('navigation api missing', 'NetSuite menu clicks will leave phone mode');
   }
+
+  // ---- Screen-pop (inbound) ----
+  // After Answer on a matched caller the phone frame asks to open the record
+  // in the NetSuite frame. Accepted only from #ctc-phone-frame, same origin,
+  // and only an entity record path with a numeric id.
+  var RECORD_PATH = /^[/]app[/]common[/]entity[/](custjob|contact)[.]nl[?]id=[0-9]+$/;
+  window.addEventListener('message', function (ev) {
+    var m = ev && ev.data;
+    if (!m || m.v !== 1 || m.type !== CFG.openRecordType) return;
+    if (ev.origin !== location.origin || ev.source !== phoneFrame.contentWindow) return;
+    if (typeof m.path !== 'string' || !RECORD_PATH.test(m.path)) {
+      logEvent('screen-pop refused', tail(m.path));
+      return;
+    }
+    logEvent('screen-pop', m.path);
+    nsFrame.src = m.path;
+  });
 
   // ---- Call-aware guard ----
   function onBeforeUnload(e) {

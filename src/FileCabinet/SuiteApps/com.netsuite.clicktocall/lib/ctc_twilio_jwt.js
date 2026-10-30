@@ -32,6 +32,8 @@ define(['N/crypto', 'N/encode'], (crypto, encode) => {
      * @param {string} options.twimlAppSid  - TwiML Application SID (AP...)
      * @param {string} options.identity     - User identity (employee ID or username)
      * @param {number} [options.ttl=3600]   - Token lifetime in seconds
+     * @param {boolean} [options.incomingAllow=false] - Let Twilio ring this
+     *        identity (inbound calls). Off: today's outbound-only grant.
      * @returns {string} JWT token string
      */
     const generateAccessToken = (options) => {
@@ -41,7 +43,8 @@ define(['N/crypto', 'N/encode'], (crypto, encode) => {
             apiSecretId,
             twimlAppSid,
             identity,
-            ttl = 3600
+            ttl = 3600,
+            incomingAllow = false
         } = options;
 
         const now = Math.floor(Date.now() / 1000);
@@ -64,7 +67,7 @@ define(['N/crypto', 'N/encode'], (crypto, encode) => {
                 identity: identity,
                 voice: {
                     outgoing: { application_sid: twimlAppSid },
-                    incoming: { allow: false }
+                    incoming: { allow: incomingAllow === true }
                 }
             }
         };

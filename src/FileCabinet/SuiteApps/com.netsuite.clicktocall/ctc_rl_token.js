@@ -41,6 +41,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         if (body.action === 'approveProposedTask')  return approveProposedTask(body);
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
+        if (body.action === 'lookupCaller')         return lookupCaller(body);
 
         return generateToken(body);
     };
@@ -68,7 +69,10 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 apiKeySid:   config.apiKeySid,
                 apiSecretId: config.apiSecretId,
                 twimlAppSid: config.twimlAppSid,
-                identity:    identity
+                identity:    identity,
+                // Inbound spike: Twilio may ring this identity only when the
+                // config record turns inbound on.
+                incomingAllow: config.inboundEnabled === true
             });
 
             return { token: token, phoneNumber: config.phoneNumber };
@@ -76,6 +80,21 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             log.error({ title: 'CTC Token Generation Failed', details: e.message || e });
             return { error: 'Token generation failed' };
         }
+    };
+
+    /**
+     * Inbound spike: match the caller's number to a record for the ring UI
+     * and the screen-pop. The rep's own book wins (see
+     * workspaceQueries.lookupCallerByPhone).
+     * @param {Object} body
+     * @param {string} body.phone - caller number as Twilio sent it (E.164)
+     * @returns {Object} { match: {entityId, entityType, name, contactName, contactId, inBook} | null } or { error, match: null }
+     */
+    const lookupCaller = (body) => {
+        return workspaceQueries.lookupCallerByPhone({
+            userId: runtime.getCurrentUser().id,
+            phone: body.phone
+        });
     };
 
     // Minimum call duration (seconds) before we create a Phone Call record.
@@ -191,6 +210,19 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     };
 
     /**
+     * Name for an inbound Phone Call title: the matched record's name the
+     * softphone sends (plain text, capped, control characters removed),
+     * else the caller's number.
+     * @param {Object} body
+     * @returns {string}
+     */
+    const inboundTitleName = (body) => {
+        // eslint-disable-next-line no-control-regex
+        const name = String(body.callerName || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 120);
+        return name || body.phone || 'unknown';
+    };
+
+    /**
      * Create a Phone Call record immediately after call ends.
      * @param {Object} body
      * @returns {Object} { success, recordId, duplicate? } or { error }
@@ -232,8 +264,12 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             // we create a Phone Call record from it. Pre-fix, any internal
             // user could POST arbitrary callSid + entityId combinations and
             // forge activity records against any customer/contact/lead.
+            // Inbound spike: a call Twilio rang in to this rep's phone.
+            // verifyCallOwnership checks the Twilio leg's `to` is this
+            // rep's client identity instead of the outbound `from` rules.
+            const inbound = body.direction === 'inbound';
             const userId = runtime.getCurrentUser().id;
-            const auth = verifyCallOwnership(body.callSid, userId);
+            const auth = verifyCallOwnership(body.callSid, userId, inbound ? 'inbound' : 'outbound');
             if (!auth.ok) {
                 log.audit({
                     title: 'CTC logCall — verification rejected',
@@ -245,7 +281,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
 
             const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
 
-            phoneCall.setValue({ fieldId: 'title', value: 'Call to ' + (body.phone || 'unknown') });
+            phoneCall.setValue({ fieldId: 'title', value: inbound
+                ? 'Inbound call from ' + inboundTitleName(body)
+                : 'Call to ' + (body.phone || 'unknown') });
             phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
             phoneCall.setValue({ fieldId: 'phone', value: body.phone || '' });
             // Sprint 2 review ORPHAN-B — set assigned=userId. Without
@@ -260,6 +298,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: duration });
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
+            if (inbound) phoneCall.setValue({ fieldId: 'custevent_ctc_inbound', value: true });
 
             // Numeric-id guard: Phone Call's `company` and `contact` fields
             // require numeric record IDs. NetSuite sometimes injects sentinel

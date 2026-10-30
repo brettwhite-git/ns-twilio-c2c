@@ -229,18 +229,18 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                     'custevent_ctc_ai_brief',
                     'custevent_ctc_satisfaction',
                     'custevent_ctc_duration',
-                    'custevent_ctc_call_status'
+                    'custevent_ctc_call_status',
+                    'custevent_ctc_inbound'
                 ]
             }).run().getRange({ start: 0, end: limit });
 
             const rows = results.map((r) => {
                 const duration = parseInt(r.getValue('custevent_ctc_duration'), 10) || 0;
                 const callStatus = r.getValue('custevent_ctc_call_status') || '';
-                // Iteration B Phase 5: direction is always 'outbound' for now —
-                // CTC is outbound-only per CLAUDE.md / no-inbound-MVP scope. When
-                // inbound lands, derive from a Phone Call field (is_outgoing or
-                // a new custevent). 'missed' is a UI-only derived state for the
-                // Recents tab — inbound + duration === 0 once inbound exists.
+                // Direction from custevent_ctc_inbound (inbound spike): T for
+                // calls the rep answered in the phone, else outbound. Missed
+                // inbound calls are not logged as Phone Calls in the spike.
+                const inbound = r.getValue('custevent_ctc_inbound');
                 return {
                     id: r.id,
                     date: r.getValue('startdate') || '',
@@ -257,8 +257,8 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                     satisfaction: parseInt(r.getValue('custevent_ctc_satisfaction'), 10) || null,
                     duration: duration,
                     callStatus: callStatus,
-                    direction: 'outbound',
-                    isMissed: false, // duration === 0 once inbound calls exist
+                    direction: (inbound === true || inbound === 'T') ? 'inbound' : 'outbound',
+                    isMissed: false,
                     entityType: ''
                 };
             });
@@ -1058,6 +1058,106 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         }
     };
 
+    // ─── Inbound spike — caller match ──────────────────────────────────────
+
+    const personName = (first, last) => (String(first || '') + ' ' + String(last || '')).trim();
+
+    /**
+     * Match an inbound caller number to a customer / prospect / lead or a
+     * contact. Compares the last 10 digits (fewer when the number is
+     * shorter) with non-digits stripped on both sides (REGEXP_REPLACE in
+     * SuiteQL). A match in the rep's book (getBookCustomerIds) wins over
+     * one outside it; a contact counts as in the book when its company is.
+     * A contact with a company returns the company as the entity and the
+     * contact as contactName / contactId (same shape logCall takes).
+     *
+     * @param {{userId?: string|number, phone?: string}} [params]
+     * @returns {{match: ({entityId: string, entityType: string, name: string,
+     *            contactName: string, contactId: string, inBook: boolean}|null), error?: string}}
+     */
+    const lookupCallerByPhone = (params) => {
+        const p = params || {};
+        const raw = String(p.phone || '');
+        const digits = raw.replace(/[^0-9]/g, '');
+        if (raw.length > 32 || digits.length < 7 || digits.length > 15) {
+            return { error: 'invalid_phone', match: null };
+        }
+        const key = digits.slice(-10);
+        const n = key.length; // 7..10, from the checks above: safe to inline
+        const tail = (col) => 'SUBSTR(REGEXP_REPLACE(' + col + ", '[^0-9]', ''), -" + n + ')';
+
+        try {
+            const book = {};
+            getBookCustomerIds({ userId: p.userId }).forEach((id) => { book[String(id)] = true; });
+
+            const candidates = [];
+
+            const customerSql =
+                'SELECT c.id AS id, c.companyname AS companyname, c.firstname AS firstname, ' +
+                '       c.lastname AS lastname, c.stage AS stage ' +
+                'FROM customer c ' +
+                "WHERE c.isInactive = 'F' " +
+                "  AND c.stage IN ('CUSTOMER', 'PROSPECT', 'LEAD') " +
+                '  AND (' + tail('c.phone') + ' = ? OR ' + tail('c.altphone') + ' = ?) ' +
+                'FETCH FIRST 20 ROWS ONLY';
+            query.runSuiteQL({ query: customerSql, params: [key, key] }).asMappedResults().forEach((r) => {
+                const id = String(r.id);
+                candidates.push({
+                    entityId: id,
+                    entityType: STAGE_TO_WIRE[String(r.stage || '').toUpperCase()] || 'customer',
+                    name: r.companyname || personName(r.firstname, r.lastname),
+                    contactName: '',
+                    contactId: '',
+                    inBook: !!book[id]
+                });
+            });
+
+            const contactSql =
+                'SELECT ct.id AS id, ct.firstname AS firstname, ct.lastname AS lastname, ' +
+                '       ct.company AS company, c.companyname AS companyname, c.stage AS stage ' +
+                'FROM contact ct ' +
+                'LEFT JOIN customer c ON c.id = ct.company ' +
+                "WHERE ct.isInactive = 'F' " +
+                '  AND (' + tail('ct.phone') + ' = ? OR ' + tail('ct.mobilephone') + ' = ? OR ' +
+                tail('ct.homephone') + ' = ?) ' +
+                'FETCH FIRST 20 ROWS ONLY';
+            query.runSuiteQL({ query: contactSql, params: [key, key, key] }).asMappedResults().forEach((r) => {
+                const contactName = personName(r.firstname, r.lastname);
+                const companyId = r.company ? String(r.company) : '';
+                if (companyId && r.stage) {
+                    candidates.push({
+                        entityId: companyId,
+                        entityType: STAGE_TO_WIRE[String(r.stage).toUpperCase()] || 'customer',
+                        name: r.companyname || contactName,
+                        contactName: contactName,
+                        contactId: String(r.id),
+                        inBook: !!book[companyId]
+                    });
+                } else {
+                    candidates.push({
+                        entityId: String(r.id),
+                        entityType: 'contact',
+                        name: contactName,
+                        contactName: '',
+                        contactId: '',
+                        inBook: false
+                    });
+                }
+            });
+
+            // Book first; inside each group the query order holds
+            // (customer-level numbers before contact numbers).
+            const match = candidates.filter((c) => c.inBook)[0] || candidates[0] || null;
+            return { match: match };
+        } catch (e) {
+            log.error({
+                title: 'CTC lookupCallerByPhone Failed',
+                details: 'name=' + (e && e.name) + ' message=' + (e && e.message)
+            });
+            return { error: 'Lookup failed', match: null };
+        }
+    };
+
     return {
         extractText,
         loadHistoryRows,
@@ -1078,6 +1178,8 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         computeReportKpis,
         countCalls,
         getRepPhoneNumber,
-        REPORT_PREVIOUS_RANGE
+        REPORT_PREVIOUS_RANGE,
+        // Inbound spike — caller match
+        lookupCallerByPhone
     };
 });

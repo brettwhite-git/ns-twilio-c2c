@@ -72,14 +72,22 @@ define(['N/search', 'N/log', './ctc_config', './ctc_twilio_admin'],
      *       fallback for installs that haven't set up per-rep
      *       assignments yet
      *
+     * Inbound (direction === 'inbound', spike): Twilio rang the browser
+     * phone, so the callSid is the leg Twilio dialed to the client. Its
+     * `to` is `client:<identity>` and its `from` is the outside caller.
+     * The only accepted binding is `to === client:<userId>` (CRIT-1 ties
+     * the identity to the session user). The outbound rules above are not
+     * used for inbound, and inbound rules are never used for outbound.
+     *
      * Returns { ok: true, call } or { ok: false, reason: <CODE>, ... }.
      * Never throws.
      *
      * @param {string} callSid
      * @param {string|number} userId
-     * @returns {{ok:true, call:object} | {ok:false, reason:string, callFrom?:string, twilioStatus?:number}}
+     * @param {string} [direction] - 'inbound' for a call Twilio rang in; anything else = outbound
+     * @returns {{ok:true, call:object} | {ok:false, reason:string, callFrom?:string, callTo?:string, twilioStatus?:number}}
      */
-    const verifyCallOwnership = (callSid, userId) => {
+    const verifyCallOwnership = (callSid, userId, direction) => {
         if (!callSid || typeof callSid !== 'string' ||
             !/^CA[a-zA-Z0-9]{32}$/.test(callSid)) {
             return { ok: false, reason: 'INVALID_CALLSID_FORMAT' };
@@ -105,6 +113,21 @@ define(['N/search', 'N/log', './ctc_config', './ctc_twilio_admin'],
         }
 
         const callFrom = String((twilioResult.call && twilioResult.call.from) || '');
+        const expectedClientIdentity = 'client:' + String(userId);
+
+        if (direction === 'inbound') {
+            const callTo = String((twilioResult.call && twilioResult.call.to) || '');
+            if (callTo === expectedClientIdentity) {
+                return { ok: true, call: twilioResult.call };
+            }
+            log.audit({
+                title: 'CTC verifyCallOwnership — inbound callee mismatch',
+                details: 'callSid=' + callSid + ' userId=' + userId +
+                         ' callTo=' + callTo +
+                         ' expectedClient=' + expectedClientIdentity
+            });
+            return { ok: false, reason: 'NOT_CALL_OWNER', callTo: callTo };
+        }
 
         // For outbound WebRTC calls, Twilio's `from` is the calling
         // client's JWT identity in the form `client:<identity>` — not
@@ -112,7 +135,6 @@ define(['N/search', 'N/log', './ctc_config', './ctc_twilio_admin'],
         // `callerId="+15551234567"` on its <Dial>. We accept either
         // path; see ctc_rl_token.js original implementation comments
         // for the full reasoning.
-        const expectedClientIdentity = 'client:' + String(userId);
         if (callFrom === expectedClientIdentity) {
             return { ok: true, call: twilioResult.call };
         }

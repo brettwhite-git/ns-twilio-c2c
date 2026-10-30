@@ -20,13 +20,17 @@ define(['N/search'], (search) => {
      * Load the singleton CTC configuration record.
      * @returns {Object} {
      *     accountSid, apiKeySid, apiSecretId,
-     *     twimlAppSid, phoneNumber, intelServiceSid, active
+     *     twimlAppSid, phoneNumber, intelServiceSid, active, inboundEnabled
      * }
      *
      * `active` defaults to false. Phone-button UE gates on this in U9 — until
      * the wizard flips it, the phone icon stays hidden on fresh customer
      * installs. Back-compat: U9 treats unset+populated-config as true so
      * existing installs don't lose the icon at deploy time.
+     *
+     * `inboundEnabled` defaults to false. When true, the RESTlet's token
+     * grant allows incoming calls to the rep's client identity (inbound
+     * spike). Outbound-only installs keep today's grant.
      *
      * @throws {Error} if no active config record exists
      */
@@ -41,7 +45,8 @@ define(['N/search'], (search) => {
                 'custrecord_ctc_twiml_app_sid',
                 'custrecord_ctc_phone_number',
                 'custrecord_ctc_intel_service_sid',
-                'custrecord_ctc_active'
+                'custrecord_ctc_active',
+                'custrecord_ctc_inbound_enabled'
             ]
         }).run().getRange({ start: 0, end: 1 });
 
@@ -58,7 +63,9 @@ define(['N/search'], (search) => {
             phoneNumber:       r.getValue('custrecord_ctc_phone_number'),
             intelServiceSid:   r.getValue('custrecord_ctc_intel_service_sid'),
             active:            r.getValue('custrecord_ctc_active') === true
-                            || r.getValue('custrecord_ctc_active') === 'T'
+                            || r.getValue('custrecord_ctc_active') === 'T',
+            inboundEnabled:    r.getValue('custrecord_ctc_inbound_enabled') === true
+                            || r.getValue('custrecord_ctc_inbound_enabled') === 'T'
         };
     };
 

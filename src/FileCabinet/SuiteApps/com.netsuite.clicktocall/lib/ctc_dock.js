@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '9';
+    const DOCK_ASSET_VERSION = '10';
 
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
     // shell's #ctc-phone-frame) and every dock. Message shapes (all carry v: 1):
@@ -33,10 +33,22 @@ define(['./ctc_html'], (ctcHtml) => {
     //                  { type: 'request', action: 'digits', d }
     //                  { type: 'request', action: 'dial', to, entityId, entityName, entityType, contactId, contactName }
     //                  { type: 'request', action: 'setInput' | 'setOutput', id }  (refused during a call)
-    //   anchor → docks: { type: 'snapshot', snap: { phase, entityId, entityType, entityName,
-    //                     contactName, number, startedAt, muted, lastLog, audio } }
-    // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'connected' | 'error'
-    // lastLog: null | { status: 'saved' | 'skipped' | 'error', message, recordUrl }
+    //                  { type: 'request', action: 'answer' | 'decline' }  (only while phase is 'incoming')
+    //   anchor → docks: { type: 'snapshot', snap: { phase, direction, caller, entityId, entityType,
+    //                     entityName, contactName, number, startedAt, muted, lastLog, audio } }
+    // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'incoming' | 'connected' | 'error'
+    //   incoming: Twilio rings this phone (inbound). Docks show Answer / Decline.
+    // direction: 'outbound' | 'inbound' (the current or last call)
+    // caller: null | { number, name, entityId, entityType } for an inbound call; name and the
+    //   entity fill in after the anchor's lookupCaller answer (a second snapshot).
+    // lastLog: null | { status: 'saved' | 'skipped' | 'error' | 'missed', message, recordUrl }
+    //   missed: an inbound call that stopped ringing before Answer ("Missed call from …").
+    //
+    // Anchor → shell (not the bus): after Answer on a matched caller the anchor
+    // asks the shell to open the record in the NetSuite frame (screen-pop):
+    //   window.parent.postMessage({ v: 1, type: OPEN_RECORD_MESSAGE, path }, origin)
+    // The shell accepts it only from #ctc-phone-frame, same origin, and only an
+    // entity record path (/app/common/entity/custjob.nl|contact.nl?id=<digits>).
     // audio: null (no device yet) | { inputs: [{ id, label }], outputs: [{ id, label }],
     //        input, output, outputSupported }
     //
@@ -53,6 +65,14 @@ define(['./ctc_html'], (ctcHtml) => {
     //             portlet) it goes there by itself unless the rep left phone
     //             mode in this tab (sessionStorage EXIT_KEY = '1').
     const BUS_CHANNEL = 'ctc-bus';
+
+    // Bus phase while Twilio rings this phone (inbound), and the requests the
+    // docks send to answer or decline it.
+    const PHASE_INCOMING = 'incoming';
+    const REQUEST_ANSWER = 'answer';
+    const REQUEST_DECLINE = 'decline';
+    // postMessage type the anchor sends the shell for the screen-pop.
+    const OPEN_RECORD_MESSAGE = 'ctc-open-record';
 
     // Web Lock the shell holds for its whole life while it runs the phone.
     const PHONE_LOCK_NAME = 'ctc-phone-anchor';
@@ -138,6 +158,10 @@ define(['./ctc_html'], (ctcHtml) => {
         DIALER_ASSET_PATH,
         DOCK_ASSET_VERSION,
         BUS_CHANNEL,
+        PHASE_INCOMING,
+        REQUEST_ANSWER,
+        REQUEST_DECLINE,
+        OPEN_RECORD_MESSAGE,
         PHONE_LOCK_NAME,
         EXIT_KEY,
         dockAttributes,

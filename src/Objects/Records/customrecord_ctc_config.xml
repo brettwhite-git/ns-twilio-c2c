@@ -68,5 +68,13 @@
             <defaultvalue>F</defaultvalue>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_inbound_enabled">
+            <label>Inbound Calls Enabled</label>
+            <description>When checked, the phone token lets Twilio ring the rep's browser phone (client identity = employee internal id) for inbound calls. Default F: outbound only.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultvalue>F</defaultvalue>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
     </customrecordcustomfields>
 </customrecordtype>
