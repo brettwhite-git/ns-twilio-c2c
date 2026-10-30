@@ -2367,8 +2367,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         renderContactInfoFor(ENTITY_INFO, (window.__CTC_ENTITY_TYPE__ || 'record'));
 
         // --- Token fetch ---
-        function fetchToken() {
-            setStatus('Fetching token\\u2026');
+        // quiet: a background token refresh must not touch the status text
+        // (it would overwrite an active call's status).
+        function fetchToken(quiet) {
+            if (!quiet) setStatus('Fetching token\\u2026');
             return fetch(TOKEN_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2614,17 +2616,93 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         // --- Twilio Device setup ---
+        // Token renewal: the access token has a 1 h ttl (lib/ctc_twilio_jwt.js)
+        // and the phone mode shell keeps this page open for hours. Without a
+        // refresh the device errors with AccessTokenExpired after an hour and
+        // flips ready/error in a loop. The SDK emits tokenWillExpire
+        // tokenRefreshMs before expiry; we fetch a new token and updateToken().
+        var TOKEN_REFRESH_MS = 60000;
+        var TOKEN_RETRY_DELAYS_MS = [5000, 15000, 30000];
+        // Twilio codes for an expired / invalid-expiry JWT.
+        var TOKEN_EXPIRY_CODES = [20104, 31204, 31205, 31206];
+        var tokenRefreshInFlight = false;
+        // Set by an expiry error, so a refresh already in flight from
+        // tokenWillExpire still reports the Error pill if it finally fails.
+        var tokenExpired = false;
+        // The mic permission nudge + device list fill runs on the FIRST
+        // registration only; re-registers after a token update skip it.
+        var audioPrimed = false;
+
+        function isTokenExpiryError(err) {
+            return !!err && TOKEN_EXPIRY_CODES.indexOf(Number(err.code)) !== -1;
+        }
+
+        // expired: the token is already dead, so a final failure shows the
+        // Error pill. A pre-expiry refresh failure leaves the phase alone.
+        function refreshDeviceToken(expired, attempt) {
+            attempt = attempt || 0;
+            if (!device) return;
+            if (expired) tokenExpired = true;
+            if (attempt === 0) {
+                if (tokenRefreshInFlight) return;
+                tokenRefreshInFlight = true;
+            }
+            fetchToken(true)
+                .then(function (result) {
+                    device.updateToken(result.token);
+                    tokenRefreshInFlight = false;
+                    tokenExpired = false;
+                    console.log('[CTC] Token refreshed');
+                    if (device.state === 'unregistered') {
+                        console.log('[CTC] Re-registering device after token refresh');
+                        var p = device.register();
+                        if (p && typeof p.catch === 'function') {
+                            p.catch(function (err) {
+                                console.error('[CTC] Re-register failed:', err && err.message);
+                            });
+                        }
+                    }
+                })
+                .catch(function (err) {
+                    console.log('[CTC] Token refresh failed (attempt ' + (attempt + 1) + '): '
+                        + (err && err.message));
+                    if (attempt < TOKEN_RETRY_DELAYS_MS.length) {
+                        setTimeout(function () {
+                            refreshDeviceToken(expired, attempt + 1);
+                        }, TOKEN_RETRY_DELAYS_MS[attempt]);
+                        return;
+                    }
+                    tokenRefreshInFlight = false;
+                    if (tokenExpired && !activeCall) {
+                        showError('Phone session expired. Reload the phone to reconnect.');
+                        setStatus('Error', 'error');
+                        setButtons(true, false, false);
+                    }
+                });
+        }
+
         function initDevice(token) {
             device = new Twilio.Device(token, {
                 codecPreferences: ['opus', 'pcmu'],
-                logLevel: 1
+                logLevel: 1,
+                tokenRefreshMs: TOKEN_REFRESH_MS
+            });
+
+            device.on('tokenWillExpire', function () {
+                console.log('[CTC] Token will expire; refreshing');
+                refreshDeviceToken(false);
             });
 
             device.on('registered', function () {
                 console.log('[CTC] Device registered');
-                setStatus('Ready to call', '');
-                setButtons(true, false, false);
-                setCallView('idle');
+                // Never reset the view or status of a live call.
+                if (!activeCall) {
+                    setStatus('Ready to call', '');
+                    setButtons(true, false, false);
+                    setCallView('idle');
+                }
+                if (audioPrimed) return;
+                audioPrimed = true;
                 // Phase 4: explicitly request mic permission BEFORE populating
                 // the device list. macOS browsers (Chrome / Brave / Safari)
                 // return empty label strings for input devices until the user
@@ -2645,6 +2723,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             });
 
             device.on('error', function (err) {
+                // An expired token is recoverable: renew it instead of
+                // showing the Error pill.
+                if (isTokenExpiryError(err)) {
+                    console.log('[CTC] Token expired (code ' + err.code + '); renewing');
+                    refreshDeviceToken(true);
+                    return;
+                }
                 console.error('[CTC] Device error:', err.message);
                 showError('Device error: ' + err.message);
                 setStatus('Error', 'error');

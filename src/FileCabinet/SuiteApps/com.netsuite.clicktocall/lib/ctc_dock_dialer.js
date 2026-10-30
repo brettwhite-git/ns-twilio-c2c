@@ -3,8 +3,9 @@
  *
  * Loads after ctc_dock_client.js and, in the phone mode shell only, registers
  * the full softphone panel that opens out of the pill: Dial, Search, Recents,
- * the in-call screen, and audio settings. The panel runs full height on the
- * left or right screen edge (placement and drag live in the client). Data
+ * the in-call screen, and audio settings. The panel sits on the left or right
+ * screen edge, as tall as its content up to the available height (placement
+ * and drag live in the client). Data
  * comes from the ctc_rl_token RESTlet over same-session fetch (the same
  * actions the anchor uses). Call control and audio device changes go to the
  * anchor (the shell's hidden #ctc-phone-frame) over the dock bus: the anchor
@@ -22,6 +23,7 @@
     var ACTIVE = { dialing: true, ringing: true, connected: true };
     var PENDING_TIMEOUT_MS = 15000;
     var SEARCH_DEBOUNCE_MS = 250;
+    var NOTE_HIDE_MS = 10000; // 'saved' and 'skipped' notes hide by themselves
     var TYPE_LABEL = { customer: 'CUSTOMER', prospect: 'PROSPECT', lead: 'LEAD', contact: 'CONTACT' };
     var PHASE_VIEW = {
         offline: { dot: '#8B8780', label: 'Phone offline' },
@@ -43,8 +45,10 @@
     var STROKE = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 
     host.css([
-        // Position and size come from the client (placePanel). The panel is not
-        // inside .dock, so it restates the dock's font and pointer rules.
+        // Position, width and max-height come from the client (placePanel); the
+        // height follows the content. Header and footer stay; the body scrolls
+        // when the max-height is hit. The panel is not inside .dock, so it
+        // restates the dock's font and pointer rules.
         '.dl{position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         '.dl.closed{opacity:0;transform:translateX(12px);pointer-events:none}',
         '.dl[data-side="l"].closed{transform:translateX(-12px)}',
@@ -55,9 +59,13 @@
         '.dl-icon:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
         '.dl-icon[aria-pressed="true"]{background:rgba(255,255,255,0.12);color:#FFFFFF}',
         '.dl-note{flex-shrink:0;margin:10px 14px 0;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.06);display:flex;align-items:center;gap:8px;font-size:12px}',
-        '.dl-note a{color:#B6DCFA;text-decoration:none;margin-left:auto}',
+        '.dl-note-text{flex:1;min-width:0}',
+        '.dl-note a{color:#B6DCFA;text-decoration:none}',
         '.dl-note a:hover{text-decoration:underline}',
-        '.dl-body{flex:1;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
+        '.dl-note-x{width:24px;height:24px;flex-shrink:0;margin:-4px -4px -4px 0;border-radius:6px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-note-x:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
+        '.dl-pane{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}',
+        '.dl-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
         '.dl-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:2px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-tab{padding:6px;border-radius:999px;background:transparent;font-size:11.5px;font-weight:600;color:#94A6BF}',
         '.dl-tab[aria-selected="true"]{background:rgba(255,255,255,0.16);color:#FFFFFF}',
@@ -110,6 +118,9 @@
         '.dl-chip em{font-style:normal;margin-left:4px;opacity:0.8}',
         '.dl-sect{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
         '.dl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}',
+        // Lists scroll on their own, so a long list does not stretch the panel.
+        // The 3 px padding keeps the rows' focus rings inside the scroll box.
+        '.dl-results,.dl-recent-list{flex-shrink:0;max-height:360px;overflow:auto;padding:3px;margin:-3px}',
         '.dl-row{width:100%;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;gap:10px;text-align:left}',
         '.dl-row:hover{background:rgba(255,255,255,0.08)}',
         '.dl-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
@@ -118,7 +129,7 @@
         '.dl-row-meta{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:10px;color:#94A6BF;flex-shrink:0;text-align:right;white-space:pre-line}',
         '.dl-empty,.dl-msg{font-size:12px;color:#94A6BF;text-align:center;padding:12px 0}',
         '.dl-msg.err{color:#FCA5A5}',
-        '.dl-live{flex:1;min-height:0;overflow:auto;padding:24px 14px 0;display:flex;flex-direction:column;align-items:center;gap:4px}',
+        '.dl-live{flex:1 1 auto;min-height:0;overflow:auto;padding:24px 14px 0;display:flex;flex-direction:column;align-items:center;gap:4px}',
         '.dl-live-av{width:68px;height:68px;border-radius:999px;background:linear-gradient(135deg,#38507A 0%,#1F2F4D 100%);border:2px solid rgba(255,255,255,0.08);box-shadow:0 3px 12px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;margin-bottom:10px}',
         '.dl-live-name{font-size:20px;font-weight:600;letter-spacing:-0.01em;text-align:center}',
         '.dl-live-sub{font-size:11.5px;color:#94A6BF}',
@@ -155,9 +166,11 @@
         +   '<button type="button" class="dl-icon dl-gear" aria-label="Audio settings" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>'
         +   '<button type="button" class="dl-icon dl-close" aria-label="Collapse phone"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 9l6 6 6-6"></path></svg></button>'
         + '</div>'
-        + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span><a class="dl-note-link" href="#" target="_top">Open record →</a></div>'
+        + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span><a class="dl-note-link" href="#" target="_top">Open record →</a>'
+        +   '<button type="button" class="dl-note-x" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 6l12 12M18 6L6 18"></path></svg></button>'
+        + '</div>'
         // Idle: tabs
-        + '<div class="dl-idle" style="display:flex;flex-direction:column;flex:1;min-height:0">'
+        + '<div class="dl-idle dl-pane">'
         +   '<div class="dl-body">'
         +     '<div class="dl-tabs" role="tablist" aria-label="Phone views">'
         +       '<button type="button" class="dl-tab" role="tab" data-tab="dial" aria-selected="true">Dial</button>'
@@ -202,7 +215,7 @@
         +   '</div>'
         + '</div>'
         // Live: in-call
-        + '<div class="dl-live-wrap" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">'
+        + '<div class="dl-live-wrap dl-pane" hidden>'
         +   '<div class="dl-live">'
         +     '<div class="dl-live-av" aria-hidden="true"></div>'
         +     '<div class="dl-live-name"></div>'
@@ -221,7 +234,7 @@
         +   '</div>'
         + '</div>'
         // Audio settings (gear)
-        + '<div class="dl-audio-wrap" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">'
+        + '<div class="dl-audio-wrap dl-pane" hidden>'
         +   '<div class="dl-body" style="padding-bottom:14px">'
         +     '<div class="dl-audio-top"><button type="button" class="dl-text dl-audio-back">Back</button><span class="dl-audio-title">Audio</span></div>'
         +     '<div class="dl-msg dl-audio-msg" role="status"></div>'
@@ -236,7 +249,7 @@
     var ui = {
         status: q('.dl-status'), statusLabel: q('.dl-status-label'),
         gear: q('.dl-gear'), close: q('.dl-close'),
-        note: q('.dl-note'), noteText: q('.dl-note-text'), noteLink: q('.dl-note-link'),
+        note: q('.dl-note'), noteText: q('.dl-note-text'), noteLink: q('.dl-note-link'), noteX: q('.dl-note-x'),
         idle: q('.dl-idle'), live: q('.dl-live-wrap'),
         tabs: qa('.dl-tab'), views: qa('.dl-view'),
         entity: q('.dl-entity'), av: q('.dl-av'), entityName: q('.dl-entity-name'), badge: q('.dl-badge'),
@@ -271,6 +284,9 @@
     var suggested = null;
     var bookCounts = null;
     var recentsLoaded = false;
+    var noteKey = null;       // key of the lastLog the note shows (null: a local note)
+    var noteDismissed = null; // key of the lastLog the rep closed (or that hid itself)
+    var noteTimer = null;
 
     // --- Helpers ---
     function api(action, body) {
@@ -725,13 +741,54 @@
     });
 
     // --- Header, note ---
-    function showNote(kind, text, url) {
+    // key: the lastLog this note shows; leave it out for a local note.
+    function showNote(kind, text, url, key) {
+        window.clearTimeout(noteTimer);
+        noteTimer = null;
+        noteKey = key || null;
         ui.note.hidden = false;
         ui.noteText.textContent = text;
         ui.noteLink.hidden = !url;
         if (url) ui.noteLink.href = url;
         ui.note.setAttribute('data-kind', kind);
     }
+
+    function hideNote() {
+        window.clearTimeout(noteTimer);
+        noteTimer = null;
+        noteKey = null;
+        ui.note.hidden = true;
+    }
+
+    function logKey(log) {
+        return [log.status, log.message || '', log.recordUrl || ''].join('|');
+    }
+
+    // The after-call note. Each snapshot repeats lastLog, so the note and its
+    // 10 s timer start only when a different lastLog arrives. A closed note
+    // stays closed for that lastLog.
+    function showLog(log) {
+        var key = logKey(log);
+        if (key === noteDismissed) { hideNote(); return; }
+        if (key === noteKey && !ui.note.hidden) return;
+        showNote(log.status, log.message || 'Call ended', log.recordUrl, key);
+        if (log.status === 'saved' || log.status === 'skipped') {
+            noteTimer = window.setTimeout(function () {
+                noteTimer = null;
+                if (noteKey !== key) return;
+                noteDismissed = key;
+                hideNote();
+            }, NOTE_HIDE_MS);
+        }
+    }
+
+    ui.noteX.addEventListener('click', function () {
+        var hadFocus = el.getRootNode().activeElement === ui.noteX;
+        if (noteKey) noteDismissed = noteKey;
+        ui.note.removeAttribute('data-kind');
+        hideNote();
+        if (hadFocus) focusPanel();
+    });
 
     // --- Audio settings ---
     // Rebuild a select only when its options or value changed, so a snapshot
@@ -825,17 +882,18 @@
         if (audioOpen) renderAudio();
         if (active) {
             renderLive();
-            ui.note.hidden = true;
+            // A new call: its lastLog shows even if it reads like the last one.
+            hideNote();
+            noteDismissed = null;
         } else {
             if (liveTimer) { window.clearInterval(liveTimer); liveTimer = null; }
             liveFor = null;
             ui.dtmf.hidden = true;
             ui.keys.setAttribute('aria-pressed', 'false');
             var log = snap && snap.lastLog;
-            if (log && ui.note.getAttribute('data-kind') !== 'error') {
-                showNote(log.status, log.message || 'Call ended', log.recordUrl);
-            } else if (!log && ui.note.getAttribute('data-kind') !== 'error') {
-                ui.note.hidden = true;
+            if (ui.note.getAttribute('data-kind') !== 'error') {
+                if (log) showLog(log);
+                else hideNote();
             }
         }
         syncCallButton();

@@ -19,8 +19,9 @@
  *
  * The pill sits on one of eight edge points; the point is shared by every
  * tab through localStorage. In the shell the dialer panel registers through
- * window.__ctcDock.host.registerPanel() and opens full height on the left or
- * right edge.
+ * window.__ctcDock.host.registerPanel() and opens on the left or right edge,
+ * as tall as its content, level with the pill's row. On the left and right
+ * middle points (ml, mr) the pill stands vertical.
  */
 (function () {
     'use strict';
@@ -132,6 +133,7 @@
 
     var ICON_PHONE = '<path d="M2 5.5C2 3.6 3.6 2 5.5 2h1.3c.9 0 1.7.6 1.9 1.5l1 4c.2.8-.1 1.6-.8 2.1l-1.5 1.1a12 12 0 0 0 5.9 5.9l1.1-1.5c.5-.7 1.3-1 2.1-.8l4 1c.9.2 1.5 1 1.5 1.9v1.3c0 1.9-1.6 3.5-3.5 3.5A16.5 16.5 0 0 1 2 5.5z"></path>';
     var ICON_MIC = '<rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"></path>';
+    var ICON_RETRY = '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8M3 3v5h5"></path>';
     var ICON_MIC_OFF = '<path d="M2 2l20 20M9 9v3a3 3 0 0 0 5.1 2.1M15 9.3V5a3 3 0 0 0-5.9-.6M19 10v2a7 7 0 0 1-.6 2.8M5 10v2a7 7 0 0 0 12 5M12 19v3"></path>';
 
     var CSS = [
@@ -147,20 +149,59 @@
         '.dot{width:7px;height:7px;border-radius:999px;flex-shrink:0;background:var(--dot,#94A6BF)}',
         '.mono{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}',
 
-        /* chip */
-        '.chip{display:inline-flex;align-items:center;gap:4px;height:44px;padding:0 6px 0 0;border-radius:999px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 8px 20px rgba(15,27,48,0.24);transition:box-shadow 140ms ease-out}',
-        '.chip-main{display:inline-flex;align-items:center;gap:10px;height:44px;padding:0 6px 0 16px;border-radius:999px;background:transparent;touch-action:none;user-select:none;-webkit-user-select:none}',
-        '.chip-main:active{transform:none}',
-        '.chip-label{font-size:13px;font-weight:600;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis}',
-        '.chip-time{font-size:12px;color:#94A6BF}',
-        '.chip-go{width:28px;height:28px;border-radius:999px;background:rgba(255,255,255,0.08);display:inline-flex;align-items:center;justify-content:center}',
-        '.chip-end{width:32px;height:32px;border-radius:999px;background:#EE6E5C;display:inline-flex;align-items:center;justify-content:center}',
-        '.chip-end:hover{background:#D85440}',
-        '.dock.lifted .chip{box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 16px 36px rgba(15,27,48,0.32)}',
-
-        /* offline pill: light, quiet */
-        '.chip.light{background:#FFFFFF;border:1px solid #E5E2DD;color:#161513;box-shadow:0 6px 16px rgba(22,21,19,0.08)}',
-        '.chip.light .chip-main{padding-right:16px}',
+        /* pill: one component in two shapes. Horizontal (R5) on six points:
+           grip, dot, words, timer, Mute, main button in a row. Vertical (R4)
+           on the left/right middle points (ml, mr): the same parts in a
+           column, no words (labels live in title + aria-label). */
+        '.vchip{display:flex;align-items:center;gap:10px;border-radius:26px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26);touch-action:none;user-select:none;-webkit-user-select:none}',
+        '.dock:not(.vert) .vchip{flex-direction:row;height:52px;padding:0 6px 0 14px}',
+        '.dock.vert .vchip{flex-direction:column;width:52px;padding:10px 0}',
+        '.dock:not(.vert) .vchip[data-main="none"]{padding-right:18px}',
+        '.dock.vert .vchip[data-main="none"]{padding-bottom:16px}',
+        '.dock.lifted .vchip{box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 16px 36px rgba(15,27,48,0.32)}',
+        '.v-body{display:flex;align-items:center;gap:10px;padding:0;border-radius:12px;background:transparent;text-align:left}',
+        '.dock:not(.vert) .v-body{flex-direction:row;height:40px;min-width:0}',
+        '.dock.vert .v-body{flex-direction:column;width:40px}',
+        '.v-body:active{transform:none}',
+        '.v-grip{display:grid;grid-template-columns:3px 3px;gap:2px;flex-shrink:0}',
+        '.v-grip i{width:3px;height:3px;border-radius:999px;background:rgba(255,255,255,0.28)}',
+        '.v-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:var(--dot,#94A6BF)}',
+        '.vchip[data-stage="dialing"] .v-dot,.vchip[data-stage="ringing"] .v-dot{box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
+        '.vchip[data-stage="connected"] .v-dot{box-shadow:0 0 0 3px rgba(20,185,129,0.20)}',
+        '.vchip[data-muted="true"] .v-dot{background:#F4C76A;box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
+        '.vchip[data-stage="starting"] .v-dot{animation:ctc-breathe 1.2s ease-in-out infinite alternate}',
+        '@keyframes ctc-breathe{from{opacity:0.4}to{opacity:1}}',
+        /* each shape shows only its own words / timer */
+        '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
+        '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
+        '.h-l1,.h-l2{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.h-l1{font-size:13px;font-weight:600;line-height:16px;color:#FFFFFF}',
+        '.h-l2{font-size:11px;line-height:14px;color:#94A6BF}',
+        '.h-l2.muted{color:#F4C76A}',
+        '.h-time{flex-shrink:0;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:13px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap;color:#FFFFFF}',
+        '.v-time{display:flex;flex-direction:column;align-items:center;font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;font-size:13px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1;color:#FFFFFF}',
+        '.v-sep{font-size:7px;color:#94A6BF}',
+        '.v-mute{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,0.10);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
+        '.v-mute:hover{background:rgba(255,255,255,0.18)}',
+        '.v-mute[aria-pressed="true"]{background:#F4C76A}',
+        '.v-mute[aria-pressed="true"] svg{stroke:#1F2F4D}',
+        '.v-main{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
+        '.v-main.call{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
+        '.v-main.end{background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
+        '.v-main.end:hover{background:#D85440}',
+        '.v-main.end svg{transform:rotate(135deg)}',
+        '.v-main.offline{background:#F4F2EE}',
+        '.v-main.retry{width:36px;height:36px;border-radius:12px;background:#FCE9E7}',
+        '.v-ico{display:none}',
+        '.v-main.call .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
+        /* offline / error: light pill */
+        '.vchip.light{background:#FFFFFF;border:1px solid #E5E2DD;box-shadow:0 6px 16px rgba(22,21,19,0.08)}',
+        '.vchip.light .v-grip i{background:#D9D5CF}',
+        '.vchip.light.err{border-color:#F2C4BD}',
+        '.vchip.light.err .v-grip i{background:#E5D3D0}',
+        '.vchip.light .h-l1{color:#161513}',
+        '.vchip.light .h-l2{color:#5C5955}',
+        '.vchip.light.err .h-l1{color:#9A2A23}',
 
         /* card */
         '.card{width:300px;border-radius:14px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 16px 40px rgba(15,27,48,0.28);transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1)}',
@@ -183,20 +224,26 @@
         '.key.end{background:#EE6E5C}',
         '.key.end:hover{background:#D85440}',
         '.key[disabled]{opacity:0.4;cursor:default}',
-        '@media (prefers-reduced-motion: reduce){.card,button{transition:opacity 200ms linear}.card.closed{transform:none}button:active{transform:none}}'
+        '@media (prefers-reduced-motion: reduce){.card,button{transition:opacity 200ms linear}.card.closed{transform:none}button:active{transform:none}.vchip .v-dot{animation:none}}'
     ].join('\n');
 
     var HTML = ''
         + '<div class="dock" hidden>'
-        +   '<div class="chip navy">'
-        +     '<button type="button" class="chip-main">'
-        +       '<span class="dot"></span>'
-        +       '<span class="chip-label"></span>'
-        +       '<span class="chip-time mono"></span>'
-        +       '<span class="chip-go" aria-hidden="true"><svg width="13" height="13" viewBox="0 0 24 24" fill="#14B981">' + ICON_PHONE + '</svg></span>'
+        +   '<div class="vchip navy">'
+        +     '<button type="button" class="v-body">'
+        +       '<span class="v-grip" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
+        +       '<span class="v-dot" aria-hidden="true"></span>'
+        +       '<span class="h-words" aria-hidden="true"><span class="h-l1"></span><span class="h-l2"></span></span>'
+        +       '<span class="h-time" aria-hidden="true"></span>'
+        +       '<span class="v-time" aria-hidden="true"><span class="v-mm"></span><span class="v-sep">·</span><span class="v-ss"></span></span>'
         +     '</button>'
-        +     '<button type="button" class="chip-end" aria-label="End call">'
-        +       '<svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg>'
+        +     '<button type="button" class="v-mute" aria-label="Mute" aria-pressed="false">'
+        +       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_MIC + '</svg>'
+        +     '</button>'
+        +     '<button type="button" class="v-main call">'
+        +       '<svg class="v-ico ico-call" width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>'
+        +       '<svg class="v-ico ico-offline" width="16" height="16" viewBox="0 0 24 24" fill="#345D7E" aria-hidden="true">' + ICON_PHONE + '</svg>'
+        +       '<svg class="v-ico ico-retry" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9A2A23" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_RETRY + '</svg>'
         +     '</button>'
         +   '</div>'
         +   '<div class="card navy closed" role="region" aria-label="Current call">'
@@ -229,6 +276,11 @@
     var panelHideTimer = null;
     var suppressClick = false;
     var timerId = null;
+    var orientTimer = null; // pending vertical/horizontal switch after a snap
+    // Last settled pill size along its long axis (width when horizontal,
+    // height when vertical); 0 = none shown.
+    var pillFit = { vert: false, size: 0 };
+    var pillFitTimer = null;
     // Outside mode: does another tab hold the phone? 'pending' until the
     // first lock query answers; null when the browser has no Web Locks.
     var lockHeld = mode === 'outside' ? 'pending' : false;
@@ -243,13 +295,17 @@
 
     var $ = function (sel) { return root.querySelector(sel); };
     var dockEl = $('.dock');
-    var chipEl = $('.chip');
-    var chipMain = $('.chip-main');
-    var chipDot = $('.chip-main .dot');
-    var chipLabel = $('.chip-label');
-    var chipTime = $('.chip-time');
-    var chipGo = $('.chip-go');
-    var chipEnd = $('.chip-end');
+    var vchipEl = $('.vchip');
+    var vBody = $('.v-body');
+    var hWords = $('.h-words');
+    var hL1 = $('.h-l1');
+    var hL2 = $('.h-l2');
+    var hTime = $('.h-time');
+    var vTime = $('.v-time');
+    var vMm = $('.v-mm');
+    var vSs = $('.v-ss');
+    var vMute = $('.v-mute');
+    var vMain = $('.v-main');
     var cardEl = $('.card');
     var cardTop = $('.card-top');
     var avatarEl = $('.avatar');
@@ -317,6 +373,21 @@
         return (m < 10 ? '0' : '') + m + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
     }
 
+    // Display form of a number. Same rules as formatPhone in
+    // ctc_dock_dialer.js and ctc_sl_softphone.js.
+    function formatPhone(input) {
+        var str = String(input || '');
+        var plus = str.trim().charAt(0) === '+';
+        var d = str.replace(/[^0-9]/g, '');
+        if (!d) return '';
+        if (plus && d.length <= 10) return '+' + d;
+        if (!plus && d.length <= 3) return d;
+        if (!plus && d.length <= 6) return '(' + d.slice(0, 3) + ') ' + d.slice(3);
+        if (!plus && d.length <= 10) return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6);
+        var cc = d.slice(0, d.length - 10), r = d.slice(d.length - 10);
+        return '+' + cc + ' (' + r.slice(0, 3) + ') ' + r.slice(3, 6) + '-' + r.slice(6);
+    }
+
     function send(action) {
         bus.postMessage({ v: 1, type: 'request', action: action });
     }
@@ -326,7 +397,7 @@
         offline: { dot: '#8B8780', label: 'Phone offline' },
         error: { dot: '#EE6E5C', label: 'Phone error' },
         starting: { dot: '#F4C76A', label: 'Starting phone…' },
-        ready: { dot: '#94A6BF', label: 'Ready' },
+        ready: { dot: '#94A6BF', label: 'Phone ready' }, // aria-label only: the ready pill has no text
         dialing: { dot: '#F4C76A', label: 'Calling…' },
         ringing: { dot: '#F4C76A', label: 'Ringing…' },
         connected: { dot: '#14B981', label: 'Connected' }
@@ -338,29 +409,27 @@
         // it on a stale view.
         if (panel && snap) panel.render(snap);
 
-        if (mode === 'outside') { renderOutside(); return; }
-        if (!snap) { dockEl.hidden = true; return; }
-        renderChip(snap.phase, false);
-        renderCard();
-        setExpanded(expanded, false);
+        if (mode === 'outside') renderOutside();
+        else if (!snap) dockEl.hidden = true;
+        else {
+            renderChip(snap.phase, false);
+            renderCard();
+            setExpanded(expanded, false);
+        }
+        fitPill();
     }
 
     function renderOutside() {
         if (lockHeld === 'pending') { dockEl.hidden = true; return; }
         if (!phoneElsewhere()) {
             if (!cfg.shellUrl) { dockEl.hidden = true; return; }
-            // "Open phone": this tab moves into phone mode.
+            // "Open phone" (offline style): this tab moves into phone mode.
             expanded = false;
             dockEl.hidden = false;
-            chipEl.classList.remove('light');
-            chipEl.classList.add('navy');
-            chipDot.hidden = true;
-            chipLabel.textContent = 'Open phone';
-            chipTime.hidden = true;
-            chipGo.hidden = false;
-            chipEnd.hidden = true;
-            chipMain.setAttribute('aria-label', 'Open phone.' + ARROWS_HINT);
+            dockEl.style.setProperty('--dot', PHASE_VIEW.offline.dot);
+            renderPill({ stage: 'offline', dot: true, light: true, main: 'offline', label: 'Open phone.' + ARROWS_HINT, title: 'Open phone', l1: 'Open phone' });
             if (timerId) { window.clearInterval(timerId); timerId = null; }
+            setOrient();
             setExpanded(false, false);
             return;
         }
@@ -384,16 +453,28 @@
 
         dockEl.hidden = false;
         dockEl.style.setProperty('--dot', view.dot);
-        chipEl.classList.toggle('light', light);
-        chipEl.classList.toggle('navy', !light);
-        chipDot.hidden = false;
-        chipLabel.textContent = active ? name : idleLabel;
-        chipTime.hidden = !active || !snap.startedAt;
-        chipGo.hidden = mirror || phase !== 'ready';
-        chipEnd.hidden = !active;
-        chipMain.setAttribute('aria-label', active
+        // Tooltip text. Ready: dot + green phone button only, no label.
+        var chipText = active ? name : (!mirror && phase === 'ready' ? '' : idleLabel);
+        var label = active
             ? name + ', ' + view.label + '. Open call card.' + ARROWS_HINT
-            : idleLabel + '.' + (mirror ? '' : ' Open phone.') + ARROWS_HINT);
+            : idleLabel + '.' + (mirror ? '' : ' Open phone.') + ARROWS_HINT;
+        var words = pillWords(phase, mirror, active);
+        renderPill({
+            stage: phase,
+            dot: true,
+            light: light,
+            err: phase === 'error',
+            timer: active && !!snap.startedAt,
+            mute: phase === 'connected',
+            muted: !!(snap && snap.muted),
+            main: active ? 'end' : mirror ? null : phase === 'ready' ? 'call' : phase === 'offline' ? 'offline' : phase === 'error' ? 'retry' : null,
+            label: label,
+            title: chipText || idleLabel,
+            l1: words.l1,
+            l2: words.l2,
+            l2Muted: words.l2Muted
+        });
+        setOrient();
 
         tick();
         var running = !!(snap && snap.startedAt);
@@ -403,6 +484,114 @@
 
     function callName() {
         return snap.entityName || snap.contactName || snap.number || 'Call';
+    }
+
+    // Horizontal pill words (two lines; '' = line not shown). The vertical
+    // pill shows none. Wrap-up and incoming stages slot in here later.
+    function pillWords(phase, mirror, active) {
+        var number = active ? formatPhone(snap.number) || snap.number || '' : '';
+        var name = active ? snap.entityName || snap.contactName || number || 'Call' : '';
+        if (mirror) return { l1: 'Phone open in another tab', l2: name };
+        if (phase === 'offline') return { l1: 'Phone offline', l2: 'Open phone mode' };
+        if (phase === 'error') return { l1: 'Phone error', l2: 'Tap to reconnect' };
+        if (phase === 'starting') return { l1: 'Starting phone', l2: '' };
+        if (phase === 'dialing' || phase === 'ringing') return { l1: name, l2: 'Calling…' };
+        if (phase === 'connected') {
+            if (snap.muted) return { l1: name, l2: 'Muted', l2Muted: true };
+            var sub = snap.contactName || number;
+            return { l1: name, l2: sub === name ? '' : sub };
+        }
+        return { l1: '', l2: '' }; // ready: no words
+    }
+
+    // The pill, both shapes. Grip, status dot, words + timer (horizontal) or
+    // timer as mm over ss (vertical), Mute while connected, main button last.
+    //   main: 'call' (open phone) | 'end' (hang up) | 'offline' (open phone)
+    //         | 'retry' (open phone) | null (no button: starting, mirror idle)
+    // The body button opens the phone / call card. When the main button does
+    // that same thing, the body leaves the tab order so keyboard users meet
+    // one control per action.
+    function renderPill(o) {
+        vchipEl.setAttribute('data-stage', o.stage);
+        vchipEl.setAttribute('data-muted', o.mute && o.muted ? 'true' : 'false');
+        vchipEl.setAttribute('data-main', o.main || 'none');
+        vchipEl.classList.toggle('light', !!o.light);
+        vchipEl.classList.toggle('navy', !o.light);
+        vchipEl.classList.toggle('err', !!o.err);
+        vchipEl.title = o.title || '';
+        vchipEl.querySelector('.v-dot').hidden = !o.dot;
+        hL1.textContent = o.l1 || '';
+        hL2.textContent = o.l2 || '';
+        hL2.hidden = !o.l2;
+        hL2.classList.toggle('muted', !!o.l2Muted);
+        hWords.hidden = !o.l1 && !o.l2;
+        vTime.hidden = !o.timer;
+        hTime.hidden = !o.timer;
+        vMute.hidden = !o.mute;
+        vMute.setAttribute('aria-pressed', o.muted ? 'true' : 'false');
+        vMute.setAttribute('aria-label', o.muted ? 'Unmute' : 'Mute');
+        vMute.querySelector('svg').innerHTML = o.muted ? ICON_MIC_OFF : ICON_MIC;
+        vMain.hidden = !o.main;
+        vMain.className = 'v-main' + (o.main ? ' ' + o.main : '');
+        vMain.setAttribute('aria-label', o.main === 'end' ? 'End call' : o.label);
+        var bodyIsMain = o.main && o.main !== 'end';
+        vBody.tabIndex = bodyIsMain ? -1 : 0;
+        if (bodyIsMain) {
+            vBody.removeAttribute('aria-label');
+            vBody.setAttribute('aria-hidden', 'true');
+        } else {
+            vBody.setAttribute('aria-label', o.label);
+            vBody.removeAttribute('aria-hidden');
+        }
+    }
+
+    // The pill's long axis follows its content: width when horizontal,
+    // height when vertical. A change while it shows eases over 200 ms (no
+    // ease under reduced motion). The dock is placed on the start and end
+    // sizes and the ResizeObserver re-places it on every frame between, so
+    // it stays anchored to its snap point (left / centre / right edge when
+    // horizontal, centred on ml / mr when vertical). A render during an ease
+    // (snapshots come in bursts) continues from the size shown now.
+    function fitPill() {
+        window.clearTimeout(pillFitTimer);
+        var st = vchipEl.style;
+        var vert = dockEl.classList.contains('vert');
+        var prop = vert ? 'height' : 'width';
+        var shown = !dockEl.hidden && !vchipEl.hidden;
+        var from = pillFit.vert === vert ? pillFit.size : 0;
+        if (from && st.transition) from = vert ? vchipEl.offsetHeight : vchipEl.offsetWidth;
+        st.transition = '';
+        st.width = '';
+        st.height = '';
+        st.overflow = '';
+        if (!shown) { pillFit.size = 0; return; }
+        var to = vert ? vchipEl.offsetHeight : vchipEl.offsetWidth;
+        pillFit = { vert: vert, size: to };
+        if (!from || from === to || reduced()) {
+            if (from !== to) place(false);
+            return;
+        }
+        st.overflow = 'hidden'; // content may be larger than the pill mid-ease
+        st[prop] = from + 'px';
+        place(false); // anchor on the start size; the observer follows the ease
+        st.transition = prop + ' 200ms ease-out';
+        st[prop] = to + 'px';
+        pillFitTimer = window.setTimeout(function () {
+            st.transition = '';
+            st[prop] = '';
+            st.overflow = '';
+            place(false);
+        }, 220);
+    }
+
+    // The control that holds focus for the pill.
+    function pillFocusTarget() {
+        return vBody.tabIndex === 0 || vMain.hidden ? vBody : vMain;
+    }
+
+    function focusPill() {
+        var t = pillFocusTarget();
+        if (t) t.focus();
     }
 
     function renderCard() {
@@ -425,21 +614,24 @@
     // No motion on the timer tick.
     function tick() {
         var t = elapsed();
-        chipTime.textContent = t;
+        hTime.textContent = t;
         cardTime.textContent = t;
+        var i = t.indexOf(':');
+        vMm.textContent = i === -1 ? '' : t.slice(0, i);
+        vSs.textContent = i === -1 ? '' : t.slice(i + 1);
     }
 
     function setExpanded(next, animate) {
         expanded = next;
+        vchipEl.hidden = next;
+        if (next) pillFit.size = 0; // reappears at its own size, no ease
         if (panel) {
-            chipEl.hidden = next;
             cardEl.hidden = true;
             setPanelOpen(next, animate);
             place(false);
             return;
         }
         var wasOpen = !cardEl.hidden;
-        chipEl.hidden = next;
         cardEl.hidden = !next;
         place(false);
         if (next && !wasOpen) {
@@ -459,13 +651,12 @@
         var el = panel.el;
         if (open) {
             window.clearTimeout(panelHideTimer);
-            placePanel();
-            if (el.hidden) {
-                el.hidden = false;
-                if (animate) {
-                    el.classList.add('closed');
-                    void el.offsetWidth; // commit the closed state so the transition runs
-                }
+            var wasHidden = el.hidden;
+            el.hidden = false;
+            placePanel(); // reads the panel's height, so it runs with the panel shown
+            if (wasHidden && animate) {
+                el.classList.add('closed');
+                void el.offsetWidth; // commit the closed state so the transition runs
             }
             el.classList.remove('closed');
         } else if (!el.hidden && !el.classList.contains('closed')) {
@@ -495,9 +686,42 @@
         return top;
     }
 
-    function cornerXY(c) {
-        var w = dockEl.offsetWidth;
-        var h = dockEl.offsetHeight;
+    function isVertCorner(c) { return c === 'ml' || c === 'mr'; }
+
+    // Vertical pill on ml / mr, horizontal elsewhere. A shape switch is not
+    // a size change: the pill starts at its own size in the new shape.
+    function setOrient() {
+        var v = isVertCorner(corner);
+        if (v === dockEl.classList.contains('vert')) return;
+        var refocus = root.activeElement && root.activeElement === pillFocusTarget();
+        dockEl.classList.toggle('vert', v);
+        pillFit.size = 0;
+        fitPill();
+        if (refocus) focusPill();
+    }
+
+    // Rendered size of the pill in one orientation. Toggles the class and back
+    // in the same task, so nothing paints and no resize is observed. The other
+    // shape is measured at its natural size (no size ease in progress).
+    function sizeOf(vert) {
+        var was = dockEl.classList.contains('vert');
+        if (was === vert) return { w: dockEl.offsetWidth, h: dockEl.offsetHeight };
+        var st = vchipEl.style;
+        var keep = { w: st.width, h: st.height, o: st.overflow };
+        st.width = st.height = st.overflow = '';
+        dockEl.classList.toggle('vert', vert);
+        var s = { w: dockEl.offsetWidth, h: dockEl.offsetHeight };
+        dockEl.classList.toggle('vert', was);
+        st.width = keep.w;
+        st.height = keep.h;
+        st.overflow = keep.o;
+        return s;
+    }
+
+    // Placement of a pill of size `size` (default: as rendered now) at `c`.
+    function cornerXY(c, size) {
+        var w = size ? size.w : dockEl.offsetWidth;
+        var h = size ? size.h : dockEl.offsetHeight;
         var top = safeTop();
         var bottom = window.innerHeight - h - BOTTOM_GAP;
         var col = c.charAt(1);
@@ -509,15 +733,17 @@
     }
 
     // Snap point whose placement is nearest to the dock's centre (cx, cy).
+    // Each point is measured with the pill it would hold there (vertical on
+    // ml / mr), so the centres compare like for like.
     function nearestCorner(cx, cy) {
-        var w = dockEl.offsetWidth;
-        var h = dockEl.offsetHeight;
+        var sizes = { h: sizeOf(false), v: sizeOf(true) };
         var best = DEFAULT_CORNER;
         var bestD = Infinity;
         CORNERS.forEach(function (c) {
-            var xy = cornerXY(c);
-            var dx = xy.x + w / 2 - cx;
-            var dy = xy.y + h / 2 - cy;
+            var s = isVertCorner(c) ? sizes.v : sizes.h;
+            var xy = cornerXY(c, s);
+            var dx = xy.x + s.w / 2 - cx;
+            var dy = xy.y + s.h / 2 - cy;
             var d = dx * dx + dy * dy;
             if (d < bestD) { bestD = d; best = c; }
         });
@@ -528,25 +754,39 @@
         dockEl.style.transform = 'translate3d(' + Math.round(pos.x) + 'px,' + Math.round(pos.y) + 'px,0)' + (lift ? ' scale(1.02)' : '');
     }
 
+    // An animated snap that changes orientation glides in the current shape,
+    // then switches shape and re-places without animation.
     function place(animate) {
         if (drag && drag.moved) return;
+        var glide = animate && !reduced();
+        var flip = isVertCorner(corner) !== dockEl.classList.contains('vert');
+        window.clearTimeout(orientTimer);
+        orientTimer = null;
+        if (!glide || !flip) setOrient();
         var xy = cornerXY(corner);
         pos.x = xy.x;
         pos.y = xy.y;
         var col = corner.charAt(1);
         var row = corner.charAt(0);
         cardEl.style.transformOrigin = (col === 'r' ? 'right ' : col === 'l' ? 'left ' : 'center ') + (row === 'b' ? 'bottom' : row === 't' ? 'top' : 'center');
-        if (animate && !reduced()) {
+        if (glide) {
             dockEl.style.transition = 'transform ' + SETTLE;
             window.setTimeout(function () { dockEl.style.transition = ''; }, 320);
         } else {
             dockEl.style.transition = '';
         }
         applyTransform(false);
+        if (glide && flip) {
+            orientTimer = window.setTimeout(function () {
+                orientTimer = null;
+                place(false);
+            }, 320);
+        }
     }
 
-    // Full-height panel: from the safe top to 24 px above the bottom, 380 px
-    // wide, 16 px from the left or right screen edge.
+    // Panel: 380 px wide, 16 px from the left or right screen edge, as tall
+    // as its content but no taller than the area from the safe top to 24 px
+    // above the bottom (avail).
     function panelBox() {
         var top = safeTop();
         var w = Math.min(PANEL_W, window.innerWidth - 2 * EDGE);
@@ -554,32 +794,50 @@
         return {
             side: side,
             x: side === 'l' ? EDGE : window.innerWidth - w - EDGE,
-            y: top,
+            top: top,
             w: w,
-            h: Math.max(0, window.innerHeight - top - BOTTOM_GAP)
+            avail: Math.max(0, window.innerHeight - top - BOTTOM_GAP)
         };
     }
 
+    // Vertical position follows the pill's row: top row at the safe top,
+    // middle row centred in the available area, bottom row 24 px above the
+    // bottom. Call with the panel shown (it reads the panel's height).
     function placePanel() {
         if (!panel || (panelDrag && panelDrag.moved)) return;
         var b = panelBox();
-        var s = panel.el.style;
+        var el = panel.el;
+        var s = el.style;
         s.left = b.x + 'px';
-        s.top = b.y + 'px';
         s.width = b.w + 'px';
-        s.height = b.h + 'px';
-        panel.el.setAttribute('data-side', b.side);
+        s.height = '';
+        s.maxHeight = b.avail + 'px';
+        el.setAttribute('data-side', b.side);
+        var h = Math.min(el.offsetHeight, b.avail);
+        var row = corner.charAt(0);
+        var y = row === 'b' ? b.top + b.avail - h : row === 'm' ? b.top + (b.avail - h) / 2 : b.top;
+        s.top = Math.round(y) + 'px';
     }
 
-    // --- Drag (chip only) ---
-    chipMain.addEventListener('pointerdown', function (e) {
-        if (e.button !== 0 || drag) return;
-        suppressClick = false;
-        drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, ox: pos.x, oy: pos.y, moved: false, samples: [] };
-        chipMain.setPointerCapture(e.pointerId);
-    });
+    // --- Drag (pill only) ---
+    // The whole pill is the handle, its buttons included. The pointer is captured by
+    // the button pressed (else the pill), so a plain press still clicks that
+    // button and a fast drag never loses the pointer.
+    function bindDrag(el) {
+        el.addEventListener('pointerdown', function (e) {
+            if (e.button !== 0 || drag) return;
+            suppressClick = false;
+            var btn = e.target && e.target.closest ? e.target.closest('button') : null;
+            var cap = btn && el.contains(btn) ? btn : el;
+            drag = { id: e.pointerId, el: cap, x0: e.clientX, y0: e.clientY, ox: pos.x, oy: pos.y, moved: false, samples: [] };
+            cap.setPointerCapture(e.pointerId);
+        });
+        el.addEventListener('pointermove', onDragMove);
+        el.addEventListener('pointerup', endDrag);
+        el.addEventListener('pointercancel', endDrag);
+    }
 
-    chipMain.addEventListener('pointermove', function (e) {
+    function onDragMove(e) {
         if (!drag || e.pointerId !== drag.id) return;
         var dx = e.clientX - drag.x0;
         var dy = e.clientY - drag.y0;
@@ -595,13 +853,13 @@
         var now = e.timeStamp || Date.now();
         drag.samples.push({ x: e.clientX, y: e.clientY, t: now });
         while (drag.samples.length > 2 && now - drag.samples[0].t > 100) drag.samples.shift();
-    });
+    }
 
     function endDrag(e) {
         if (!drag || e.pointerId !== drag.id) return;
         var d = drag;
         drag = null;
-        try { chipMain.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
+        try { d.el.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
         if (!d.moved) return;
         suppressClick = true;
         dockEl.classList.remove('lifted');
@@ -624,8 +882,15 @@
         saveCorner(corner);
         place(true);
     }
-    chipMain.addEventListener('pointerup', endDrag);
-    chipMain.addEventListener('pointercancel', endDrag);
+    bindDrag(vchipEl);
+    // A drag never clicks the pill or its buttons (capture phase, before the
+    // button sees it; immediate, so the pill's own click below skips too).
+    vchipEl.addEventListener('click', function (e) {
+        if (!suppressClick) return;
+        suppressClick = false;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }, true);
 
     // Keyboard: arrows step to the next snap point on the 3 x 3 grid (the
     // centre is skipped), no animation.
@@ -648,7 +913,8 @@
         saveCorner(corner);
         place(false);
     }
-    chipMain.addEventListener('keydown', onArrow);
+    vBody.addEventListener('keydown', onArrow);
+    vMain.addEventListener('keydown', onArrow);
 
     // --- Drag (panel header): snaps to the nearer screen side ---
     function bindPanelDrag(handle) {
@@ -694,8 +960,10 @@
     }
 
     // --- Actions ---
-    chipMain.addEventListener('click', function () {
-        if (suppressClick) { suppressClick = false; return; }
+
+    // The pill's own action: open the phone (panel), or the call card when
+    // there is no panel; outside the shell with no phone, move into phone mode.
+    function openFromPill() {
         if (mode === 'outside' && !phoneElsewhere()) { goShell(); return; }
         if (panel) {
             setExpanded(true, true);
@@ -705,14 +973,23 @@
             cardTop.focus();
         }
         // Outside mode, idle, phone in another tab: nothing to open here.
+    }
+    vBody.addEventListener('click', openFromPill);
+    // The pill's padding and gaps act like its body.
+    vchipEl.addEventListener('click', function (e) {
+        if (!(e.target.closest && e.target.closest('button'))) openFromPill();
     });
-    chipEnd.addEventListener('click', function () { send('hangup'); });
+    vMain.addEventListener('click', function () {
+        if (vMain.classList.contains('end')) send('hangup');
+        else openFromPill();
+    });
+    vMute.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
     cardTop.addEventListener('click', function () {
         setExpanded(false, false);
-        chipMain.focus();
+        focusPill();
     });
     cardEl.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { setExpanded(false, false); chipMain.focus(); }
+        if (e.key === 'Escape') { setExpanded(false, false); focusPill(); }
     });
     muteBtn.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
     endBtn.addEventListener('click', function () { send('hangup'); });
@@ -773,6 +1050,7 @@
         if (e.key !== CORNER_KEY || CORNERS.indexOf(e.newValue) === -1) return;
         corner = e.newValue;
         place(true);
+        if (expanded) placePanel();
     });
     if (typeof ResizeObserver !== 'undefined') {
         new ResizeObserver(function () { place(false); }).observe(dockEl);
@@ -828,13 +1106,20 @@
                 if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) m[k] = extra[k];
                 bus.postMessage(m);
             },
-            collapse: function () { setExpanded(false, true); chipMain.focus(); },
+            collapse: function () { setExpanded(false, true); focusPill(); },
             registerPanel: function (p) {
                 panel = p;
                 p.el.hidden = true;
                 p.el.classList.add('closed');
                 root.appendChild(p.el);
                 if (p.handle) bindPanelDrag(p.handle);
+                // The panel is as tall as its content: re-place it when the
+                // content changes height (tab, note, results, keypad).
+                if (typeof ResizeObserver !== 'undefined') {
+                    new ResizeObserver(function () {
+                        if (expanded && !p.el.hidden) placePanel();
+                    }).observe(p.el);
+                }
                 if (snap) render();
             }
         }
