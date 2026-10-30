@@ -1,0 +1,25 @@
+<suitelet scriptid="customscript_ctc_sl_reporting">
+    <name>CTC Reporting Central</name>
+    <scriptfile>[/SuiteApps/com.netsuite.clicktocall/ctc_sl_reporting.js]</scriptfile>
+    <notifyadmins>F</notifyadmins>
+    <notifyemails></notifyemails>
+    <notifyowner>T</notifyowner>
+    <notifyuser>F</notifyuser>
+    <status>RELEASED</status>
+    <isinactive>F</isinactive>
+    <loglevel>DEBUG</loglevel>
+    <scriptdeployments>
+        <scriptdeployment scriptid="customdeploy_ctc_sl_reporting">
+            <title>CTC Reporting Central</title>
+            <isdeployed>T</isdeployed>
+            <status>RELEASED</status>
+            <!-- HIGH-10 (SAFE review 2026-05-21) — see ctc_rl_token.xml
+                 for full rationale. Script-level loglevel above remains
+                 DEBUG as the max-level cap for local dev; deployment
+                 runs at ERROR in production. -->
+            <loglevel>ERROR</loglevel>
+            <allroles>T</allroles>
+            <isonline>F</isonline>
+        </scriptdeployment>
+    </scriptdeployments>
+</suitelet>

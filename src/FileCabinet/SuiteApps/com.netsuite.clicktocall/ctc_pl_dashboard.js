@@ -3,8 +3,8 @@
  * @NScriptType Portlet
  * @NModuleScope SameAccount
  *
- * CTC Sales Dashboard Portlet — home dashboard launcher with two tabs
- * (Today's Calls / Pending Tasks) + inline actions.
+ * CTC Sales Dashboard Portlet ("Sales Rep Central") — period switch, KPI
+ * strip, Calls / Follow-ups tabs, inline actions, Reporting Central link.
  *
  * IMPORTANT ARCHITECTURE NOTE
  * ---------------------------
@@ -14,7 +14,7 @@
  *
  *   - Inline <script>, external <script src>, addEventListener bindings,
  *     and any window.* globals set by the iframe-side script DO NOT SURVIVE.
- *   - Only static HTML, inline CSS, anchor hrefs, form submissions, and
+ *   - Only static HTML, <style> blocks, anchor hrefs, form submissions, and
  *     inline `onclick="..."` attribute STRINGS survive the iframe copy.
  *
  * Therefore this portlet renders the entire DOM server-side at request time,
@@ -22,11 +22,19 @@
  * and wires every interactive element with inline `onclick="..."` strings
  * containing fully self-contained logic. No external client.js needed.
  *
+ * UI state lives in classes on #ctc-pl-root (`ctc-pl-show-tasks`,
+ * `ctc-pl-no-fu`); CSS responds. The period refresh logic lives once, in the
+ * onclick of the hidden #ctc-pl-refresh button; the period chips and the
+ * Try again buttons set its data-range and call .click() on it.
+ *
+ * Narrow portlet columns (<= 560 px) switch layout through a container query
+ * on #ctc-pl-root (container-type: inline-size), not a media query.
+ *
  * Reference: /Users/brettwhite/Projects/opportunity-kanban (proven pattern).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_dock'],
-       (url, log, runtime, file, ctcHtml, workspaceQueries, ctcEntity, ctcDock) => {
+define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_dock', './lib/ctc_fonts'],
+       (url, log, runtime, file, ctcHtml, workspaceQueries, ctcEntity, ctcDock, ctcFonts) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
@@ -35,15 +43,42 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     // the tab into the shell otherwise. No popup window.
     const POPUP_NAME = ctcEntity.SOFTPHONE_POPUP_NAME;
 
-    // Modern handset SVG (Heroicons solid `phone`). fill='currentColor' so the icon
-    // inherits whatever text color its container sets — white on the navy CTA tile,
-    // navy on the per-row redial buttons. Sized via CSS rules on `.ctc-pl-call-icon
-    // svg` and `.ctc-pl-redial svg`. The path is exported separately so the inline
-    // client-side rebuilder (chip-click handler) can construct an equivalent SVG via
-    // document.createElementNS — keeps the server-rendered icon and the dynamically
-    // rebuilt icon in pixel-perfect sync from a single source of truth.
-    const PHONE_SVG_PATH = "M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5z";
-    const PHONE_SVG = "<svg viewBox='0 0 24 24' fill='currentColor'><path d='" + PHONE_SVG_PATH + "'/></svg>";
+    // ── Icons (24 grid). Colour comes from CSS via currentColor. ────────────
+    // The phone glyph is the only filled icon. The paths are shared with the
+    // inline client-side row rebuilder (period switch) so server-rendered and
+    // rebuilt rows stay identical.
+    const PATH = {
+        call: 'M2 5.5C2 3.6 3.6 2 5.5 2h1.3c.9 0 1.7.6 1.9 1.5l1 4c.2.8-.1 1.6-.8 2.1l-1.5 1.1a12 12 0 0 0 5.9 5.9l1.1-1.5c.5-.7 1.3-1 2.1-.8l4 1c.9.2 1.5 1 1.5 1.9v1.3c0 1.9-1.6 3.5-3.5 3.5A16.5 16.5 0 0 1 2 5.5z',
+        outbound: 'M7 17L17 7M9 7h8v8',
+        inbound: 'M17 7L7 17M15 17H7V9',
+        open: 'M14 3h7v7M21 3l-9 9M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5',
+        approve: 'M5 12l5 5L20 7',
+        dismiss: 'M6 6l12 12M18 6L6 18',
+        followUp: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9'
+    };
+
+    const strokeSvg = (d, size, width, cls, aria) => '<svg' + (cls ? ' class="' + cls + '"' : '') +
+        ' width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + width + '"' +
+        ' stroke-linecap="round" stroke-linejoin="round"' +
+        (aria ? ' role="img" aria-label="' + escapeHtml(aria) + '"' : ' aria-hidden="true"') +
+        '><path d="' + d + '"></path></svg>';
+    const callSvg = (size) => '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="' + PATH.call + '"></path></svg>';
+
+    const DIRECTION = {
+        outbound: { label: 'Outbound', cls: 'ctc-pl-dir ctc-pl-dir-out', path: PATH.outbound },
+        inbound:  { label: 'Inbound',  cls: 'ctc-pl-dir ctc-pl-dir-in',  path: PATH.inbound }
+    };
+
+    // Period segmented control. `calls` names the data in the error state;
+    // `empty` is the empty-state title.
+    const RANGES = [
+        { range: 'today',     label: 'Today',     calls: 'today’s calls',     empty: 'No calls yet today' },
+        { range: 'yesterday', label: 'Yesterday', calls: 'yesterday’s calls', empty: 'No calls yesterday' },
+        { range: 'thisweek',  label: 'This week', calls: 'this week’s calls', empty: 'No calls this week' },
+        { range: 'lastweek',  label: 'Last week', calls: 'last week’s calls', empty: 'No calls last week' }
+    ];
+    const EMPTY_SUB = 'Calls you make from NetSuite show up here.';
+    const ERROR_SUB = 'The rest of your dashboard is fine.';
 
     /**
      * Portlet entry point.
@@ -56,7 +91,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
         let shellUrl = '';
         let restletUrl = '';
-        let workspaceUrl = '';
+        let reportingUrl = '';
 
         try {
             shellUrl = url.resolveScript({
@@ -78,23 +113,25 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             log.error({ title: 'CTC Portlet — RESTlet URL resolve failed', details: e.message || e });
         }
 
+        // Reporting Central may not be deployed yet. No link when it is missing.
         try {
-            workspaceUrl = url.resolveScript({
-                scriptId: 'customscript_ctc_sl_workspace',
-                deploymentId: 'customdeploy_ctc_sl_workspace'
-            });
+            reportingUrl = url.resolveScript({
+                scriptId: 'customscript_ctc_sl_reporting',
+                deploymentId: 'customdeploy_ctc_sl_reporting',
+                returnExternalUrl: false
+            }) || '';
         } catch (e) {
-            // workspace deferred — silently ignore
+            reportingUrl = '';
         }
 
         const historyResult = workspaceQueries.loadHistoryRows({ userId, todayOnly: true, limit: 5 });
         const tasksResult   = workspaceQueries.loadTaskGroups({ userId, tab: 'pending', limit: 5 });
         const stats         = workspaceQueries.computeStats(historyResult.rows || []);
 
-        portlet.html = buildHtml({
+        portlet.html = ctcFonts.buildFigtreeStyle() + buildHtml({
             shellUrl,
             restletUrl,
-            workspaceUrl,
+            reportingUrl,
             rows: historyResult.rows || [],
             groups: tasksResult.groups || [],
             totalTasks: tasksResult.totalTasks || 0,
@@ -135,7 +172,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     // ─────────────────────────────────────────────────────────────────────────
     // Inline-onclick builders. Each returns a self-contained JS string that
     // executes in the parent page context (after iframe-copy + script strip).
-    // Uses only built-in DOM APIs and `fetch`. Never references parent globals.
+    // Uses only built-in DOM APIs and `fetch`. Never references parent globals
+    // other than window.top.__ctcShell (the phone mode shell's API).
     // ─────────────────────────────────────────────────────────────────────────
 
     // JS that starts a call. Inside phone mode (the dashboard runs in the
@@ -168,19 +206,43 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         return buildShellCallJs(shellUrl, ctxJs);
     };
 
+    // Tabs: a class on the root shows one panel (CSS), the tab buttons get
+    // the active class + aria-selected.
     const buildTabOnclick = (tabName) => {
         const tn = escapeJs(tabName);
-        return "var tn='" + tn + "';" +
+        return "var tn='" + tn + "';var R=document.getElementById('ctc-pl-root');" +
+            "if(R){if(tn==='tasks'){R.classList.add('ctc-pl-show-tasks')}else{R.classList.remove('ctc-pl-show-tasks')}}" +
             "var ts=document.querySelectorAll('.ctc-pl-tab');" +
             "for(var i=0;i<ts.length;i++){" +
-                "if(ts[i].getAttribute('data-tab')===tn){ts[i].classList.add('ctc-pl-tab-active')}" +
-                "else{ts[i].classList.remove('ctc-pl-tab-active')}" +
-            "}" +
-            "var cs=document.querySelectorAll('.ctc-pl-tab-content');" +
-            "for(var j=0;j<cs.length;j++){" +
-                "cs[j].style.display=(cs[j].id==='ctc-pl-tab-'+tn)?'block':'none';" +
+                "var on=ts[i].getAttribute('data-tab')===tn;" +
+                "if(on){ts[i].classList.add('ctc-pl-tab-active')}else{ts[i].classList.remove('ctc-pl-tab-active')}" +
+                "ts[i].setAttribute('aria-selected',on?'true':'false')" +
             "}";
     };
+
+    // Write the follow-up count to the tab badge, the KPI and the bar, and the
+    // rows still on screen to "Approve all N" (it approves only those). The
+    // total lives in the root's data-fu-total, because the portlet shows only
+    // the newest few; taskExitJs lowers it by one per row. At 0 the root gets
+    // `ctc-pl-no-fu` (CSS hides the badge/bar/button, shows "All caught up").
+    // The count changes at once, without animation.
+    const FU_SYNC_JS = "var R=document.getElementById('ctc-pl-root');" +
+        "var n=R?(parseInt(R.getAttribute('data-fu-total'),10)||0):0;" +
+        "var sh=document.querySelectorAll('.ctc-pl-task-row:not(.ctc-pl-task-gone)').length;" +
+        "var ns=document.querySelectorAll('.ctc-pl-fu-n');for(var q=0;q<ns.length;q++){ns[q].textContent=String(n)}" +
+        "var nh=document.querySelectorAll('.ctc-pl-fu-shown');for(var h=0;h<nh.length;h++){nh[h].textContent=String(sh)}" +
+        "var nw=document.querySelectorAll('.ctc-pl-fu-noun');for(var w=0;w<nw.length;w++){nw[w].textContent=n===1?'follow-up':'follow-ups'}" +
+        "if(R){if(n){R.classList.remove('ctc-pl-no-fu')}else{R.classList.add('ctc-pl-no-fu')}}";
+
+    // Row exit: opacity, then height (CSS transitions on .ctc-pl-task-leaving),
+    // then the node is removed. `v` is the JS variable that holds the row.
+    const taskExitJs = (v) => "if(!" + v + ".classList.contains('ctc-pl-task-gone')){" +
+        "var Rt=document.getElementById('ctc-pl-root');" +
+        "if(Rt){Rt.setAttribute('data-fu-total',String(Math.max(0,(parseInt(Rt.getAttribute('data-fu-total'),10)||0)-1)))}}" +
+        v + ".classList.add('ctc-pl-task-gone');" +
+        v + ".style.height=" + v + ".offsetHeight+'px';void " + v + ".offsetHeight;" +
+        v + ".classList.add('ctc-pl-task-leaving');" +
+        "(function(x){setTimeout(function(){if(x.parentNode){x.parentNode.removeChild(x)}},360)})(" + v + ");";
 
     const buildTaskActionOnclick = (action, taskId, restletUrl) => {
         if (!restletUrl) return '';
@@ -198,8 +260,9 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             ".then(function(d){" +
                 "if(d&&d.ok){" +
                     "var row=b.parentNode;" +
-                    "while(row&&!row.classList.contains('ctc-pl-task-row')){row=row.parentNode}" +
-                    "if(row){row.style.opacity='0.3';row.style.pointerEvents='none'}" +
+                    "while(row&&!(row.classList&&row.classList.contains('ctc-pl-task-row'))){row=row.parentNode}" +
+                    "if(row){" + taskExitJs('row') + "}" +
+                    FU_SYNC_JS +
                 "}else{" +
                     "alert('" + errLabel + " failed: '+((d&&d.error)||'unknown'));" +
                     "b.disabled=false;if(sib){sib.disabled=false}" +
@@ -210,37 +273,181 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             "});";
     };
 
+    // "Approve all N": posts every follow-up still on screen to
+    // bulkApproveProposedTasks; approved rows leave, failed rows stay.
+    const buildBulkApproveOnclick = (restletUrl) => {
+        if (!restletUrl) return '';
+        return "var b=this;b.disabled=true;" +
+            "var rows=document.querySelectorAll('.ctc-pl-task-row:not(.ctc-pl-task-gone)');" +
+            "var ids=[];for(var i=0;i<rows.length;i++){ids.push(rows[i].getAttribute('data-row-id'))}" +
+            "if(!ids.length){b.disabled=false;return}" +
+            "fetch('" + escapeJs(restletUrl) + "',{" +
+                "method:'POST',credentials:'same-origin'," +
+                "headers:{'Content-Type':'application/json'}," +
+                "body:JSON.stringify({action:'bulkApproveProposedTasks',taskIds:ids})" +
+            "}).then(function(r){return r.json()})" +
+            ".then(function(d){" +
+                "if(d&&d.results){" +
+                    "d.results.forEach(function(r){" +
+                        "if(!r.ok)return;" +
+                        "var row=document.querySelector('.ctc-pl-task-row[data-row-id=\"'+r.taskId+'\"]');" +
+                        "if(row){" + taskExitJs('row') + "}" +
+                    "});" +
+                    FU_SYNC_JS +
+                    "if(d.failed){alert('Approve all: '+d.approved+' succeeded, '+d.failed+' failed. Failed rows remain visible.')}" +
+                "}else{" +
+                    "alert('Bulk approve failed: '+((d&&d.error)||'unknown'));" +
+                "}" +
+                "b.disabled=false;" +
+            "}).catch(function(e){alert('Bulk approve error: '+e.message);b.disabled=false});";
+    };
+
+    // Period chip: mark it active, carry the range to the Reporting Central
+    // link, then run the shared refresh (hidden #ctc-pl-refresh).
+    const buildChipOnclick = (range) => {
+        return "var b=this,rg='" + escapeJs(range) + "';" +
+            "var cs=document.querySelectorAll('.ctc-pl-chip');" +
+            "for(var i=0;i<cs.length;i++){" +
+                "var on=cs[i]===b;" +
+                "if(on){cs[i].classList.add('ctc-pl-chip-active')}else{cs[i].classList.remove('ctc-pl-chip-active')}" +
+                "cs[i].setAttribute('aria-pressed',on?'true':'false')" +
+            "}" +
+            "var R=document.getElementById('ctc-pl-root');if(R){R.setAttribute('data-range',rg)}" +
+            "var a=document.getElementById('ctc-pl-report');if(a){a.href=a.getAttribute('data-base')+encodeURIComponent(rg)}" +
+            "var f=document.getElementById('ctc-pl-refresh');if(f){f.setAttribute('data-range',rg);f.click()}";
+    };
+
+    const RETRY_JS = "var f=document.getElementById('ctc-pl-refresh');if(f){f.click()}";
+
+    // The period refresh. Runs from the hidden #ctc-pl-refresh button: shows
+    // the static skeleton, fetches getWorkspaceHistory for data-range, then
+    // recomputes the KPIs and rebuilds the rows with createElement (never
+    // innerHTML with data). Error and empty states match the server render.
+    // A sequence number drops responses from an older click.
+    const buildRefreshOnclick = (restletUrl, shellUrl) => {
+        if (!restletUrl) return '';
+        const lbl = {};
+        const emp = {};
+        RANGES.forEach((r) => { lbl[r.range] = r.calls; emp[r.range] = r.empty; });
+        const placeJs = buildPlaceCallOnclick(shellUrl);
+        const redialJs = shellUrl
+            ? buildShellCallJs(shellUrl,
+                "{entityId:String(r.companyId||''),entityName:String(r.companyName||'')," +
+                "entityType:r.companyId?'customer':'',phone:String(r.phone||'')}")
+            : '';
+        return "var rg=this.getAttribute('data-range')||'today';" +
+            "var box=document.getElementById('ctc-pl-calls');if(!box)return;" +
+            "var seq=String((parseInt(box.getAttribute('data-seq'),10)||0)+1);box.setAttribute('data-seq',seq);" +
+            "var LBL=" + JSON.stringify(lbl) + ",EMP=" + JSON.stringify(emp) + ";" +
+            "var NS='http://www.w3.org/2000/svg';" +
+            "function el(t,c,x){var e=document.createElement(t);if(c){e.className=c}if(x!=null){e.textContent=x}return e}" +
+            "function cell(e){e.setAttribute('role','cell');return e}" +
+            "function sv(p,z,sw,cl){var s=document.createElementNS(NS,'svg');s.setAttribute('width',z);s.setAttribute('height',z);s.setAttribute('viewBox','0 0 24 24');" +
+                "if(sw){s.setAttribute('fill','none');s.setAttribute('stroke','currentColor');s.setAttribute('stroke-width',sw);s.setAttribute('stroke-linecap','round');s.setAttribute('stroke-linejoin','round')}" +
+                "else{s.setAttribute('fill','currentColor')}" +
+                "if(cl){s.setAttribute('class',cl)}s.setAttribute('aria-hidden','true');" +
+                "var q=document.createElementNS(NS,'path');q.setAttribute('d',p);s.appendChild(q);return s}" +
+            "function pad(n){return(n<10?'0':'')+n}" +
+            "function setT(id,v){var e=document.getElementById(id);if(e){e.textContent=v}}" +
+            "function state(t,s,bc,bt,fn){var g=el('div','ctc-pl-state');g.appendChild(el('span','ctc-pl-state-title',t));g.appendChild(el('span','ctc-pl-state-sub',s));" +
+                "if(fn){var k=el('button',bc,bt);k.type='button';k.onclick=fn;g.appendChild(k)}box.appendChild(g);return g}" +
+            "function fail(m){box.textContent='';box.removeAttribute('aria-busy');" +
+                "var g=state('Couldn’t load '+(LBL[rg]||'calls')," + JSON.stringify(ERROR_SUB) + ",'ctc-pl-btn ctc-pl-btn-secondary','Try again',function(){" + RETRY_JS + "});" +
+                "g.title=String(m||'')}" +
+            // Loading: static skeleton bars, no shimmer.
+            "box.textContent='';box.setAttribute('aria-busy','true');" +
+            "var sk=el('div','ctc-pl-skel');sk.setAttribute('aria-label','Loading calls');" +
+            "['70%','55%','80%','45%'].forEach(function(wd){var l=el('div','ctc-pl-skel-line');l.appendChild(el('span','ctc-pl-skel-bar ctc-pl-skel-short'));var br=el('span','ctc-pl-skel-bar');br.style.width=wd;l.appendChild(br);sk.appendChild(l)});" +
+            "box.appendChild(sk);" +
+            "fetch('" + escapeJs(restletUrl) + "',{" +
+                "method:'POST',credentials:'same-origin'," +
+                "headers:{'Content-Type':'application/json'}," +
+                "body:JSON.stringify({action:'getWorkspaceHistory',dateRange:rg,limit:25})" +
+            "}).then(function(x){return x.json()})" +
+            ".then(function(d){" +
+                "if(box.getAttribute('data-seq')!==seq)return;" +
+                "if(!d||d.error){fail(d&&d.error);return}" +
+                "box.textContent='';box.removeAttribute('aria-busy');" +
+                "var rows=d.rows||[];" +
+                // KPIs — parallels server-side computeStats + buildKpiSubs.
+                "var sc=rows.filter(function(r){return r.satisfaction});" +
+                "var avg=sc.length?(sc.reduce(function(a,r){return a+r.satisfaction},0)/sc.length).toFixed(1):'—';" +
+                "var ts=rows.reduce(function(a,r){return a+(r.duration||0)},0);" +
+                "var av=rows.length?Math.round(ts/rows.length):0;" +
+                "setT('ctc-pl-kpi-calls',String(rows.length));" +
+                "setT('ctc-pl-kpi-sat',String(avg));" +
+                "setT('ctc-pl-kpi-time',String(Math.round(ts/60)));" +
+                "setT('ctc-pl-kpi-sat-sub',rows.length?sc.length+' of '+rows.length+' scored':'');" +
+                "setT('ctc-pl-kpi-time-sub',rows.length?'Avg '+(av<60?av+' s':Math.floor(av/60)+' min '+(av%60)+' s')+' per call':'');" +
+                "if(!rows.length){" +
+                    "state(EMP[rg]||'No calls in this period'," + JSON.stringify(EMPTY_SUB) + ",'ctc-pl-btn ctc-pl-btn-call','Make a call'," +
+                        (placeJs ? "function(){" + placeJs + "}" : "null") + ");return" +
+                "}" +
+                "var h=el('div','ctc-pl-colhead');h.setAttribute('role','row');" +
+                "['Time','Customer','AI brief','Sat','Length'].forEach(function(t,i){var c=el('span',i===4?'ctc-pl-r':'',t);c.setAttribute('role','columnheader');h.appendChild(c)});" +
+                "var hc=el('span');hc.setAttribute('role','columnheader');hc.appendChild(el('span','ctc-pl-sr','Actions'));h.appendChild(hc);" +
+                "box.appendChild(h);" +
+                "rows.forEach(function(r){" +
+                    "var row=el('div','ctc-pl-row');row.setAttribute('role','row');" +
+                    "var inb=r.direction==='inbound';" +
+                    "var wh=cell(el('span','ctc-pl-when'));" +
+                    "var ds=sv(inb?'" + PATH.inbound + "':'" + PATH.outbound + "',13,'2.2',inb?'ctc-pl-dir ctc-pl-dir-in':'ctc-pl-dir ctc-pl-dir-out');" +
+                    "ds.removeAttribute('aria-hidden');ds.setAttribute('role','img');ds.setAttribute('aria-label',inb?'Inbound':'Outbound');wh.appendChild(ds);" +
+                    "var dt=r.date?new Date(r.date):null;" +
+                    "wh.appendChild(el('span','ctc-pl-time',r.timeOfDay||(dt&&!isNaN(dt.getTime())?pad(dt.getHours())+':'+pad(dt.getMinutes()):'—')));" +
+                    "row.appendChild(wh);" +
+                    "var nm=r.companyName||'Unknown';" +
+                    "var wo=cell(el('span','ctc-pl-who'));" +
+                    "var co=el('a','ctc-pl-company',nm);co.href='/app/common/entity/custjob.nl?id='+encodeURIComponent(r.companyId||'');co.title=nm;wo.appendChild(co);" +
+                    "wo.appendChild(el('span','ctc-pl-contact',r.contactName||''));row.appendChild(wo);" +
+                    "var st=r.callStatus||'';" +
+                    "var bt=r.brief||(st==='Logged'||st==='Processing'?'Processing…':st==='No transcript'?'Too short to summarize':'—');" +
+                    "var bf=cell(el('span','ctc-pl-brief'+(r.brief?'':' ctc-pl-brief-muted'),bt));bf.title=r.brief||'';row.appendChild(bf);" +
+                    "var sa=r.satisfaction;var sp=cell(el('span','ctc-pl-sat'));" +
+                    "sp.appendChild(el('span','ctc-pl-pill '+(!sa?'ctc-pl-sat-none':sa>=7?'ctc-pl-sat-hi':sa>=5?'ctc-pl-sat-mid':'ctc-pl-sat-low'),sa?String(sa):'—'));row.appendChild(sp);" +
+                    "var du=Math.max(0,parseInt(r.duration,10)||0);" +
+                    "row.appendChild(cell(el('span','ctc-pl-dur',Math.floor(du/60)+':'+pad(du%60))));" +
+                    "var ac=cell(el('span','ctc-pl-acts'));" +
+                    "var op=el('a','ctc-pl-icon-btn ctc-pl-view-call ctc-pl-press');op.href='/app/crm/calendar/call.nl?id='+encodeURIComponent(r.id||'');" +
+                    "op.target='_blank';op.rel='noopener';op.title='Open the Phone Call record';op.setAttribute('aria-label','Open '+nm+' call');" +
+                    "op.appendChild(sv('" + PATH.open + "',15,'1.8',''));ac.appendChild(op);" +
+                    "var rd=el('button','ctc-pl-icon-btn ctc-pl-redial');rd.type='button';rd.title='Call again';rd.setAttribute('aria-label','Call '+nm+' again');" +
+                    "rd.appendChild(sv('" + PATH.call + "',14,'',''));" +
+                    // Closure-based onclick (NOT a setAttribute string) so `r` is
+                    // captured at row-build time.
+                    (redialJs
+                        ? "rd.onclick=function(){" + redialJs + "};"
+                        : "rd.disabled=true;rd.title='Phone unavailable';") +
+                    "ac.appendChild(rd);row.appendChild(ac);" +
+                    "box.appendChild(row);" +
+                "});" +
+            "}).catch(function(e){if(box.getAttribute('data-seq')!==seq)return;fail(e&&e.message)});";
+    };
+
     // ─────────────────────────────────────────────────────────────────────────
-    // HTML builders
+    // Formatting helpers (the client rebuilder above mirrors these)
     // ─────────────────────────────────────────────────────────────────────────
+
+    const pad2 = (n) => (n < 10 ? '0' : '') + n;
 
     const fmtTime = (dateStr) => {
         if (!dateStr) return '';
         // Accept ISO or "M/D/YYYY h:mm AM/PM" formats from NetSuite search
         const d = new Date(dateStr);
         if (isNaN(d.getTime())) return String(dateStr).split(' ').slice(-2).join(' ');
-        const h = d.getHours();
-        const m = d.getMinutes();
-        return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
     };
 
-    const fmtDuration = (secs) => {
-        if (!secs || secs < 0) return '0s';
-        if (secs < 60) return secs + 's';
-        const m = Math.floor(secs / 60);
-        const s = secs % 60;
-        return m + 'm ' + (s < 10 ? '0' + s : s) + 's';
+    // Call length as m:ss (mono column).
+    const fmtLen = (secs) => {
+        const s = Math.max(0, parseInt(secs, 10) || 0);
+        return Math.floor(s / 60) + ':' + pad2(s % 60);
     };
 
-    const satPillClass = (sat) => {
-        if (!sat) return 'ctc-pl-pill ctc-pl-pill-none';
-        if (sat >= 7) return 'ctc-pl-pill ctc-pl-pill-high';
-        if (sat >= 4) return 'ctc-pl-pill ctc-pl-pill-mid';
-        return 'ctc-pl-pill ctc-pl-pill-low';
-    };
+    const fmtAvg = (secs) => (secs < 60 ? secs + ' s' : Math.floor(secs / 60) + ' min ' + (secs % 60) + ' s');
 
     const fmtDate = (dateStr) => {
-        if (!dateStr) return '—';
+        if (!dateStr) return '';
         const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
         // Parse YYYY-MM-DD safely (avoid timezone shift from Date('2026-05-16') being interpreted as UTC)
         const isoMatch = String(dateStr).match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})/);
@@ -252,315 +459,132 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         return months[d.getMonth()] + ' ' + d.getDate();
     };
 
-    const buildCallRowHtml = (r, shellUrl) => {
-        const time = escapeHtml(fmtTime(r.date) || '—');
-        const companyId = encodeURIComponent(r.companyId || '');
-        const callId = encodeURIComponent(r.id || '');
-        const companyName = escapeHtml(r.companyName || 'Unknown');
-        const entityType = escapeHtml(r.entityType || '—');
-        const brief = escapeHtml(r.brief || '—');
-        const briefAttr = escapeHtml(r.brief || '');
-        const sat = r.satisfaction ? String(r.satisfaction) : '—';
-        const dur = escapeHtml(fmtDuration(r.duration));
-        const redialOnclick = buildRedialOnclick(shellUrl, r.phone, r.companyId, r.companyName);
-        // Standard NetSuite Phone Call record URL — the ctc_ue_transcript_viewer
-        // UE script adds the Call Intelligence (transcript + AI summary) panel.
-        const callRecordUrl = '/app/crm/calendar/call.nl?id=' + callId;
-
-        return '<div class="ctc-pl-row">' +
-            '<span class="ctc-pl-time">' + time + '</span>' +
-            '<span class="ctc-pl-type">' + entityType + '</span>' +
-            '<a class="ctc-pl-company" href="/app/common/entity/custjob.nl?id=' + companyId + '">' + companyName + '</a>' +
-            '<span class="ctc-pl-brief" title="' + briefAttr + '">' + brief + '</span>' +
-            '<span class="' + satPillClass(r.satisfaction) + '">' + escapeHtml(sat) + '</span>' +
-            '<span class="ctc-pl-dur">' + dur + '</span>' +
-            '<a class="ctc-pl-view-call" href="' + callRecordUrl + '" target="_blank" rel="noopener" title="Open Phone Call record (transcript + AI summary)">📋</a>' +
-            (redialOnclick
-                ? '<button class="ctc-pl-redial" type="button" title="Call this contact" onclick="' + escapeHtml(redialOnclick) + '">' + PHONE_SVG + '</button>'
-                : '<span class="ctc-pl-redial-disabled" title="Phone unavailable">' + PHONE_SVG + '</span>'
-            ) +
-        '</div>';
+    // AI brief text, or a grey placeholder by call status.
+    const briefOf = (r) => {
+        if (r.brief) return { text: r.brief, muted: false };
+        const st = r.callStatus || '';
+        if (st === 'Logged' || st === 'Processing') return { text: 'Processing…', muted: true };
+        if (st === 'No transcript') return { text: 'Too short to summarize', muted: true };
+        return { text: '—', muted: true };
     };
 
-    // Inline onclick for a date-filter chip on Today's Calls.
-    // Fetches the calls for the chosen range, then re-renders the rows in-place.
-    // Self-contained — uses only built-in DOM APIs + fetch.
-    const buildChipOnclick = (range, restletUrl, shellUrl) => {
-        if (!restletUrl) return '';
-        return "var b=this;" +
-            "var chips=document.querySelectorAll('.ctc-pl-chip');" +
-            "for(var i=0;i<chips.length;i++){" +
-                "if(chips[i]===b){chips[i].classList.add('ctc-pl-chip-active')}" +
-                "else{chips[i].classList.remove('ctc-pl-chip-active')}" +
-            "}" +
-            "var container=document.getElementById('ctc-pl-tab-today');" +
-            "if(!container)return;" +
-            // Show loading state without obliterating the chip strip (we keep first child)
-            "var chipStrip=container.firstElementChild;" +
-            "container.textContent='';" +
-            "if(chipStrip)container.appendChild(chipStrip);" +
-            "var loading=document.createElement('div');" +
-            "loading.className='ctc-pl-empty';" +
-            "loading.textContent='Loading...';" +
-            "container.appendChild(loading);" +
-            "fetch('" + escapeJs(restletUrl) + "',{" +
-                "method:'POST',credentials:'same-origin'," +
-                "headers:{'Content-Type':'application/json'}," +
-                "body:JSON.stringify({action:'getWorkspaceHistory',dateRange:'" + escapeJs(range) + "',limit:25})" +
-            "}).then(function(r){return r.json()})" +
-            ".then(function(d){" +
-                "container.removeChild(loading);" +
-                "if(d&&d.error){" +
-                    "var err=document.createElement('div');err.className='ctc-pl-error';err.textContent='Failed: '+d.error;" +
-                    "container.appendChild(err);return;" +
-                "}" +
-                "var rows=(d&&d.rows)||[];" +
-                // Recompute KPIs from the new rows and update the DOM (parallels server-side computeStats)
-                "var sats=rows.filter(function(r){return r.satisfaction});" +
-                "var avgSat=sats.length?(sats.reduce(function(a,r){return a+r.satisfaction},0)/sats.length).toFixed(1):'—';" +
-                "var totalSec=rows.reduce(function(a,r){return a+(r.duration||0)},0);" +
-                "var minutes=Math.round(totalSec/60);" +
-                "var kCalls=document.getElementById('ctc-pl-kpi-calls');if(kCalls)kCalls.textContent=String(rows.length);" +
-                "var kSat=document.getElementById('ctc-pl-kpi-sat');if(kSat)kSat.textContent=String(avgSat);" +
-                "var kTime=document.getElementById('ctc-pl-kpi-time');if(kTime)kTime.textContent=String(minutes);" +
-                "if(!rows.length){" +
-                    "var empty=document.createElement('div');empty.className='ctc-pl-empty';empty.textContent='No calls in this range.';" +
-                    "container.appendChild(empty);return;" +
-                "}" +
-                // Re-render column header + rows. Keep header parallel to initial render.
-                "var head=document.createElement('div');head.className='ctc-pl-colhead ctc-pl-colhead-calls';" +
-                "head.innerHTML='<span>Time</span><span>Type</span><span>Company</span><span>AI Brief</span><span style=\\\"text-align:center\\\">Sat</span><span style=\\\"text-align:right\\\">Duration</span><span></span><span></span>';" +
-                "container.appendChild(head);" +
-                "rows.forEach(function(r){" +
-                    "var row=document.createElement('div');row.className='ctc-pl-row';" +
-                    "var t=document.createElement('span');t.className='ctc-pl-time';" +
-                    "var d2=r.date?new Date(r.date):null;" +
-                    "t.textContent=d2&&!isNaN(d2.getTime())?(d2.getHours()<10?'0':'')+d2.getHours()+':'+(d2.getMinutes()<10?'0':'')+d2.getMinutes():'';" +
-                    "row.appendChild(t);" +
-                    "var ty=document.createElement('span');ty.className='ctc-pl-type';ty.textContent=r.entityType||'—';row.appendChild(ty);" +
-                    "var a=document.createElement('a');a.className='ctc-pl-company';a.href='/app/common/entity/custjob.nl?id='+encodeURIComponent(r.companyId||'');a.textContent=r.companyName||'Unknown';row.appendChild(a);" +
-                    "var b2=document.createElement('span');b2.className='ctc-pl-brief';b2.title=r.brief||'';b2.textContent=r.brief||'—';row.appendChild(b2);" +
-                    "var sat=r.satisfaction;var pillCls='ctc-pl-pill ctc-pl-pill-none';if(sat>=7)pillCls='ctc-pl-pill ctc-pl-pill-high';else if(sat>=4)pillCls='ctc-pl-pill ctc-pl-pill-mid';else if(sat)pillCls='ctc-pl-pill ctc-pl-pill-low';" +
-                    "var p=document.createElement('span');p.className=pillCls;p.textContent=sat?String(sat):'—';row.appendChild(p);" +
-                    "var du=document.createElement('span');du.className='ctc-pl-dur';" +
-                    "var s=r.duration||0;du.textContent=s<60?(s+'s'):(Math.floor(s/60)+'m '+(s%60<10?'0':'')+(s%60)+'s');" +
-                    "row.appendChild(du);" +
-                    "var vw=document.createElement('a');vw.className='ctc-pl-view-call';vw.href='/app/crm/calendar/call.nl?id='+encodeURIComponent(r.id||'');vw.target='_blank';vw.rel='noopener';vw.title='Open Phone Call record (transcript + AI summary)';vw.textContent='📋';row.appendChild(vw);" +
-                    "var rd=document.createElement('button');rd.className='ctc-pl-redial';rd.type='button';rd.title='Call this contact';" +
-                    // Build phone SVG via DOM (XSS-safe; no innerHTML string parsing).
-                    // Iter B retains the SVG path over the legacy ☎ text glyph for
-                    // colour-inheritance + sizing consistency with the softphone
-                    // dialpad button.
-                    "var svgNS='http://www.w3.org/2000/svg';" +
-                    "var svg=document.createElementNS(svgNS,'svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','currentColor');" +
-                    "var p=document.createElementNS(svgNS,'path');p.setAttribute('d','" + escapeJs(PHONE_SVG_PATH) + "');" +
-                    "svg.appendChild(p);rd.appendChild(svg);" +
-                    // Closure-based onclick (NOT setAttribute string) so `r.phone` / `r.companyId`
-                    // are captured by the function's scope at row-build time. Mirrors the
-                    // server-side `buildRedialOnclick` logic (lenient: phone / companyId / both / neither).
-                    "if(" + (shellUrl ? 'true' : 'false') + "){" +
-                        "rd.onclick=function(){" + buildShellCallJs(shellUrl || '',
-                            "{entityId:String(r.companyId||''),entityName:String(r.companyName||'')," +
-                            "entityType:r.companyId?'customer':'',phone:String(r.phone||'')}") + "};" +
-                    "}else{" +
-                        "rd.disabled=true;rd.title='Phone unavailable';" +
-                    "}" +
-                    "row.appendChild(rd);" +
-                    "container.appendChild(row);" +
-                "});" +
-            "}).catch(function(e){" +
-                "var err=document.createElement('div');err.className='ctc-pl-error';err.textContent='Failed: '+e.message;" +
-                "container.appendChild(err);" +
-            "});";
+    const satClass = (sat) => {
+        if (!sat) return 'ctc-pl-sat-none';
+        if (sat >= 7) return 'ctc-pl-sat-hi';
+        if (sat >= 5) return 'ctc-pl-sat-mid';
+        return 'ctc-pl-sat-low';
     };
 
-    const buildChipsHtml = (restletUrl, shellUrl) => {
-        const chips = [
-            { range: 'today',     label: 'Today',     active: true },
-            { range: 'yesterday', label: 'Yesterday', active: false },
-            { range: 'thisweek',  label: 'This Week', active: false },
-            { range: 'lastweek',  label: 'Last Week', active: false }
-        ];
-        return '<div class="ctc-pl-chips">' +
-            chips.map((c) => {
-                const onclick = buildChipOnclick(c.range, restletUrl, shellUrl);
-                const cls = 'ctc-pl-chip' + (c.active ? ' ctc-pl-chip-active' : '');
-                return onclick
-                    ? '<button class="' + cls + '" type="button" data-range="' + c.range + '" onclick="' + escapeHtml(onclick) + '">' + c.label + '</button>'
-                    : '<button class="' + cls + '" type="button" disabled>' + c.label + '</button>';
-            }).join('') +
-        '</div>';
+    const buildKpiSubs = (rows) => {
+        const scored = rows.filter((r) => r.satisfaction).length;
+        const totalSec = rows.reduce((a, r) => a + (r.duration || 0), 0);
+        const avg = rows.length ? Math.round(totalSec / rows.length) : 0;
+        return {
+            sat: rows.length ? scored + ' of ' + rows.length + ' scored' : '',
+            time: rows.length ? 'Avg ' + fmtAvg(avg) + ' per call' : ''
+        };
     };
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HTML builders
+    // ─────────────────────────────────────────────────────────────────────────
 
     const buildCallsColumnHeaderHtml = () => {
-        return '<div class="ctc-pl-colhead ctc-pl-colhead-calls">' +
-            '<span>Time</span>' +
-            '<span>Type</span>' +
-            '<span>Company</span>' +
-            '<span>AI Brief</span>' +
-            '<span style="text-align:center">Sat</span>' +
-            '<span style="text-align:right">Duration</span>' +
-            '<span></span>' +
-            '<span></span>' +
+        return '<div class="ctc-pl-colhead" role="row">' +
+            '<span role="columnheader">Time</span>' +
+            '<span role="columnheader">Customer</span>' +
+            '<span role="columnheader">AI brief</span>' +
+            '<span role="columnheader">Sat</span>' +
+            '<span role="columnheader" class="ctc-pl-r">Length</span>' +
+            '<span role="columnheader"><span class="ctc-pl-sr">Actions</span></span>' +
         '</div>';
     };
 
-    // Master select-all checkbox (lives in the tasks column header, right of "Company").
-    // Clicking it toggles bulk-mode on the tasks container — per-row checkboxes only
-    // become visible inside bulk-mode, so the table stays uncluttered the rest of the time.
-    // Also tags each visible row with data-bulk-selected="1" so bulk-approve can find them.
-    const buildSelectAllOnclick = () => {
-        return "var master=this;" +
-            "var container=document.getElementById('ctc-pl-tasks-container');" +
-            "var rows=document.querySelectorAll('.ctc-pl-task-row');" +
-            "var boxes=document.querySelectorAll('.ctc-pl-task-check');" +
-            "if(master.checked){" +
-                "if(container){container.classList.add('bulk-mode');container.classList.add('has-selection')}" +
-                "for(var i=0;i<rows.length;i++){rows[i].setAttribute('data-bulk-selected','1')}" +
-                "for(var j=0;j<boxes.length;j++){boxes[j].checked=true}" +
-            "}else{" +
-                "if(container){container.classList.remove('bulk-mode');container.classList.remove('has-selection')}" +
-                "for(var i=0;i<rows.length;i++){rows[i].removeAttribute('data-bulk-selected')}" +
-                "for(var j=0;j<boxes.length;j++){boxes[j].checked=false}" +
-            "}" +
-            "var cnt=document.getElementById('ctc-pl-selected-count');" +
-            "if(cnt){cnt.textContent=master.checked?rows.length:0}";
-    };
+    const buildCallRowHtml = (r, shellUrl) => {
+        const dir = r.direction === 'inbound' ? DIRECTION.inbound : DIRECTION.outbound;
+        const time = escapeHtml(r.timeOfDay || fmtTime(r.date) || '—');
+        const companyId = encodeURIComponent(r.companyId || '');
+        // Standard NetSuite Phone Call record URL — the ctc_ue_transcript_viewer
+        // UE script adds the Call Intelligence (transcript + AI summary) panel.
+        const callId = encodeURIComponent(r.id || '');
+        const companyName = escapeHtml(r.companyName || 'Unknown');
+        const contact = escapeHtml(r.contactName || '');
+        const brief = briefOf(r);
+        const redialOnclick = buildRedialOnclick(shellUrl, r.phone, r.companyId, r.companyName);
 
-    // Per-row checkbox onclick — toggles that row's data-bulk-selected, recomputes
-    // the count, hides the action bar when nothing remains selected, and syncs the
-    // master checkbox's checked state.
-    const buildRowCheckOnclick = () => {
-        return "var cb=this;" +
-            "var row=cb.parentNode;while(row&&!row.classList.contains('ctc-pl-task-row')){row=row.parentNode}" +
-            "if(row){if(cb.checked)row.setAttribute('data-bulk-selected','1');else row.removeAttribute('data-bulk-selected')}" +
-            "var selected=document.querySelectorAll('.ctc-pl-task-row[data-bulk-selected=\"1\"]');" +
-            "var cnt=document.getElementById('ctc-pl-selected-count');" +
-            "if(cnt){cnt.textContent=selected.length}" +
-            "var container=document.getElementById('ctc-pl-tasks-container');" +
-            "if(container){" +
-                "if(selected.length>0){container.classList.add('has-selection')}" +
-                "else{container.classList.remove('has-selection')}" +
-            "}" +
-            "var master=document.getElementById('ctc-pl-select-all');" +
-            "var allRows=document.querySelectorAll('.ctc-pl-task-row');" +
-            "if(master){master.checked=(allRows.length>0&&selected.length===allRows.length)}";
-    };
-
-    const buildTasksColumnHeaderHtml = (selectAllOnclick) => {
-        const checkCell = selectAllOnclick
-            ? '<span class="ctc-pl-colhead-check"><input type="checkbox" id="ctc-pl-select-all" class="ctc-pl-task-check-all" title="Select all visible tasks" onclick="' + escapeHtml(selectAllOnclick) + '"></span>'
-            : '<span class="ctc-pl-colhead-check"></span>';
-        return '<div class="ctc-pl-colhead ctc-pl-colhead-tasks">' +
-            checkCell +
-            '<span>Type</span>' +
-            '<span>Company</span>' +
-            '<span>AI Action Item</span>' +
-            '<span>Due</span>' +
-            '<span style="text-align:right">Approve / Reject</span>' +
-        '</div>';
-    };
-
-    // Inline onclick fired by the Clear button — full reset: uncheck everything,
-    // exit bulk-mode (per-row checkboxes hide), and hide the action bar.
-    const buildClearOnclick = () => {
-        return "var container=document.getElementById('ctc-pl-tasks-container');" +
-            "var rows=document.querySelectorAll('.ctc-pl-task-row');" +
-            "for(var i=0;i<rows.length;i++){rows[i].removeAttribute('data-bulk-selected')}" +
-            "var boxes=document.querySelectorAll('.ctc-pl-task-check');" +
-            "for(var j=0;j<boxes.length;j++){boxes[j].checked=false}" +
-            "var master=document.getElementById('ctc-pl-select-all');" +
-            "if(master){master.checked=false}" +
-            "if(container){container.classList.remove('bulk-mode');container.classList.remove('has-selection')}" +
-            "var cnt=document.getElementById('ctc-pl-selected-count');" +
-            "if(cnt){cnt.textContent=0}";
-    };
-
-    // Inline onclick fired by the bulk Approve button. Gathers task IDs from rows
-    // tagged with data-bulk-selected="1" (set by the master checkbox), posts to
-    // bulkApproveProposedTasks, fades approved rows, reports failures.
-    const buildBulkApproveOnclick = (restletUrl) => {
-        if (!restletUrl) return '';
-        return "var b=this;b.disabled=true;" +
-            "var rows=document.querySelectorAll('.ctc-pl-task-row[data-bulk-selected=\"1\"]');" +
-            "var ids=[];for(var i=0;i<rows.length;i++){ids.push(rows[i].getAttribute('data-row-id'))}" +
-            "if(!ids.length){b.disabled=false;return}" +
-            "fetch('" + escapeJs(restletUrl) + "',{" +
-                "method:'POST',credentials:'same-origin'," +
-                "headers:{'Content-Type':'application/json'}," +
-                "body:JSON.stringify({action:'bulkApproveProposedTasks',taskIds:ids})" +
-            "}).then(function(r){return r.json()})" +
-            ".then(function(d){" +
-                "if(d&&d.results){" +
-                    "d.results.forEach(function(r){" +
-                        "var row=document.querySelector('.ctc-pl-task-row[data-row-id=\"'+r.taskId+'\"]');" +
-                        "if(!row)return;" +
-                        "if(r.ok){row.style.opacity='0.3';row.style.pointerEvents='none';row.removeAttribute('data-bulk-selected')}" +
-                    "});" +
-                    "var master=document.getElementById('ctc-pl-select-all');" +
-                    "if(master){master.checked=false}" +
-                    "var boxes=document.querySelectorAll('.ctc-pl-task-check');" +
-                    "for(var k=0;k<boxes.length;k++){boxes[k].checked=false}" +
-                    "var container=document.getElementById('ctc-pl-tasks-container');" +
-                    "if(container){container.classList.remove('bulk-mode');container.classList.remove('has-selection')}" +
-                    "var cnt=document.getElementById('ctc-pl-selected-count');" +
-                    "if(cnt){cnt.textContent=0}" +
-                    "if(d.failed){alert('Bulk approve: '+d.approved+' succeeded, '+d.failed+' failed. Failed rows remain visible.')}" +
-                "}else{" +
-                    "alert('Bulk approve failed: '+((d&&d.error)||'unknown'));" +
-                "}" +
-                "b.disabled=false;" +
-            "}).catch(function(e){alert('Bulk approve error: '+e.message);b.disabled=false});";
-    };
-
-    // Build a single flat task row. Each task = one row regardless of source call.
-    // Parallel structure to buildCallRowHtml.
-    const buildTaskRowHtml = (task, call, restletUrl) => {
-        const companyName = escapeHtml(call.companyName || 'Unknown');
-        const companyId = encodeURIComponent(call.companyId || '');
-        const briefAttr = escapeHtml(call.brief || '');
-        const taskText = escapeHtml(task.text || '');
-        const taskTextAttr = escapeHtml(task.text || '');
-        const dueDate = escapeHtml(fmtDate(task.proposedDue));
-        const approveOnclick = buildTaskActionOnclick('approveProposedTask', task.id, restletUrl);
-        const rejectOnclick  = buildTaskActionOnclick('rejectProposedTask',  task.id, restletUrl);
-        const rowCheckOnclick = buildRowCheckOnclick();
-
-        const entityType = escapeHtml(call.entityType || '—');
-
-        return '<div class="ctc-pl-task-row" data-row-id="' + escapeHtml(String(task.id)) + '" title="' + briefAttr + '">' +
-            '<input type="checkbox" class="ctc-pl-task-check" title="Select this task" onclick="' + escapeHtml(rowCheckOnclick) + '">' +
-            '<span class="ctc-pl-task-type">' + entityType + '</span>' +
-            '<a class="ctc-pl-task-company" href="/app/common/entity/custjob.nl?id=' + companyId + '">' + companyName + '</a>' +
-            '<span class="ctc-pl-task-text" title="' + taskTextAttr + '">' + taskText + '</span>' +
-            '<span class="ctc-pl-task-due">' + dueDate + '</span>' +
-            '<span class="ctc-pl-task-actions">' +
-                (approveOnclick
-                    ? '<button class="ctc-pl-approve" type="button" title="Approve — creates a NetSuite Task" onclick="' + escapeHtml(approveOnclick) + '">✓</button>'
-                    : '<button class="ctc-pl-approve" type="button" disabled title="RESTlet unavailable">✓</button>'
-                ) +
-                (rejectOnclick
-                    ? '<button class="ctc-pl-reject" type="button" title="Reject — dismiss this AI suggestion" onclick="' + escapeHtml(rejectOnclick) + '">✗</button>'
-                    : '<button class="ctc-pl-reject" type="button" disabled title="RESTlet unavailable">✗</button>'
+        return '<div class="ctc-pl-row" role="row">' +
+            '<span class="ctc-pl-when" role="cell">' + strokeSvg(dir.path, 13, '2.2', dir.cls, dir.label) +
+                '<span class="ctc-pl-time">' + time + '</span></span>' +
+            '<span class="ctc-pl-who" role="cell">' +
+                '<a class="ctc-pl-company" href="/app/common/entity/custjob.nl?id=' + companyId + '" title="' + companyName + '">' + companyName + '</a>' +
+                '<span class="ctc-pl-contact">' + contact + '</span>' +
+            '</span>' +
+            '<span class="ctc-pl-brief' + (brief.muted ? ' ctc-pl-brief-muted' : '') + '" role="cell" title="' + escapeHtml(r.brief || '') + '">' + escapeHtml(brief.text) + '</span>' +
+            '<span class="ctc-pl-sat" role="cell"><span class="ctc-pl-pill ' + satClass(r.satisfaction) + '">' +
+                escapeHtml(r.satisfaction ? String(r.satisfaction) : '—') + '</span></span>' +
+            '<span class="ctc-pl-dur" role="cell">' + escapeHtml(fmtLen(r.duration)) + '</span>' +
+            '<span class="ctc-pl-acts" role="cell">' +
+                '<a class="ctc-pl-icon-btn ctc-pl-view-call ctc-pl-press" href="/app/crm/calendar/call.nl?id=' + callId + '" target="_blank" rel="noopener"' +
+                    ' title="Open the Phone Call record" aria-label="Open ' + companyName + ' call">' + strokeSvg(PATH.open, 15, '1.8') + '</a>' +
+                (redialOnclick
+                    ? '<button class="ctc-pl-icon-btn ctc-pl-redial" type="button" title="Call again" aria-label="Call ' + companyName + ' again" onclick="' + escapeHtml(redialOnclick) + '">' + callSvg(14) + '</button>'
+                    : '<button class="ctc-pl-icon-btn ctc-pl-redial" type="button" disabled title="Phone unavailable" aria-label="Phone unavailable">' + callSvg(14) + '</button>'
                 ) +
             '</span>' +
         '</div>';
     };
 
-    // Action bar lives BELOW the task rows and ABOVE the AI nudge.
-    // Hidden by default; revealed only when at least one row is selected
-    // (driven by the `.has-selection` class on `#ctc-pl-tasks-container`).
-    const buildTasksActionBarHtml = (restletUrl) => {
-        const bulkOnclick = buildBulkApproveOnclick(restletUrl);
-        const clearOnclick = buildClearOnclick();
-        return '<div class="ctc-pl-tasks-actionbar">' +
-            '<span><strong id="ctc-pl-selected-count">0</strong> selected</span>' +
-            '<span class="ctc-pl-bulk-spacer"></span>' +
-            (bulkOnclick
-                ? '<button class="ctc-pl-bulk-approve" type="button" onclick="' + escapeHtml(bulkOnclick) + '">✓ Approve Selected</button>'
-                : '<button class="ctc-pl-bulk-approve" type="button" disabled>✓ Approve Selected</button>'
-            ) +
-            '<button class="ctc-pl-bulk-clear" type="button" onclick="' + escapeHtml(clearOnclick) + '">Clear</button>' +
+    const buildStateHtml = (title, sub, buttonHtml, extraAttrs) => {
+        return '<div class="ctc-pl-state"' + (extraAttrs || '') + '>' +
+            '<span class="ctc-pl-state-title">' + escapeHtml(title) + '</span>' +
+            '<span class="ctc-pl-state-sub">' + escapeHtml(sub) + '</span>' +
+            (buttonHtml || '') +
+        '</div>';
+    };
+
+    const buildChipsHtml = (restletUrl) => {
+        return '<div class="ctc-pl-seg" role="group" aria-label="Period">' +
+            RANGES.map((c, i) => {
+                const active = i === 0;
+                const cls = 'ctc-pl-chip' + (active ? ' ctc-pl-chip-active' : '');
+                // Without the RESTlet a period switch cannot load data.
+                return restletUrl
+                    ? '<button class="' + cls + '" type="button" data-range="' + c.range + '" aria-pressed="' + active + '" onclick="' + escapeHtml(buildChipOnclick(c.range)) + '">' + c.label + '</button>'
+                    : '<button class="' + cls + '" type="button" data-range="' + c.range + '" aria-pressed="' + active + '" disabled>' + c.label + '</button>';
+            }).join('') +
+        '</div>';
+    };
+
+    // Build a single follow-up row (S2): text, meta line, Dismiss ×, Approve.
+    const buildTaskRowHtml = (task, call, restletUrl, callLengths) => {
+        const companyName = escapeHtml(call.companyName || 'Unknown');
+        const companyId = encodeURIComponent(call.companyId || '');
+        const taskText = escapeHtml(task.text || '');
+        const due = fmtDate(task.proposedDue);
+        const len = callLengths[String(call.id)];
+        const approveOnclick = buildTaskActionOnclick('approveProposedTask', task.id, restletUrl);
+        const rejectOnclick  = buildTaskActionOnclick('rejectProposedTask',  task.id, restletUrl);
+        const meta = [
+            '<a class="ctc-pl-task-company" href="/app/common/entity/custjob.nl?id=' + companyId + '">' + companyName + '</a>'
+        ];
+        if (due) meta.push('due <span class="ctc-pl-task-due">' + escapeHtml(due) + '</span>');
+        if (len) meta.push('from a ' + escapeHtml(len) + ' call');
+
+        return '<div class="ctc-pl-task-row" data-row-id="' + escapeHtml(String(task.id)) + '" title="' + escapeHtml(call.brief || '') + '">' +
+            '<div class="ctc-pl-task-main">' +
+                '<span class="ctc-pl-task-text">' + taskText + '</span>' +
+                '<span class="ctc-pl-task-meta">' + meta.join(' · ') + '</span>' +
+            '</div>' +
+            '<span class="ctc-pl-task-actions">' +
+                (rejectOnclick
+                    ? '<button class="ctc-pl-reject" type="button" title="Dismiss this suggestion" aria-label="Dismiss: ' + taskText + '" onclick="' + escapeHtml(rejectOnclick) + '">' + strokeSvg(PATH.dismiss, 14, '2') + '</button>'
+                    : '<button class="ctc-pl-reject" type="button" disabled title="RESTlet unavailable" aria-label="Dismiss: ' + taskText + '">' + strokeSvg(PATH.dismiss, 14, '2') + '</button>'
+                ) +
+                (approveOnclick
+                    ? '<button class="ctc-pl-approve" type="button" title="Approve — creates a NetSuite Task" onclick="' + escapeHtml(approveOnclick) + '">' + strokeSvg(PATH.approve, 13, '2.2') + 'Approve</button>'
+                    : '<button class="ctc-pl-approve" type="button" disabled title="RESTlet unavailable">' + strokeSvg(PATH.approve, 13, '2.2') + 'Approve</button>'
+                ) +
+            '</span>' +
         '</div>';
     };
 
@@ -571,433 +595,308 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const stats = opts.stats || {};
         const shellUrl = opts.shellUrl || '';
         const restletUrl = opts.restletUrl || '';
-        const workspaceUrl = opts.workspaceUrl || '';
+        const reportingUrl = opts.reportingUrl || '';
+        const noFollowUps = !!opts.tasksError || !totalTasks;
+        const fuNoun = totalTasks === 1 ? 'follow-up' : 'follow-ups';
+        const fuCount = escapeHtml(String(totalTasks));
+        const shownTasks = groups.reduce((n, g) => n + ((g.tasks || []).length), 0);
 
         const placeCallOnclick = buildPlaceCallOnclick(shellUrl);
-        const todayTabOnclick = buildTabOnclick('today');
-        const tasksTabOnclick = buildTabOnclick('tasks');
+        const refreshOnclick = buildRefreshOnclick(restletUrl, shellUrl);
+        const subs = buildKpiSubs(rows);
 
-        // Today's-calls section — chip strip is always rendered first so users can
-        // switch to Yesterday / This Week / Last Week even when today is empty.
-        const chipsHtml = buildChipsHtml(restletUrl, shellUrl);
-        let todayContentHtml;
+        // ── Header: title, period, Reporting Central, Call ──────────────────
+        const reportBase = reportingUrl
+            ? reportingUrl + (reportingUrl.indexOf('?') >= 0 ? '&' : '?') + 'range='
+            : '';
+        const reportHtml = reportBase
+            ? '<a class="ctc-pl-report" id="ctc-pl-report" href="' + escapeHtml(reportBase + 'today') + '" data-base="' + escapeHtml(reportBase) + '">' +
+                '<span class="ctc-pl-report-long">Reporting Central</span><span class="ctc-pl-report-short">Reporting</span>' +
+                strokeSvg(PATH.outbound, 13, '2') +
+              '</a>'
+            : '';
+        const callButtonHtml = placeCallOnclick
+            ? '<button class="ctc-pl-call-btn" type="button" title="Open the phone" onclick="' + escapeHtml(placeCallOnclick) + '">' + callSvg(13) + 'Call</button>'
+            : '<button class="ctc-pl-call-btn ctc-pl-call-btn-disabled" type="button" disabled ' +
+              'aria-label="Call (unavailable)" title="Phone mode Suitelet not deployed — check CTC Configuration">' + callSvg(13) + 'Call</button>';
+
+        // ── Calls panel ─────────────────────────────────────────────────────
+        let callsHtml;
         if (opts.historyError) {
-            todayContentHtml = chipsHtml + '<div class="ctc-pl-error">Failed to load today\'s calls: ' + escapeHtml(opts.historyError) + '</div>';
+            callsHtml = buildStateHtml('Couldn’t load today’s calls', ERROR_SUB,
+                refreshOnclick ? '<button class="ctc-pl-btn ctc-pl-btn-secondary" type="button" onclick="' + escapeHtml(RETRY_JS) + '">Try again</button>' : '',
+                ' title="' + escapeHtml(opts.historyError) + '"');
         } else if (!rows.length) {
-            todayContentHtml = chipsHtml + '<div class="ctc-pl-empty">No calls yet today — start with the button above.</div>';
+            callsHtml = buildStateHtml('No calls yet today', EMPTY_SUB,
+                placeCallOnclick ? '<button class="ctc-pl-btn ctc-pl-btn-call" type="button" onclick="' + escapeHtml(placeCallOnclick) + '">Make a call</button>' : '');
         } else {
-            todayContentHtml = chipsHtml + buildCallsColumnHeaderHtml() +
-                               rows.map((r) => buildCallRowHtml(r, shellUrl)).join('');
+            callsHtml = buildCallsColumnHeaderHtml() + rows.map((r) => buildCallRowHtml(r, shellUrl)).join('');
         }
 
-        // Pending-tasks section. Order inside the container:
-        //   column header (with Select all checkbox right of "Company")
-        //   → task rows
-        //   → action bar (hidden until a row is selected)
-        //   The container's class drives visibility: `.bulk-mode` reveals per-row
-        //   checkboxes, `.has-selection` reveals the action bar.
-        let tasksContentHtml;
+        // ── Follow-ups panel ────────────────────────────────────────────────
+        let tasksHtml;
         if (opts.tasksError) {
-            tasksContentHtml = '<div class="ctc-pl-error">Failed to load tasks: ' + escapeHtml(opts.tasksError) + '</div>';
-        } else if (!totalTasks) {
-            tasksContentHtml = '<div class="ctc-pl-empty">✓ All caught up — no pending follow-ups.</div>';
+            tasksHtml = buildStateHtml('Couldn’t load follow-ups', ERROR_SUB, '', ' title="' + escapeHtml(opts.tasksError) + '"');
         } else {
-            const flatTaskRows = [];
+            const callLengths = {};
+            rows.forEach((r) => { if (r.id && r.duration) callLengths[String(r.id)] = fmtLen(r.duration); });
+            const taskRows = [];
             groups.forEach((g) => {
                 (g.tasks || []).forEach((t) => {
-                    flatTaskRows.push(buildTaskRowHtml(t, g.call, restletUrl));
+                    taskRows.push(buildTaskRowHtml(t, g.call || {}, restletUrl, callLengths));
                 });
             });
-            const selectAllOnclick = buildSelectAllOnclick();
-            tasksContentHtml =
-                '<div id="ctc-pl-tasks-container" class="ctc-pl-tasks-container">' +
-                    buildTasksColumnHeaderHtml(selectAllOnclick) +
-                    flatTaskRows.join('') +
-                    buildTasksActionBarHtml(restletUrl) +
-                '</div>';
+            tasksHtml = '<div id="ctc-pl-tasks-container" class="ctc-pl-tasks">' + taskRows.join('') + '</div>' +
+                buildStateHtml('All caught up', 'No follow-ups are waiting for you.', '', ' id="ctc-pl-tasks-empty"');
         }
 
-        // AI nudge strip
-        const nudgeHtml = totalTasks ? (
-            '<div class="ctc-pl-nudge">' +
-                '<span class="ctc-pl-nudge-icon">✦</span>' +
-                '<div class="ctc-pl-nudge-text">' +
-                    '<strong>' + totalTasks + '</strong> pending follow-up' + (totalTasks === 1 ? '' : 's') +
-                    ' across ' + groups.length + ' call' + (groups.length === 1 ? '' : 's') +
-                '</div>' +
-                (workspaceUrl
-                    ? '<a class="ctc-pl-nudge-cta" href="' + escapeHtml(workspaceUrl) +
-                      (workspaceUrl.indexOf('?') >= 0 ? '&' : '?') + 'view=tasks">Review →</a>'
-                    : '<button class="ctc-pl-nudge-cta" type="button" onclick="' + escapeHtml(buildTabOnclick('tasks')) + '">Review →</button>'
-                ) +
-            '</div>'
-        ) : '';
+        const bulkOnclick = buildBulkApproveOnclick(restletUrl);
+        const approveAllHtml = '<button class="ctc-pl-approve-all" type="button"' +
+            (bulkOnclick ? ' onclick="' + escapeHtml(bulkOnclick) + '"' : ' disabled') +
+            '>Approve all <span class="ctc-pl-fu-shown">' + escapeHtml(String(shownTasks)) + '</span></button>';
 
-        // Place-a-Call button (icon-only; tooltip explains action; falls back to disabled state if URL missing)
-        const callButtonHtml = placeCallOnclick
-            ? '<button class="ctc-pl-call-btn" type="button" aria-label="Place a Call" title="Place a Call" onclick="' + escapeHtml(placeCallOnclick) + '">' +
-                '<span class="ctc-pl-call-icon" aria-hidden="true">' + PHONE_SVG + '</span>' +
-              '</button>'
-            : '<button class="ctc-pl-call-btn ctc-pl-call-btn-disabled" type="button" disabled ' +
-              'aria-label="Place a Call (unavailable)" title="Phone mode Suitelet not deployed — check CTC Configuration">' +
-                '<span class="ctc-pl-call-icon" aria-hidden="true">' + PHONE_SVG + '</span>' +
-              '</button>';
+        // ── Follow-up bar (hidden at 0 by the root class) ───────────────────
+        const fuBarHtml = opts.tasksError ? '' :
+            '<div class="ctc-pl-fubar">' +
+                strokeSvg(PATH.followUp, 16, '1.8', 'ctc-pl-fubar-icon') +
+                '<span class="ctc-pl-fubar-text"><strong><span class="ctc-pl-fu-n">' + fuCount + '</span> <span class="ctc-pl-fu-noun">' + fuNoun + '</span></strong> ' +
+                    '<span class="ctc-pl-fubar-long">are waiting for you</span>' +
+                    '<span class="ctc-pl-fubar-short">to review</span>' +
+                '</span>' +
+                '<button class="ctc-pl-review" type="button" onclick="' + escapeHtml(buildTabOnclick('tasks')) + '">Review</button>' +
+            '</div>';
 
-        // Tab badge for pending tasks count
-        const tasksBadge = totalTasks ? ' (' + totalTasks + ')' : '';
+        const refreshHtml = refreshOnclick
+            ? '<button id="ctc-pl-refresh" type="button" hidden aria-hidden="true" tabindex="-1" data-range="today" onclick="' + escapeHtml(refreshOnclick) + '">Refresh</button>'
+            : '';
+
+        const FONT = ctcFonts.FONT_STACK;
+        const MONO = ctcFonts.MONO_STACK;
 
         return `<style>
-.ctc-pl-root {
-    font-family: "Oracle Sans", "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    color: #161513;
-    font-size: 13px;
-}
+.ctc-pl-root { container-type: inline-size; container-name: ctcpl; font-family: ${FONT}; color: #161513; font-size: 13px; line-height: 1.4; background: #FFFFFF; padding-bottom: 14px; -webkit-font-smoothing: antialiased; }
+.ctc-pl-root *, .ctc-pl-root *::before, .ctc-pl-root *::after { box-sizing: border-box; }
+.ctc-pl-root a { color: #1B6097; text-decoration: none; }
+.ctc-pl-root a:hover { color: #345D7E; }
+.ctc-pl-root button { font-family: inherit; margin: 0; cursor: pointer; transition: transform 140ms ease-out, background-color 120ms ease, box-shadow 120ms ease, opacity 120ms ease; }
+.ctc-pl-root button:active:not(:disabled), .ctc-pl-root .ctc-pl-press:active { transform: scale(0.97); }
+.ctc-pl-root button:disabled { opacity: 0.4; cursor: not-allowed; }
+.ctc-pl-root button:focus-visible, .ctc-pl-root a:focus-visible { outline: none; box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 4px #74C0FC; }
+.ctc-pl-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+#ctc-pl-refresh { display: none !important; }
 
-/* ── HEADER: button left, 4 KPI cards right, all aligned ─────────────── */
-.ctc-pl-headline {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: center;
-    gap: 20px;
-    padding: 16px 16px 14px;
-    border-bottom: 1px solid #E5E2DD;
-}
-.ctc-pl-call-btn {
-    background: #345D7E; color: #FFFFFF;
-    border: 1px solid #345D7E; border-radius: 6px;
-    padding: 0;
-    font-size: 14px; font-weight: 600;
-    cursor: pointer;
-    display: inline-flex; align-items: center;
-    font-family: inherit;
-    height: 84px; width: 84px;
-    justify-content: center;
-    box-sizing: border-box;
-    line-height: 1;
-    title: "Place a Call";
-}
-.ctc-pl-call-btn:hover { background: #2B4D69; border-color: #2B4D69; }
-.ctc-pl-call-btn-disabled, .ctc-pl-call-btn:disabled {
-    background: #8B8780; border-color: #8B8780; cursor: not-allowed; opacity: 0.65;
-}
-.ctc-pl-call-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-}
-.ctc-pl-call-icon svg { width: 38px; height: 38px; display: block; }
+/* Header */
+.ctc-pl-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; padding: 18px 22px 14px; }
+.ctc-pl-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; color: #161513; }
+.ctc-pl-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: #F4F2EE; }
+.ctc-pl-chip { height: 28px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; font-size: 12.5px; font-weight: 500; color: #5C5955; }
+.ctc-pl-chip:hover:not(:disabled) { color: #161513; }
+.ctc-pl-chip.ctc-pl-chip-active { background: #FFFFFF; box-shadow: 0 1px 2px rgba(22,21,19,0.10); color: #161513; }
+.ctc-pl-spacer { flex: 1; }
+.ctc-pl-report { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.ctc-pl-report-short { display: none; }
+.ctc-pl-call-btn { height: 32px; padding: 0 12px 0 10px; border: 0; border-radius: 8px; background: #0F1B30; color: #FFFFFF; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+.ctc-pl-call-btn:hover:not(:disabled) { background: #1B2A44; }
+.ctc-pl-call-btn svg { color: #14B981; display: block; }
 
-/* KPI cards — borrowed from opportunity-kanban (Oracle Sans, bordered card) */
-.ctc-pl-kpis {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
-    align-items: stretch;
-}
-.ctc-pl-kpi {
-    padding: 12px 14px;
-    height: 84px;
-    border: 1px solid rgba(22, 21, 19, 0.12);
-    border-radius: 6px;
-    background-color: transparent;
-    box-sizing: border-box;
-    display: flex; flex-direction: column; justify-content: center;
-    gap: 6px;
-}
-.ctc-pl-kpi-label {
-    font-size: 12.5px; font-weight: 400;
-    color: rgb(0, 0, 0);
-    margin: 0;
-    line-height: 1.2;
-}
-.ctc-pl-kpi-value {
-    font-size: 22px; font-weight: 700;
-    color: rgb(0, 0, 0);
-    margin: 0;
-    line-height: 1.1;
-    font-family: inherit;
-}
-.ctc-pl-kpi-value-sub {
-    font-size: 12px; font-weight: 500; color: #5C5955; margin-left: 4px;
-}
+/* KPI strip: flat, hairline dividers */
+.ctc-pl-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 22px; border-radius: 10px; background: #FAFAF8; box-shadow: inset 0 0 0 1px #F1EFEA; }
+.ctc-pl-kpi { padding: 14px 18px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ctc-pl-kpi + .ctc-pl-kpi { box-shadow: inset 1px 0 0 #F1EFEA; }
+.ctc-pl-kpi-label { font-size: 12px; color: #5C5955; }
+.ctc-pl-kpi-val { display: flex; align-items: baseline; gap: 6px; }
+.ctc-pl-kpi-num { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; color: #161513; }
+.ctc-pl-kpi-unit { font-size: 12px; color: #5C5955; }
+.ctc-pl-kpi-sub { font-size: 11.5px; color: #5C5955; min-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ── TABS ─────────────────────────────────────────────────────────────── */
-.ctc-pl-tabs {
-    display: flex; gap: 2px;
-    padding: 10px 16px 0;
-    background: #FAFAF8;
-    border-bottom: 1px solid #E5E2DD;
-}
-.ctc-pl-tab {
-    background: transparent; border: none;
-    padding: 8px 14px;
-    font-size: 13px; font-weight: 500;
-    color: #5C5955;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    font-family: inherit;
-}
+/* Tabs */
+.ctc-pl-tabs { display: flex; align-items: flex-end; gap: 24px; padding: 16px 22px 0; box-shadow: inset 0 -1px 0 #F1EFEA; }
+.ctc-pl-tab { padding: 0 0 10px; border: 0; border-radius: 0; background: transparent; font-size: 13.5px; font-weight: 400; line-height: 1.3; color: #5C5955; display: inline-flex; align-items: center; gap: 6px; }
+.ctc-pl-root .ctc-pl-tab:active { transform: none; }
 .ctc-pl-tab:hover { color: #161513; }
-.ctc-pl-tab-active { color: #345D7E; border-bottom-color: #345D7E; font-weight: 600; }
-.ctc-pl-tab-badge { color: #B47200; font-size: 12px; margin-left: 5px; font-weight: 600; }
+.ctc-pl-tab.ctc-pl-tab-active { font-weight: 600; color: #161513; box-shadow: inset 0 -2px 0 #161513; }
+.ctc-pl-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #FFF3D6; color: #8A5A00; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.ctc-pl-root .ctc-pl-approve-all { display: none; margin: 0 0 8px auto; height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #D9D5CF; font-size: 12.5px; font-weight: 500; color: #161513; align-items: center; gap: 4px; }
+.ctc-pl-approve-all:hover:not(:disabled) { background: #F7F6F3; }
+.ctc-pl-root.ctc-pl-show-tasks .ctc-pl-approve-all { display: inline-flex; }
 
-.ctc-pl-tab-content { padding: 0 16px 12px; min-height: 80px; }
+/* Panels (class on the root picks one) */
+.ctc-pl-panel { padding: 4px 10px 0; }
+#ctc-pl-tab-tasks { display: none; }
+.ctc-pl-show-tasks #ctc-pl-tab-today { display: none; }
+.ctc-pl-show-tasks #ctc-pl-tab-tasks { display: block; }
+.ctc-pl-show-tasks .ctc-pl-fubar { display: none; }
 
-/* ── Date filter chips (Today's Calls) ───────────────────────────────── */
-.ctc-pl-chips {
-    display: flex; gap: 6px;
-    padding: 10px 0 8px;
-}
-.ctc-pl-chip {
-    background: #FFFFFF;
-    border: 1px solid #C9C5BE;
-    border-radius: 999px;
-    padding: 4px 12px;
-    font-size: 12px; font-weight: 500;
-    color: #5C5955;
-    cursor: pointer;
-    font-family: inherit;
-}
-.ctc-pl-chip:hover { border-color: #5C5955; color: #161513; }
-.ctc-pl-chip-active {
-    background: #345D7E; border-color: #345D7E; color: #FFFFFF;
-}
-.ctc-pl-chip-active:hover { color: #FFFFFF; border-color: #2B4D69; background: #2B4D69; }
-.ctc-pl-empty { color: #5C5955; padding: 28px 12px; text-align: center; font-size: 13px; }
-.ctc-pl-error { color: #B83A33; padding: 12px; font-size: 12px; }
+/* Calls table */
+.ctc-pl-colhead, .ctc-pl-row { display: grid; grid-template-columns: 64px minmax(0, 1.3fr) minmax(0, 1.7fr) 56px 64px 80px; gap: 14px; align-items: center; }
+.ctc-pl-colhead { padding: 10px 12px; font-size: 11.5px; color: #5C5955; }
+.ctc-pl-r { text-align: right; }
+.ctc-pl-row { min-height: 56px; padding: 6px 12px; border-radius: 8px; transition: background-color 120ms ease; }
+.ctc-pl-row:hover { background: #F7F6F3; }
+.ctc-pl-when { display: flex; align-items: center; gap: 8px; }
+.ctc-pl-dir { display: block; flex: none; }
+.ctc-pl-dir-out { color: #0E7A4F; }
+.ctc-pl-dir-in { color: #1B6097; }
+.ctc-pl-time { font-size: 13px; color: #5C5955; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctc-pl-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ctc-pl-company { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctc-pl-contact { font-size: 12px; color: #5C5955; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctc-pl-contact:empty { display: none; }
+.ctc-pl-brief { font-size: 13px; line-height: 1.45; color: #2E2C29; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ctc-pl-brief-muted { color: #8B8780; }
+.ctc-pl-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ctc-pl-sat-hi { background: #E3F5EC; color: #0E6B45; }
+.ctc-pl-sat-mid { background: #FFF3D6; color: #8A5A00; }
+.ctc-pl-sat-low { background: #FCE9E7; color: #9A2A23; }
+.ctc-pl-sat-none { background: #F4F2EE; color: #8B8780; }
+.ctc-pl-dur { font-family: ${MONO}; font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; color: #161513; }
+.ctc-pl-acts { display: flex; justify-content: flex-end; gap: 2px; opacity: 0.35; transition: opacity 120ms ease; }
+.ctc-pl-row:hover .ctc-pl-acts, .ctc-pl-row:focus-within .ctc-pl-acts { opacity: 1; }
+.ctc-pl-icon-btn { position: relative; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; display: inline-flex; align-items: center; justify-content: center; }
+.ctc-pl-icon-btn::after { content: ""; position: absolute; inset: -4px; }
+.ctc-pl-icon-btn svg { display: block; }
+.ctc-pl-root a.ctc-pl-view-call { color: #5C5955; transition: transform 140ms ease-out, background-color 120ms ease; }
+.ctc-pl-root a.ctc-pl-view-call:hover { background: #EFEDE8; color: #161513; }
+.ctc-pl-redial { background: rgba(20,185,129,0.10); color: #0E7A4F; }
+.ctc-pl-redial:hover:not(:disabled) { background: rgba(20,185,129,0.18); }
 
-/* ── COLUMN HEADER ROW (shared structure for both tabs) ───────────────── */
-.ctc-pl-colhead {
-    display: grid;
-    gap: 10px;
-    align-items: center;
-    padding: 10px 6px 6px;
-    border-bottom: 1.5px solid #C9C5BE;
-    font-size: 10.5px;
-    font-weight: 700;
-    color: #5C5955;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-}
-.ctc-pl-colhead-calls {
-    grid-template-columns: 60px 70px 1.4fr 2.2fr 46px 70px 36px 36px;
-}
-.ctc-pl-colhead-tasks {
-    grid-template-columns: 28px 70px 1.4fr 2.5fr 70px 64px;
-}
-.ctc-pl-colhead-tasks .ctc-pl-colhead-check {
-    display: inline-flex; align-items: center; justify-content: center;
+/* States: empty, loading (static skeleton), error */
+.ctc-pl-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 168px; padding: 16px; text-align: center; }
+.ctc-pl-state-title { font-size: 13.5px; font-weight: 500; }
+.ctc-pl-state-sub { font-size: 12px; color: #5C5955; }
+.ctc-pl-btn { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; font-size: 12px; font-weight: 600; }
+.ctc-pl-btn-call { background: #0F1B30; color: #FFFFFF; }
+.ctc-pl-btn-call:hover:not(:disabled) { background: #1B2A44; }
+.ctc-pl-btn-secondary { background: transparent; box-shadow: inset 0 0 0 1px #C9C5BE; color: #161513; font-weight: 500; }
+.ctc-pl-btn-secondary:hover:not(:disabled) { background: #F7F6F3; }
+.ctc-pl-skel { display: flex; flex-direction: column; gap: 12px; min-height: 168px; padding: 18px 12px; }
+.ctc-pl-skel-line { display: flex; align-items: center; gap: 10px; }
+.ctc-pl-skel-bar { display: block; height: 10px; border-radius: 4px; background: #F1EFEA; }
+.ctc-pl-skel-short { width: 40px; flex: none; }
+
+/* Follow-ups */
+.ctc-pl-task-row { display: flex; align-items: center; gap: 14px; padding: 12px; border-bottom: 1px solid #F7F6F3; overflow: hidden; transition: opacity 200ms ease-out, height 200ms ease-out 120ms, padding 200ms ease-out 120ms; }
+.ctc-pl-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ctc-pl-task-text { font-size: 13.5px; font-weight: 500; }
+.ctc-pl-task-meta { font-size: 12px; color: #5C5955; }
+.ctc-pl-root a.ctc-pl-task-company { color: #5C5955; }
+.ctc-pl-root a.ctc-pl-task-company:hover { color: #345D7E; text-decoration: underline; }
+.ctc-pl-task-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.ctc-pl-reject { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #8B8780; display: inline-flex; align-items: center; justify-content: center; }
+.ctc-pl-reject:hover:not(:disabled) { background: #F4F2EE; color: #5C5955; }
+.ctc-pl-approve { height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: #345D7E; color: #FFFFFF; font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.ctc-pl-approve:hover:not(:disabled) { background: #2B4D69; }
+.ctc-pl-reject svg, .ctc-pl-approve svg { display: block; }
+.ctc-pl-task-row.ctc-pl-task-leaving { opacity: 0; height: 0 !important; padding-top: 0; padding-bottom: 0; border-bottom-color: transparent; pointer-events: none; }
+#ctc-pl-tasks-empty { display: none; }
+
+/* Follow-up bar */
+.ctc-pl-fubar { display: flex; align-items: center; gap: 12px; margin: 10px 22px 4px; padding: 12px 14px; border-radius: 10px; background: #FFFBF0; box-shadow: inset 0 0 0 1px #F4E3B5; }
+.ctc-pl-fubar-icon { color: #8A5A00; flex: none; display: block; }
+.ctc-pl-fubar-text { flex: 1; font-size: 13px; }
+.ctc-pl-fubar-text strong { font-weight: 600; }
+.ctc-pl-fubar-long { color: #5C5955; }
+.ctc-pl-fubar-short { display: none; }
+.ctc-pl-review { height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #E5D3A3; font-size: 12.5px; font-weight: 600; color: #6B4700; }
+.ctc-pl-review:hover { background: #FFF6E0; }
+
+/* No follow-ups left: hide count UI, show "All caught up" */
+.ctc-pl-root.ctc-pl-no-fu .ctc-pl-approve-all, .ctc-pl-no-fu .ctc-pl-badge, .ctc-pl-no-fu .ctc-pl-fubar { display: none; }
+.ctc-pl-no-fu #ctc-pl-tasks-empty { display: flex; }
+
+/* Narrow portlet column */
+@container ctcpl (max-width: 560px) {
+    .ctc-pl-head { padding: 16px 16px 12px; gap: 10px; }
+    .ctc-pl-seg { order: 10; }
+    .ctc-pl-report { font-size: 12.5px; gap: 4px; }
+    .ctc-pl-report-long { display: none; }
+    .ctc-pl-report-short { display: inline; }
+    .ctc-pl-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 16px; }
+    .ctc-pl-kpi { padding: 12px 14px; gap: 2px; }
+    .ctc-pl-kpi + .ctc-pl-kpi { box-shadow: none; }
+    .ctc-pl-kpi:nth-child(2) { box-shadow: inset 1px 0 0 #F1EFEA; }
+    .ctc-pl-kpi:nth-child(3) { box-shadow: inset 0 1px 0 #F1EFEA; }
+    .ctc-pl-kpi:nth-child(4) { box-shadow: inset 1px 1px 0 #F1EFEA; }
+    .ctc-pl-kpi-label { font-size: 11.5px; }
+    .ctc-pl-kpi-val { gap: 4px; }
+    .ctc-pl-kpi-num { font-size: 19px; letter-spacing: 0; }
+    .ctc-pl-kpi-unit, .ctc-pl-kpi-sub { display: none; }
+    .ctc-pl-kpi-unit.ctc-pl-kpi-unit-keep { display: inline; font-size: 19px; font-weight: 600; color: #161513; }
+    .ctc-pl-tabs { padding: 12px 16px 0; }
+    .ctc-pl-panel { padding: 8px 6px 0; }
+    .ctc-pl-colhead { display: none; }
+    .ctc-pl-row { grid-template-columns: 13px auto minmax(0, 1fr) auto auto; grid-template-areas: "dir co co len act" "dir time brief len act"; column-gap: 10px; row-gap: 0; min-height: 48px; padding: 5px 10px; }
+    .ctc-pl-when, .ctc-pl-who { display: contents; }
+    .ctc-pl-dir { grid-area: dir; }
+    .ctc-pl-company { grid-area: co; font-size: 13px; }
+    .ctc-pl-time { grid-area: time; font-size: 11.5px; margin-right: -6px; }
+    .ctc-pl-time::after { content: "·"; margin-left: 4px; }
+    .ctc-pl-brief { grid-area: brief; font-size: 11.5px; line-height: 1.4; color: #5C5955; -webkit-line-clamp: 1; }
+    .ctc-pl-contact, .ctc-pl-sat, .ctc-pl-root a.ctc-pl-view-call { display: none; }
+    .ctc-pl-dur { grid-area: len; font-size: 11.5px; }
+    .ctc-pl-acts { grid-area: act; opacity: 1; }
+    .ctc-pl-fubar { margin: 8px 16px 0; padding: 10px 12px; border-radius: 9px; gap: 8px; }
+    .ctc-pl-fubar-icon, .ctc-pl-fubar-long { display: none; }
+    .ctc-pl-fubar-short { display: inline; }
+    .ctc-pl-fubar-text { font-size: 12.5px; color: #6B4700; }
+    .ctc-pl-review { height: auto; padding: 0; background: transparent; box-shadow: none; font-weight: 500; }
+    .ctc-pl-review:hover { background: transparent; text-decoration: underline; }
 }
 
-/* ── Bulk action bar (hidden by default; revealed when ≥1 row selected) ──
-   Positioned BELOW the task rows and ABOVE the AI nudge strip. */
-.ctc-pl-tasks-actionbar {
-    display: none;
-    align-items: center; gap: 12px;
-    padding: 8px 10px;
-    margin: 8px 0 6px;
-    background: rgba(52, 93, 126, 0.06);
-    border: 1px solid rgba(52, 93, 126, 0.18);
-    border-radius: 6px;
-    font-size: 12.5px;
-    color: #161513;
+/* Reduced motion: keep colour and opacity, drop scale and height */
+@media (prefers-reduced-motion: reduce) {
+    .ctc-pl-root button:active:not(:disabled), .ctc-pl-root .ctc-pl-press:active { transform: none; }
+    .ctc-pl-root button, .ctc-pl-root a.ctc-pl-view-call { transition: background-color 120ms ease, opacity 120ms ease; }
+    .ctc-pl-task-row { transition: opacity 200ms ease-out; }
+    .ctc-pl-task-row.ctc-pl-task-leaving { height: auto !important; padding-top: 12px; padding-bottom: 12px; }
 }
-.ctc-pl-tasks-container.has-selection .ctc-pl-tasks-actionbar {
-    display: flex;
-}
-/* Per-row checkboxes are hidden until the user enters bulk-mode via Select all */
-.ctc-pl-task-check {
-    visibility: hidden;
-}
-.ctc-pl-tasks-container.bulk-mode .ctc-pl-task-check {
-    visibility: visible;
-}
-.ctc-pl-tasks-actionbar strong { color: #345D7E; }
-.ctc-pl-select-all-label {
-    display: inline-flex; align-items: center; gap: 6px;
-    cursor: pointer;
-    user-select: none;
-}
-.ctc-pl-bulk-approve {
-    background: #0E7A4F; color: #FFFFFF; border: none;
-    border-radius: 5px; padding: 6px 14px;
-    font-size: 12.5px; font-weight: 600; cursor: pointer;
-    font-family: inherit;
-}
-.ctc-pl-bulk-approve:hover { background: #0A5C3B; }
-.ctc-pl-bulk-clear {
-    background: transparent; border: 1px solid #C9C5BE; color: #5C5955;
-    border-radius: 5px; padding: 5px 10px;
-    font-size: 12px; cursor: pointer; font-family: inherit;
-}
-.ctc-pl-bulk-clear:hover { color: #161513; border-color: #5C5955; }
-.ctc-pl-bulk-spacer { margin-left: auto; }
-
-.ctc-pl-task-check, .ctc-pl-task-check-all {
-    width: 16px; height: 16px;
-    accent-color: #345D7E;
-    cursor: pointer;
-    margin: 0;
-    justify-self: center;
-}
-
-/* ── TODAY'S CALLS ROWS ───────────────────────────────────────────────── */
-.ctc-pl-row {
-    display: grid;
-    grid-template-columns: 60px 70px 1.4fr 2.2fr 46px 70px 36px 36px;
-    gap: 10px; align-items: center;
-    padding: 8px 6px;
-    border-bottom: 1px solid #F1EFEA;
-    font-size: 13px;
-}
-.ctc-pl-row:last-child { border-bottom: none; }
-.ctc-pl-row:hover { background: #FAFAF8; }
-.ctc-pl-time { color: #5C5955; font-size: 12px; }
-.ctc-pl-type, .ctc-pl-task-type { color: #5C5955; font-size: 12px; }
-.ctc-pl-company { color: #345D7E; font-weight: 600; text-decoration: none; }
-.ctc-pl-company:hover { text-decoration: underline; }
-.ctc-pl-brief { color: #5C5955; font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctc-pl-dur { color: #5C5955; font-size: 12px; text-align: right; }
-.ctc-pl-redial, .ctc-pl-redial-disabled {
-    background: transparent; border: 1px solid #C9C5BE; color: #345D7E;
-    border-radius: 4px; width: 28px; height: 24px;
-    cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-family: inherit;
-}
-.ctc-pl-redial svg, .ctc-pl-redial-disabled svg { width: 13px; height: 13px; display: block; }
-.ctc-pl-redial-disabled { opacity: 0.4; cursor: not-allowed; }
-.ctc-pl-redial:hover { background: rgba(52, 93, 126, 0.08); border-color: #345D7E; }
-.ctc-pl-view-call {
-    background: transparent; border: 1px solid #C9C5BE; color: #345D7E;
-    border-radius: 4px; width: 28px; height: 24px;
-    font-size: 13px; line-height: 1; cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    text-decoration: none;
-}
-.ctc-pl-view-call:hover { background: rgba(52, 93, 126, 0.08); border-color: #345D7E; text-decoration: none; }
-
-.ctc-pl-pill {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 1px 8px; border-radius: 999px;
-    font-size: 12px; font-weight: 600;
-    justify-self: center;
-}
-.ctc-pl-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.ctc-pl-pill-high { background: rgba(14, 122, 79, 0.1); color: #0E7A4F; }
-.ctc-pl-pill-mid { background: rgba(180, 114, 0, 0.1); color: #B47200; }
-.ctc-pl-pill-low { background: rgba(184, 58, 51, 0.1); color: #B83A33; }
-.ctc-pl-pill-none { background: rgba(139, 135, 128, 0.14); color: #8B8780; }
-.ctc-pl-pill-none::before { display: none; }
-
-/* ── PENDING TASKS — flat table parallel to Today's Calls ────────────── */
-.ctc-pl-task-row {
-    display: grid;
-    grid-template-columns: 28px 70px 1.4fr 2.5fr 70px 64px;
-    gap: 10px; align-items: center;
-    padding: 8px 6px;
-    border-bottom: 1px solid #F1EFEA;
-    transition: opacity 0.3s;
-    font-size: 13px;
-}
-.ctc-pl-task-row[data-bulk-selected="1"] {
-    background: rgba(52, 93, 126, 0.06);
-}
-.ctc-pl-task-row:last-child { border-bottom: none; }
-.ctc-pl-task-row:hover { background: #FAFAF8; }
-.ctc-pl-task-company { color: #345D7E; font-weight: 600; text-decoration: none; }
-.ctc-pl-task-company:hover { text-decoration: underline; }
-.ctc-pl-task-text { color: #161513; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ctc-pl-task-due {
-    color: #5C5955; font-size: 12px; white-space: nowrap;
-}
-.ctc-pl-task-actions { display: flex; gap: 4px; justify-content: flex-end; }
-.ctc-pl-approve, .ctc-pl-reject {
-    width: 28px; height: 24px;
-    border-radius: 4px;
-    border: 1px solid;
-    font-size: 13px; font-weight: 600; cursor: pointer;
-    font-family: inherit;
-    display: inline-flex; align-items: center; justify-content: center;
-    line-height: 1;
-    padding: 0;
-}
-.ctc-pl-approve {
-    background: #0E7A4F; border-color: #0E7A4F; color: #FFFFFF;
-}
-.ctc-pl-approve:hover { background: #0A5C3B; border-color: #0A5C3B; }
-.ctc-pl-reject {
-    background: #FFFFFF; border-color: #C9C5BE; color: #B83A33;
-}
-.ctc-pl-reject:hover { background: rgba(184, 58, 51, 0.08); border-color: #B83A33; }
-.ctc-pl-approve:disabled, .ctc-pl-reject:disabled { opacity: 0.5; cursor: not-allowed; }
-
-/* ── NUDGE STRIP (NetSuite blue, matches project palette) ─────────────── */
-.ctc-pl-nudge {
-    margin: 12px 16px 0;
-    background: linear-gradient(135deg, rgba(52, 93, 126, 0.10) 0%, rgba(52, 93, 126, 0.04) 100%);
-    border: 1px solid rgba(52, 93, 126, 0.22);
-    border-radius: 8px;
-    padding: 10px 14px;
-    display: flex; gap: 12px; align-items: center;
-    font-size: 13px;
-}
-.ctc-pl-nudge-icon {
-    width: 24px; height: 24px;
-    background: linear-gradient(135deg, #4A78A2 0%, #345D7E 100%);
-    color: #FFFFFF;
-    border-radius: 6px;
-    display: inline-flex; align-items: center; justify-content: center;
-    font-size: 13px;
-    flex-shrink: 0;
-}
-.ctc-pl-nudge-text { flex: 1; color: #161513; }
-.ctc-pl-nudge-text strong { color: #345D7E; font-weight: 700; }
-.ctc-pl-nudge-cta {
-    background: #345D7E; color: #FFFFFF !important;
-    border: none; border-radius: 5px; padding: 6px 12px;
-    font-size: 12px; font-weight: 600;
-    text-decoration: none;
-    cursor: pointer; font-family: inherit;
-    display: inline-block;
-}
-.ctc-pl-nudge-cta:hover { background: #2B4D69; }
-
 </style>
 
-<div class="ctc-pl-root">
-    <div class="ctc-pl-headline">
+<div class="ctc-pl-root${noFollowUps ? ' ctc-pl-no-fu' : ''}" id="ctc-pl-root" data-range="today" data-fu-total="${fuCount}">
+    <div class="ctc-pl-head">
+        <h2 class="ctc-pl-title">Sales Rep Central</h2>
+        ${buildChipsHtml(restletUrl)}
+        <span class="ctc-pl-spacer"></span>
+        ${reportHtml}
         ${callButtonHtml}
-        <div class="ctc-pl-kpis">
-            <div class="ctc-pl-kpi">
-                <div class="ctc-pl-kpi-label">Calls</div>
-                <div class="ctc-pl-kpi-value" id="ctc-pl-kpi-calls">${escapeHtml(String(stats.callsToday || 0))}</div>
-            </div>
-            <div class="ctc-pl-kpi">
-                <div class="ctc-pl-kpi-label">Avg Satisfaction</div>
-                <div class="ctc-pl-kpi-value"><span id="ctc-pl-kpi-sat">${escapeHtml(String(stats.avgSat || '—'))}</span><span class="ctc-pl-kpi-value-sub">/10</span></div>
-            </div>
-            <div class="ctc-pl-kpi">
-                <div class="ctc-pl-kpi-label">Talk Time</div>
-                <div class="ctc-pl-kpi-value"><span id="ctc-pl-kpi-time">${escapeHtml(String(stats.talkTimeMinutes || 0))}</span><span class="ctc-pl-kpi-value-sub">min</span></div>
-            </div>
-            <div class="ctc-pl-kpi">
-                <div class="ctc-pl-kpi-label">Pending Tasks</div>
-                <div class="ctc-pl-kpi-value">${escapeHtml(String(totalTasks))}</div>
-            </div>
+    </div>
+
+    <div class="ctc-pl-kpis">
+        <div class="ctc-pl-kpi">
+            <span class="ctc-pl-kpi-label">Calls</span>
+            <span class="ctc-pl-kpi-val"><span class="ctc-pl-kpi-num" id="ctc-pl-kpi-calls">${escapeHtml(String(stats.callsToday || 0))}</span></span>
+            <span class="ctc-pl-kpi-sub" id="ctc-pl-kpi-calls-sub"></span>
+        </div>
+        <div class="ctc-pl-kpi">
+            <span class="ctc-pl-kpi-label">Satisfaction</span>
+            <span class="ctc-pl-kpi-val"><span class="ctc-pl-kpi-num" id="ctc-pl-kpi-sat">${escapeHtml(String(stats.avgSat || '—'))}</span><span class="ctc-pl-kpi-unit">/10</span></span>
+            <span class="ctc-pl-kpi-sub" id="ctc-pl-kpi-sat-sub">${escapeHtml(subs.sat)}</span>
+        </div>
+        <div class="ctc-pl-kpi">
+            <span class="ctc-pl-kpi-label">Talk time</span>
+            <span class="ctc-pl-kpi-val"><span class="ctc-pl-kpi-num" id="ctc-pl-kpi-time">${escapeHtml(String(stats.talkTimeMinutes || 0))}</span><span class="ctc-pl-kpi-unit ctc-pl-kpi-unit-keep">min</span></span>
+            <span class="ctc-pl-kpi-sub" id="ctc-pl-kpi-time-sub">${escapeHtml(subs.time)}</span>
+        </div>
+        <div class="ctc-pl-kpi">
+            <span class="ctc-pl-kpi-label">Follow-ups</span>
+            <span class="ctc-pl-kpi-val"><span class="ctc-pl-kpi-num ctc-pl-fu-n" id="ctc-pl-kpi-fu">${fuCount}</span><span class="ctc-pl-kpi-unit">to review</span></span>
+            <span class="ctc-pl-kpi-sub"></span>
         </div>
     </div>
 
-    <div class="ctc-pl-tabs">
-        <button class="ctc-pl-tab ctc-pl-tab-active" type="button" data-tab="today" onclick="${escapeHtml(todayTabOnclick)}">Call History</button>
-        <button class="ctc-pl-tab" type="button" data-tab="tasks" onclick="${escapeHtml(tasksTabOnclick)}">Pending Tasks${escapeHtml(tasksBadge)}</button>
+    <div class="ctc-pl-tabs" role="tablist" aria-label="Sections">
+        <button class="ctc-pl-tab ctc-pl-tab-active" type="button" role="tab" aria-selected="true" data-tab="today" onclick="${escapeHtml(buildTabOnclick('today'))}">Calls</button>
+        <button class="ctc-pl-tab" type="button" role="tab" aria-selected="false" data-tab="tasks" onclick="${escapeHtml(buildTabOnclick('tasks'))}">Follow-ups <span class="ctc-pl-badge ctc-pl-fu-n">${fuCount}</span></button>
+        ${approveAllHtml}
     </div>
 
-    <div id="ctc-pl-tab-today" class="ctc-pl-tab-content">${todayContentHtml}</div>
-    <div id="ctc-pl-tab-tasks" class="ctc-pl-tab-content" style="display:none">${tasksContentHtml}</div>
+    <div id="ctc-pl-tab-today" class="ctc-pl-panel" role="tabpanel">
+        <div id="ctc-pl-calls" role="table" aria-label="Calls">${callsHtml}</div>
+    </div>
+    <div id="ctc-pl-tab-tasks" class="ctc-pl-panel" role="tabpanel">${tasksHtml}</div>
 
-    ${nudgeHtml}
+    ${fuBarHtml}
+    ${refreshHtml}
 </div>`;
     };
 

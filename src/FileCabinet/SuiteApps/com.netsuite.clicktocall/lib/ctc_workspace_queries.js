@@ -40,6 +40,25 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
     };
 
     /**
+     * Read the time of day from a NetSuite time or datetime string, in the
+     * user's format ("9:48 am", "21:05", "10/30/2026 9:48 pm",
+     * "30.10.2026 09:48:12"). Returns 'HH:MM' in 24 h, or '' when no time.
+     * @param {*} value
+     * @returns {string}
+     */
+    const parseTimeOfDay = (value) => {
+        const m = String(value || '').match(/([0-9]{1,2}):([0-9]{2})(?::[0-9]{2})?\s*([ap])?\.?m?\.?/i);
+        if (!m) return '';
+        let h = parseInt(m[1], 10);
+        const min = parseInt(m[2], 10);
+        const ampm = (m[3] || '').toLowerCase();
+        if (ampm === 'p' && h < 12) h += 12;
+        if (ampm === 'a' && h === 12) h = 0;
+        if (h > 23 || min > 59) return '';
+        return (h < 10 ? '0' : '') + h + ':' + (min < 10 ? '0' : '') + min;
+    };
+
+    /**
      * Batched stage lookup. Given an array of objects with `companyId`,
      * mutates each object's `entityType` field with the Lead / Prospect /
      * Customer label from the customer record. One round-trip regardless
@@ -132,7 +151,8 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
      *   filters?: {dateFrom?: string, dateTo?: string, satMin?: number, status?: string},
      *   todayOnly?: boolean,
      *   dateRange?: string,
-     *   limit?: number
+     *   limit?: number,
+     *   bookCustomerIds?: Array<string>
      * }} [params]
      * @returns {{rows: Array<Object>, total: number, error?: string}} `{error}` on failure
      */
@@ -153,7 +173,11 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             // then pass the IDs to N/search via `['company', 'anyof', ids]`
             // so all existing date/status/satMin filters keep working without
             // a translation pass.
-            const bookCustomerIds = getBookCustomerIds({ userId: userId });
+            // `bookCustomerIds` lets a caller that already resolved the book
+            // (Reporting Central runs several range queries) skip the lookup.
+            const bookCustomerIds = Array.isArray(p.bookCustomerIds)
+                ? p.bookCustomerIds
+                : getBookCustomerIds({ userId: userId });
             if (!bookCustomerIds.length) {
                 // No accessible customers → no rows. Short-circuit; the
                 // N/search `anyof` operator rejects empty arrays anyway.
@@ -190,11 +214,15 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             if (filters.satMin) searchFilters.push('AND', ['custevent_ctc_satisfaction', 'greaterthanorequalto', String(filters.satMin)]);
             if (filters.status) searchFilters.push('AND', ['custevent_ctc_call_status', 'is', filters.status]);
 
+            // `createddate` is the second sort key so calls on the same day
+            // come newest first (startdate has no time part).
             const results = search.create({
                 type: search.Type.PHONE_CALL,
                 filters: searchFilters,
                 columns: [
                     { name: 'startdate', sort: search.Sort.DESC },
+                    { name: 'createddate', sort: search.Sort.DESC },
+                    'starttime',
                     'company',
                     'contact',
                     'phone',
@@ -216,6 +244,11 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                 return {
                     id: r.id,
                     date: r.getValue('startdate') || '',
+                    // 'HH:MM' (24 h). Phone Calls logged by the softphone are not
+                    // timed events, so `starttime` is usually blank; the record's
+                    // creation time is the call time in that case.
+                    timeOfDay: parseTimeOfDay(r.getValue('starttime')) ||
+                               parseTimeOfDay(r.getValue('createddate')),
                     companyId: extractId(r.getValue('company')),
                     companyName: extractText(r.getText ? r.getText('company') : r.getValue('company')),
                     contactName: extractText(r.getText ? r.getText('contact') : r.getValue('contact')),
@@ -315,7 +348,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                 part.forEach((p) => filters.push(p));
             });
 
-            const results = search.create({
+            const taskSearch = search.create({
                 type: 'customrecord_ctc_proposed_task',
                 filters: filters,
                 columns: [
@@ -332,7 +365,11 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                     search.createColumn({ name: 'startdate', join: 'custrecord_ctc_pt_phone_call' }),
                     search.createColumn({ name: 'company', join: 'custrecord_ctc_pt_phone_call' })
                 ]
-            }).run().getRange({ start: 0, end: limit });
+            });
+            const results = taskSearch.run().getRange({ start: 0, end: limit });
+            // totalTasks is every pending task, not only the rows returned.
+            // Count only when the limit may have cut the list.
+            const totalTasks = results.length < limit ? results.length : taskSearch.runPaged({ pageSize: 1000 }).count;
 
             // For joined SELECT columns, getValue returns the internal ID and getText
             // returns the display text. Use getText for display fields, getValue for IDs.
@@ -391,7 +428,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             // proposed_task → phone_call → company → stage in a single search.
             enrichRowsWithEntityType(groups.map((g) => g.call));
 
-            return { groups: groups, totalTasks: results.length };
+            return { groups: groups, totalTasks: totalTasks };
         } catch (e) {
             log.error({ title: 'CTC loadTaskGroups Failed', details: e.message || e });
             return { error: 'Tasks fetch failed', groups: [], totalTasks: 0 };
@@ -415,6 +452,134 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             avgSat: avgSat,
             talkTimeMinutes: Math.round(totalSec / 60)
         };
+    };
+
+    // ─── Reporting Central ──────────────────────────────────────────────────
+
+    // NetSuite search date keywords for each Reporting Central range, and the
+    // keyword for the period before it (only where one compares fairly).
+    const REPORT_RANGE_KEYWORD = {
+        today: 'today', yesterday: 'yesterday', thisweek: 'thisweek', lastweek: 'lastweek'
+    };
+    const REPORT_PREVIOUS_RANGE = { today: 'yesterday', thisweek: 'lastweektodate' };
+
+    /**
+     * True when a call did not connect (no talk time). CTC is outbound only,
+     * so this is the "missed" source until inbound calls exist.
+     * @param {{duration?: number}} row
+     * @returns {boolean}
+     */
+    const isUnconnected = (row) => !(row && row.duration > 0);
+
+    /**
+     * Filter history rows by direction and a search text. Pure: no queries.
+     * direction: 'all' | 'outbound' | 'inbound' | 'missed'. 'missed' means
+     * not connected; 'outbound' / 'inbound' mean connected in that direction.
+     * The search matches company or contact name (case-insensitive), or the
+     * phone digits when the text holds 3 or more digits.
+     * @param {Array<Object>} rows
+     * @param {{direction?: string, search?: string}} [opts]
+     * @returns {Array<Object>}
+     */
+    const filterCallRows = (rows, opts) => {
+        const o = opts || {};
+        const dir = o.direction || 'all';
+        const text = String(o.search || '').trim().toLowerCase();
+        const digits = text.replace(/[^0-9]/g, '');
+        return (rows || []).filter((r) => {
+            if (dir === 'missed' && !isUnconnected(r)) return false;
+            if ((dir === 'outbound' || dir === 'inbound') &&
+                (isUnconnected(r) || (r.direction || 'outbound') !== dir)) return false;
+            if (!text) return true;
+            const names = (String(r.companyName || '') + ' ' + String(r.contactName || '')).toLowerCase();
+            if (names.indexOf(text) !== -1) return true;
+            return digits.length >= 3 && String(r.phone || '').replace(/[^0-9]/g, '').indexOf(digits) !== -1;
+        });
+    };
+
+    /**
+     * Headline numbers for a set of calls. Pure: no queries.
+     * @param {Array<Object>} rows
+     * @returns {{calls: number, connected: number, connectedPct: number|null,
+     *   talkSeconds: number, talkMinutes: number, avgTalkSeconds: number|null,
+     *   satAvg: number|null, satCount: number}}
+     */
+    const computeReportKpis = (rows) => {
+        const list = rows || [];
+        const connected = list.filter((r) => !isUnconnected(r));
+        const talkSeconds = connected.reduce((a, r) => a + r.duration, 0);
+        const scored = list.filter((r) => typeof r.satisfaction === 'number' && r.satisfaction > 0);
+        return {
+            calls: list.length,
+            connected: connected.length,
+            connectedPct: list.length ? Math.round((connected.length / list.length) * 100) : null,
+            talkSeconds: talkSeconds,
+            talkMinutes: Math.round(talkSeconds / 60),
+            avgTalkSeconds: connected.length ? Math.round(talkSeconds / connected.length) : null,
+            satAvg: scored.length ? scored.reduce((a, r) => a + r.satisfaction, 0) / scored.length : null,
+            satCount: scored.length
+        };
+    };
+
+    /**
+     * Count CTC calls in the rep's book for a NetSuite date keyword (for
+     * "vs previous period"). Returns null on failure so callers omit the delta.
+     * @param {{userId?: string|number, bookCustomerIds?: Array<string>, dateKeyword: string}} params
+     * @returns {number|null}
+     */
+    const countCalls = (params) => {
+        try {
+            const p = params || { dateKeyword: '' };
+            if (!p.dateKeyword) return null;
+            const ids = Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: p.userId });
+            if (!ids.length) return 0;
+            const op = (p.dateKeyword === 'today' || p.dateKeyword === 'yesterday') ? 'on' : 'within';
+            return search.create({
+                type: search.Type.PHONE_CALL,
+                filters: [
+                    ['company', 'anyof', ids], 'AND',
+                    ['custevent_ctc_call_sid', 'isnotempty', ''], 'AND',
+                    ['startdate', op, p.dateKeyword]
+                ],
+                columns: ['internalid']
+            }).runPaged({ pageSize: 1000 }).count;
+        } catch (e) {
+            log.error({ title: 'CTC countCalls Failed', details: e.message || e });
+            return null;
+        }
+    };
+
+    /**
+     * The rep's Twilio caller ID from customrecord_ctc_rep_assignment: the
+     * primary assignment, else the first one. '' when none or on failure.
+     * @param {{userId?: string|number}} [params]
+     * @returns {string}
+     */
+    const getRepPhoneNumber = (params) => {
+        try {
+            const userId = parseInt(String((params && params.userId) || ''), 10);
+            if (!userId) return '';
+            const results = search.create({
+                type: 'customrecord_ctc_rep_assignment',
+                filters: [
+                    ['custrecord_ctc_ra_employee', 'anyof', userId], 'AND',
+                    ['isinactive', 'is', 'F']
+                ],
+                columns: ['custrecord_ctc_ra_phone_number', 'custrecord_ctc_ra_is_primary']
+            }).run().getRange({ start: 0, end: 20 });
+            let first = '';
+            for (let i = 0; i < results.length; i++) {
+                const phone = String(results[i].getValue('custrecord_ctc_ra_phone_number') || '');
+                if (!phone) continue;
+                const primary = results[i].getValue('custrecord_ctc_ra_is_primary');
+                if (primary === true || primary === 'T') return phone;
+                if (!first) first = phone;
+            }
+            return first;
+        } catch (e) {
+            log.error({ title: 'CTC getRepPhoneNumber Failed', details: e.message || e });
+            return '';
+        }
     };
 
     // ─── Iteration B · Phase 2 — softphone Search tab ───────────────────────
@@ -892,6 +1057,16 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         searchOwnedEntities,
         getBookCounts,
         // Phase 6 — in-call account snapshot
-        getAccountSnapshot
+        getAccountSnapshot,
+        // Reporting Central
+        getBookCustomerIds,
+        parseTimeOfDay,
+        isUnconnected,
+        filterCallRows,
+        computeReportKpis,
+        countCalls,
+        getRepPhoneNumber,
+        REPORT_RANGE_KEYWORD,
+        REPORT_PREVIOUS_RANGE
     };
 });
