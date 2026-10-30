@@ -15,12 +15,12 @@ import type {AppState} from './InitialState';
 const nonEmpty = (v: string | undefined | null): boolean =>
     !!(v && String(v).trim().length > 0);
 
-export function isStep2Valid(state: AppState): boolean {
+function isStep2Valid(state: AppState): boolean {
     const s = state.step2;
     return nonEmpty(s.accountSid) && nonEmpty(s.apiKeySid) && nonEmpty(s.apiSecretId);
 }
 
-export function isStep3Valid(state: AppState): boolean {
+function isStep3Valid(state: AppState): boolean {
     const s = state.step3;
     return nonEmpty(s.twimlAppSid) && nonEmpty(s.phoneNumber);
 }
@@ -29,7 +29,7 @@ interface Step4Assignment {
     employeeIds?: number[];
 }
 
-export function isStep4Valid(state: AppState): boolean {
+function isStep4Valid(state: AppState): boolean {
     const map = state.step4.assignments as Record<string, Step4Assignment>;
     for (const sid in map) {
         if (!Object.prototype.hasOwnProperty.call(map, sid)) continue;

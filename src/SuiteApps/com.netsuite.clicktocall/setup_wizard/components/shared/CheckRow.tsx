@@ -2,7 +2,8 @@
  * CheckRow — one preflight/drift check row.
  *
  * Phase 6 fix (2026-05-28) — refactored ternary-null siblings to
- * array-filter pattern. See StatCard.tsx for rationale.
+ * array-filter pattern. StackPanel rejects `null` children at runtime
+ * ("Invalid StackPanel item"), so siblings pass as a filtered array.
  */
 
 import * as core from '@uif-js/core';

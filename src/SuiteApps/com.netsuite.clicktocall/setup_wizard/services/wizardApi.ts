@@ -36,7 +36,7 @@ import * as core from '@uif-js/core';
  * Script + deployment IDs are stable across accounts because the
  * SuiteApp owns them (SDF object scriptids).
  */
-export const WIZARD_API_URL =
+const WIZARD_API_URL =
     '/app/site/hosting/scriptlet.nl' +
     '?script=customscript_ctc_sl_wizard_api' +
     '&deploy=customdeploy_ctc_sl_wizard_api';
@@ -82,7 +82,7 @@ interface AjaxEnvelope {
  * wrapper object like { status, statusText, data, responseHeaders }.
  * Probe both shapes so we don't care which one this UIF version uses.
  */
-export const extractPayload = (response: unknown): WizardPayload => {
+const extractPayload = (response: unknown): WizardPayload => {
     if (response == null) return null;
 
     // Direct: response IS the parsed body. Detect by presence of

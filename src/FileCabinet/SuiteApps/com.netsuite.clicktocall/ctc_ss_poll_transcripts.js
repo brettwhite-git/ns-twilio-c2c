@@ -8,7 +8,7 @@
  * updates Phone Call activity records, and deletes processed recordings.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership'], (https, record, search, llm, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership) => {
+define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
@@ -168,30 +168,6 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
     };
 
     /**
-     * Sprint 2 review #3 — restore the parent-company lookup that
-     * the RESTlet's logCall does for contact-entityType calls. Without
-     * this, recreated Phone Calls for contact entities lose the
-     * `company` link (sales rollups attribute to the contact only,
-     * not the parent customer).
-     */
-    const lookupContactCompany = (contactId) => {
-        try {
-            const result = search.lookupFields({
-                type: 'contact',
-                id: contactId,
-                columns: ['company']
-            });
-            if (result && result.company && result.company.length) {
-                return result.company[0].value;
-            }
-            return null;
-        } catch (e) {
-            log.error({ title: 'CTC lookupContactCompany failed', details: (e && e.message) || String(e) });
-            return null;
-        }
-    };
-
-    /**
      * Idempotency check before recreating a Phone Call from an
      * orphan row — the in-flight save might have actually succeeded
      * (e.g., the save returned but a network error stole the
@@ -240,7 +216,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
         if (entityId && entityId > 0) {
             if (orphan.entityType === 'contact') {
                 phoneCall.setValue({ fieldId: 'contact', value: entityId });
-                const parentCompany = lookupContactCompany(entityId);
+                const parentCompany = utils.lookupContactCompany(entityId);
                 if (parentCompany) {
                     phoneCall.setValue({ fieldId: 'company', value: parentCompany });
                 }
@@ -386,27 +362,9 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
             accountSid: config.accountSid,
             transcriptText: transcriptText,
             analysis: analysis,
-            includeBrief: true,
             includeDuration: true
         });
         return phoneCall.save();
-    };
-
-    const markCallStatus = (recordId, status, processed) => {
-        try {
-            const updates = { custevent_ctc_call_status: status };
-            if (typeof processed === 'boolean') {
-                updates.custevent_ctc_processed = processed;
-            }
-            record.submitFields({
-                type: record.Type.PHONE_CALL,
-                id: recordId,
-                values: updates,
-                options: { enableSourcing: false, ignoreMandatoryFields: true }
-            });
-        } catch (e) {
-            log.error({ title: 'CTC Mark Status Failed', details: `${recordId}: ${e.message || e}` });
-        }
     };
 
     const execute = () => {
@@ -425,7 +383,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
         try {
             const config = loadConfig();
             const authHeader = buildSecureAuthHeader(config);
-            const hasLlmQuota = llm.getRemainingFreeUsage() >= 10;
+            const hasLlmQuota = llmAnalysis.hasQuota();
 
             if (!hasLlmQuota) {
                 log.audit({ title: 'CTC LLM Quota Low', details: 'AI analysis will be skipped this cycle' });
@@ -548,13 +506,13 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                         continue;
                     }
                     if (!recording) {
-                        markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
+                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;
                         continue;
                     }
 
                     if (utils.isRecordingTerminal(recording)) {
-                        markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
                         skipped++;
                         continue;
                     }
@@ -565,19 +523,19 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                         continue;
                     }
                     if (!transcript) {
-                        markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
+                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;
                         continue;
                     }
 
                     if (utils.isTranscriptTerminal(transcript)) {
-                        markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
                         skipped++;
                         continue;
                     }
 
                     if (!utils.isTranscriptComplete(transcript)) {
-                        markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
+                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
                         skipped++;
                         continue;
                     }
@@ -612,7 +570,7 @@ define(['N/https', 'N/record', 'N/search', 'N/llm', 'N/encode', 'N/log', 'N/runt
                     processed++;
                 } catch (e) {
                     log.error({ title: 'CTC Call Processing Error', details: `${call.callSid}: ${e.message || e}` });
-                    markCallStatus(call.recordId, utils.CALL_STATUS.FAILED, false);
+                    utils.markCallStatus(call.recordId, utils.CALL_STATUS.FAILED, false);
                     errors++;
                 }
             }

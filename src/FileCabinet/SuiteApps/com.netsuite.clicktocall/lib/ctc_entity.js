@@ -3,44 +3,15 @@
  * @NApiVersion 2.1
  * @NModuleScope SameAccount
  *
- * Shared entity helpers + softphone-popup constants.
+ * Shared entity helpers + the phone frame name.
  * Single source of truth for entity-name resolution across Customer / Contact / Lead
- * record types, plus the window.open options string used by every launcher.
+ * record types.
  */
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/search', 'N/log'], (search, log) => {
 
-    // Phase 1 (Iteration B): popup is locked to 380 × 640 to match the
-    // mobile-emulator wireframe. Resize disabled so the popup never grows
-    // between tab states (Dial / Search / Recents) — internal scroll absorbs
-    // overflow inside the .phone-scroll zone.
-    const SOFTPHONE_POPUP_OPTIONS =
-        'width=380,height=640,resizable=no,scrollbars=no,toolbar=no,menubar=no,location=no';
-
-    // Versioned popup name. window.open(url, name, features) silently
-    // ignores the features string when a window with `name` already exists
-    // and just loads the new URL into the stale chrome. Bump the suffix
-    // every time SOFTPHONE_POPUP_OPTIONS dimensions change OR the inline
-    // JS gets a load-bearing fix that reps must pick up immediately so
-    // they don't keep using a stale-state popup after a deploy.
-    //
-    // v3 (Phase 4 fix): forces fresh popup so the deviceSelectors-crash
-    // + mic-permission warm-up fixes take effect without reps needing
-    // to manually close their existing popup window.
-    // v4 (Phase 6 refinements): SuiteQL search refactor — force fresh
-    // window so reps can't accidentally hit cached softphone HTML that
-    // calls the old N/search-based search backend.
-    // v5 (Phase 6 refinements): honest chip counts via softphoneBookCounts —
-    // force fresh window so reps see the true book size (95 / 4 / 13)
-    // instead of the cached "displayed slice" counts (16 / 3 / 1).
-    // v6 (Phase 7 polish): legacy contactRow/originLine removed + mic-level
-    // VU meter added to audio overlay. Force fresh popup so reps see the
-    // new meter and don't end up running JS that references the now-deleted
-    // contactSelect element.
-    // v7 (Telephony Dock): popup now hosts the ctc-bus BroadcastChannel.
-    // Force fresh popup so dock tabs find an anchor that answers them.
-    // v8 (Dock dialer): anchor accepts dial / digits requests and reports
-    // the 'starting' phase + lastLog. Force fresh popup for the new bus.
+    // Window name of the phone mode shell's hidden phone frame
+    // (#ctc-phone-frame in ctc_sl_shell.js).
     const SOFTPHONE_POPUP_NAME = 'ctc_softphone_v8';
 
     /**
@@ -134,7 +105,6 @@ define(['N/search', 'N/log'], (search, log) => {
     };
 
     return {
-        SOFTPHONE_POPUP_OPTIONS,
         SOFTPHONE_POPUP_NAME,
         resolveEntityName,
         getContactsAtEntity

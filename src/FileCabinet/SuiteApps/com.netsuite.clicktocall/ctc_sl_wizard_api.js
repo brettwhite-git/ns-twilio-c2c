@@ -154,22 +154,6 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         catch (e) { return {}; }
     };
 
-    /**
-     * Run an N/runtime feature check. Returns a structured row.
-     */
-    const featureCheck = (featureName, displayName, repairHint) => {
-        const enabled = runtime.isFeatureInEffect({ feature: featureName });
-        return {
-            id: 'feature_' + featureName.toLowerCase(),
-            label: displayName + ' feature enabled',
-            status: enabled ? 'pass' : 'fail',
-            detail: enabled
-                ? featureName + ' is enabled.'
-                : featureName + ' is NOT enabled on this account.',
-            repairHint: enabled ? null : repairHint
-        };
-    };
-
     const infoCheck = (featureName, displayName, message) => {
         const enabled = runtime.isFeatureInEffect({ feature: featureName });
         return {
@@ -355,43 +339,6 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
-    /* Action: wizardValidateTwilio (Step 2)                              */
-    /* ------------------------------------------------------------------ */
-
-    /**
-     * Live-validate the persisted credentials by pinging Twilio's
-     * /Accounts/{Sid}.json endpoint. Uses N/https.createSecureString
-     * with the {custsecret_xxx} placeholder — the secret VALUE is
-     * never in script scope.
-     *
-     * Prerequisites: Step 2 must have already saved Account SID +
-     * API Key SID + API Key Secret script ID to the config record.
-     */
-    const wizardValidateTwilio = () => {
-        const cfg = loadConfigOrError();
-        if (cfg.error) return cfg;
-
-        const result = twilio.pingAccount(cfg);
-
-        if (result.ok) {
-            return {
-                validation: {
-                    ok: true,
-                    friendlyName: result.friendlyName,
-                    twilioStatus: result.twilioStatus
-                }
-            };
-        }
-        return {
-            validation: {
-                ok: false,
-                errorCode: result.errorCode,
-                errorMessage: result.errorMessage
-            }
-        };
-    };
-
-    /* ------------------------------------------------------------------ */
     /* Action: wizardListTwiMLApps / wizardListPhoneNumbers /             */
     /*         wizardListIntelServices (Step 3 dropdowns + Step 5 grid)   */
     /* ------------------------------------------------------------------ */
@@ -477,39 +424,6 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         });
 
         return { saved: true };
-    };
-
-    /* ------------------------------------------------------------------ */
-    /* Action: wizardValidateTwiML (Step 3)                               */
-    /* ------------------------------------------------------------------ */
-
-    /**
-     * Live-validate the TwiML App SID + optional phone number + optional
-     * Intel Service SID. Uses N/https.createSecureString — secret VALUE
-     * never in script scope. Called from Step 6 (Preflight).
-     */
-    const wizardValidateTwiML = (payload) => {
-        const cfg = loadConfigOrError();
-        if (cfg.error) return cfg;
-
-        if (!payload.twimlAppSid || typeof payload.twimlAppSid !== 'string') {
-            return { ok: false, error: 'missing_twiml_app_sid' };
-        }
-
-        const validations = {};
-        validations.twimlApp = twilio.getApplication(cfg, payload.twimlAppSid);
-
-        if (payload.phoneNumber) {
-            validations.phoneNumber = twilio.getPhoneNumberLookup(
-                cfg, payload.phoneNumber);
-        }
-
-        if (payload.intelServiceSid) {
-            validations.intelService = twilio.getIntelService(
-                cfg, payload.intelServiceSid);
-        }
-
-        return { validations: validations };
     };
 
     /* ------------------------------------------------------------------ */
@@ -1203,12 +1117,10 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     const ACTIONS = {
         wizardPrereqs:           wizardPrereqs,
         wizardSnapshot:          wizardSnapshot,
-        wizardValidateTwilio:    wizardValidateTwilio,
         wizardSavePublicIds:     wizardSavePublicIds,
         wizardListTwiMLApps:     wizardListTwiMLApps,
         wizardListPhoneNumbers:  wizardListPhoneNumbers,
         wizardListIntelServices: wizardListIntelServices,
-        wizardValidateTwiML:     wizardValidateTwiML,
         wizardSaveVoice:         wizardSaveVoice,
         wizardListEmployees:     wizardListEmployees,
         wizardLoadAssignments:   wizardLoadAssignments,

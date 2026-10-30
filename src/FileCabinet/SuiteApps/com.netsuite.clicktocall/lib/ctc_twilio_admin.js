@@ -129,32 +129,6 @@ define(['N/https', 'N/encode', 'N/log'],
     };
 
     /**
-     * GET /Accounts/{Sid}.json — proves Account SID + secret pair is valid.
-     * Used as the wizard's primary "are credentials wired?" check.
-     */
-    const pingAccount = (cfg) => {
-        const url = TWILIO_API_BASE + '/' + cfg.accountSid + '.json';
-        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
-
-        log.audit({
-            title: 'CTC Wizard — Twilio account ping',
-            details: 'sid=' + maskSid(cfg.accountSid) +
-                     ' status=' + result.status +
-                     ' ok=' + result.ok
-        });
-
-        if (result.ok) {
-            return {
-                ok: true,
-                friendlyName: result.body.friendly_name,
-                twilioStatus: result.body.status,
-                accountSid: maskSid(result.body.sid || cfg.accountSid)
-            };
-        }
-        return result;
-    };
-
-    /**
      * GET /Accounts/{Sid}/Applications.json — list ALL TwiML apps in
      * the account. Used by Step 3 to render the TwiML App dropdown.
      */
@@ -183,33 +157,6 @@ define(['N/https', 'N/encode', 'N/log'],
             }),
             hasMore: !!(result.body && result.body.next_page_uri)
         };
-    };
-
-    /**
-     * GET /Accounts/{Sid}/Applications/{TwiMLAppSid}.json — single-app
-     * detail. Kept for preflight in Step 6 (verify a specific app).
-     */
-    const getApplication = (cfg, twimlAppSid) => {
-        const url = TWILIO_API_BASE + '/' + cfg.accountSid +
-                    '/Applications/' + twimlAppSid + '.json';
-        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
-
-        log.audit({
-            title: 'CTC Wizard — TwiML App validation',
-            details: 'twimlApp=' + maskSid(twimlAppSid) +
-                     ' status=' + result.status + ' ok=' + result.ok
-        });
-
-        if (result.ok) {
-            return {
-                ok: true,
-                friendlyName: result.body.friendly_name,
-                voiceUrl: result.body.voice_url,
-                voiceMethod: result.body.voice_method,
-                twimlAppSid: maskSid(result.body.sid || twimlAppSid)
-            };
-        }
-        return result;
     };
 
     /**
@@ -245,46 +192,6 @@ define(['N/https', 'N/encode', 'N/log'],
     };
 
     /**
-     * GET /Accounts/{Sid}/IncomingPhoneNumbers.json?PhoneNumber=<E164> —
-     * verify the number is owned by this Twilio account. Used by
-     * preflight when admin manually entered a number rather than picking
-     * from the list dropdown.
-     */
-    const getPhoneNumberLookup = (cfg, phoneNumber) => {
-        const encodedNumber = encodeURIComponent(phoneNumber);
-        const url = TWILIO_API_BASE + '/' + cfg.accountSid +
-                    '/IncomingPhoneNumbers.json?PhoneNumber=' + encodedNumber;
-        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
-
-        log.audit({
-            title: 'CTC Wizard — phone number lookup',
-            details: 'number=' + phoneNumber +
-                     ' status=' + result.status + ' ok=' + result.ok
-        });
-
-        if (!result.ok) return result;
-
-        const list = (result.body && result.body.incoming_phone_numbers) || [];
-        if (list.length === 0) {
-            return {
-                ok: false,
-                status: 200,
-                errorCode: 'NOT_OWNED',
-                errorMessage: 'Phone number ' + phoneNumber +
-                              ' is not owned by this Twilio account.'
-            };
-        }
-        const number = list[0];
-        return {
-            ok: true,
-            phoneNumber: number.phone_number,
-            friendlyName: number.friendly_name,
-            phoneSid: number.sid,
-            capabilities: number.capabilities
-        };
-    };
-
-    /**
      * GET intelligence.twilio.com/v2/Services — list Intel services.
      */
     const listIntelServices = (cfg) => {
@@ -309,30 +216,6 @@ define(['N/https', 'N/encode', 'N/log'],
                 };
             })
         };
-    };
-
-    /**
-     * GET intelligence.twilio.com/v2/Services/{Gid} — single-service
-     * detail. Kept for preflight in Step 6.
-     */
-    const getIntelService = (cfg, intelServiceSid) => {
-        const url = TWILIO_INTEL_BASE + '/Services/' + intelServiceSid;
-        const result = httpGetJson(url, buildSecureAuthHeader(cfg));
-
-        log.audit({
-            title: 'CTC Wizard — Intel Service validation',
-            details: 'intelService=' + maskSid(intelServiceSid) +
-                     ' status=' + result.status + ' ok=' + result.ok
-        });
-
-        if (result.ok) {
-            return {
-                ok: true,
-                friendlyName: result.body.friendly_name,
-                intelServiceSid: maskSid(result.body.sid || intelServiceSid)
-            };
-        }
-        return result;
     };
 
     /**
@@ -368,13 +251,9 @@ define(['N/https', 'N/encode', 'N/log'],
     return {
         buildSecureAuthHeader: buildSecureAuthHeader,
         maskSid: maskSid,
-        pingAccount: pingAccount,
         listApplications: listApplications,
-        getApplication: getApplication,
         listPhoneNumbers: listPhoneNumbers,
-        getPhoneNumberLookup: getPhoneNumberLookup,
         listIntelServices: listIntelServices,
-        getIntelService: getIntelService,
         getCall: getCall
     };
 });

@@ -33,15 +33,14 @@
  * Reference: /Users/brettwhite/Projects/opportunity-kanban (proven pattern).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_dock', './lib/ctc_fonts'],
-       (url, log, runtime, file, ctcHtml, workspaceQueries, ctcEntity, ctcDock, ctcFonts) => {
+define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_dock', './lib/ctc_fonts'],
+       (url, log, runtime, file, ctcHtml, workspaceQueries, ctcDock, ctcFonts) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
     // Calls live only in the phone mode shell (ctc_sl_shell.js). Launchers
     // here ask the shell's dialer when the dashboard runs inside it, and move
     // the tab into the shell otherwise. No popup window.
-    const POPUP_NAME = ctcEntity.SOFTPHONE_POPUP_NAME;
 
     // ── Icons (24 grid). Colour comes from CSS via currentColor. ────────────
     // The phone glyph is the only filled icon. The paths are shared with the
@@ -160,7 +159,6 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
                 shellUrl: shellUrl,
                 autoEnter: true,
-                popupName: POPUP_NAME,
                 restletUrl: restletUrl
             });
         } catch (e) {
@@ -468,12 +466,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         return { text: '—', muted: true };
     };
 
-    const satClass = (sat) => {
-        if (!sat) return 'ctc-pl-sat-none';
-        if (sat >= 7) return 'ctc-pl-sat-hi';
-        if (sat >= 5) return 'ctc-pl-sat-mid';
-        return 'ctc-pl-sat-low';
-    };
+    const SAT_CLASS = { high: 'ctc-pl-sat-hi', mid: 'ctc-pl-sat-mid', low: 'ctc-pl-sat-low', none: 'ctc-pl-sat-none' };
+    const satClass = (sat) => SAT_CLASS[workspaceQueries.satClass(sat)];
 
     const buildKpiSubs = (rows) => {
         const scored = rows.filter((r) => r.satisfaction).length;

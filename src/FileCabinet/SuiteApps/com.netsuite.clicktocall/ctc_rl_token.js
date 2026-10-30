@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/llm', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership'], (search, runtime, log, record, https, encode, llm, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -17,24 +17,6 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
     // never enters script scope; NetSuite's HTTP runtime expands the
     // {custsecret_*} placeholder at the socket write boundary.
     const buildSecureAuthHeader = twilioAdmin.buildSecureAuthHeader;
-
-    const lookupContactCompany = (contactId) => {
-        try {
-            const result = search.lookupFields({
-                type: search.Type.CONTACT,
-                id: contactId,
-                columns: ['company']
-            });
-            const company = result && result.company;
-            if (Array.isArray(company) && company.length && company[0].value) {
-                return company[0].value;
-            }
-            return '';
-        } catch (e) {
-            log.error({ title: 'CTC Contact Parent Lookup Failed', details: e.message || e });
-            return '';
-        }
-    };
 
     /**
      * POST handler — routes to token generation, call logging, transcript check,
@@ -294,7 +276,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 const contactNumeric = numericId(body.entityId);
                 if (contactNumeric) {
                     phoneCall.setValue({ fieldId: 'contact', value: contactNumeric });
-                    const parentCompany = lookupContactCompany(contactNumeric);
+                    const parentCompany = utils.lookupContactCompany(contactNumeric);
                     if (parentCompany) {
                         phoneCall.setValue({ fieldId: 'company', value: parentCompany });
                     }
@@ -349,27 +331,6 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
         } catch (e) {
             log.error({ title: 'CTC Log Call Failed', details: e.message || e });
             return { error: 'Failed to log call' };
-        }
-    };
-
-    /**
-     * Update only the status fields on a Phone Call record. Used to mark Processing
-     * mid-flight or terminal states without overwriting the rest of the record.
-     */
-    const markCallStatus = (recordId, status, processed) => {
-        try {
-            const updates = { custevent_ctc_call_status: status };
-            if (typeof processed === 'boolean') {
-                updates.custevent_ctc_processed = processed;
-            }
-            record.submitFields({
-                type: record.Type.PHONE_CALL,
-                id: recordId,
-                values: updates,
-                options: { enableSourcing: false, ignoreMandatoryFields: true }
-            });
-        } catch (e) {
-            log.error({ title: 'CTC Mark Status Failed', details: `${recordId}: ${e.message || e}` });
         }
     };
 
@@ -455,7 +416,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
             }
 
             if (utils.isRecordingTerminal(recording)) {
-                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                if (body.recordId) utils.markCallStatus(body.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
                 return { status: 'terminal', reason: 'recording_' + recording.status };
             }
 
@@ -464,17 +425,17 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 return { status: 'transient', reason: 'twilio_unreachable' };
             }
             if (!transcript) {
-                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
+                if (body.recordId) utils.markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
                 return { status: 'pending' };
             }
 
             if (utils.isTranscriptTerminal(transcript)) {
-                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                if (body.recordId) utils.markCallStatus(body.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
                 return { status: 'terminal', reason: 'transcript_' + transcript.status };
             }
 
             if (!utils.isTranscriptComplete(transcript)) {
-                if (body.recordId) markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
+                if (body.recordId) utils.markCallStatus(body.recordId, utils.CALL_STATUS.PROCESSING, false);
                 return { status: 'pending' };
             }
 
@@ -488,7 +449,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 action_items: []
             };
 
-            const hasLlmQuota = llm.getRemainingFreeUsage() >= 10;
+            const hasLlmQuota = llmAnalysis.hasQuota();
             if (hasLlmQuota && transcriptText) {
                 analysis = utils.analyzeTranscript(transcriptText);
             }
@@ -499,7 +460,6 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', 'N/
                 accountSid: config.accountSid,
                 transcriptText: transcriptText,
                 analysis: analysis,
-                includeBrief: true,
                 includeDuration: false
             });
             const savedRecordId = phoneCall.save();

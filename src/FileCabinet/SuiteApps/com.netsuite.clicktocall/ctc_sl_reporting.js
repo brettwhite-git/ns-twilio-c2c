@@ -196,12 +196,8 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
         return { text: row.brief ? 'Summary ready' : '—', tone: 'muted' };
     };
 
-    const satClass = (n) => {
-        if (typeof n !== 'number' || !n) return 'none';
-        if (n >= 7) return 'good';
-        if (n >= 5) return 'mid';
-        return 'low';
-    };
+    const SAT_CLASS = { high: 'good', mid: 'mid', low: 'low', none: 'none' };
+    const satClass = (n) => SAT_CLASS[wq.satClass(n)];
 
     const directionKey = (row) => (wq.isUnconnected(row) ? 'missed' : (row.direction === 'inbound' ? 'inbound' : 'outbound'));
 
@@ -853,8 +849,6 @@ ${skeleton()}
         formatPhone,
         afterCall,
         csvCell,
-        toCsv,
-        buildHtml,
-        CSV_HEADERS
+        buildHtml
     };
 });

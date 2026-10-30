@@ -7,7 +7,7 @@
  * Receives phone, entityId, entityName as URL parameters.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock'], (url, runtime, log, file, search, ctcHtml, ctcEntity, ctcDock) => {
+define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock', './lib/ctc_workspace_queries'], (url, runtime, log, file, search, ctcHtml, ctcEntity, ctcDock, workspaceQueries) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs = ctcHtml.escapeJs;
@@ -56,15 +56,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             log.error({ title: 'CTC Softphone — Failed to load Twilio SDK file', details: e.message || e });
         }
 
-        let contacts = [];
         let contactsV2 = [];
         if ((entityType === 'customer' || entityType === 'prospect') && entityId) {
-            // Phase 3: rich contact shape with all phones per contact. Used by
-            // the new multi-contact picker UI. Kept alongside the legacy
-            // queryContacts() shape so the existing initContactDropdown event
-            // handlers keep working until the Phase 7 polish removes them.
+            // Phase 3: rich contact shape with all phones per contact, used by
+            // the multi-contact picker.
             contactsV2 = ctcEntity.getContactsAtEntity(entityId);
-            contacts = queryContacts(entityId);
         }
         // Phase 6 fix: when the record carries its own primary phone (the
         // company switchboard / customer's record-level phone), prepend a
@@ -91,20 +87,21 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         const html = buildHtml({
             phone, entityId, entityName, entityType, tokenEndpoint, sdkUrl,
-            contacts, contactsV2, entityInfo, entityRecordUrl,
+            contactsV2, entityInfo, entityRecordUrl,
             entryPoint, initialTab
         });
         context.response.write(html);
     };
 
     /**
-     * Look up enrichment fields on the launch entity to populate the contact-info panel.
+     * Look up enrichment fields on the launch entity. The in-call meta strip reads
+     * ENTITY_INFO.owner.
      * Uses search.lookupFields (~1 governance unit) per call. Missing fields yield ''.
      */
     const lookupEntityInfo = (entityType, entityId) => {
         if (!entityType || !entityId) return {};
         try {
-            const extractText = (val) => (Array.isArray(val) && val.length ? (val[0].text || '') : '');
+            const extractText = workspaceQueries.extractText;
 
             if (entityType === 'customer') {
                 const r = search.lookupFields({
@@ -145,7 +142,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
     };
 
     /**
-     * Build a NetSuite record URL for the "See in NetSuite" link in the contact panel.
+     * Build a NetSuite record URL for the in-call meta strip's Open-record link.
      */
     const resolveEntityRecordUrl = (entityType, entityId) => {
         if (!entityType || !entityId) return '';
@@ -153,44 +150,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             return url.resolveRecord({ recordType: entityType, recordId: entityId });
         } catch (e) {
             return '';
-        }
-    };
-
-    /**
-     * Query contacts related to a customer entity.
-     * @param {string} entityId - Customer internal ID
-     * @returns {Array<Object>} Array of {id, name, phone, mobile}
-     */
-    const queryContacts = (entityId) => {
-        try {
-            // HIGH-8 (SAFE review 2026-05-21) — filter out deactivated
-            // contacts. Pre-fix this legacy query missed the isinactive
-            // filter that the parallel ctcEntity.getContactsAtEntity()
-            // had, so deactivated contacts (former employees, duplicates)
-            // appeared in the softphone's CONTACTS array and reps could
-            // accidentally dial them.
-            const results = search.create({
-                type: 'contact',
-                filters: [
-                    ['company', 'anyof', entityId],
-                    'AND', ['isinactive', 'is', 'F']
-                ],
-                columns: ['firstname', 'lastname', 'phone', 'mobilephone', 'email', 'title']
-            }).run().getRange({ start: 0, end: 50 });
-
-            log.debug({ title: 'CTC queryContacts', details: `entityId=${entityId}, found=${results.length}` });
-
-            return results.map((r) => ({
-                id: r.id,
-                name: ((r.getValue('firstname') || '') + ' ' + (r.getValue('lastname') || '')).trim(),
-                phone: r.getValue('phone') || '',
-                mobile: r.getValue('mobilephone') || '',
-                email: r.getValue('email') || '',
-                title: r.getValue('title') || ''
-            })).filter((c) => c.phone || c.mobile);
-        } catch (e) {
-            log.error({ title: 'CTC Softphone — Failed to query contacts', details: e.message || e });
-            return [];
         }
     };
 
@@ -207,13 +166,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
     const buildHtml = (opts) => {
         const safePhone = escapeHtml(opts.phone);
         const safeEntityName = escapeHtml(opts.entityName);
-        const safeEntityId = escapeHtml(opts.entityId);
         // JS context values — safe for embedding in JS string literals inside <script>
         const jsPhone = escapeJs(opts.phone);
         const jsEntityId = escapeJs(opts.entityId);
         const jsEntityType = escapeJs(opts.entityType || '');
         const jsTokenEndpoint = escapeJs(opts.tokenEndpoint);
-        const contactsJson = safeJsonEmbed(opts.contacts || []);
         // Phase 3: richer contacts shape for the multi-contact picker. Each
         // contact carries an array of phones [{number, type, isPrimary}]
         // covering work / mobile / home / alt.
@@ -223,8 +180,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         const jsInitialTab = escapeJs(opts.initialTab || 'dial');
 
         const info = opts.entityInfo || {};
-        const safeRecordUrl = escapeHtml(opts.entityRecordUrl || '');
-        const infoRows = buildContactInfoRows(info, opts.entityType);
 
         return `<!DOCTYPE html>
 <html lang="en">
@@ -252,8 +207,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             --panel-text: #161513;
             --panel-text-muted: #5C5955;
             --panel-border: #E5E2DD;
-            --info: #1B6097;
-            --info-soft: rgba(27, 96, 151, 0.08);
             --warning: #B47200;
             --danger: #B83A33;
         }
@@ -665,79 +618,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             text-align: center;
             word-break: break-word;
             display: none;
-        }
-        /* Iteration A/C/D/I alignment: the legacy white .contact-panel under
-           the dark phone-display is gone — the compact meta strip inside
-           view-dial absorbed Owner / Open-record / Last-call, and Email /
-           Title etc. were rarely surfaced anyway. The element stays in the
-           DOM as a no-op so existing JS hooks (renderContactInfoFor and the
-           info-* element refs) don't break. */
-        .contact-panel {
-            display: none;
-        }
-        .contact-panel h3 {
-            margin: 0 0 10px;
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--panel-text-muted);
-            text-align: left;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
-        .panel-link-row { margin-top: auto; padding-top: 10px; }
-        .contact-link {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 10px 12px;
-            background: var(--info-soft);
-            border: 1px solid rgba(27, 96, 151, 0.22);
-            border-radius: 10px;
-            color: var(--info);
-            font-size: 12.5px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            cursor: pointer;
-            text-decoration: none;
-        }
-        .contact-link:hover { background: rgba(27, 96, 151, 0.14); }
-        .contact-link .ns-icon {
-            width: 22px; height: 22px;
-            background: var(--info);
-            color: #fff;
-            border-radius: 6px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.02em;
-        }
-        .contact-link .arrow { margin-left: auto; opacity: 0.7; }
-        .contact-rows { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; }
-        .contact-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 14px;
-            font-size: 12px;
-        }
-        .contact-row dt { color: var(--panel-text-muted); font-weight: 500; flex-shrink: 0; margin: 0; }
-        .contact-row dd {
-            margin: 0;
-            color: var(--panel-text);
-            text-align: right;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            min-width: 0;
-        }
-        .panel-empty {
-            text-align: center;
-            font-size: 11.5px;
-            color: var(--panel-text-muted);
-            font-style: italic;
-            padding: 8px 0 0;
         }
         /* ─── Iteration B Phase 2: Search tab ────────────────────────────── */
         /* view-dial / view-search are siblings inside .phone-scroll.
@@ -1752,19 +1632,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         <div class="log-status" id="logStatus"></div>
         </div><!-- /phone-footer -->
     </div>
-
-    <div class="contact-panel">
-        <h3>Contact information</h3>
-
-        <dl class="contact-rows" id="contactInfoRows">
-            <div class="contact-row" data-row="email"><dt>Email</dt><dd id="info-email">&mdash;</dd></div>
-            <div class="contact-row" data-row="title"><dt>Title</dt><dd id="info-title">&mdash;</dd></div>
-            <div class="contact-row" data-row="owner"><dt>Owner</dt><dd id="info-owner">&mdash;</dd></div>
-            <div class="contact-row" data-row="parent"><dt>Parent</dt><dd id="info-parent">&mdash;</dd></div>
-        </dl>
-    </div>
 </div>
-<!-- ENTITY_INFO and CONTACTS_INFO are consumed by inline JS to swap panel rows when picker changes -->
+<!-- ENTITY_INFO, record URL, name and type are read by the inline JS (in-call meta strip) -->
 <script>window.__CTC_ENTITY_INFO__ = ${safeJsonEmbed(info || {})}; window.__CTC_ENTITY_RECORD_URL__ = ${safeJsonEmbed(opts.entityRecordUrl || '')}; window.__CTC_ENTITY_NAME__ = ${safeJsonEmbed(opts.entityName || '')}; window.__CTC_ENTITY_TYPE__ = ${safeJsonEmbed(opts.entityType || '')};</script>
 
     <script src="${escapeHtml(opts.sdkUrl)}"></script>
@@ -1776,7 +1645,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var PHONE = '${jsPhone}';
         var ENTITY_ID = '${jsEntityId}';
         var ENTITY_TYPE = '${jsEntityType}';
-        var CONTACTS = ${contactsJson};
         // Phase 3: richer per-entity contact shape for the multi-contact picker.
         var CONTACTS_V2 = ${contactsV2Json};
         var SELECTED_CONTACT_ID = '';
@@ -1848,14 +1716,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var inputSelect = document.getElementById('inputDevice');
         var outputSelect = document.getElementById('outputDevice');
         var outputRow = document.getElementById('outputRow');
-
-        // Contact panel info row elements
-        var infoEmailEl = document.getElementById('info-email');
-        var infoTitleEl = document.getElementById('info-title');
-        var infoOwnerEl = document.getElementById('info-owner');
-        var infoParentEl = document.getElementById('info-parent');
-        var contactLinkLabelEl = document.getElementById('contactLinkLabel');
-        var contactLinkEl = document.getElementById('contactLink');
 
         var ENTITY_INFO = window.__CTC_ENTITY_INFO__ || {};
         var ENTITY_RECORD_URL = window.__CTC_ENTITY_RECORD_URL__ || '';
@@ -2321,51 +2181,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // Initial state — show backspace if number is pre-populated
         syncBackspaceVisibility();
 
-        // --- Contact info panel ---
-        function setRowValue(rowEl, valueEl, value) {
-            if (!rowEl || !valueEl) return;
-            if (value) {
-                valueEl.textContent = value;
-                rowEl.style.display = '';
-            } else {
-                rowEl.style.display = 'none';
-            }
-        }
-
-        function renderContactInfoFor(info, displayName) {
-            info = info || {};
-            var rows = document.querySelectorAll('.contact-row');
-            // Map each row's data-row attr to the corresponding info field + DOM value el
-            var map = {
-                email:  { el: infoEmailEl,  val: info.email  || '' },
-                title:  { el: infoTitleEl,  val: info.title  || '' },
-                owner:  { el: infoOwnerEl,  val: info.owner  || '' },
-                parent: { el: infoParentEl, val: info.parent || '' }
-            };
-            rows.forEach(function (row) {
-                var key = row.getAttribute('data-row');
-                var m = map[key];
-                if (m) setRowValue(row, m.el, m.val);
-            });
-            // Hide entire panel rows section if everything is empty
-            var anyVisible = Object.keys(map).some(function (k) { return map[k].val; });
-            var panelEmpty = document.getElementById('panelEmpty');
-            if (!anyVisible && !panelEmpty) {
-                var emptyDiv = document.createElement('div');
-                emptyDiv.id = 'panelEmpty';
-                emptyDiv.className = 'panel-empty';
-                emptyDiv.textContent = 'No additional contact details available.';
-                document.getElementById('contactInfoRows').after(emptyDiv);
-            } else if (anyVisible && panelEmpty) {
-                panelEmpty.remove();
-            }
-            if (contactLinkLabelEl && displayName) {
-                contactLinkLabelEl.textContent = 'See ' + displayName + ' in NetSuite';
-            }
-        }
-        // Initial render with the launch entity's info
-        renderContactInfoFor(ENTITY_INFO, (window.__CTC_ENTITY_TYPE__ || 'record'));
-
         // --- Token fetch ---
         // quiet: a background token refresh must not touch the status text
         // (it would overwrite an active call's status).
@@ -2387,14 +2202,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         var callerId = '';
-
-        // --- Contact dropdown (lives in the bottom contact-info panel) ---
-        function findContactById(id) {
-            for (var i = 0; i < CONTACTS.length; i++) {
-                if (String(CONTACTS[i].id) === String(id)) return CONTACTS[i];
-            }
-            return null;
-        }
 
         // --- Call logging ---
         function logCallToNetSuite(callSid, duration) {
@@ -3170,7 +2977,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             setDialedNumber(row.phone || '', { resetFresh: true });
             if (entityName)    entityName.textContent = row.companyName || '';
             if (entityCompany) entityCompany.textContent = row.contactName || '';
-            renderContactInfoFor({ email: row.email, contactName: row.contactName }, row.companyName);
             setActiveTab('dial');
             setButtons(!!row.phone, false, false);
 
@@ -3493,7 +3299,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var audioOverlay  = document.getElementById('audioOverlay');
         var audioDoneBtn  = document.getElementById('audioDone');
         var audioSaveBox  = document.getElementById('audioSaveDefault');
-        var previousView  = 'dial'; // remember which view to restore on Done
 
         function loadAudioDefaults() {
             try {
@@ -3806,7 +3611,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             setDialedNumber(row.phone || '', { resetFresh: true });
             if (entityName)    entityName.textContent = row.companyName || '';
             if (entityCompany) entityCompany.textContent = row.contactName || '';
-            renderContactInfoFor({ email: '', contactName: row.contactName }, row.companyName);
             setActiveTab('dial');
             setButtons(!!row.phone, false, false);
             // Phase 3 picker hydration: if entity has multiple contacts, the
@@ -4094,24 +3898,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
     </script>
 </body>
 </html>`;
-    };
-
-    /**
-     * Build the <dl>.contact-rows HTML for the contact-info panel from looked-up entity info.
-     * Renders only rows that have a non-empty value so blanks don't clutter the panel.
-     */
-    const buildContactInfoRows = (info, entityType) => {
-        const rows = [];
-        const push = (label, value) => {
-            if (!value) return;
-            rows.push(`<div class="contact-row"><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`);
-        };
-        push('Email', info.email);
-        push('Title', info.title);
-        push('Owner', info.owner);
-        push('Parent', info.parent);
-        if (!rows.length) return '';
-        return `<dl class="contact-rows">${rows.join('')}</dl>`;
     };
 
     return { onRequest };

@@ -123,8 +123,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_
                 assetUrl: file.load({ id: ctcDock.DOCK_ASSET_PATH }).url,
                 dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
                 shellUrl: shellUrl,
-                popupName: ctcEntity.SOFTPHONE_POPUP_NAME,
-                popupOptions: ctcEntity.SOFTPHONE_POPUP_OPTIONS,
                 restletUrl: restletUrl,
                 context: dockContext
             });

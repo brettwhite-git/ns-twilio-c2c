@@ -30,7 +30,6 @@
 import gulp from 'gulp';
 import ts from 'gulp-typescript';
 import { rollup } from 'rollup';
-import terser from '@rollup/plugin-terser';
 import path from 'path';
 import fs from 'fs';
 import fsp from 'fs/promises';
@@ -43,16 +42,6 @@ const tsBuildDir = 'build';
 const srcSuiteAppDir = path.join('src', 'SuiteApps');
 const buildSuiteAppDir = path.join(tsBuildDir, 'src', 'SuiteApps');
 const fileCabinetSuiteAppDir = path.join('src', 'FileCabinet', 'SuiteApps');
-
-// Concatenate all of a SPA's modules into a single AMD file per entry
-// point (matches the current hand-written SpaClient.js shape).
-// Set to false for module-per-file output (preserves rollup tree).
-const concatenateScripts = true;
-
-// Minification disabled by default — keep AMD output readable for
-// debugging / git-blame purposes. Set true for production-style
-// builds if needed.
-const minifyScripts = false;
 
 // External module specifiers — these are resolved by NetSuite's hosted
 // runtime, NOT by our bundler. Without the /^N$/ and /^N\// regexes,
@@ -235,8 +224,7 @@ const bundleScripts = async () => {
 
         const bundle = await rollup({
             input: entry,
-            external: ROLLUP_EXTERNALS,
-            plugins: minifyScripts ? [terser()] : []
+            external: ROLLUP_EXTERNALS
         });
 
         await bundle.write({
@@ -245,8 +233,6 @@ const bundleScripts = async () => {
             banner: banner,
             // Avoid named-module conflicts in NetSuite's AMD loader.
             amd: { autoId: false },
-            // Preserve readability; rollup default is concise.
-            compact: minifyScripts,
             sourcemap: false
         });
 

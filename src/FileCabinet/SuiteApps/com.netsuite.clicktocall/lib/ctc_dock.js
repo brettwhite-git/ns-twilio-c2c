@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '8';
+    const DOCK_ASSET_VERSION = '9';
 
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
     // shell's #ctc-phone-frame) and every dock. Message shapes (all carry v: 1):
@@ -63,8 +63,6 @@ define(['./ctc_html'], (ctcHtml) => {
      * @typedef {Object} DockMountOptions
      * @property {string} [shellUrl] - phone mode shell Suitelet URL (same origin)
      * @property {boolean} [autoEnter] - outside phone mode, go to the shell by itself (dashboard portlet only)
-     * @property {string} [popupName] - name of the shell's phone frame
-     * @property {string} [popupOptions] - legacy popup features (unused by the dock)
      * @property {string} [restletUrl] - ctc_rl_token RESTlet URL (same origin)
      * @property {{entityId?: string, entityName?: string, entityType?: string, phone?: string}} [context] - Record the page shows
      * @property {string} [assetUrl] - media URL of ctc_dock_client.js
@@ -85,8 +83,6 @@ define(['./ctc_html'], (ctcHtml) => {
         const attrs = [
             ['data-bus', BUS_CHANNEL],
             ['data-shell-url', opts.shellUrl || ''],
-            ['data-popup-name', opts.popupName || ''],
-            ['data-popup-options', opts.popupOptions || ''],
             ['data-restlet-url', opts.restletUrl || ''],
             ['data-entity-id', String(ctx.entityId || '')],
             ['data-entity-name', String(ctx.entityName || '')],

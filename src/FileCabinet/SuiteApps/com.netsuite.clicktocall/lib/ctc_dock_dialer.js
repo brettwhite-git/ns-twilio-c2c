@@ -19,6 +19,8 @@
     var host = dock.host;
     var cfg = host.cfg;
     host.dialer = true;
+    var formatPhone = dock.formatPhone;
+    var initials = dock.initials;
 
     var ACTIVE = { dialing: true, ringing: true, connected: true };
     var PENDING_TIMEOUT_MS = 15000;
@@ -312,24 +314,6 @@
         return (str.trim().charAt(0) === '+' ? '+' : '') + str.replace(/[^0-9]/g, '');
     }
 
-    // Same rules as formatPhone / dialableFormat in ctc_sl_softphone.js.
-    function formatPhone(input) {
-        var s = digitsOf(input);
-        var plus = s.charAt(0) === '+';
-        var d = s.replace(/\+/g, '');
-        if (!d) return '';
-        if (plus) {
-            if (d.length <= 10) return '+' + d;
-            var cc = d.slice(0, d.length - 10), r = d.slice(d.length - 10);
-            return '+' + cc + ' (' + r.slice(0, 3) + ') ' + r.slice(3, 6) + '-' + r.slice(6);
-        }
-        if (d.length <= 3) return d;
-        if (d.length <= 6) return '(' + d.slice(0, 3) + ') ' + d.slice(3);
-        if (d.length <= 10) return '(' + d.slice(0, 3) + ') ' + d.slice(3, 6) + '-' + d.slice(6);
-        var cc2 = d.slice(0, d.length - 10), r2 = d.slice(d.length - 10);
-        return '+' + cc2 + ' (' + r2.slice(0, 3) + ') ' + r2.slice(3, 6) + '-' + r2.slice(6);
-    }
-
     function dialable(input) {
         var d = digitsOf(input);
         if (!d) return '';
@@ -337,12 +321,6 @@
         if (d.length === 10) return '+1' + d;
         if (d.length === 11 && d.charAt(0) === '1') return '+' + d;
         return d;
-    }
-
-    function initials(name) {
-        var parts = String(name || '').replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/);
-        if (!parts[0]) return '?';
-        return (parts[0].charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : '')).toUpperCase();
     }
 
     function money(n) {

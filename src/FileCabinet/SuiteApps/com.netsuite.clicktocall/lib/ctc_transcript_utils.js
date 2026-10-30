@@ -7,8 +7,8 @@
  * and the RESTlet checkTranscript action.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
-       (https, llm, log, record, llmAnalysis) => {
+define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis'],
+       (https, llm, log, record, search, llmAnalysis) => {
 
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
@@ -212,9 +212,8 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
      * the RESTlet checkTranscript action and the Scheduled Script retry both end
      * up with identical field sets. Caller is responsible for record.load() and .save().
      *
-     * Also spawns customrecord_ctc_proposed_task rows from analysis.action_items
-     * (unless opts.createProposedTasks === false). Failures in task creation never
-     * block the core enrichment write.
+     * Also spawns customrecord_ctc_proposed_task rows from analysis.action_items.
+     * Failures in task creation never block the core enrichment write.
      *
      * @param {Object} phoneCallRec - record object already loaded via record.load()
      * @param {Object} opts
@@ -223,13 +222,8 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
      * @param {string} opts.transcriptText - formatted "[REP] ..." conversation text
      * @param {Object} opts.analysis - LLM output ({ title, brief, summary,
      *                                  satisfaction_score, tone_keywords, action_items })
-     * @param {boolean} [opts.includeBrief=false] - whether to set custevent_ctc_ai_brief
-     *                                              (Scheduled Script path does, RESTlet path historically didn't)
      * @param {boolean} [opts.includeDuration=false] - whether to set custevent_ctc_duration
      *                                                 from recording.duration (Scheduled Script path does)
-     * @param {boolean} [opts.createProposedTasks=true] - whether to spawn proposed_task rows
-     *                                                   from analysis.action_items
-     * @param {string|number} [opts.phoneCallId] - fallback if phoneCallRec.id is not available
      */
     const writePhoneCallEnrichmentFields = (phoneCallRec, opts) => {
         const recording = opts.recording || {};
@@ -253,21 +247,61 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_satisfaction', value: analysis.satisfaction_score || 5 });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_tone_keywords', value: (analysis.tone_keywords || []).join(', ') });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_action_items', value: (analysis.action_items || []).join('\n') });
-        if (opts.includeBrief) {
-            phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_brief', value: (analysis.brief || analysis.summary || '').substring(0, 120) });
-        }
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_brief', value: (analysis.brief || analysis.summary || '').substring(0, 120) });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_processed', value: true });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_call_status', value: CALL_STATUS.TRANSCRIBED });
 
-        if (opts.createProposedTasks !== false) {
-            try {
-                const callId = phoneCallRec.id || opts.phoneCallId;
-                if (callId) {
-                    createProposedTasksFromAnalysis(callId, analysis);
-                }
-            } catch (e) {
-                log.error({ title: 'CTC Proposed Task Creation Failed', details: e.toString() });
+        try {
+            if (phoneCallRec.id) {
+                createProposedTasksFromAnalysis(phoneCallRec.id, analysis);
             }
+        } catch (e) {
+            log.error({ title: 'CTC Proposed Task Creation Failed', details: e.toString() });
+        }
+    };
+
+    /**
+     * Update only the status fields on a Phone Call record. Used to mark Processing
+     * mid-flight or terminal states without overwriting the rest of the record.
+     * Never throws.
+     */
+    const markCallStatus = (recordId, status, processed) => {
+        try {
+            const updates = { custevent_ctc_call_status: status };
+            if (typeof processed === 'boolean') {
+                updates.custevent_ctc_processed = processed;
+            }
+            record.submitFields({
+                type: record.Type.PHONE_CALL,
+                id: recordId,
+                values: updates,
+                options: { enableSourcing: false, ignoreMandatoryFields: true }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Mark Status Failed', details: `${recordId}: ${e.message || e}` });
+        }
+    };
+
+    /**
+     * Parent company internal ID of a Contact, or '' when it has none or the
+     * lookup fails. Phone Calls for a contact also link the parent company so
+     * sales rollups attribute to the customer. Never throws.
+     */
+    const lookupContactCompany = (contactId) => {
+        try {
+            const result = search.lookupFields({
+                type: search.Type.CONTACT,
+                id: contactId,
+                columns: ['company']
+            });
+            const company = result && result.company;
+            if (Array.isArray(company) && company.length && company[0].value) {
+                return company[0].value;
+            }
+            return '';
+        } catch (e) {
+            log.error({ title: 'CTC Contact Parent Lookup Failed', details: e.message || e });
+            return '';
         }
     };
 
@@ -342,8 +376,6 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
         TWILIO_INTEL_BASE,
         ANALYSIS_PROMPT_PREFIX,
         CALL_STATUS,
-        RECORDING_TERMINAL_STATUSES,
-        TRANSCRIPT_TERMINAL_STATUSES,
         TRANSIENT_ERROR,
         isTransientError,
         isRecordingTerminal,
@@ -356,6 +388,8 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', './ctc_llm_analysis'],
         analyzeTranscript,
         createProposedTasksFromAnalysis,
         writePhoneCallEnrichmentFields,
+        markCallStatus,
+        lookupContactCompany,
         deleteRecording
     };
 });

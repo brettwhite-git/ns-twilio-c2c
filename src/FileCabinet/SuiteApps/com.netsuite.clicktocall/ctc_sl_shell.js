@@ -18,9 +18,8 @@
  * The shell page itself draws the one dock pill + dialer (lib/ctc_dock_client.js
  * in shell mode). Docks on NetSuite pages inside the frame stay silent and
  * send Call clicks here through window.__ctcShell.call(ctx).
- * The shell also adds a session banner, a call-aware leave guard, a
- * top.document.getElementById shim, and (with &debug=1 only) a menu with
- * an event log, "Show phone" and "Exit phone mode".
+ * The shell also adds a session banner, a call-aware leave guard and a
+ * top.document.getElementById shim. Shell events go to the console.
  */
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock'], (url, log, file, ctcHtml, ctcEntity, ctcDock) => {
@@ -92,8 +91,6 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
                 dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
                 restletUrl: restletUrl,
                 shellUrl: shellBase,
-                popupName: ctcEntity.SOFTPHONE_POPUP_NAME,
-                popupOptions: ctcEntity.SOFTPHONE_POPUP_OPTIONS,
                 context: {}
             });
         } catch (e) {
@@ -117,8 +114,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             framePath,
             softphoneUrl,
             shellBase,
-            popupName: ctcEntity.SOFTPHONE_POPUP_NAME,
-            debug: params.debug === '1',
+            phoneFrameName: ctcEntity.SOFTPHONE_POPUP_NAME,
             dockTags: buildShellDockTags(shellBase)
         }));
     };
@@ -130,8 +126,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
      * @param {string} o.framePath - validated NetSuite path
      * @param {string} o.softphoneUrl - softphone Suitelet URL ('' if unresolved)
      * @param {string} o.shellBase - this Suitelet's own URL ('' if unresolved)
-     * @param {string} o.popupName - anchor window name
-     * @param {boolean} [o.debug] - show the debug menu (&debug=1)
+     * @param {string} o.phoneFrameName - name of the hidden phone frame
      * @param {string} [o.dockTags] - dock <script> tags ('' if unavailable)
      * @returns {string}
      */
@@ -141,19 +136,9 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             shellBase: o.shellBase,
             softphoneUrl: o.softphoneUrl || '',
             signInUrl: '/app/center/card.nl',
-            debug: !!o.debug,
             lockName: ctcDock.PHONE_LOCK_NAME,
             exitKey: ctcDock.EXIT_KEY
         };
-        const debugHtml = o.debug ? `
-<button type="button" id="ctc-pm-pill" aria-expanded="false" aria-controls="ctc-pm-menu"><span class="dot" id="ctc-pm-dot" aria-hidden="true"></span>Phone mode</button>
-<div id="ctc-pm-menu" hidden>
-  <button type="button" id="ctc-pm-phone" aria-expanded="false" aria-controls="ctc-phone-frame">Show phone</button>
-  <button type="button" id="ctc-pm-logbtn" aria-expanded="false" aria-controls="ctc-pm-log">Event log</button>
-  <button type="button" id="ctc-pm-exit">Exit phone mode</button>
-</div>
-<div id="ctc-pm-log" role="log" aria-label="Event log" hidden></div>
-` : '';
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -167,10 +152,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   button { font-family: inherit; cursor: pointer; }
   button:focus-visible { outline: 2px solid #74C0FC; outline-offset: 2px; }
   #ctc-ns-frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; z-index: 0; }
-  /* The dock pill snaps to 8 points on the screen edge (corners + edge
-     middles, default bottom centre). Shell controls stay off all of them:
-     the button sits on the left edge between middle and bottom, and the
-     phone panel and log open near the screen centre. */
+  /* The phone frame holds audio and call state. It stays hidden. */
   #ctc-phone-frame { position: fixed; left: calc(50% - 200px); top: 50%; transform: translate(-50%, -50%); max-height: calc(100vh - 32px); width: 380px; height: 640px; border: 0; z-index: 10;
     background: #FFFFFF; border-radius: 12px; box-shadow: 0 0 0 1px rgba(22,21,19,0.08), 0 8px 24px rgba(22,21,19,0.10); }
   #ctc-phone-frame.ctc-off { visibility: hidden; pointer-events: none; }
@@ -184,25 +166,11 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   .ctc-pm-banner .sub { font-size: 12px; color: #5F5B55; margin-top: 2px; }
   #ctc-pm-reload, #ctc-pm-busy-reload { background: none; border: 0; color: #1B6097; font-size: 13px; padding: 0 8px; height: 32px; border-radius: 6px; }
   #ctc-pm-signin { background: #345D7E; color: #FFFFFF; border: 0; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 600; flex: none; }
-  #ctc-pm-pill { position: fixed; left: 0; top: 75%; transform: translateY(-50%); border-top-left-radius: 0 !important; border-bottom-left-radius: 0 !important; z-index: 30; height: 32px; padding: 0 14px; border: 0; border-radius: 999px;
-    display: inline-flex; align-items: center; gap: 8px; color: #FFFFFF; font-size: 12px; font-weight: 600;
-    background: linear-gradient(180deg, #1A2B47 0%, #0F1B30 100%); }
-  #ctc-pm-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: #8B8780; }
-  #ctc-pm-menu { position: fixed; left: 12px; bottom: calc(25% + 24px); z-index: 31; min-width: 180px; padding: 6px; background: #FFFFFF; border-radius: 12px;
-    box-shadow: 0 0 0 1px rgba(22,21,19,0.08), 0 8px 24px rgba(22,21,19,0.10); }
-  #ctc-pm-menu button { display: block; width: 100%; height: 32px; padding: 0 10px; text-align: left; background: none; border: 0;
-    border-radius: 6px; font-size: 13px; color: #161513; }
-  #ctc-pm-menu button:hover { background: #F5F4F2; }
-  #ctc-pm-log { position: fixed; left: calc(50% + 20px); top: 50%; transform: translateY(-50%); z-index: 20; width: 420px; height: 280px; box-sizing: border-box;
-    overflow: auto; padding: 8px 10px; background: #FFFFFF; border-radius: 12px;
-    box-shadow: 0 0 0 1px rgba(22,21,19,0.08), 0 8px 24px rgba(22,21,19,0.10);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; color: #161513; }
-  #ctc-pm-log .row { white-space: pre-wrap; word-break: break-all; padding: 1px 0; }
 </style>
 </head>
 <body>
 <iframe id="ctc-ns-frame" title="NetSuite" src="${escapeHtml(o.framePath)}"></iframe>
-<iframe id="ctc-phone-frame" class="ctc-off" title="Softphone" name="${escapeHtml(o.popupName)}" allow="microphone; autoplay" src="about:blank"></iframe>
+<iframe id="ctc-phone-frame" class="ctc-off" title="Softphone" name="${escapeHtml(o.phoneFrameName)}" allow="microphone; autoplay" src="about:blank"></iframe>
 
 <div id="ctc-pm-banners">
   <div class="ctc-pm-banner" id="ctc-pm-banner" role="alert" hidden>
@@ -223,7 +191,6 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     <button type="button" id="ctc-pm-busy-reload">Reload</button>
   </div>
 </div>
-${debugHtml}
 <script>
 (function () {
   'use strict';
@@ -244,18 +211,11 @@ ${debugHtml}
     exit: function () {}
   };
   var ACTIVE = { dialing: 1, ringing: 1, connected: 1 };
-  var DOT = { offline: '#8B8780', starting: '#8B8780', ready: '#94A6BF', dialing: '#F4C76A', ringing: '#F4C76A', connected: '#14B981', error: '#EE6E5C' };
 
   var nsFrame = document.getElementById('ctc-ns-frame');
   var phoneFrame = document.getElementById('ctc-phone-frame');
   var banner = document.getElementById('ctc-pm-banner');
   var bannerSub = document.getElementById('ctc-pm-banner-sub');
-  var pill = document.getElementById('ctc-pm-pill');
-  var pillDot = document.getElementById('ctc-pm-dot');
-  var menu = document.getElementById('ctc-pm-menu');
-  var phoneBtn = document.getElementById('ctc-pm-phone');
-  var logBtn = document.getElementById('ctc-pm-logbtn');
-  var logPanel = document.getElementById('ctc-pm-log');
 
   var busy = document.getElementById('ctc-pm-busy');
 
@@ -263,23 +223,9 @@ ${debugHtml}
   var phase = 'offline';
   var phoneStarted = false;
 
-  // ---- Event log (newest first, last 200) ----
-  var entries = [];
+  // ---- Event log (console only) ----
   function logEvent(event, detail) {
-    var t = new Date().toTimeString().slice(0, 8);
-    entries.unshift({ t: t, e: event, d: detail == null ? '' : String(detail) });
-    if (entries.length > 200) entries.length = 200;
     console.log('[ctc-shell]', event, detail == null ? '' : detail);
-    if (logPanel && !logPanel.hidden) renderLog();
-  }
-  function renderLog() {
-    logPanel.textContent = '';
-    for (var i = 0; i < entries.length; i++) {
-      var row = document.createElement('div');
-      row.className = 'row';
-      row.textContent = entries[i].t + '  ' + entries[i].e + (entries[i].d ? '  ' + entries[i].d : '');
-      logPanel.appendChild(row);
-    }
   }
   function tail(s) {
     s = String(s || '');
@@ -373,7 +319,7 @@ ${debugHtml}
     lastGoodPath = path;
     if (CFG.shellBase) {
       var sep = CFG.shellBase.indexOf('?') === -1 ? '?' : '&';
-      try { history.replaceState(null, '', CFG.shellBase + sep + 'u=' + encodeURIComponent(path) + (CFG.debug ? '&debug=1' : '')); } catch (e) { /* ignore */ }
+      try { history.replaceState(null, '', CFG.shellBase + sep + 'u=' + encodeURIComponent(path)); } catch (e) { /* ignore */ }
     }
     if (title) document.title = title;
     logEvent('frame load', path);
@@ -446,8 +392,6 @@ ${debugHtml}
     if (next === phase) return;
     logEvent('bus phase', phase + ' -> ' + next);
     phase = next;
-    if (pillDot) pillDot.style.background = DOT[phase] || DOT.offline;
-    if (pill) pill.setAttribute('title', 'Phone: ' + phase);
     setGuard(!!ACTIVE[phase]);
     if (!banner.hidden) bannerText();
   }
@@ -505,33 +449,6 @@ ${debugHtml}
     window.location.reload();
   });
 
-  // ---- Debug menu (&debug=1 only) ----
-  if (pill && menu) {
-    var setMenu = function (open) {
-      menu.hidden = !open;
-      pill.setAttribute('aria-expanded', open ? 'true' : 'false');
-    };
-    pill.addEventListener('click', function () { setMenu(menu.hidden); });
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !menu.hidden) {
-        setMenu(false);
-        pill.focus();
-      }
-    });
-    phoneBtn.addEventListener('click', function () {
-      var show = phoneFrame.classList.contains('ctc-off');
-      phoneFrame.classList.toggle('ctc-off', !show);
-      phoneBtn.textContent = show ? 'Hide phone' : 'Show phone';
-      phoneBtn.setAttribute('aria-expanded', show ? 'true' : 'false');
-    });
-    logBtn.addEventListener('click', function () {
-      logPanel.hidden = !logPanel.hidden;
-      logBtn.setAttribute('aria-expanded', logPanel.hidden ? 'false' : 'true');
-      if (!logPanel.hidden) renderLog();
-    });
-    document.getElementById('ctc-pm-exit').addEventListener('click', exitPhoneMode);
-  }
-
   logEvent('shell start', CFG.framePath);
 })();
 </script>
@@ -540,5 +457,5 @@ ${o.dockTags || ''}
 </html>`;
     };
 
-    return { onRequest, safeFramePath, DEFAULT_FRAME_PATH };
+    return { onRequest, safeFramePath };
 });

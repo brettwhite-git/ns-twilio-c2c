@@ -105,7 +105,7 @@ export interface ConsoleState {
 // Prereqs (Step 1) — separate slice; not part of console
 // ─────────────────────────────────────────────────────────────────────
 
-export interface PrereqsState {
+interface PrereqsState {
     checks: unknown[] | null;
     loading: boolean;
     error: string | null;

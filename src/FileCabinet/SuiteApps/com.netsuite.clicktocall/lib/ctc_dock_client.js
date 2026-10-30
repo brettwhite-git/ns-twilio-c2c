@@ -39,7 +39,6 @@
         bus: attr('data-bus', 'ctc-bus'),
         shellUrl: attr('data-shell-url', ''),
         autoEnter: attr('data-auto-enter', '') === '1',
-        popupName: attr('data-popup-name', ''),
         restletUrl: attr('data-restlet-url', ''),
         // The record this page shows, if any (empty on the dashboard).
         context: normalizeContext({
@@ -374,7 +373,7 @@
     }
 
     // Display form of a number. Same rules as formatPhone in
-    // ctc_dock_dialer.js and ctc_sl_softphone.js.
+    // ctc_sl_softphone.js. ctc_dock_dialer.js uses this one via __ctcDock.
     function formatPhone(input) {
         var str = String(input || '');
         var plus = str.trim().charAt(0) === '+';
@@ -1063,6 +1062,10 @@
     // --- Public API ---
     window.__ctcDock = {
         mode: mode,
+
+        // Shared display helpers for ctc_dock_dialer.js.
+        formatPhone: formatPhone,
+        initials: initials,
 
         /**
          * Shell: open the dialer on Dial with `ctx` loaded and focus Call (it

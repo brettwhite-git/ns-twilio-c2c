@@ -456,12 +456,22 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
 
     // ─── Reporting Central ──────────────────────────────────────────────────
 
-    // NetSuite search date keywords for each Reporting Central range, and the
-    // keyword for the period before it (only where one compares fairly).
-    const REPORT_RANGE_KEYWORD = {
-        today: 'today', yesterday: 'yesterday', thisweek: 'thisweek', lastweek: 'lastweek'
-    };
+    // NetSuite search date keyword for the period before each Reporting Central
+    // range (only where one compares fairly).
     const REPORT_PREVIOUS_RANGE = { today: 'yesterday', thisweek: 'lastweektodate' };
+
+    /**
+     * Satisfaction band for a 1-10 score: 'high' (7+), 'mid' (5-6), 'low'
+     * (1-4) or 'none' (unscored). Callers map the band to their CSS class.
+     * @param {*} n
+     * @returns {'high'|'mid'|'low'|'none'}
+     */
+    const satClass = (n) => {
+        if (typeof n !== 'number' || !n) return 'none';
+        if (n >= 7) return 'high';
+        if (n >= 5) return 'mid';
+        return 'low';
+    };
 
     /**
      * True when a call did not connect (no talk time). CTC is outbound only,
@@ -1049,6 +1059,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
     };
 
     return {
+        extractText,
         loadHistoryRows,
         loadTaskGroups,
         computeStats,
@@ -1062,11 +1073,11 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
         getBookCustomerIds,
         parseTimeOfDay,
         isUnconnected,
+        satClass,
         filterCallRows,
         computeReportKpis,
         countCalls,
         getRepPhoneNumber,
-        REPORT_RANGE_KEYWORD,
         REPORT_PREVIOUS_RANGE
     };
 });

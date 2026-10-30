@@ -176,5 +176,5 @@ ${actionBlock}
 </div>`;
     };
 
-    return { beforeLoad, buildViewerHtml, escapeHtml, splitLines };
+    return { beforeLoad, escapeHtml, splitLines };
 });
