@@ -1011,44 +1011,41 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             }
 
             // ── Last activity: most-recent Phone Call / Task / Event ──
-            // Phone Call records reference the customer via `company`. Tasks and
-            // CalendarEvents use `company` too. Search all three types in parallel
-            // and pick the latest.
-            try {
-                const phoneCalls = search.create({
-                    type: search.Type.PHONE_CALL,
-                    filters: [['company', 'anyof', entityId]],
-                    columns: [{ name: 'startdate', sort: search.Sort.DESC }]
-                }).run().getRange({ start: 0, end: 1 });
-
-                const tasks = search.create({
-                    type: search.Type.TASK,
-                    filters: [['company', 'anyof', entityId]],
-                    columns: [{ name: 'createddate', sort: search.Sort.DESC }]
-                }).run().getRange({ start: 0, end: 1 });
-
-                const events = search.create({
-                    type: search.Type.CALENDAR_EVENT,
-                    filters: [['company', 'anyof', entityId]],
-                    columns: [{ name: 'startdate', sort: search.Sort.DESC }]
-                }).run().getRange({ start: 0, end: 1 });
-
-                const candidates = [];
-                if (phoneCalls.length) candidates.push({ type: 'Phone call', date: phoneCalls[0].getValue('startdate') });
-                if (tasks.length)      candidates.push({ type: 'Task',       date: tasks[0].getValue('createddate') });
-                if (events.length)     candidates.push({ type: 'Event',      date: events[0].getValue('startdate') });
-
-                if (candidates.length) {
-                    candidates.sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0));
-                    const winner = candidates[0];
-                    empty.lastActivity = {
-                        type:    winner.type,
-                        date:    winner.date,
-                        ageDays: daysSince(winner.date)
-                    };
+            // Phone Call and Task searches both expose a `company` filter
+            // (Records Browser). Calendar Event does NOT: its search rejects
+            // `company` with "An nlobjSearchFilter contains invalid search
+            // criteria: company" (live RESTlet log, 2026-10). Events link to
+            // a customer through their attendee list, so the Event search
+            // filters on `attendee` instead. Each search runs in its own
+            // try/catch, so one bad filter only drops that source and the
+            // other two still fill the tile.
+            const activitySources = [
+                { label: 'Phone call', type: search.Type.PHONE_CALL,     filter: 'company',  dateCol: 'startdate' },
+                { label: 'Task',       type: search.Type.TASK,           filter: 'company',  dateCol: 'createddate' },
+                { label: 'Event',      type: search.Type.CALENDAR_EVENT, filter: 'attendee', dateCol: 'startdate' }
+            ];
+            const candidates = [];
+            activitySources.forEach((src) => {
+                try {
+                    const rows = search.create({
+                        type: src.type,
+                        filters: [[src.filter, 'anyof', entityId]],
+                        columns: [{ name: src.dateCol, sort: search.Sort.DESC }]
+                    }).run().getRange({ start: 0, end: 1 });
+                    if (rows.length) candidates.push({ type: src.label, date: rows[0].getValue(src.dateCol) });
+                } catch (e) {
+                    log.error({ title: 'CTC snapshot lastActivity failed (' + src.label + ')', details: e.message || e });
                 }
-            } catch (e) {
-                log.error({ title: 'CTC snapshot lastActivity failed', details: e.message || e });
+            });
+
+            if (candidates.length) {
+                candidates.sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0));
+                const winner = candidates[0];
+                empty.lastActivity = {
+                    type:    winner.type,
+                    date:    winner.date,
+                    ageDays: daysSince(winner.date)
+                };
             }
 
             return empty;

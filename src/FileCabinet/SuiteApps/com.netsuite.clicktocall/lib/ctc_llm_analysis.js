@@ -96,20 +96,22 @@ TRANSCRIPT:
      *   - maxTokens: 800 covers ~6 paragraphs of summary + 5 action items.
      *     N/llm returns a hard error if the response exceeds; budget
      *     generously.
-     *   - modelFamily: COHERE_COMMAND is NetSuite's default free-tier
-     *     choice (verified 2026 release notes). COHERE_COMMAND_LIGHT is
-     *     faster + cheaper but produces shorter, less nuanced summaries.
+     *   - modelFamily: must be one of the account's llm.ModelFamily
+     *     string values (for example 'cohere.command-a-03-2025').
+     *     NetSuite now rejects the old enum names such as
+     *     'COHERE_COMMAND' with INVALID_MODEL_FAMILY_VALUE (live RESTlet
+     *     log, 2026-10-30). The error message lists the values the
+     *     account accepts. We use Cohere Command A.
      *
      * NetSuite gotcha (2026-05-27 deploy failure): accessing
-     * `llm.ModelFamily.COHERE_COMMAND` at module top-level inside the
-     * define() body throws SUITESCRIPT_API_UNAVAILABLE_IN_DEFINE during
-     * SDF deploy-time validation. Same parser-quirk family as accessing
-     * any N/* module member at module-load time. Fix: inline the string
-     * literal value (the enum is just a string constant — same pattern
-     * we use for Twilio codec strings 'opus'/'pcmu' per CLAUDE.md).
+     * `llm.ModelFamily.*` at module top-level inside the define() body
+     * throws SUITESCRIPT_API_UNAVAILABLE_IN_DEFINE during SDF deploy-time
+     * validation. Fix: inline the string value (the enum is just a string
+     * constant — same pattern we use for Twilio codec strings
+     * 'opus'/'pcmu' per CLAUDE.md).
      */
     const DEFAULT_MODEL_PARAMS = {
-        modelFamily: 'COHERE_COMMAND',  // === llm.ModelFamily.COHERE_COMMAND
+        modelFamily: 'cohere.command-a-03-2025',  // Cohere Command A
         modelParameters: { temperature: 0.2, maxTokens: 800 }
     };
 
