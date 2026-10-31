@@ -68,6 +68,29 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         inbound:  { label: 'Inbound',  cls: 'ctc-pl-dir ctc-pl-dir-in',  path: PATH.inbound }
     };
 
+    // Call status (custevent_ctc_call_status) -> what a row shows when there
+    // is no AI brief. ONE rule set: briefOf / lenIsDash use it on the server,
+    // and buildRefreshOnclick ships it as JSON to the client rebuilder.
+    //   text  placeholder in the AI brief cell (muted grey unless `chip`)
+    //   chip  status chip modifier: ctc-pl-status ctc-pl-status-<chip>
+    //   len   'dash' = Length is always "—"; 'dashZero' = "—" when 0 s
+    // Missed rows also tint the direction arrow (ctc-pl-dir-missed).
+    // A status not listed here shows "—".
+    const STATUS_RULES = {
+        'Logged':        { text: 'Processing…' },
+        'Processing':    { text: 'Processing…' },
+        'No transcript': { text: 'No transcript' },
+        'Too short':     { text: 'Too short to summarize' },
+        'Failed':        { text: 'Summary failed' },
+        'Missed':        { text: 'Missed call', chip: 'missed', len: 'dash' },
+        'No answer':     { text: 'No answer', chip: 'quiet', len: 'dashZero' }
+    };
+    const MISSED = 'Missed';
+    const statusRule = (r) => {
+        const st = r.callStatus || '';
+        return Object.prototype.hasOwnProperty.call(STATUS_RULES, st) ? STATUS_RULES[st] : null;
+    };
+
     // Period segmented control. `calls` names the data in the error state;
     // `empty` is the empty-state title.
     const RANGES = [
@@ -336,7 +359,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         return "var rg=this.getAttribute('data-range')||'today';" +
             "var box=document.getElementById('ctc-pl-calls');if(!box)return;" +
             "var seq=String((parseInt(box.getAttribute('data-seq'),10)||0)+1);box.setAttribute('data-seq',seq);" +
-            "var LBL=" + JSON.stringify(lbl) + ",EMP=" + JSON.stringify(emp) + ";" +
+            "var LBL=" + JSON.stringify(lbl) + ",EMP=" + JSON.stringify(emp) + ",SR=" + JSON.stringify(STATUS_RULES) + ",MS=" + JSON.stringify(MISSED) + ";" +
             "var NS='http://www.w3.org/2000/svg';" +
             "function el(t,c,x){var e=document.createElement(t);if(c){e.className=c}if(x!=null){e.textContent=x}return e}" +
             "function cell(e){e.setAttribute('role','cell');return e}" +
@@ -370,13 +393,17 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 // KPIs — parallels server-side computeStats + buildKpiSubs.
                 "var sc=rows.filter(function(r){return r.satisfaction});" +
                 "var avg=sc.length?(sc.reduce(function(a,r){return a+r.satisfaction},0)/sc.length).toFixed(1):'—';" +
-                "var ts=rows.reduce(function(a,r){return a+(r.duration||0)},0);" +
-                "var av=rows.length?Math.round(ts/rows.length):0;" +
+                "function dsec(r){return Math.max(0,parseInt(r.duration,10)||0)}" +
+                "var ts=rows.reduce(function(a,r){return a+dsec(r)},0);" +
+                "var tk=rows.filter(function(r){return dsec(r)>0});" +
+                "var av=tk.length?Math.round(ts/tk.length):0;" +
+                "var ms=rows.filter(function(r){return r.callStatus===MS}).length;" +
                 "setT('ctc-pl-kpi-calls',String(rows.length));" +
+                "setT('ctc-pl-kpi-calls-sub',ms?ms+' missed':'');" +
                 "setT('ctc-pl-kpi-sat',String(avg));" +
                 "setT('ctc-pl-kpi-time',String(Math.round(ts/60)));" +
                 "setT('ctc-pl-kpi-sat-sub',rows.length?sc.length+' of '+rows.length+' scored':'');" +
-                "setT('ctc-pl-kpi-time-sub',rows.length?'Avg '+(av<60?av+' s':Math.floor(av/60)+' min '+(av%60)+' s')+' per call':'');" +
+                "setT('ctc-pl-kpi-time-sub',tk.length?'Avg '+(av<60?av+' s':Math.floor(av/60)+' min '+(av%60)+' s')+' per call':'');" +
                 "if(!rows.length){" +
                     "state(EMP[rg]||'No calls in this period'," + JSON.stringify(EMPTY_SUB) + ",'ctc-pl-btn ctc-pl-btn-call','Make a call'," +
                         (placeJs ? "function(){" + placeJs + "}" : "null") + ");return" +
@@ -389,7 +416,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                     "var row=el('div','ctc-pl-row');row.setAttribute('role','row');" +
                     "var inb=r.direction==='inbound';" +
                     "var wh=cell(el('span','ctc-pl-when'));" +
-                    "var ds=sv(inb?'" + PATH.inbound + "':'" + PATH.outbound + "',13,'2.2',inb?'ctc-pl-dir ctc-pl-dir-in':'ctc-pl-dir ctc-pl-dir-out');" +
+                    "var st=r.callStatus||'';var ru=Object.prototype.hasOwnProperty.call(SR,st)?SR[st]:null;" +
+                    "var ds=sv(inb?'" + PATH.inbound + "':'" + PATH.outbound + "',13,'2.2',(inb?'ctc-pl-dir ctc-pl-dir-in':'ctc-pl-dir ctc-pl-dir-out')+(st===MS?' ctc-pl-dir-missed':''));" +
                     "ds.removeAttribute('aria-hidden');ds.setAttribute('role','img');ds.setAttribute('aria-label',inb?'Inbound':'Outbound');wh.appendChild(ds);" +
                     "var dt=r.date?new Date(r.date):null;" +
                     "wh.appendChild(el('span','ctc-pl-time',r.timeOfDay||(dt&&!isNaN(dt.getTime())?pad(dt.getHours())+':'+pad(dt.getMinutes()):'—')));" +
@@ -398,13 +426,16 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                     "var wo=cell(el('span','ctc-pl-who'));" +
                     "var co=el('a','ctc-pl-company',nm);co.href='/app/common/entity/custjob.nl?id='+encodeURIComponent(r.companyId||'');co.title=nm;wo.appendChild(co);" +
                     "wo.appendChild(el('span','ctc-pl-contact',r.contactName||''));row.appendChild(wo);" +
-                    "var st=r.callStatus||'';" +
-                    "var bt=r.brief||(st==='Logged'||st==='Processing'?'Processing…':st==='No transcript'?'Too short to summarize':'—');" +
-                    "var bf=cell(el('span','ctc-pl-brief'+(r.brief?'':' ctc-pl-brief-muted'),bt));bf.title=r.brief||'';row.appendChild(bf);" +
+                    // Brief or status placeholder — mirrors server briefOf.
+                    "var bc=!r.brief&&ru&&ru.chip?ru.chip:'';" +
+                    "var bt=r.brief||(ru?ru.text:'—');" +
+                    "var bf=cell(el('span','ctc-pl-brief'+(r.brief||bc?'':' ctc-pl-brief-muted'),bc?null:bt));bf.title=r.brief||'';" +
+                    "if(bc){bf.appendChild(el('span','ctc-pl-status ctc-pl-status-'+bc,bt))}row.appendChild(bf);" +
                     "var sa=r.satisfaction;var sp=cell(el('span','ctc-pl-sat'));" +
                     "sp.appendChild(el('span','ctc-pl-pill '+(!sa?'ctc-pl-sat-none':sa>=7?'ctc-pl-sat-hi':sa>=5?'ctc-pl-sat-mid':'ctc-pl-sat-low'),sa?String(sa):'—'));row.appendChild(sp);" +
-                    "var du=Math.max(0,parseInt(r.duration,10)||0);" +
-                    "row.appendChild(cell(el('span','ctc-pl-dur',Math.floor(du/60)+':'+pad(du%60))));" +
+                    // Length dash — mirrors server lenIsDash.
+                    "var du=dsec(r);var ld=!!ru&&(ru.len==='dash'||(ru.len==='dashZero'&&du===0));" +
+                    "row.appendChild(cell(el('span','ctc-pl-dur',ld?'—':Math.floor(du/60)+':'+pad(du%60))));" +
                     "var ac=cell(el('span','ctc-pl-acts'));" +
                     "var op=el('a','ctc-pl-icon-btn ctc-pl-view-call ctc-pl-press');op.href='/app/crm/calendar/call.nl?id='+encodeURIComponent(r.id||'');" +
                     "op.target='_blank';op.rel='noopener';op.title='Open the Phone Call record';op.setAttribute('aria-label','Open '+nm+' call');" +
@@ -458,24 +489,36 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     };
 
     // AI brief text, or a grey placeholder by call status.
+    // `chip` set = render the text as a status chip instead of grey text.
     const briefOf = (r) => {
-        if (r.brief) return { text: r.brief, muted: false };
-        const st = r.callStatus || '';
-        if (st === 'Logged' || st === 'Processing') return { text: 'Processing…', muted: true };
-        if (st === 'No transcript') return { text: 'Too short to summarize', muted: true };
-        return { text: '—', muted: true };
+        if (r.brief) return { text: r.brief, muted: false, chip: '' };
+        const rule = statusRule(r);
+        if (!rule) return { text: '—', muted: true, chip: '' };
+        return { text: rule.text, muted: !rule.chip, chip: rule.chip || '' };
+    };
+
+    const durSecs = (r) => Math.max(0, parseInt(r.duration, 10) || 0);
+
+    // Length shows "—" for Missed, and for No answer when 0 s.
+    const lenIsDash = (r) => {
+        const rule = statusRule(r);
+        return !!rule && (rule.len === 'dash' || (rule.len === 'dashZero' && durSecs(r) === 0));
     };
 
     const SAT_CLASS = { high: 'ctc-pl-sat-hi', mid: 'ctc-pl-sat-mid', low: 'ctc-pl-sat-low', none: 'ctc-pl-sat-none' };
     const satClass = (sat) => SAT_CLASS[workspaceQueries.satClass(sat)];
 
+    // Avg talk time counts only calls with talk time (duration > 0).
     const buildKpiSubs = (rows) => {
         const scored = rows.filter((r) => r.satisfaction).length;
-        const totalSec = rows.reduce((a, r) => a + (r.duration || 0), 0);
-        const avg = rows.length ? Math.round(totalSec / rows.length) : 0;
+        const talked = rows.filter((r) => durSecs(r) > 0);
+        const totalSec = talked.reduce((a, r) => a + durSecs(r), 0);
+        const avg = talked.length ? Math.round(totalSec / talked.length) : 0;
+        const missed = rows.filter((r) => r.callStatus === MISSED).length;
         return {
+            calls: missed ? missed + ' missed' : '',
             sat: rows.length ? scored + ' of ' + rows.length + ' scored' : '',
-            time: rows.length ? 'Avg ' + fmtAvg(avg) + ' per call' : ''
+            time: talked.length ? 'Avg ' + fmtAvg(avg) + ' per call' : ''
         };
     };
 
@@ -496,6 +539,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
     const buildCallRowHtml = (r, shellUrl) => {
         const dir = r.direction === 'inbound' ? DIRECTION.inbound : DIRECTION.outbound;
+        const dirCls = dir.cls + (r.callStatus === MISSED ? ' ctc-pl-dir-missed' : '');
         const time = escapeHtml(r.timeOfDay || fmtTime(r.date) || '—');
         const companyId = encodeURIComponent(r.companyId || '');
         // Standard NetSuite Phone Call record URL — the ctc_ue_transcript_viewer
@@ -507,16 +551,19 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const redialOnclick = buildRedialOnclick(shellUrl, r.phone, r.companyId, r.companyName);
 
         return '<div class="ctc-pl-row" role="row">' +
-            '<span class="ctc-pl-when" role="cell">' + strokeSvg(dir.path, 13, '2.2', dir.cls, dir.label) +
+            '<span class="ctc-pl-when" role="cell">' + strokeSvg(dir.path, 13, '2.2', dirCls, dir.label) +
                 '<span class="ctc-pl-time">' + time + '</span></span>' +
             '<span class="ctc-pl-who" role="cell">' +
                 '<a class="ctc-pl-company" href="/app/common/entity/custjob.nl?id=' + companyId + '" title="' + companyName + '">' + companyName + '</a>' +
                 '<span class="ctc-pl-contact">' + contact + '</span>' +
             '</span>' +
-            '<span class="ctc-pl-brief' + (brief.muted ? ' ctc-pl-brief-muted' : '') + '" role="cell" title="' + escapeHtml(r.brief || '') + '">' + escapeHtml(brief.text) + '</span>' +
+            '<span class="ctc-pl-brief' + (brief.muted ? ' ctc-pl-brief-muted' : '') + '" role="cell" title="' + escapeHtml(r.brief || '') + '">' +
+                (brief.chip
+                    ? '<span class="ctc-pl-status ctc-pl-status-' + brief.chip + '">' + escapeHtml(brief.text) + '</span>'
+                    : escapeHtml(brief.text)) + '</span>' +
             '<span class="ctc-pl-sat" role="cell"><span class="ctc-pl-pill ' + satClass(r.satisfaction) + '">' +
                 escapeHtml(r.satisfaction ? String(r.satisfaction) : '—') + '</span></span>' +
-            '<span class="ctc-pl-dur" role="cell">' + escapeHtml(fmtLen(r.duration)) + '</span>' +
+            '<span class="ctc-pl-dur" role="cell">' + escapeHtml(lenIsDash(r) ? '—' : fmtLen(r.duration)) + '</span>' +
             '<span class="ctc-pl-acts" role="cell">' +
                 '<a class="ctc-pl-icon-btn ctc-pl-view-call ctc-pl-press" href="/app/crm/calendar/call.nl?id=' + callId + '" target="_blank" rel="noopener"' +
                     ' title="Open the Phone Call record" aria-label="Open ' + companyName + ' call">' + strokeSvg(PATH.open, 15, '1.8') + '</a>' +
@@ -702,6 +749,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-kpi-num { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; color: #161513; }
 .ctc-pl-kpi-unit { font-size: 12px; color: #5C5955; }
 .ctc-pl-kpi-sub { font-size: 11.5px; color: #5C5955; min-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctc-pl-kpi-sub.ctc-pl-kpi-sub-missed { color: #D9553F; }
 
 /* Tabs */
 .ctc-pl-tabs { display: flex; align-items: flex-end; gap: 24px; padding: 16px 22px 0; box-shadow: inset 0 -1px 0 #F1EFEA; }
@@ -731,6 +779,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-dir { display: block; flex: none; }
 .ctc-pl-dir-out { color: #0E7A4F; }
 .ctc-pl-dir-in { color: #1B6097; }
+.ctc-pl-dir.ctc-pl-dir-missed { color: #D9553F; }
 .ctc-pl-time { font-size: 13px; color: #5C5955; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctc-pl-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .ctc-pl-company { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -738,6 +787,9 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-contact:empty { display: none; }
 .ctc-pl-brief { font-size: 13px; line-height: 1.45; color: #2E2C29; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ctc-pl-brief-muted { color: #8B8780; }
+.ctc-pl-status { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.4; }
+.ctc-pl-status-missed { background: #FCE9E7; color: #9A3A2C; }
+.ctc-pl-status-quiet { background: #F1EFEA; color: #5C5955; }
 .ctc-pl-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .ctc-pl-sat-hi { background: #E3F5EC; color: #0E6B45; }
 .ctc-pl-sat-mid { background: #FFF3D6; color: #8A5A00; }
@@ -859,7 +911,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         <div class="ctc-pl-kpi">
             <span class="ctc-pl-kpi-label">Calls</span>
             <span class="ctc-pl-kpi-val"><span class="ctc-pl-kpi-num" id="ctc-pl-kpi-calls">${escapeHtml(String(stats.callsToday || 0))}</span></span>
-            <span class="ctc-pl-kpi-sub" id="ctc-pl-kpi-calls-sub"></span>
+            <span class="ctc-pl-kpi-sub ctc-pl-kpi-sub-missed" id="ctc-pl-kpi-calls-sub">${escapeHtml(subs.calls)}</span>
         </div>
         <div class="ctc-pl-kpi">
             <span class="ctc-pl-kpi-label">Satisfaction</span>

@@ -195,7 +195,9 @@ Paths: `F/` = `src/FileCabinet/SuiteApps/com.netsuite.clicktocall/`; `W/` = `src
 
 **Shared.** Rep's book = primary sales rep OR Sales Team member (SuiteQL `customerSalesTeam.customer`). Font: Figtree woff2 from the File Cabinet (`F/lib/ctc_fonts.js`, `F/lib/fonts/`), no font CDN. Call rows carry `timeOfDay` from `starttime`, else `createddate`.
 
-**Rules.** **"Missed" today means a call with no talk time (duration 0, `isUnconnected`), not status `Missed`.**
+**Portlet call statuses** (one `STATUS_RULES` table, used by the server render and the period-refresh JS). With no AI brief: Logged / Processing → "Processing…"; No transcript → "No transcript"; Too short → "Too short to summarize"; Failed → "Summary failed"; Missed → coral chip "Missed call" (`ctc-pl-status-missed`) + coral inbound arrow + Length "—"; No answer → grey chip "No answer" (`ctc-pl-status-quiet`), Length "—" when 0 s. Calls KPI sub-line "<n> missed" (coral); average talk time excludes 0 s rows. Status chips use `ctc-pl-status`, never `ctc-pl-chip` (that class belongs to the period buttons).
+
+**Rules.** **Reporting Central's "Missed" still means a call with no talk time (duration 0, `isUnconnected`), not status `Missed`.**
 
 **Open gaps.** Missed tab should read status `Missed` once reconciliation ships. Portlet `<style>` / `@container` survival in the live portlet copy not verified.
 
