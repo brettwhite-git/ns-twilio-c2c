@@ -16,10 +16,12 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadInbound, publishRouting, saveInbound} from '../../app/effects/inbound';
-import type {AppState, InboundRoute, InboundState} from '../../app/InitialState';
+import {loadPresence} from '../../app/effects/presence';
+import type {AppState, InboundRoute, InboundState, PresenceRow} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import {ErrorText} from '../shared/ErrorText';
 import {formatPhone} from '../shared/formatPhone';
+import {buildPhoneStatusCell} from '../shared/phoneStatus';
 
 export const DEFAULT_NO_ANSWER_MESSAGE =
     'Sorry, no one is available to take your call. Please try again later. Goodbye.';
@@ -74,10 +76,15 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
         if (!inbound.loaded && !inbound.loading) {
             loadInbound();
         }
+        // Phone status is live data: reload it every time the page opens.
+        loadPresence();
     }
 
     private buildColumns(): unknown[] {
         const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
+        const presence = (store.getState() as AppState).presence;
+        const byEmployee: Record<string, PresenceRow> = {};
+        presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
         return [
             {
                 type: CT.TEMPLATED,
@@ -97,6 +104,22 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
                 content: (args: CellArgs): unknown => new component.Text({
                     text: args?.cell?.row?.dataItem?.employeeName || ''
                 })
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'phone',
+                label: 'Phone',
+                stretchFactor: 1,
+                content: (args: CellArgs): unknown => {
+                    if (!presence.loaded) {
+                        return new component.Text({
+                            text: presence.error ? '—' : 'Loading…',
+                            type: component.Text.Type.WEAK
+                        });
+                    }
+                    const id = args?.cell?.row?.dataItem?.employeeId;
+                    return buildPhoneStatusCell(id == null ? undefined : byEmployee[String(id)]);
+                }
             }
         ];
     }

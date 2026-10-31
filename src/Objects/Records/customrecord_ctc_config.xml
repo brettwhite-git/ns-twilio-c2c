@@ -127,5 +127,12 @@
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_recon_watermark">
+            <label>Call Reconciliation Watermark</label>
+            <description>ISO 8601 UTC time. Every Twilio browser call that ended before this time has a Phone Call. Written by the transcript poller (call reconciliation). Blank means the next run looks back 7 days.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
     </customrecordcustomfields>
 </customrecordtype>

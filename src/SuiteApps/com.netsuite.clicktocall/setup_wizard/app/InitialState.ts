@@ -164,6 +164,33 @@ export interface InboundState {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Rep phone presence — server contract of wizardLoadPresence
+// (ctc_sl_wizard_api.js; rows written by the token RESTlet's phoneHeartbeat)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface PresenceRow {
+    employeeId: string;
+    employeeName: string;
+    canReceive: boolean;
+    /** registered / unregistered / registering / offline; '' = never reported. */
+    state: string;
+    /** ISO time of the last heartbeat write; '' = never. */
+    lastSeen: string;
+    lastChange: string;
+    /** lastSeen older than 12 minutes (or never). */
+    stale: boolean;
+}
+
+export interface PresenceState {
+    loaded: boolean;
+    loading: boolean;
+    error: string | null;
+    items: PresenceRow[];
+    /** Server clock minus browser clock at load (ms), for "2 min ago". */
+    clockSkewMs: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Prereqs (Step 1) — separate slice; not part of console
 // ─────────────────────────────────────────────────────────────────────
 
@@ -203,6 +230,9 @@ export interface AppState {
 
     // Inbound calls section
     inbound: InboundState;
+
+    // Rep phone presence (Health "Phones" + Inbound routing "Phone")
+    presence: PresenceState;
 }
 
 /**
@@ -291,6 +321,13 @@ const initialState: AppState = {
         saveError: null,
         publishing: false,
         lastPublish: null
+    },
+    presence: {
+        loaded: false,
+        loading: false,
+        error: null,
+        items: [],
+        clockSkewMs: 0
     }
 };
 

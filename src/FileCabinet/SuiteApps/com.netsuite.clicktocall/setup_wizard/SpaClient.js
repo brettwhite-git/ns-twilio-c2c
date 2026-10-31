@@ -47,6 +47,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         INBOUND_SAVE: Symbol('inboundSave'),
         INBOUND_PUBLISH: Symbol('inboundPublish'),
         INBOUND_ROUTING_UPDATE: Symbol('inboundRoutingUpdate'),
+        PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
+        PRESENCE_LOAD_SUCCESS: Symbol('presenceLoadSuccess'),
+        PRESENCE_LOAD_FAILURE: Symbol('presenceLoadFailure'),
         VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
         VOICE_FIELD_SAVE: Symbol('voiceFieldSave'),
         DEACTIVATE_REQUEST: Symbol('deactivateRequest'),
@@ -135,6 +138,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         },
         inboundRoutingUpdate(publish) {
             return { type: ActionType.INBOUND_ROUTING_UPDATE, payload: publish };
+        },
+        presenceLoadStart() {
+            return { type: ActionType.PRESENCE_LOAD_START, payload: null };
+        },
+        presenceLoadSuccess(items, clockSkewMs) {
+            return { type: ActionType.PRESENCE_LOAD_SUCCESS, payload: { items, clockSkewMs } };
+        },
+        presenceLoadFailure(error) {
+            return { type: ActionType.PRESENCE_LOAD_FAILURE, payload: { error } };
         },
         voiceFieldEdit(field, pendingValue = null) {
             return { type: ActionType.VOICE_FIELD_EDIT, payload: { field, pendingValue } };
@@ -332,6 +344,22 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     applyPublish(d.inbound, a.payload);
                     d.inbound.loaded = false;
                 })],
+            [ActionType.PRESENCE_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.presence.loading = true;
+                    d.presence.error = null;
+                })],
+            [ActionType.PRESENCE_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.presence.loading = false;
+                    d.presence.loaded = true;
+                    d.presence.error = null;
+                    d.presence.items = p.items;
+                    d.presence.clockSkewMs = p.clockSkewMs;
+                })],
+            [ActionType.PRESENCE_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.presence.loading = false;
+                    d.presence.error = a.payload.error;
+                })],
             [ActionType.VOICE_FIELD_EDIT, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
                     d.console.voiceEditing = p.field;
@@ -473,6 +501,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             saveError: null,
             publishing: false,
             lastPublish: null
+        },
+        presence: {
+            loaded: false,
+            loading: false,
+            error: null,
+            items: [],
+            clockSkewMs: 0
         }
     };
 
@@ -2111,6 +2146,94 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const toRow = (raw) => {
+        const r = (raw || {});
+        return {
+            employeeId: String(r.employeeId ?? ''),
+            employeeName: String(r.employeeName ?? ''),
+            canReceive: r.canReceive === true,
+            state: String(r.state ?? ''),
+            lastSeen: String(r.lastSeen ?? ''),
+            lastChange: String(r.lastChange ?? ''),
+            stale: r.stale !== false
+        };
+    };
+    async function loadPresence() {
+        if (store.getState().presence.loading)
+            return;
+        store.dispatch(Action.presenceLoadStart());
+        try {
+            const result = (await wizardCall('wizardLoadPresence', {}));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.presenceLoadFailure((result && (result.message || result.error)) || 'Could not load phone status'));
+                return;
+            }
+            const serverNow = Date.parse(result.now || '');
+            const skew = isNaN(serverNow) ? 0 : serverNow - Date.now();
+            const items = Array.isArray(result.items) ? result.items.map(toRow) : [];
+            store.dispatch(Action.presenceLoadSuccess(items, skew));
+        }
+        catch (e) {
+            store.dispatch(Action.presenceLoadFailure(e instanceof Error && e.message ? e.message : 'Could not load phone status'));
+        }
+    }
+
+    const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#14B981' };
+    const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#F4C76A' };
+    const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#9CA3AF' };
+    const phoneStatus = (row) => {
+        if (!row || row.stale || row.state === 'offline' || !row.state)
+            return PHONE_STATUS_OFFLINE;
+        if (row.state !== 'registered' || !row.canReceive)
+            return PHONE_STATUS_NOT_RECEIVING;
+        return PHONE_STATUS_RECEIVING;
+    };
+    const relativeTime = (iso, nowMs) => {
+        const t = Date.parse(iso || '');
+        if (isNaN(t))
+            return 'Never';
+        const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
+        if (sec < 60)
+            return 'Just now';
+        const min = Math.floor(sec / 60);
+        if (min < 60)
+            return min + ' min ago';
+        const hr = Math.floor(min / 60);
+        if (hr < 24)
+            return hr + ' h ago';
+        const days = Math.floor(hr / 24);
+        return days + (days === 1 ? ' day ago' : ' days ago');
+    };
+    const exactTime = (iso) => {
+        const t = Date.parse(iso || '');
+        return isNaN(t) ? '' : new Date(t).toLocaleString();
+    };
+    const buildPhoneStatusCell = (row) => {
+        const status = phoneStatus(row);
+        return new component__namespace.StackPanel({
+            items: [
+                new component__namespace.Text({
+                    text: '●',
+                    rootStyle: { color: status.color },
+                    rootAttributes: { 'aria-hidden': 'true' }
+                }),
+                new component__namespace.Text({ text: status.label })
+            ],
+            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
+            itemGap: component__namespace.StackPanel.GapSize.XS,
+            alignment: component__namespace.StackPanel.Alignment.CENTER
+        });
+    };
+    const buildLastSeenCell = (row, nowMs) => {
+        const iso = (row && row.lastSeen) || '';
+        const title = exactTime(iso);
+        return new component__namespace.Text({
+            text: relativeTime(iso, nowMs),
+            type: component__namespace.Text.Type.WEAK,
+            rootAttributes: title ? { title: title } : {}
+        });
+    };
+
     const DEFAULT_NO_ANSWER_MESSAGE = 'Sorry, no one is available to take your call. Please try again later. Goodbye.';
     const NO_ANSWER_MAX_LENGTH = 300;
     const DEFAULT_RECORDING_NOTICE = 'This call may be recorded for quality and training.';
@@ -2139,9 +2262,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             if (!inbound.loaded && !inbound.loading) {
                 loadInbound();
             }
+            loadPresence();
         }
         buildColumns() {
             const CT = component__namespace.DataGrid.ColumnType;
+            const presence = store.getState().presence;
+            const byEmployee = {};
+            presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
             return [
                 {
                     type: CT.TEMPLATED,
@@ -2161,6 +2288,22 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     content: (args) => new component__namespace.Text({
                         text: args?.cell?.row?.dataItem?.employeeName || ''
                     })
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'phone',
+                    label: 'Phone',
+                    stretchFactor: 1,
+                    content: (args) => {
+                        if (!presence.loaded) {
+                            return new component__namespace.Text({
+                                text: presence.error ? '—' : 'Loading…',
+                                type: component__namespace.Text.Type.WEAK
+                            });
+                        }
+                        const id = args?.cell?.row?.dataItem?.employeeId;
+                        return buildPhoneStatusCell(id == null ? undefined : byEmployee[String(id)]);
+                    }
                 }
             ];
         }
@@ -2743,6 +2886,76 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     };
     class HealthPage extends core.PureComponent {
+        componentDidMount() {
+            loadPresence();
+        }
+        buildPresenceColumns(nowMs) {
+            const CT = component__namespace.DataGrid.ColumnType;
+            return [
+                {
+                    type: CT.TEMPLATED,
+                    name: 'rep',
+                    label: 'Rep',
+                    stretchFactor: 3,
+                    content: (args) => new component__namespace.Text({
+                        text: args?.cell?.row?.dataItem?.employeeName || '(unnamed rep)',
+                        type: component__namespace.Text.Type.STRONG
+                    })
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'status',
+                    label: 'Status',
+                    stretchFactor: 3,
+                    content: (args) => buildPhoneStatusCell(args?.cell?.row?.dataItem)
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'lastSeen',
+                    label: 'Last seen',
+                    stretchFactor: 2,
+                    content: (args) => buildLastSeenCell(args?.cell?.row?.dataItem, nowMs)
+                }
+            ];
+        }
+        buildPhonesContent(presence) {
+            const content = [];
+            const push = (node) => {
+                content.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node })));
+            };
+            push(jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Phones" }));
+            if (presence.error) {
+                push(jsxRuntime.jsx(ErrorText, { message: presence.error }));
+            }
+            if (!presence.loaded) {
+                if (!presence.error) {
+                    push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Loading phones\u2026" }));
+                }
+            }
+            else if (presence.items.length === 0) {
+                push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No reps have phones yet." }));
+            }
+            else {
+                const nowMs = Date.now() + presence.clockSkewMs;
+                push(new component__namespace.DataGrid({
+                    dataSource: new core__namespace.ArrayDataSource(presence.items),
+                    columns: this.buildPresenceColumns(nowMs),
+                    columnStretch: true,
+                    highlightRowsOnHover: true,
+                    stripedRows: true,
+                    dataRowHeight: 48,
+                    headerRowHeight: 40,
+                    rootStyle: { width: '100%' }
+                }));
+            }
+            push(new component__namespace.Button({
+                label: presence.loading ? 'Refreshing…' : 'Refresh',
+                startIcon: core__namespace.SystemIcon.REFRESH,
+                enabled: !presence.loading,
+                action: () => { loadPresence(); }
+            }));
+            return content;
+        }
         rerunPreflight = async () => {
             store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true }));
             try {
@@ -2859,6 +3072,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 c.deactivateError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Deactivate failed: ", c.deactivateError] }) }))
             ].filter(Boolean);
             const columns = this.buildCheckColumns();
+            const phonesContent = this.buildPhonesContent(state.presence);
             const preflightContent = [];
             preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight" }) })));
             if (preflight === null || preflight === undefined) {
@@ -2902,6 +3116,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const outerItems = [
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: preflightContent }) })),
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: driftContent }) })),
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: phonesContent }) })),
                 !isPaused && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
                             border: '1px solid #D33A2C',
                             borderRadius: '8px',

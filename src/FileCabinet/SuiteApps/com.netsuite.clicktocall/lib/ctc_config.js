@@ -54,7 +54,7 @@ define(['N/search'], (search) => {
      *     id, accountSid, apiKeySid, apiSecretId,
      *     twimlAppSid, phoneNumber, intelServiceSid, active, inboundEnabled,
      *     ringSeconds, noAnswerMessage, studioFlowSid, routingPublishedAt,
-     *     recordInbound, recordingNoticeOn, recordingNotice
+     *     recordInbound, recordingNoticeOn, recordingNotice, reconWatermark
      * }
      *
      * `id` is the config record's internal id (for record.submitFields).
@@ -69,6 +69,10 @@ define(['N/search'], (search) => {
      * checkboxes as-is (the XML default is checked for new records; an
      * unset value reads false). `recordingNotice` defaults to a built-in
      * notice when blank.
+     *
+     * Call reconciliation (lib/ctc_call_reconcile): `reconWatermark` is the
+     * ISO 8601 UTC time before which every Twilio browser call has a Phone
+     * Call; '' until the first complete run.
      *
      * `active` defaults to false. Phone-button UE gates on this in U9 — until
      * the wizard flips it, the phone icon stays hidden on fresh customer
@@ -100,7 +104,8 @@ define(['N/search'], (search) => {
                 'custrecord_ctc_routing_published_at',
                 'custrecord_ctc_record_inbound',
                 'custrecord_ctc_recording_notice_on',
-                'custrecord_ctc_recording_notice'
+                'custrecord_ctc_recording_notice',
+                'custrecord_ctc_recon_watermark'
             ]
         }).run().getRange({ start: 0, end: 1 });
 
@@ -127,7 +132,8 @@ define(['N/search'], (search) => {
             routingPublishedAt: r.getValue('custrecord_ctc_routing_published_at') || '',
             recordInbound:     isChecked(r.getValue('custrecord_ctc_record_inbound')),
             recordingNoticeOn: isChecked(r.getValue('custrecord_ctc_recording_notice_on')),
-            recordingNotice:   parseRecordingNotice(r.getValue('custrecord_ctc_recording_notice'))
+            recordingNotice:   parseRecordingNotice(r.getValue('custrecord_ctc_recording_notice')),
+            reconWatermark:    r.getValue('custrecord_ctc_recon_watermark') || ''
         };
     };
 

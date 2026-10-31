@@ -19,7 +19,8 @@ import type {
     InboundPublishError,
     InboundPublishResult,
     InboundRoute,
-    InboundSettings
+    InboundSettings,
+    PresenceRow
 } from './InitialState';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -64,6 +65,11 @@ const ActionType = {
     INBOUND_SAVE: Symbol('inboundSave'),
     INBOUND_PUBLISH: Symbol('inboundPublish'),
     INBOUND_ROUTING_UPDATE: Symbol('inboundRoutingUpdate'),
+
+    // Rep phone presence
+    PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
+    PRESENCE_LOAD_SUCCESS: Symbol('presenceLoadSuccess'),
+    PRESENCE_LOAD_FAILURE: Symbol('presenceLoadFailure'),
 
     // Voice section
     VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
@@ -241,6 +247,21 @@ interface InboundRoutingUpdateAction {
     payload: InboundPublishResult;
 }
 
+interface PresenceLoadStartAction {
+    type: typeof ActionType.PRESENCE_LOAD_START;
+    payload: null;
+}
+
+interface PresenceLoadSuccessAction {
+    type: typeof ActionType.PRESENCE_LOAD_SUCCESS;
+    payload: { items: PresenceRow[]; clockSkewMs: number };
+}
+
+interface PresenceLoadFailureAction {
+    type: typeof ActionType.PRESENCE_LOAD_FAILURE;
+    payload: { error: string };
+}
+
 interface VoiceFieldEditAction {
     type: typeof ActionType.VOICE_FIELD_EDIT;
     payload: {
@@ -322,6 +343,9 @@ export type AppAction =
     | InboundSaveAction
     | InboundPublishAction
     | InboundRoutingUpdateAction
+    | PresenceLoadStartAction
+    | PresenceLoadSuccessAction
+    | PresenceLoadFailureAction
     | VoiceFieldEditAction
     | VoiceFieldSaveAction
     | DeactivateRequestAction
@@ -426,6 +450,16 @@ const Action = {
      */
     inboundRoutingUpdate(publish: InboundPublishResult): InboundRoutingUpdateAction {
         return { type: ActionType.INBOUND_ROUTING_UPDATE, payload: publish };
+    },
+
+    presenceLoadStart(): PresenceLoadStartAction {
+        return { type: ActionType.PRESENCE_LOAD_START, payload: null };
+    },
+    presenceLoadSuccess(items: PresenceRow[], clockSkewMs: number): PresenceLoadSuccessAction {
+        return { type: ActionType.PRESENCE_LOAD_SUCCESS, payload: { items, clockSkewMs } };
+    },
+    presenceLoadFailure(error: string): PresenceLoadFailureAction {
+        return { type: ActionType.PRESENCE_LOAD_FAILURE, payload: { error } };
     },
 
     voiceFieldEdit(

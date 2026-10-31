@@ -42,6 +42,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
         if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
         if (body.action === 'lookupCaller')         return lookupCaller(body);
+        if (body.action === 'phoneHeartbeat')       return phoneHeartbeat(body);
 
         return generateToken(body);
     };
@@ -95,6 +96,104 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             userId: runtime.getCurrentUser().id,
             phone: body.phone
         });
+    };
+
+    // --- Rep phone heartbeat (customrecord_ctc_rep_presence) ---
+    const PRESENCE_TYPE = 'customrecord_ctc_rep_presence';
+    const PRESENCE_FIELDS = {
+        employee:        'custrecord_ctc_rp_employee',
+        lastSeen:        'custrecord_ctc_rp_last_seen',
+        canReceive:      'custrecord_ctc_rp_can_receive',
+        state:           'custrecord_ctc_rp_state',
+        incomingGranted: 'custrecord_ctc_rp_incoming_granted',
+        client:          'custrecord_ctc_rp_client',
+        lastChange:      'custrecord_ctc_rp_last_change'
+    };
+    const PRESENCE_STATES = ['registered', 'unregistered', 'registering', 'offline'];
+    const PRESENCE_CLIENT_MAX = 80;
+    // An unchanged heartbeat inside this window is not written.
+    const PRESENCE_MIN_WRITE_MS = 60 * 1000;
+
+    const isChecked = (v) => v === true || v === 'T';
+
+    /**
+     * The softphone reports whether this rep's browser phone can receive
+     * calls. One row per employee (upsert). The employee is the session
+     * user, never a body value. Cost: one search (10 units) plus, when it
+     * writes, submitFields (2) or create + save (2 + 4).
+     * @param {Object} body - { state, canReceive, incomingGranted, client }
+     * @returns {Object} { ok: true, skipped? } or { error }
+     */
+    const phoneHeartbeat = (body) => {
+        try {
+            const employeeId = parseInt(runtime.getCurrentUser().id, 10);
+            if (!(employeeId > 0)) return { error: 'no_user' };
+
+            const state = String(body.state || '');
+            if (PRESENCE_STATES.indexOf(state) === -1) return { error: 'invalid_state' };
+            const incomingGranted = body.incomingGranted === true;
+            // Twilio rings only a registered device whose token grants incoming.
+            const canReceive = body.canReceive === true && incomingGranted && state === 'registered';
+            // eslint-disable-next-line no-control-regex
+            const client = String(body.client || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim()
+                .slice(0, PRESENCE_CLIENT_MAX);
+
+            const now = new Date();
+            const nowIso = now.toISOString();
+            const F = PRESENCE_FIELDS;
+
+            const rows = search.create({
+                type: PRESENCE_TYPE,
+                filters: [[F.employee, 'anyof', String(employeeId)]],
+                columns: [
+                    search.createColumn({ name: 'internalid', sort: search.Sort.DESC }),
+                    F.lastSeen, F.canReceive, F.state, F.incomingGranted, F.client
+                ]
+            }).run().getRange({ start: 0, end: 1 });
+
+            if (!rows || !rows.length) {
+                const rec = record.create({ type: PRESENCE_TYPE });
+                rec.setValue({ fieldId: F.employee, value: employeeId });
+                rec.setValue({ fieldId: F.lastSeen, value: nowIso });
+                rec.setValue({ fieldId: F.canReceive, value: canReceive });
+                rec.setValue({ fieldId: F.state, value: state });
+                rec.setValue({ fieldId: F.incomingGranted, value: incomingGranted });
+                rec.setValue({ fieldId: F.client, value: client });
+                rec.setValue({ fieldId: F.lastChange, value: nowIso });
+                rec.save({ ignoreMandatoryFields: true });
+                return { ok: true };
+            }
+
+            const row = rows[0];
+            const prevCanReceive = isChecked(row.getValue(F.canReceive));
+            const changed = prevCanReceive !== canReceive
+                || String(row.getValue(F.state) || '') !== state
+                || isChecked(row.getValue(F.incomingGranted)) !== incomingGranted
+                || String(row.getValue(F.client) || '') !== client;
+            const lastSeenMs = Date.parse(String(row.getValue(F.lastSeen) || ''));
+            const recent = !isNaN(lastSeenMs)
+                && now.getTime() - lastSeenMs >= 0
+                && now.getTime() - lastSeenMs < PRESENCE_MIN_WRITE_MS;
+            if (!changed && recent) return { ok: true, skipped: true };
+
+            const values = {};
+            values[F.lastSeen] = nowIso;
+            values[F.canReceive] = canReceive;
+            values[F.state] = state;
+            values[F.incomingGranted] = incomingGranted;
+            values[F.client] = client;
+            if (prevCanReceive !== canReceive) values[F.lastChange] = nowIso;
+            record.submitFields({
+                type: PRESENCE_TYPE,
+                id: row.id,
+                values: values,
+                options: { enableSourcing: false, ignoreMandatoryFields: true }
+            });
+            return { ok: true };
+        } catch (e) {
+            log.error({ title: 'CTC phoneHeartbeat Failed', details: (e && e.message) || String(e) });
+            return { error: 'Heartbeat failed' };
+        }
     };
 
     // Minimum call duration (seconds) before we create a Phone Call record.

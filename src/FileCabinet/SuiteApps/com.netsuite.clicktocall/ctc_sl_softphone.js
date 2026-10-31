@@ -2503,6 +2503,98 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             return (typeof id === 'string' || typeof id === 'number') ? String(id) : '';
         }
 
+        // --- Phone heartbeat ---
+        // Tells NetSuite (RESTlet action phoneHeartbeat, record
+        // customrecord_ctc_rep_presence) whether this phone can take calls,
+        // so the Setup Wizard shows a stale phone before a caller hits it.
+        // Sent on every registration state change (watchRegistration), after
+        // a token refresh, every HEARTBEAT_INTERVAL_MS while the page is
+        // open, and a final 'offline' beacon on pagehide. The server keeps
+        // one row per rep and skips a write when nothing changed in 60 s.
+        // A heartbeat failure never touches calling: errors are logged only.
+        var HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+        var heartbeatStarted = false;
+
+        // Short browser label, e.g. 'Chrome 130 on macOS' (80 chars max).
+        function heartbeatClient() {
+            var ua = String((navigator && navigator.userAgent) || '');
+            var marks = [['Edg/', 'Edge'], ['OPR/', 'Opera'], ['Firefox/', 'Firefox'],
+                ['Chrome/', 'Chrome'], ['Version/', 'Safari']];
+            var name = 'Browser';
+            var version = '';
+            for (var i = 0; i < marks.length; i++) {
+                var at = ua.indexOf(marks[i][0]);
+                if (at !== -1) {
+                    name = marks[i][1];
+                    version = ua.substr(at + marks[i][0].length).split('.')[0].split(' ')[0];
+                    break;
+                }
+            }
+            var os = ua.indexOf('Windows') !== -1 ? 'Windows'
+                : ua.indexOf('Mac OS X') !== -1 ? 'macOS'
+                : ua.indexOf('CrOS') !== -1 ? 'ChromeOS'
+                : ua.indexOf('Linux') !== -1 ? 'Linux' : '';
+            return (name + (version ? ' ' + version : '') + (os ? ' on ' + os : '')).slice(0, 80);
+        }
+
+        // The Twilio device state as the server knows it:
+        // registered / unregistered / registering / offline.
+        function heartbeatState() {
+            if (!device) return 'unregistered';
+            var s = device.state;
+            if (s === 'registered' || s === 'registering' || s === 'unregistered') return s;
+            return 'offline';
+        }
+
+        function heartbeatBody(state) {
+            return JSON.stringify({
+                action: 'phoneHeartbeat',
+                state: state,
+                canReceive: state === 'registered' && !!incomingGranted,
+                incomingGranted: !!incomingGranted,
+                client: heartbeatClient()
+            });
+        }
+
+        function sendHeartbeat(reason) {
+            try {
+                fetch(TOKEN_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: heartbeatBody(heartbeatState())
+                })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                })
+                .catch(function (err) {
+                    console.log('[CTC] Heartbeat failed (' + reason + '): ' + (err && err.message));
+                });
+            } catch (err) {
+                console.log('[CTC] Heartbeat failed (' + reason + '): ' + (err && err.message));
+            }
+        }
+
+        // Installed once per page (not per device).
+        function startHeartbeat() {
+            if (heartbeatStarted) return;
+            heartbeatStarted = true;
+            setInterval(function () { sendHeartbeat('interval'); }, HEARTBEAT_INTERVAL_MS);
+            window.addEventListener('pagehide', function () {
+                try {
+                    if (navigator.sendBeacon) {
+                        navigator.sendBeacon(TOKEN_URL,
+                            new Blob([heartbeatBody('offline')], { type: 'application/json' }));
+                    }
+                } catch (err) {
+                    console.log('[CTC] Heartbeat beacon failed: ' + (err && err.message));
+                }
+            });
+            // Back from the back-forward cache: the phone is open again.
+            window.addEventListener('pageshow', function (e) {
+                if (e && e.persisted) sendHeartbeat('page restored');
+            });
+        }
+
         // --- Registration watchdog ---
         // Inbound calls ring only a REGISTERED device. The signaling socket
         // can drop (sleep, network change, background-tab throttling) and
@@ -2581,6 +2673,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 if (d !== device) return;
                 regLog('Registration state: registering');
                 publishDock();
+                sendHeartbeat('registering');
             });
             d.on('registered', function () {
                 if (d !== device) return;
@@ -2589,12 +2682,14 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 clearRegisterRetry();
                 regLog('Registration state: registered');
                 publishDock();
+                sendHeartbeat('registered');
             });
             d.on('unregistered', function () {
                 if (d !== device) return;
                 registerInFlight = false;
                 regLog('Registration state: unregistered');
                 publishDock();
+                sendHeartbeat('unregistered');
                 // Our own grant-off unregister clears incomingGranted first,
                 // so scheduleRegisterRetry does nothing then.
                 scheduleRegisterRetry('unregistered');
@@ -2708,6 +2803,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     tokenExpired = false;
                     console.log('[CTC] Token refreshed');
                     applyIncomingGrant(tokenAllowsIncoming(result.token));
+                    sendHeartbeat('token refresh');
                     if (device.state === 'unregistered') {
                         console.log('[CTC] Re-registering device after token refresh');
                         var p = device.register();
@@ -2813,6 +2909,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             watchRegistration(device);
             startRegistrationWatch();
             device.register();
+            startHeartbeat();
         }
 
         // --- Audio device change handlers ---

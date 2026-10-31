@@ -6,9 +6,11 @@
  * Polls NetSuite for unprocessed Phone Call records (processed=false, call_sid not empty),
  * fetches transcripts via Twilio Conversational Intelligence, runs AI analysis with N/llm,
  * updates Phone Call activity records, and deletes processed recordings.
+ * Last, it reconciles Twilio calls the browser never logged
+ * (lib/ctc_call_reconcile: missed inbound, too short, cut off).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis) => {
+define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
@@ -34,10 +36,14 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
     // was redeclared on every execute() invocation. TERMINAL_STATUSES
     // excludes FAILED on purpose: a FAILED call with processed=false
     // remains retry-eligible so transient root causes can self-heal
-    // on a subsequent cycle.
+    // on a subsequent cycle. MISSED / TOO_SHORT / NO_ANSWER come from
+    // call reconciliation: no transcript is ever polled for them.
     const TERMINAL_STATUSES = () => [
         utils.CALL_STATUS.TRANSCRIBED,
-        utils.CALL_STATUS.NO_TRANSCRIPT
+        utils.CALL_STATUS.NO_TRANSCRIPT,
+        utils.CALL_STATUS.MISSED,
+        utils.CALL_STATUS.TOO_SHORT,
+        utils.CALL_STATUS.NO_ANSWER
     ];
 
     const shouldYield = () => {
@@ -478,10 +484,12 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         let orphanResolved = 0;
         let orphanFailed = 0;
         let orphanRejected = 0;
+        let config = null;
+        let authHeader = null;
 
         try {
-            const config = loadConfig();
-            const authHeader = buildSecureAuthHeader(config);
+            config = loadConfig();
+            authHeader = buildSecureAuthHeader(config);
             const hasLlmQuota = llmAnalysis.hasQuota();
 
             if (!hasLlmQuota) {
@@ -625,6 +633,29 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             log.error({ title: 'CTC Poll Execute Error', details: e.message || e });
         }
 
+        // ─────────────────────────────────────────────────────
+        // Phase D — Twilio call reconciliation. Runs last, with its own
+        // governance budget (see lib/ctc_call_reconcile) and its own
+        // try/catch: a failure here never touches the passes above.
+        // ─────────────────────────────────────────────────────
+        let recon = null;
+        let reconCrashed = false;
+        if (config && authHeader) {
+            try {
+                recon = callReconcile.reconcileCalls({ config, authHeader });
+            } catch (e) {
+                reconCrashed = true;
+                log.error({ title: 'CTC Reconcile Error', details: (e && e.message) || String(e) });
+            }
+        }
+        const rc = recon || {};
+        const rcCreated = rc.created || {};
+        const reconSummary = `recon(seen=${rc.seen || 0}, existing=${rc.existing || 0}, ` +
+            `created(missed=${rcCreated.missed || 0}, tooShort=${rcCreated.tooShort || 0}, ` +
+            `noAnswer=${rcCreated.noAnswer || 0}, logged=${rcCreated.logged || 0}), ` +
+            `skipped=${rc.skipped || 0}, errors=${(rc.errors || 0) + (reconCrashed ? 1 : 0)}, ` +
+            `complete=${rc.complete === true}${rc.stopped ? `, stopped=${rc.stopped}` : ''})`;
+
         // Sprint 2 review #7 — audit summary now includes ALL three
         // passes. Admins see at a glance whether retry passes did
         // work this cycle, vs only the main loop. Pre-fix, the
@@ -635,7 +666,8 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             details: `main(processed=${processed}, skipped=${skipped}, noTranscript=${noTranscript}, ` +
                      `transient=${transient}, alreadyDone=${alreadyDone}, errors=${errors}) ` +
                      `cleanup(resolved=${cleanupResolved}, transient=${cleanupTransient}) ` +
-                     `orphan(resolved=${orphanResolved}, failed=${orphanFailed}, rejected=${orphanRejected})`
+                     `orphan(resolved=${orphanResolved}, failed=${orphanFailed}, rejected=${orphanRejected}) ` +
+                     reconSummary
         });
     };
 

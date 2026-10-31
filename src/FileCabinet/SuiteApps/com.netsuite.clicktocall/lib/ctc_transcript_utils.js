@@ -13,13 +13,19 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
 
-    // Status values written to custevent_ctc_call_status
+    // Status values written to custevent_ctc_call_status.
+    // MISSED / TOO_SHORT / NO_ANSWER are written only by call
+    // reconciliation (lib/ctc_call_reconcile) for calls the browser did
+    // not log. They are terminal: the call is never polled for a transcript.
     const CALL_STATUS = {
         LOGGED:        'Logged',
         PROCESSING:    'Processing',
         TRANSCRIBED:   'Transcribed',
         NO_TRANSCRIPT: 'No transcript',
-        FAILED:        'Failed'
+        FAILED:        'Failed',
+        MISSED:        'Missed',
+        TOO_SHORT:     'Too short',
+        NO_ANSWER:     'No answer'
     };
 
     // Twilio Recording.status values that mean "no transcript will ever exist"
@@ -551,6 +557,7 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         RECORDING_WAIT_MS,
         TRANSCRIPT_WAIT_MS,
         isTransientError,
+        getTwilioJson,
         isRecordingTerminal,
         isTranscriptTerminal,
         isTranscriptComplete,

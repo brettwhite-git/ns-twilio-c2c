@@ -1312,6 +1312,90 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Action: wizardLoadPresence (Health + Inbound calls "Phones")       */
+    /* ------------------------------------------------------------------ */
+
+    /** A phone with no heartbeat for this long counts as offline. */
+    const PRESENCE_STALE_MS = 12 * 60 * 1000;
+
+    const presenceChecked = (v) => v === true || v === 'T';
+
+    /**
+     * Phone status for every rep with an assignment or a presence row
+     * (customrecord_ctc_rep_presence, written by the token RESTlet's
+     * phoneHeartbeat). Two searches (20 units).
+     *
+     * wizardLoadPresence {} →
+     *   { items: [{ employeeId, employeeName, canReceive, state, lastSeen,
+     *               lastChange, stale }], now }
+     * A rep with an assignment and no presence row has state '' and
+     * stale true (the phone never reported).
+     */
+    const wizardLoadPresence = () => {
+        const nowMs = Date.now();
+        const byEmployee = {};
+        const order = [];
+        const ensure = (employeeId, employeeName) => {
+            const key = String(employeeId);
+            if (!byEmployee[key]) {
+                byEmployee[key] = {
+                    employeeId: key,
+                    employeeName: employeeName || '',
+                    canReceive: false,
+                    state: '',
+                    lastSeen: '',
+                    lastChange: '',
+                    stale: true
+                };
+                order.push(key);
+            } else if (!byEmployee[key].employeeName && employeeName) {
+                byEmployee[key].employeeName = employeeName;
+            }
+            return byEmployee[key];
+        };
+
+        const assignments = search.create({
+            type: 'customrecord_ctc_rep_assignment',
+            filters: [['isinactive', 'is', 'F']],
+            columns: ['custrecord_ctc_ra_employee']
+        }).run().getRange({ start: 0, end: 1000 });
+        assignments.forEach((r) => {
+            const id = r.getValue('custrecord_ctc_ra_employee');
+            if (id) ensure(id, r.getText('custrecord_ctc_ra_employee'));
+        });
+
+        // Oldest first, so the newest row wins if a race left two rows.
+        const rows = search.create({
+            type: 'customrecord_ctc_rep_presence',
+            filters: [['isinactive', 'is', 'F']],
+            columns: [
+                search.createColumn({ name: 'internalid', sort: search.Sort.ASC }),
+                'custrecord_ctc_rp_employee',
+                'custrecord_ctc_rp_last_seen',
+                'custrecord_ctc_rp_can_receive',
+                'custrecord_ctc_rp_state',
+                'custrecord_ctc_rp_last_change'
+            ]
+        }).run().getRange({ start: 0, end: 1000 });
+        rows.forEach((r) => {
+            const id = r.getValue('custrecord_ctc_rp_employee');
+            if (!id) return;
+            const item = ensure(id, r.getText('custrecord_ctc_rp_employee'));
+            const lastSeen = String(r.getValue('custrecord_ctc_rp_last_seen') || '');
+            const seenMs = Date.parse(lastSeen);
+            item.canReceive = presenceChecked(r.getValue('custrecord_ctc_rp_can_receive'));
+            item.state = String(r.getValue('custrecord_ctc_rp_state') || '');
+            item.lastSeen = lastSeen;
+            item.lastChange = String(r.getValue('custrecord_ctc_rp_last_change') || '');
+            item.stale = isNaN(seenMs) || nowMs - seenMs > PRESENCE_STALE_MS;
+        });
+
+        const items = order.map((k) => byEmployee[k]);
+        items.sort((x, y) => String(x.employeeName).localeCompare(String(y.employeeName)));
+        return { items: items, now: new Date(nowMs).toISOString() };
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Action dispatch table                                              */
     /* ------------------------------------------------------------------ */
 
@@ -1331,7 +1415,8 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardActivate:          wizardActivate,
         wizardLoadInbound:       wizardLoadInbound,
         wizardSaveInbound:       wizardSaveInbound,
-        wizardPublishRouting:    wizardPublishRouting
+        wizardPublishRouting:    wizardPublishRouting,
+        wizardLoadPresence:      wizardLoadPresence
     };
 
     return { onRequest };

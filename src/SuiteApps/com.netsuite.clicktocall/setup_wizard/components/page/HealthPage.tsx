@@ -2,10 +2,12 @@
  * Health page (U6) — JSX.
  *
  * Phase 4 (2026-05-28) — JSX rewrite of components/sections/health.ts.
- * Three sub-blocks stacked vertically:
+ * Four sub-blocks stacked vertically:
  *   1. Preflight    — re-run button + DataGrid of check rows
  *   2. Drift        — DataGrid of 3 client-computed detector rows
- *   3. Danger zone  — Deactivate flow with two-click confirm
+ *   3. Phones       — read-only DataGrid of each rep's browser phone
+ *                     (wizardLoadPresence) + Refresh button
+ *   4. Danger zone  — Deactivate flow with two-click confirm
  *
  * Spike (2026-05-28) — DataGrid layout. Preflight + Drift now use the same
  * 4-column DataGrid pattern (Status icon / Check / Detail / Status badge),
@@ -18,9 +20,12 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {deactivate} from '../../app/effects/console';
+import {loadPresence} from '../../app/effects/presence';
 import {wizardCall} from '../../services/wizardApi';
-import type {AppState} from '../../app/InitialState';
+import type {AppState, PresenceRow, PresenceState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
+import {ErrorText} from '../shared/ErrorText';
+import {buildLastSeenCell, buildPhoneStatusCell} from '../shared/phoneStatus';
 
 interface CheckItem {
     id?: string;
@@ -37,6 +42,10 @@ interface DriftSnapshot {
 
 interface CellArgs {
     cell?: { row?: { dataItem?: CheckItem } };
+}
+
+interface PresenceCellArgs {
+    cell?: { row?: { dataItem?: PresenceRow } };
 }
 
 const statusToBadge = (status: string): { text: string; palette: { bg: string; fg: string; border: string } } => {
@@ -61,6 +70,87 @@ const statusIcon = (status: string): { icon: unknown; color: unknown } => {
 };
 
 export default class HealthPage extends PureComponent<PageTickProps, unknown> {
+    componentDidMount(): void {
+        loadPresence();
+    }
+
+    private buildPresenceColumns(nowMs: number): unknown[] {
+        const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
+        return [
+            {
+                type: CT.TEMPLATED,
+                name: 'rep',
+                label: 'Rep',
+                stretchFactor: 3,
+                content: (args: PresenceCellArgs): unknown => new component.Text({
+                    text: args?.cell?.row?.dataItem?.employeeName || '(unnamed rep)',
+                    type: component.Text.Type.STRONG
+                })
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'status',
+                label: 'Status',
+                stretchFactor: 3,
+                content: (args: PresenceCellArgs): unknown => buildPhoneStatusCell(args?.cell?.row?.dataItem)
+            },
+            {
+                type: CT.TEMPLATED,
+                name: 'lastSeen',
+                label: 'Last seen',
+                stretchFactor: 2,
+                content: (args: PresenceCellArgs): unknown => buildLastSeenCell(args?.cell?.row?.dataItem, nowMs)
+            }
+        ];
+    }
+
+    private buildPhonesContent(presence: PresenceState): core.VDom.Node[] {
+        const content: core.VDom.Node[] = [];
+        const push = (node: unknown): void => {
+            content.push(
+                (<component.StackPanel.Item>{node as never}</component.StackPanel.Item>) as core.VDom.Node
+            );
+        };
+        push(<component.Heading level={3}>Phones</component.Heading>);
+        if (presence.error) {
+            push(<ErrorText message={presence.error} />);
+        }
+        if (!presence.loaded) {
+            if (!presence.error) {
+                push(
+                    <component.Text type={component.Text.Type.WEAK}>
+                        Loading phones…
+                    </component.Text>
+                );
+            }
+        } else if (presence.items.length === 0) {
+            push(
+                <component.Text type={component.Text.Type.WEAK}>
+                    No reps have phones yet.
+                </component.Text>
+            );
+        } else {
+            const nowMs = Date.now() + presence.clockSkewMs;
+            push(new component.DataGrid({
+                dataSource: new core.ArrayDataSource(presence.items),
+                columns: this.buildPresenceColumns(nowMs),
+                columnStretch: true,
+                highlightRowsOnHover: true,
+                stripedRows: true,
+                dataRowHeight: 48,
+                headerRowHeight: 40,
+                rootStyle: { width: '100%' }
+            } as never));
+        }
+        push(new component.Button({
+            label: presence.loading ? 'Refreshing…' : 'Refresh',
+            startIcon: core.SystemIcon.REFRESH,
+            enabled: !presence.loading,
+            action: (): void => { loadPresence(); }
+        } as never));
+        return content;
+    }
+
     private rerunPreflight = async (): Promise<void> => {
         store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true } as never));
         try {
@@ -244,6 +334,7 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
         ].filter(Boolean);
 
         const columns = this.buildCheckColumns();
+        const phonesContent = this.buildPhonesContent(state.presence);
 
         /*
          * Preflight content — flat array of <StackPanel.Item> elements.
@@ -381,6 +472,17 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
                         itemGap={component.StackPanel.GapSize.S}
                     >
                         {driftContent as never}
+                    </component.StackPanel>
+                </component.StackPanel.Item>
+            ),
+            /* Phones block */
+            (
+                <component.StackPanel.Item>
+                    <component.StackPanel
+                        orientation={component.StackPanel.Orientation.VERTICAL}
+                        itemGap={component.StackPanel.GapSize.S}
+                    >
+                        {phonesContent as never}
                     </component.StackPanel>
                 </component.StackPanel.Item>
             ),

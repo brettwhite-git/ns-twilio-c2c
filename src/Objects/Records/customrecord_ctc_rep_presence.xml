@@ -1,0 +1,78 @@
+<customrecordtype scriptid="customrecord_ctc_rep_presence">
+    <recordname>CTC Rep Phone Presence</recordname>
+    <description>One row per rep: whether the rep's browser phone can receive calls right now. Written only by the token RESTlet's phoneHeartbeat action (the softphone sends it on every registration change, on token refresh and every 5 minutes). Read by the Setup Wizard (Health and Inbound calls pages). Hidden from admin UI via allowuiaccess=F.</description>
+    <allowuiaccess>F</allowuiaccess>
+    <includeinsearchmenu>F</includeinsearchmenu>
+    <includename>F</includename>
+    <accesstype>NONENEEDED</accesstype>
+    <allowattachments>F</allowattachments>
+    <allowinlinedeleting>F</allowinlinedeleting>
+    <allowquickadd>F</allowquickadd>
+    <allowquicksearch>F</allowquicksearch>
+    <enablemailmerge>F</enablemailmerge>
+    <enablenumbering>F</enablenumbering>
+    <enablesystemnotes>F</enablesystemnotes>
+    <isinactive>F</isinactive>
+    <numberingprefix></numberingprefix>
+    <permissions>
+        <permission>
+            <permittedrole>ADMINISTRATOR</permittedrole>
+            <permittedlevel>FULL</permittedlevel>
+            <restriction>EDIT</restriction>
+        </permission>
+    </permissions>
+    <customrecordcustomfields>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_employee">
+            <label>Employee</label>
+            <description>Rep whose browser phone this row describes. Set from the session (runtime.getCurrentUser), never from the request body.</description>
+            <fieldtype>SELECT</fieldtype>
+            <selectrecordtype>-4</selectrecordtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_last_seen">
+            <label>Last Seen</label>
+            <description>ISO 8601 UTC time of the last heartbeat write. The Setup Wizard treats a phone as offline when this is older than 12 minutes.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_can_receive">
+            <label>Can Receive Calls</label>
+            <description>True when the phone is registered with Twilio and its token grants incoming calls.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultvalue>F</defaultvalue>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_state">
+            <label>State</label>
+            <description>Twilio device state: registered, unregistered, registering or offline (page closed).</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_incoming_granted">
+            <label>Incoming Granted</label>
+            <description>True when the phone's access token grants incoming calls (config: inbound enabled).</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultvalue>F</defaultvalue>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_client">
+            <label>Client</label>
+            <description>Short browser label, e.g. "Chrome 130 on macOS" (80 characters max).</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_last_change">
+            <label>Last Change</label>
+            <description>ISO 8601 UTC time when Can Receive Calls last changed value (or the row was created).</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+    </customrecordcustomfields>
+</customrecordtype>

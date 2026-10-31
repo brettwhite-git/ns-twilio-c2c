@@ -23,7 +23,8 @@ import type {
     AppState,
     InboundPublishError,
     InboundPublishResult,
-    InboundSettings
+    InboundSettings,
+    PresenceRow
 } from './InitialState';
 import type {InboundLoadPayload} from './Action';
 
@@ -219,6 +220,24 @@ export default function reducer(state: AppState, action: AppAction): AppState {
         [ActionType.INBOUND_ROUTING_UPDATE, (s) => ImmutableUpdate.of(s, (d) => {
             applyPublish(d.inbound, a.payload as InboundPublishResult);
             d.inbound.loaded = false;
+        })],
+
+        // ── Rep phone presence ─────────────────────────────────────
+        [ActionType.PRESENCE_LOAD_START, (s) => ImmutableUpdate.of(s, (d) => {
+            d.presence.loading = true;
+            d.presence.error = null;
+        })],
+        [ActionType.PRESENCE_LOAD_SUCCESS, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as { items: PresenceRow[]; clockSkewMs: number };
+            d.presence.loading = false;
+            d.presence.loaded = true;
+            d.presence.error = null;
+            d.presence.items = p.items;
+            d.presence.clockSkewMs = p.clockSkewMs;
+        })],
+        [ActionType.PRESENCE_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
+            d.presence.loading = false;
+            d.presence.error = (a.payload as { error: string }).error;
         })],
 
         // ── Voice section ──────────────────────────────────────────
