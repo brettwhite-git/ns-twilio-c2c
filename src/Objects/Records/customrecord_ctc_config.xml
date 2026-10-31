@@ -76,5 +76,56 @@
             <defaultvalue>F</defaultvalue>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_ring_seconds">
+            <label>Inbound Ring Seconds</label>
+            <description>How long an inbound call rings the assigned rep's browser phone before the caller hears the no-answer message. Whole seconds, 10 to 60. Blank means 20.</description>
+            <fieldtype>INTEGER</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_noanswer_message">
+            <label>Inbound No-Answer Message</label>
+            <description>Spoken to an inbound caller when the rep does not answer or the dialed number has no rep. Blank means the built-in default message.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_studio_flow_sid">
+            <label>Inbound Studio Flow SID</label>
+            <description>SID (FW...) of the Twilio Studio flow that NetSuite generates and publishes for inbound routing. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_routing_published_at">
+            <label>Inbound Routing Published At</label>
+            <description>ISO 8601 time of the last successful publish of the inbound routing flow. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_record_inbound">
+            <label>Record Inbound Calls</label>
+            <description>When checked, the inbound routing flow records each answered inbound call (Studio Connect Call To with Record on) so it is transcribed and analyzed like an outbound call. Checked by default.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultchecked>T</defaultchecked>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_recording_notice_on">
+            <label>Play Inbound Recording Notice</label>
+            <description>When checked and inbound recording is on, every inbound caller hears the recording notice once before the rep's phone rings. Checked by default.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultchecked>T</defaultchecked>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_recording_notice">
+            <label>Inbound Recording Notice</label>
+            <description>Spoken to an inbound caller before the call is connected and recorded. Blank means the built-in notice.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
     </customrecordcustomfields>
 </customrecordtype>

@@ -28,8 +28,8 @@
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         './lib/ctc_config', './lib/ctc_twilio_admin',
-        './lib/ctc_twilio_jwt'],
-       (runtime, record, search, log, crypto, query, config, twilio, jwt) => {
+        './lib/ctc_twilio_jwt', './lib/ctc_inbound_routing'],
+       (runtime, record, search, log, crypto, query, config, twilio, jwt, routing) => {
 
     /* ------------------------------------------------------------------ */
     /* Suitelet entry point                                               */
@@ -865,7 +865,8 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                          ' phoneSids=' + payload.assignments.length
             });
 
-            return { saved: true, deleted: deleted, inserted: inserted };
+            return { saved: true, deleted: deleted, inserted: inserted,
+                     routing: routingAfterAssignmentSave() };
         } catch (e) {
             log.error({
                 title: 'CTC Wizard — saveAssignments failed',
@@ -1111,6 +1112,206 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Inbound routing (one Studio flow for all inbound numbers)          */
+    /* ------------------------------------------------------------------ */
+
+    const MAX_NOANSWER_MESSAGE_LENGTH = 300;
+    const MAX_RECORDING_NOTICE_LENGTH = 300;
+
+    const errText = (e) => (e && e.message ? e.message : String(e));
+
+    /**
+     * After a successful assignment save, republish the routing flow when
+     * inbound is on and a flow already exists. A routing failure never
+     * turns the assignment save into a failure.
+     */
+    const routingAfterAssignmentSave = () => {
+        try {
+            const cfg = config.loadConfig();
+            if (!cfg || !cfg.inboundEnabled) return { skipped: 'inbound_off' };
+            if (!cfg.studioFlowSid) return { skipped: 'not_published' };
+            return routing.publishRouting();
+        } catch (e) {
+            log.error({
+                title: 'CTC Wizard — routing after assignment save failed',
+                details: errText(e)
+            });
+            return { ok: false, message: errText(e), flowSid: '', publishedAt: '',
+                     numbersUpdated: 0, errors: [] };
+        }
+    };
+
+    /**
+     * wizardLoadInbound {} →
+     *   { inboundEnabled, ringSeconds, noAnswerMessage, flowSid,
+     *     publishedAt, routes: [{ phoneSid, phoneNumber, employeeId, employeeName }],
+     *     recordInbound, recordingNoticeOn, recordingNotice }
+     */
+    const wizardLoadInbound = () => {
+        const cfg = loadConfigOrError();
+        if (cfg.error) return { ok: false, error: cfg.error };
+
+        let routes = [];
+        let routesError;
+        try { routes = routing.loadRoutes(); }
+        catch (e) {
+            log.error({ title: 'CTC Wizard — loadInbound routes failed', details: errText(e) });
+            routesError = 'load_routes_failed';
+        }
+
+        const result = {
+            inboundEnabled: !!cfg.inboundEnabled,
+            ringSeconds: cfg.ringSeconds,
+            noAnswerMessage: cfg.noAnswerMessage,
+            flowSid: cfg.studioFlowSid || '',
+            publishedAt: cfg.routingPublishedAt || '',
+            routes: routes,
+            recordInbound: cfg.recordInbound === true,
+            recordingNoticeOn: cfg.recordingNoticeOn === true,
+            recordingNotice: cfg.recordingNotice || config.DEFAULT_RECORDING_NOTICE || ''
+        };
+        if (routesError) result.routesError = routesError;
+        return result;
+    };
+
+    /** Spoken text: control characters become spaces; then collapse and trim. */
+    const cleanSpokenText = (raw) => String(raw || '')
+        .replace(/[\u0000-\u001F\u007F]/g, ' ')
+        .replace(/ {2,}/g, ' ')
+        .trim();
+
+    /**
+     * Validate the wizardSaveInbound payload. Returns
+     * { values: { inboundEnabled, ringSeconds, noAnswerMessage,
+     *             recordInbound, recordingNoticeOn, recordingNotice } } or
+     * { error, message }.
+     */
+    const validateInboundPayload = (payload) => {
+        const p = payload || {};
+        const minRing = config.MIN_RING_SECONDS || 10;
+        const maxRing = config.MAX_RING_SECONDS || 60;
+
+        if (typeof p.inboundEnabled !== 'boolean') {
+            return { error: 'invalid_inbound_enabled',
+                     message: 'inboundEnabled must be true or false.' };
+        }
+        if (typeof p.ringSeconds !== 'number' || !Number.isInteger(p.ringSeconds) ||
+            p.ringSeconds < minRing || p.ringSeconds > maxRing) {
+            return { error: 'invalid_ring_seconds',
+                     message: 'Ring time must be a whole number of seconds from ' +
+                              minRing + ' to ' + maxRing + '.' };
+        }
+        if (p.noAnswerMessage != null && typeof p.noAnswerMessage !== 'string') {
+            return { error: 'invalid_noanswer_message',
+                     message: 'The no-answer message must be text.' };
+        }
+        const message = cleanSpokenText(p.noAnswerMessage);
+        if (message.length > MAX_NOANSWER_MESSAGE_LENGTH) {
+            return { error: 'noanswer_message_too_long',
+                     message: 'The no-answer message must be ' +
+                              MAX_NOANSWER_MESSAGE_LENGTH + ' characters or fewer.' };
+        }
+        if (typeof p.recordInbound !== 'boolean') {
+            return { error: 'invalid_record_inbound',
+                     message: 'recordInbound must be true or false.' };
+        }
+        if (typeof p.recordingNoticeOn !== 'boolean') {
+            return { error: 'invalid_recording_notice_on',
+                     message: 'recordingNoticeOn must be true or false.' };
+        }
+        if (p.recordingNotice != null && typeof p.recordingNotice !== 'string') {
+            return { error: 'invalid_recording_notice',
+                     message: 'The recording notice must be text.' };
+        }
+        const notice = cleanSpokenText(p.recordingNotice);
+        if (notice.length > MAX_RECORDING_NOTICE_LENGTH) {
+            return { error: 'recording_notice_too_long',
+                     message: 'The recording notice must be ' +
+                              MAX_RECORDING_NOTICE_LENGTH + ' characters or fewer.' };
+        }
+        return { values: { inboundEnabled: p.inboundEnabled,
+                           ringSeconds: p.ringSeconds,
+                           noAnswerMessage: message,
+                           recordInbound: p.recordInbound,
+                           recordingNoticeOn: p.recordingNoticeOn,
+                           recordingNotice: notice } };
+    };
+
+    /**
+     * wizardSaveInbound { inboundEnabled, ringSeconds, noAnswerMessage,
+     *                     recordInbound, recordingNoticeOn, recordingNotice } →
+     *   { settings: { inboundEnabled, ringSeconds, noAnswerMessage,
+     *                 recordInbound, recordingNoticeOn, recordingNotice },
+     *     publish: PublishResult }
+     * A blank message or notice is stored blank; settings then reports the
+     * default text that callers will hear.
+     */
+    const wizardSaveInbound = (payload) => {
+        const v = validateInboundPayload(payload);
+        if (v.error) return { ok: false, error: v.error, message: v.message };
+
+        const id = getConfigRecordId();
+        if (!id) return { ok: false, error: 'config_not_found' };
+
+        record.submitFields({
+            type: 'customrecord_ctc_config',
+            id: id,
+            values: {
+                custrecord_ctc_inbound_enabled: v.values.inboundEnabled,
+                custrecord_ctc_ring_seconds: v.values.ringSeconds,
+                custrecord_ctc_noanswer_message: v.values.noAnswerMessage,
+                custrecord_ctc_record_inbound: v.values.recordInbound,
+                custrecord_ctc_recording_notice_on: v.values.recordingNoticeOn,
+                custrecord_ctc_recording_notice: v.values.recordingNotice
+            }
+        });
+
+        log.audit({
+            title: 'CTC Wizard — inbound settings saved',
+            details: 'inboundEnabled=' + v.values.inboundEnabled +
+                     ' ringSeconds=' + v.values.ringSeconds +
+                     ' messageLength=' + v.values.noAnswerMessage.length +
+                     ' recordInbound=' + v.values.recordInbound +
+                     ' recordingNoticeOn=' + v.values.recordingNoticeOn +
+                     ' noticeLength=' + v.values.recordingNotice.length
+        });
+
+        let publish;
+        try { publish = routing.publishRouting(); }
+        catch (e) {
+            log.error({ title: 'CTC Wizard — publishRouting threw', details: errText(e) });
+            publish = { ok: false, message: errText(e), flowSid: '', publishedAt: '',
+                        numbersUpdated: 0, errors: [] };
+        }
+
+        return {
+            settings: {
+                inboundEnabled: v.values.inboundEnabled,
+                ringSeconds: v.values.ringSeconds,
+                noAnswerMessage: v.values.noAnswerMessage ||
+                                 config.DEFAULT_NOANSWER_MESSAGE || '',
+                recordInbound: v.values.recordInbound,
+                recordingNoticeOn: v.values.recordingNoticeOn,
+                recordingNotice: v.values.recordingNotice ||
+                                 config.DEFAULT_RECORDING_NOTICE || ''
+            },
+            publish: publish
+        };
+    };
+
+    /** wizardPublishRouting {} → { publish: PublishResult } */
+    const wizardPublishRouting = () => {
+        let publish;
+        try { publish = routing.publishRouting(); }
+        catch (e) {
+            log.error({ title: 'CTC Wizard — publishRouting threw', details: errText(e) });
+            publish = { ok: false, message: errText(e), flowSid: '', publishedAt: '',
+                        numbersUpdated: 0, errors: [] };
+        }
+        return { publish: publish };
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Action dispatch table                                              */
     /* ------------------------------------------------------------------ */
 
@@ -1127,7 +1328,10 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardListRecentCalls:   wizardListRecentCalls,
         wizardSaveAssignments:   wizardSaveAssignments,
         wizardRunPreflight:      wizardRunPreflight,
-        wizardActivate:          wizardActivate
+        wizardActivate:          wizardActivate,
+        wizardLoadInbound:       wizardLoadInbound,
+        wizardSaveInbound:       wizardSaveInbound,
+        wizardPublishRouting:    wizardPublishRouting
     };
 
     return { onRequest };

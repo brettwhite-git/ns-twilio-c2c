@@ -17,6 +17,7 @@ import {store} from '../../app/Store';
 import {loadPhonesData, savePhonesAssignment} from '../../app/effects/phones';
 import type {AppState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
+import {formatPhone} from '../shared/formatPhone';
 
 interface EmployeeRow {
     id: number;
@@ -253,6 +254,17 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
                 <component.StackPanel.Item>
                     <component.Text type={component.Text.Type.STRONG}>
                         ✕ {c.phonesError}
+                    </component.Text>
+                </component.StackPanel.Item>
+            ),
+            c.phonesRoutingErrors.length > 0 && (
+                <component.StackPanel.Item>
+                    <component.Text
+                        type={component.Text.Type.STRONG}
+                        size={component.Text.Size.S}
+                    >
+                        {'⚠ Inbound routing did not update for: ' +
+                            c.phonesRoutingErrors.map((e) => formatPhone(e.phoneNumber)).join(', ')}
                     </component.Text>
                 </component.StackPanel.Item>
             ),

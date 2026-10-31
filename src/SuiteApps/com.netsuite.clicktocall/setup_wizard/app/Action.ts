@@ -15,7 +15,11 @@ import type {
     Step3State,
     Step4State,
     Step5State,
-    ConsoleState
+    ConsoleState,
+    InboundPublishError,
+    InboundPublishResult,
+    InboundRoute,
+    InboundSettings
 } from './InitialState';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -51,6 +55,15 @@ const ActionType = {
     PHONES_LOAD_START: Symbol('phonesLoadStart'),
     PHONES_LOAD_SUCCESS: Symbol('phonesLoadSuccess'),
     PHONES_ASSIGNMENT_SAVE: Symbol('phonesAssignmentSave'),
+
+    // Inbound calls section
+    INBOUND_LOAD_START: Symbol('inboundLoadStart'),
+    INBOUND_LOAD_SUCCESS: Symbol('inboundLoadSuccess'),
+    INBOUND_LOAD_FAILURE: Symbol('inboundLoadFailure'),
+    INBOUND_FIELD_CHANGE: Symbol('inboundFieldChange'),
+    INBOUND_SAVE: Symbol('inboundSave'),
+    INBOUND_PUBLISH: Symbol('inboundPublish'),
+    INBOUND_ROUTING_UPDATE: Symbol('inboundRoutingUpdate'),
 
     // Voice section
     VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
@@ -173,7 +186,59 @@ interface PhonesAssignmentSaveAction {
         saving?: boolean;
         assignment?: unknown;
         error?: string | null;
+        /** Inbound routing errors from the save's `routing` result. */
+        routingErrors?: InboundPublishError[];
     };
+}
+
+export interface InboundLoadPayload extends InboundSettings {
+    flowSid: string;
+    publishedAt: string;
+    routes: InboundRoute[];
+}
+
+interface InboundLoadStartAction {
+    type: typeof ActionType.INBOUND_LOAD_START;
+    payload: null;
+}
+
+interface InboundLoadSuccessAction {
+    type: typeof ActionType.INBOUND_LOAD_SUCCESS;
+    payload: InboundLoadPayload;
+}
+
+interface InboundLoadFailureAction {
+    type: typeof ActionType.INBOUND_LOAD_FAILURE;
+    payload: { error: string };
+}
+
+interface InboundFieldChangeAction {
+    type: typeof ActionType.INBOUND_FIELD_CHANGE;
+    payload: Partial<InboundSettings>;
+}
+
+interface InboundSaveAction {
+    type: typeof ActionType.INBOUND_SAVE;
+    payload: {
+        phase: 'start' | 'success' | 'failure';
+        settings?: InboundSettings;
+        publish?: InboundPublishResult;
+        error?: string | null;
+    };
+}
+
+interface InboundPublishAction {
+    type: typeof ActionType.INBOUND_PUBLISH;
+    payload: {
+        phase: 'start' | 'success' | 'failure';
+        publish?: InboundPublishResult;
+        error?: string | null;
+    };
+}
+
+interface InboundRoutingUpdateAction {
+    type: typeof ActionType.INBOUND_ROUTING_UPDATE;
+    payload: InboundPublishResult;
 }
 
 interface VoiceFieldEditAction {
@@ -250,6 +315,13 @@ export type AppAction =
     | PhonesLoadStartAction
     | PhonesLoadSuccessAction
     | PhonesAssignmentSaveAction
+    | InboundLoadStartAction
+    | InboundLoadSuccessAction
+    | InboundLoadFailureAction
+    | InboundFieldChangeAction
+    | InboundSaveAction
+    | InboundPublishAction
+    | InboundRoutingUpdateAction
     | VoiceFieldEditAction
     | VoiceFieldSaveAction
     | DeactivateRequestAction
@@ -327,6 +399,33 @@ const Action = {
         payload: PhonesAssignmentSaveAction['payload']
     ): PhonesAssignmentSaveAction {
         return { type: ActionType.PHONES_ASSIGNMENT_SAVE, payload };
+    },
+
+    inboundLoadStart(): InboundLoadStartAction {
+        return { type: ActionType.INBOUND_LOAD_START, payload: null };
+    },
+    inboundLoadSuccess(payload: InboundLoadPayload): InboundLoadSuccessAction {
+        return { type: ActionType.INBOUND_LOAD_SUCCESS, payload };
+    },
+    inboundLoadFailure(error: string): InboundLoadFailureAction {
+        return { type: ActionType.INBOUND_LOAD_FAILURE, payload: { error } };
+    },
+    inboundFieldChange(changes: Partial<InboundSettings>): InboundFieldChangeAction {
+        return { type: ActionType.INBOUND_FIELD_CHANGE, payload: changes };
+    },
+    inboundSave(payload: InboundSaveAction['payload']): InboundSaveAction {
+        return { type: ActionType.INBOUND_SAVE, payload };
+    },
+    inboundPublish(payload: InboundPublishAction['payload']): InboundPublishAction {
+        return { type: ActionType.INBOUND_PUBLISH, payload };
+    },
+    /**
+     * A Phones & reps save republished routing. Copies the new
+     * flowSid/publishedAt and marks the inbound slice for a reload
+     * (the primary reps, so the routes, may have changed).
+     */
+    inboundRoutingUpdate(publish: InboundPublishResult): InboundRoutingUpdateAction {
+        return { type: ActionType.INBOUND_ROUTING_UPDATE, payload: publish };
     },
 
     voiceFieldEdit(

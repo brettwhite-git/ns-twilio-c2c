@@ -19,7 +19,22 @@
 import {ImmutableUpdate} from '@uif-js/core';
 import {ActionType} from './Action';
 import type {AppAction} from './Action';
-import type {AppState} from './InitialState';
+import type {
+    AppState,
+    InboundPublishError,
+    InboundPublishResult,
+    InboundSettings
+} from './InitialState';
+import type {InboundLoadPayload} from './Action';
+
+/** Copy a publish result into the inbound draft (flowSid/publishedAt on ok). */
+const applyPublish = (inbound: AppState['inbound'], publish: InboundPublishResult): void => {
+    inbound.lastPublish = publish;
+    if (publish.ok) {
+        if (publish.flowSid) inbound.flowSid = publish.flowSid;
+        if (publish.publishedAt) inbound.publishedAt = publish.publishedAt;
+    }
+};
 
 type Handler = (state: AppState) => AppState;
 
@@ -120,6 +135,7 @@ export default function reducer(state: AppState, action: AppAction): AppState {
                 saving?: boolean;
                 assignment?: unknown;
                 error?: string | null;
+                routingErrors?: InboundPublishError[];
             };
             if (p.saving !== undefined) {
                 d.console.phonesSaving[p.phoneSid] = p.saving;
@@ -127,9 +143,82 @@ export default function reducer(state: AppState, action: AppAction): AppState {
             if (p.error !== undefined) {
                 d.console.phonesError = p.error;
             }
+            if (p.routingErrors !== undefined) {
+                d.console.phonesRoutingErrors = p.routingErrors;
+            }
             // The actual assignment row mutation is left to the effect
             // module to compose into a phonesLoadSuccess(byPhone:...)
             // follow-up dispatch — keeps the reducer simple.
+        })],
+
+        // ── Inbound calls section ──────────────────────────────────
+        [ActionType.INBOUND_LOAD_START, (s) => ImmutableUpdate.of(s, (d) => {
+            d.inbound.loading = true;
+            d.inbound.loadError = null;
+        })],
+        [ActionType.INBOUND_LOAD_SUCCESS, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as InboundLoadPayload;
+            d.inbound.loading = false;
+            d.inbound.loaded = true;
+            d.inbound.loadError = null;
+            d.inbound.inboundEnabled = p.inboundEnabled;
+            d.inbound.ringSeconds = p.ringSeconds;
+            d.inbound.noAnswerMessage = p.noAnswerMessage;
+            d.inbound.recordInbound = p.recordInbound;
+            d.inbound.recordingNoticeOn = p.recordingNoticeOn;
+            d.inbound.recordingNotice = p.recordingNotice;
+            d.inbound.flowSid = p.flowSid;
+            d.inbound.publishedAt = p.publishedAt;
+            d.inbound.routes = p.routes;
+        })],
+        [ActionType.INBOUND_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as { error: string };
+            d.inbound.loading = false;
+            d.inbound.loadError = p.error;
+        })],
+        [ActionType.INBOUND_FIELD_CHANGE, (s) => ImmutableUpdate.of(s, (d) => {
+            Object.assign(d.inbound, a.payload as Partial<InboundSettings>);
+        })],
+        [ActionType.INBOUND_SAVE, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as {
+                phase: 'start' | 'success' | 'failure';
+                settings?: InboundSettings;
+                publish?: InboundPublishResult;
+                error?: string | null;
+            };
+            if (p.phase === 'start') {
+                d.inbound.saving = true;
+                d.inbound.saveError = null;
+            } else if (p.phase === 'success') {
+                d.inbound.saving = false;
+                d.inbound.saveError = null;
+                if (p.settings) Object.assign(d.inbound, p.settings);
+                if (p.publish) applyPublish(d.inbound, p.publish);
+            } else {
+                d.inbound.saving = false;
+                d.inbound.saveError = p.error ?? 'Save failed';
+            }
+        })],
+        [ActionType.INBOUND_PUBLISH, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as {
+                phase: 'start' | 'success' | 'failure';
+                publish?: InboundPublishResult;
+                error?: string | null;
+            };
+            if (p.phase === 'start') {
+                d.inbound.publishing = true;
+                d.inbound.saveError = null;
+            } else if (p.phase === 'success') {
+                d.inbound.publishing = false;
+                if (p.publish) applyPublish(d.inbound, p.publish);
+            } else {
+                d.inbound.publishing = false;
+                d.inbound.saveError = p.error ?? 'Publish failed';
+            }
+        })],
+        [ActionType.INBOUND_ROUTING_UPDATE, (s) => ImmutableUpdate.of(s, (d) => {
+            applyPublish(d.inbound, a.payload as InboundPublishResult);
+            d.inbound.loaded = false;
         })],
 
         // ── Voice section ──────────────────────────────────────────

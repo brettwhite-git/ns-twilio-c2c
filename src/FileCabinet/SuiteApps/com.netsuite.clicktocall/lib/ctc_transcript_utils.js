@@ -23,10 +23,27 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
     };
 
     // Twilio Recording.status values that mean "no transcript will ever exist"
-    const RECORDING_TERMINAL_STATUSES = ['absent'];
+    // ('deleted': the media is gone, so nothing can transcribe it).
+    const RECORDING_TERMINAL_STATUSES = ['absent', 'deleted'];
 
     // Twilio Transcript.status values that mean "no transcript will ever be ready"
     const TRANSCRIPT_TERMINAL_STATUSES = ['failed', 'canceled', 'error'];
+
+    // Twilio Call.status values for a call that has ended.
+    const CALL_ENDED_STATUSES = ['completed', 'busy', 'no-answer', 'failed', 'canceled'];
+
+    // Bounded waits (2026-10-31). Before these, a call that Twilio never
+    // recorded (unanswered outbound, inbound with recording off) or never
+    // transcribed got no terminal status from Twilio, so the poller marked
+    // it Processing and polled it again every cycle, forever.
+    //   - RECORDING_WAIT_MS: Twilio creates the Recording resource when
+    //     recording starts (during the call). No recording 1 hour after the
+    //     call ended means there will never be one.
+    //   - TRANSCRIPT_WAIT_MS: Twilio publishes no transcription SLA. Normal
+    //     latency is minutes; 24 hours after the recording last changed is
+    //     far past it.
+    const RECORDING_WAIT_MS = 60 * 60 * 1000;
+    const TRANSCRIPT_WAIT_MS = 24 * 60 * 60 * 1000;
 
     // Sprint 2b (SAFE review HIGH-1) — sentinel returned by the four Twilio
     // fetchers on TRANSIENT failure (network error, timeout, 5xx, malformed
@@ -56,6 +73,86 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         return !!(transcript && transcript.status === 'completed');
     };
 
+    const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+                     jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+    /**
+     * Twilio timestamp → epoch ms, or null when it can't be read. The
+     * 2010-04-01 API uses RFC 2822 ("Fri, 30 Oct 2026 18:59:07 +0000");
+     * Intelligence v2 uses ISO 8601 ("2026-10-30T18:59:07Z"). RFC 2822 is
+     * parsed by hand so the result never depends on the engine's Date.parse
+     * or on the NetSuite user time zone.
+     */
+    const parseTwilioDate = (value) => {
+        const s = String(value || '').trim();
+        if (!s) return null;
+        const m = s.match(/^(?:[A-Za-z]{3},\s*)?([0-9]{1,2})\s+([A-Za-z]{3})\s+([0-9]{4})\s+([0-9]{2}):([0-9]{2}):([0-9]{2})\s*(?:([+-])([0-9]{2})([0-9]{2}))?/);
+        if (m) {
+            const month = MONTHS[m[2].toLowerCase()];
+            if (month === undefined) return null;
+            const offsetMin = m[7]
+                ? (m[7] === '-' ? -1 : 1) * (parseInt(m[8], 10) * 60 + parseInt(m[9], 10))
+                : 0;
+            return Date.UTC(parseInt(m[3], 10), month, parseInt(m[1], 10),
+                parseInt(m[4], 10), parseInt(m[5], 10), parseInt(m[6], 10)) - offsetMin * 60000;
+        }
+        const iso = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T/.test(s) ? Date.parse(s) : NaN;
+        return isNaN(iso) ? null : iso;
+    };
+
+    // First readable timestamp among `fields` of a Twilio resource, or null.
+    const firstTimestamp = (resource, fields) => {
+        for (const field of fields) {
+            const ms = parseTwilioDate(resource[field]);
+            if (ms !== null) return ms;
+        }
+        return null;
+    };
+
+    /**
+     * True when the poller has waited long enough for a recording on a call
+     * that has none. `twilioCall` is the fetchCall() result:
+     *   - null        → Twilio has no such call: no recording can ever appear
+     *   - live call   → (queued / ringing / in-progress) keep waiting
+     *   - ended call  → wait RECORDING_WAIT_MS after it ended
+     * An ended call with no readable timestamp keeps waiting (and logs), so a
+     * Twilio date-format change can never close calls early.
+     *
+     * @param {Object|null} twilioCall - Twilio Call resource, or null
+     * @param {number} [nowMs=Date.now()]
+     * @returns {boolean}
+     */
+    const recordingWaitExpired = (twilioCall, nowMs) => {
+        if (!twilioCall) return true;
+        if (CALL_ENDED_STATUSES.indexOf(twilioCall.status) === -1) return false;
+        const endedAt = firstTimestamp(twilioCall, ['end_time', 'date_updated', 'date_created']);
+        if (endedAt === null) {
+            log.error({ title: 'CTC Call end time unreadable', details: `${twilioCall.sid}: ${twilioCall.end_time}` });
+            return false;
+        }
+        return (nowMs === undefined ? Date.now() : nowMs) - endedAt >= RECORDING_WAIT_MS;
+    };
+
+    /**
+     * True when the poller has waited long enough for a finished transcript
+     * of this recording (none exists, or it is still queued / in progress).
+     * The clock starts when the recording last changed (it completes after
+     * the call ends). An unreadable timestamp keeps waiting (and logs).
+     *
+     * @param {Object} recording - Twilio Recording resource
+     * @param {number} [nowMs=Date.now()]
+     * @returns {boolean}
+     */
+    const transcriptWaitExpired = (recording, nowMs) => {
+        if (!recording) return false;
+        const changedAt = firstTimestamp(recording, ['date_updated', 'date_created', 'start_time']);
+        if (changedAt === null) {
+            log.error({ title: 'CTC Recording date unreadable', details: `${recording.sid}: ${recording.date_updated}` });
+            return false;
+        }
+        return (nowMs === undefined ? Date.now() : nowMs) - changedAt >= TRANSCRIPT_WAIT_MS;
+    };
+
     // Sprint 2c — LLM concerns extracted to lib/ctc_llm_analysis.js
     // (prompt template, model params, schema, fallback shape, quota guard,
     // try/catch around llm.generateText). This module re-exports
@@ -64,43 +161,126 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
     // New callers should import from ctc_llm_analysis.js directly.
     const ANALYSIS_PROMPT_PREFIX = llmAnalysis.ANALYSIS_PROMPT_PREFIX;
 
-    /**
-     * Sprint 2b — return contract:
-     *   - {sid, ...}      → recording resource found
-     *   - null            → call exists but has no recording yet (TERMINAL
-     *                       "not yet ready", caller marks PROCESSING)
-     *   - TRANSIENT_ERROR → network error / timeout / 5xx / malformed JSON;
-     *                       caller should NOT flip call_status (retry next cycle)
-     */
-    const fetchRecordingForCall = (accountSid, callSid, authHeader) => {
-        const url = `${TWILIO_API_BASE}/${accountSid}/Calls/${callSid}/Recordings.json`;
+    // 4xx codes that mean "try again later", not "Twilio has nothing":
+    // 401/403 are admin-fixable credential problems, 429 is rate limiting.
+    // These used to return null, which only meant "mark Processing". Now
+    // null can end a call as No transcript after a bounded wait, so a
+    // credential outage must never look like "no recording".
+    const RETRYABLE_4XX = [401, 403, 429];
 
+    /**
+     * GET a Twilio JSON resource. Shared by the fetchers below so they
+     * classify failures the same way:
+     *   - parsed body     → HTTP 200
+     *   - null            → Twilio answered "nothing here" (404 / other 4xx)
+     *   - TRANSIENT_ERROR → network error / timeout / 5xx / 401 / 403 / 429 /
+     *                       malformed JSON; caller retries next cycle
+     */
+    const getTwilioJson = (url, authHeader, label) => {
         let response;
         try {
             response = https.get({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
         } catch (e) {
-            log.error({ title: 'CTC Fetch Call Recordings — network error', details: (e && e.message) || String(e) });
+            log.error({ title: `${label} — network error`, details: (e && e.message) || String(e) });
             return TRANSIENT_ERROR;
         }
 
         if (response.code >= 500 && response.code < 600) {
-            log.error({ title: 'CTC Fetch Call Recordings — Twilio 5xx', details: `HTTP ${response.code}` });
+            log.error({ title: `${label} — Twilio 5xx`, details: `HTTP ${response.code}` });
+            return TRANSIENT_ERROR;
+        }
+        if (RETRYABLE_4XX.indexOf(response.code) !== -1) {
+            log.error({ title: `${label} — HTTP ${response.code} (retry next cycle)`, details: `${response.body}` });
             return TRANSIENT_ERROR;
         }
         if (response.code !== 200) {
-            log.error({ title: 'CTC Fetch Call Recordings Failed', details: `HTTP ${response.code}: ${response.body}` });
+            log.error({ title: `${label} Failed`, details: `HTTP ${response.code}: ${response.body}` });
             return null;
         }
 
-        let body;
         try {
-            body = JSON.parse(response.body);
+            return JSON.parse(response.body);
         } catch (e) {
-            log.error({ title: 'CTC Fetch Call Recordings — JSON parse', details: (e && e.message) || String(e) });
+            log.error({ title: `${label} — JSON parse`, details: (e && e.message) || String(e) });
             return TRANSIENT_ERROR;
         }
-        const recordings = body.recordings || [];
+    };
+
+    /**
+     * Sprint 2b — return contract:
+     *   - {sid, ...}      → recording resource found
+     *   - null            → Twilio lists no recording for this call (yet, or
+     *                       ever — the poller tells them apart with
+     *                       fetchCall + recordingWaitExpired)
+     *   - TRANSIENT_ERROR → see getTwilioJson; caller should NOT flip
+     *                       call_status (retry next cycle)
+     */
+    const fetchRecordingForCall = (accountSid, callSid, authHeader) => {
+        const recordings = fetchRecordingsForCall(accountSid, callSid, authHeader);
+        if (isTransientError(recordings)) return recordings;
         return recordings.length > 0 ? recordings[0] : null;
+    };
+
+    /**
+     * All Recording resources Twilio lists under one call. Returns an
+     * array ([] when there are none or Twilio has no such call), or
+     * TRANSIENT_ERROR (see getTwilioJson).
+     */
+    const fetchRecordingsForCall = (accountSid, callSid, authHeader) => {
+        const body = getTwilioJson(`${TWILIO_API_BASE}/${accountSid}/Calls/${callSid}/Recordings.json`,
+            authHeader, 'CTC Fetch Call Recordings');
+        if (isTransientError(body)) return body;
+        const recordings = (body && body.recordings) || [];
+        return Array.isArray(recordings) ? recordings : [];
+    };
+
+    const CALL_SID_PATTERN = /^CA[A-Za-z0-9]{32}$/;
+
+    /**
+     * Recording of an inbound call, found through its parent call.
+     *
+     * An inbound Phone Call stores the CallSid of the CHILD leg (the call
+     * Twilio dialed to `client:<id>`). The Studio flow records with
+     * Connect Call To (`record: true`), and Twilio attaches that recording
+     * to the PARENT call (the caller's leg), so the child's own Recordings
+     * list is empty. `childCall` is the fetchCall() result for the child
+     * leg; its `parent_call_sid` names the parent.
+     *
+     * Only a recording whose `call_sid` equals that parent SID is
+     * returned, so a recording of another call is never used.
+     *
+     * Return contract (same as fetchRecordingForCall):
+     *   - {sid, ...}      → the parent call's recording
+     *   - null            → no parent, or the parent has no recording (yet)
+     *   - TRANSIENT_ERROR → retry next cycle
+     */
+    const fetchParentCallRecording = (accountSid, childCall, authHeader) => {
+        const childSid = String((childCall && childCall.sid) || '');
+        const parentSid = String((childCall && childCall.parent_call_sid) || '');
+        if (!CALL_SID_PATTERN.test(parentSid) || parentSid === childSid) return null;
+
+        const recordings = fetchRecordingsForCall(accountSid, parentSid, authHeader);
+        if (isTransientError(recordings)) return recordings;
+        const own = recordings.filter((r) => r && r.sid && r.call_sid === parentSid);
+        if (own.length < recordings.length) {
+            log.audit({
+                title: 'CTC Parent recording — ignored foreign rows',
+                details: `parent=${parentSid} listed=${recordings.length} matched=${own.length}`
+            });
+        }
+        return own.length ? own[0] : null;
+    };
+
+    /**
+     * Fetch the Twilio Call resource ({ sid, status, end_time, ... }).
+     * Same contract as fetchRecordingForCall: null means Twilio has no such
+     * call (404), TRANSIENT_ERROR means retry next cycle.
+     */
+    const fetchCall = (accountSid, callSid, authHeader) => {
+        const body = getTwilioJson(`${TWILIO_API_BASE}/${accountSid}/Calls/${callSid}.json`,
+            authHeader, 'CTC Fetch Call');
+        if (isTransientError(body)) return body;
+        return body || null;
     };
 
     /**
@@ -109,36 +289,14 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
      *   - completed       → ready, enrich the Phone Call
      *   - queued/new/in-progress → still working, poll again later
      *   - failed/canceled/error  → terminal, no transcript will ever be ready
-     *   - null            → no transcript exists yet OR transient HTTP error (retry)
+     *   - null            → no transcript exists yet
+     *   - TRANSIENT_ERROR → see getTwilioJson (retry next cycle)
      */
     const fetchTranscript = (recordingSid, authHeader) => {
-        const url = `${TWILIO_INTEL_BASE}/Transcripts?SourceSid=${recordingSid}`;
-
-        let response;
-        try {
-            response = https.get({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
-        } catch (e) {
-            log.error({ title: 'CTC Fetch Transcript — network error', details: (e && e.message) || String(e) });
-            return TRANSIENT_ERROR;
-        }
-
-        if (response.code >= 500 && response.code < 600) {
-            log.error({ title: 'CTC Fetch Transcript — Twilio 5xx', details: `HTTP ${response.code}` });
-            return TRANSIENT_ERROR;
-        }
-        if (response.code !== 200) {
-            log.error({ title: 'CTC Fetch Transcript Failed', details: `HTTP ${response.code}: ${response.body}` });
-            return null;
-        }
-
-        let body;
-        try {
-            body = JSON.parse(response.body);
-        } catch (e) {
-            log.error({ title: 'CTC Fetch Transcript — JSON parse', details: (e && e.message) || String(e) });
-            return TRANSIENT_ERROR;
-        }
-        const transcripts = body.transcripts || [];
+        const body = getTwilioJson(`${TWILIO_INTEL_BASE}/Transcripts?SourceSid=${recordingSid}`,
+            authHeader, 'CTC Fetch Transcript');
+        if (isTransientError(body)) return body;
+        const transcripts = (body && body.transcripts) || [];
         return transcripts.length ? transcripts[0] : null;
     };
 
@@ -168,9 +326,22 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         return body.sentences || [];
     };
 
-    const formatTranscript = (sentences) => {
+    /**
+     * Sentences → "[REP] ..." / "[CUSTOMER] ..." lines.
+     *
+     * In a two-channel <Dial> recording, channel 1 is the parent call leg
+     * and channel 2 is the child leg. Outbound, the parent leg is the rep's
+     * browser phone (channel 1 = rep). Inbound, the parent leg is the
+     * caller and the rep is the dialed child (channel 2 = rep), so
+     * `opts.inbound` swaps the labels.
+     *
+     * @param {Array<{media_channel: number, transcript: string}>} sentences
+     * @param {{inbound?: boolean}} [opts]
+     */
+    const formatTranscript = (sentences, opts) => {
+        const repChannel = opts && opts.inbound === true ? 2 : 1;
         return sentences.map((s) => {
-            const speaker = s.media_channel === 1 ? '[REP]' : '[CUSTOMER]';
+            const speaker = s.media_channel === repChannel ? '[REP]' : '[CUSTOMER]';
             return `${speaker} ${s.transcript}`;
         }).join('\n');
     };
@@ -377,11 +548,19 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         ANALYSIS_PROMPT_PREFIX,
         CALL_STATUS,
         TRANSIENT_ERROR,
+        RECORDING_WAIT_MS,
+        TRANSCRIPT_WAIT_MS,
         isTransientError,
         isRecordingTerminal,
         isTranscriptTerminal,
         isTranscriptComplete,
+        parseTwilioDate,
+        recordingWaitExpired,
+        transcriptWaitExpired,
         fetchRecordingForCall,
+        fetchRecordingsForCall,
+        fetchParentCallRecording,
+        fetchCall,
         fetchTranscript,
         fetchSentences,
         formatTranscript,

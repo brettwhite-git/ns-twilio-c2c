@@ -26,6 +26,15 @@ define(['N/https', 'N/encode', 'N/log'],
 
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';
+    const TWILIO_STUDIO_FLOWS = 'https://studio.twilio.com/v2/Flows';
+    const TWILIO_FLOW_WEBHOOK_BASE = 'https://webhooks.twilio.com/v1/Accounts';
+    const DEFAULT_FLOW_NAME = 'CTC Inbound Routing';
+
+    // Strict SID shapes. Checked before any SID goes into a URL path so
+    // a bad config value can never change the request target.
+    const ACCOUNT_SID_RE = /^AC[0-9a-f]{32}$/;
+    const PHONE_SID_RE = /^PN[0-9a-f]{32}$/;
+    const FLOW_SID_RE = /^FW[0-9a-f]{32}$/;
 
     // Twilio's REST API list endpoints default to 50 per page; the wizard
     // caps at 100 numbers / 100 TwiML apps / 100 Intel services per
@@ -248,12 +257,221 @@ define(['N/https', 'N/encode', 'N/log'],
         return result;
     };
 
+    /**
+     * Encode a flat object as application/x-www-form-urlencoded.
+     * Undefined / null values are left out.
+     */
+    const encodeForm = (params) => {
+        return Object.keys(params || {})
+            .filter(function (k) { return params[k] !== undefined && params[k] !== null; })
+            .map(function (k) {
+                return encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k]));
+            })
+            .join('&');
+    };
+
+    /**
+     * Build a readable error message from a Twilio error body. Studio's
+     * 400 (invalid definition) puts the useful text in details.errors[].
+     */
+    const twilioErrorMessage = (body, status) => {
+        const base = body && body.message ? String(body.message) : 'HTTP ' + status;
+        const errs = body && body.details && Array.isArray(body.details.errors)
+            ? body.details.errors
+            : [];
+        const extra = errs
+            .map(function (e) {
+                if (!e) return '';
+                const msg = e.message ? String(e.message) : '';
+                const path = e.property_path ? ' (' + e.property_path + ')' : '';
+                return msg ? msg + path : '';
+            })
+            .filter(function (m) { return !!m; });
+        return extra.length ? base + ': ' + extra.join('; ') : base;
+    };
+
+    /**
+     * Wrap N/https.post with a form-encoded body and the same envelope
+     * as httpGetJson. Never throws.
+     */
+    const httpPostForm = (url, secureAuthHeader, params) => {
+        try {
+            const response = https.post({
+                url: url,
+                body: encodeForm(params),
+                headers: {
+                    Authorization: secureAuthHeader,
+                    Accept: 'application/json',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            });
+            const status = response.code;
+            let body;
+            try { body = JSON.parse(response.body || '{}'); }
+            catch (e) { body = {}; }
+
+            if (status >= 200 && status < 300) {
+                return { ok: true, status: status, body: body };
+            }
+            if (status === 401) {
+                return {
+                    ok: false,
+                    status: 401,
+                    errorCode: 'EMPTY_SECRET_OR_INVALID',
+                    errorMessage: 'Twilio rejected the credentials. The ' +
+                        'API Key Secret in NetSuite API Secrets may be ' +
+                        'empty or invalid. Open Setup > Company > API ' +
+                        'Secrets and paste the secret value.'
+                };
+            }
+            return {
+                ok: false,
+                status: status,
+                errorCode: body && body.code ? body.code : status,
+                errorMessage: twilioErrorMessage(body, status)
+            };
+        } catch (e) {
+            return {
+                ok: false,
+                status: 'NETWORK_ERROR',
+                errorCode: 'NETWORK_ERROR',
+                errorMessage: (e && e.message ? e.message : String(e))
+            };
+        }
+    };
+
+    /**
+     * Create or update (and publish) the inbound routing Studio flow.
+     *
+     *   flowSid valid  → POST /v2/Flows/{flowSid}; on 404 fall back to create
+     *   flowSid empty  → POST /v2/Flows
+     *
+     * Returns { ok: true, status, flowSid, created, revision } or
+     * { ok: false, status, flowSid: '', errorCode, errorMessage }.
+     */
+    const upsertStudioFlow = (cfg, flowSid, definition, friendlyName) => {
+        let auth;
+        try { auth = buildSecureAuthHeader(cfg); }
+        catch (e) {
+            return { ok: false, status: 'CONFIG_ERROR', flowSid: '',
+                     errorCode: 'CONFIG_ERROR',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
+
+        const name = friendlyName || DEFAULT_FLOW_NAME;
+        const params = {
+            FriendlyName: name,
+            Status: 'published',
+            Definition: JSON.stringify(definition),
+            CommitMessage: 'Published by NetSuite Click-to-Call ' +
+                           new Date().toISOString()
+        };
+
+        const finish = (result, created) => {
+            if (!result.ok) {
+                return {
+                    ok: false,
+                    status: result.status,
+                    flowSid: '',
+                    errorCode: result.errorCode,
+                    errorMessage: result.errorMessage
+                };
+            }
+            const sid = result.body && result.body.sid;
+            if (typeof sid !== 'string' || !FLOW_SID_RE.test(sid)) {
+                return { ok: false, status: result.status, flowSid: '',
+                         errorCode: 'BAD_RESPONSE',
+                         errorMessage: 'Twilio did not return a flow SID' };
+            }
+            return {
+                ok: true,
+                status: result.status,
+                flowSid: sid,
+                created: created,
+                revision: result.body.revision
+            };
+        };
+
+        if (flowSid && typeof flowSid === 'string' && FLOW_SID_RE.test(flowSid)) {
+            const updated = httpPostForm(TWILIO_STUDIO_FLOWS + '/' + flowSid, auth, params);
+            log.audit({
+                title: 'CTC Inbound — update Studio flow',
+                details: 'flow=' + maskSid(flowSid) + ' status=' + updated.status +
+                         ' ok=' + updated.ok
+            });
+            if (updated.ok || updated.status !== 404) return finish(updated, false);
+            // Flow deleted in the Twilio Console: create a new one.
+        } else if (flowSid) {
+            log.audit({
+                title: 'CTC Inbound — stored flow SID is not valid; creating a new flow',
+                details: 'flow=' + maskSid(String(flowSid))
+            });
+        }
+
+        const created = httpPostForm(TWILIO_STUDIO_FLOWS, auth, params);
+        log.audit({
+            title: 'CTC Inbound — create Studio flow',
+            details: 'status=' + created.status + ' ok=' + created.ok
+        });
+        return finish(created, true);
+    };
+
+    /**
+     * Point one phone number's incoming-call webhook at the Studio flow.
+     * POST /2010-04-01/Accounts/{AC}/IncomingPhoneNumbers/{PN}.json
+     *   VoiceUrl=https://webhooks.twilio.com/v1/Accounts/{AC}/Flows/{FW}
+     *   VoiceMethod=POST
+     */
+    const setNumberVoiceUrl = (cfg, phoneSid, flowSid) => {
+        const accountSid = cfg && cfg.accountSid;
+        if (typeof accountSid !== 'string' || !ACCOUNT_SID_RE.test(accountSid)) {
+            return { ok: false, status: 'INVALID_SID', errorCode: 'INVALID_ACCOUNT_SID',
+                     errorMessage: 'The Account SID in the configuration is not valid' };
+        }
+        if (typeof phoneSid !== 'string' || !PHONE_SID_RE.test(phoneSid)) {
+            return { ok: false, status: 'INVALID_SID', errorCode: 'INVALID_PHONE_SID',
+                     errorMessage: 'The phone number SID is not valid' };
+        }
+        if (typeof flowSid !== 'string' || !FLOW_SID_RE.test(flowSid)) {
+            return { ok: false, status: 'INVALID_SID', errorCode: 'INVALID_FLOW_SID',
+                     errorMessage: 'The Studio flow SID is not valid' };
+        }
+
+        let auth;
+        try { auth = buildSecureAuthHeader(cfg); }
+        catch (e) {
+            return { ok: false, status: 'CONFIG_ERROR', errorCode: 'CONFIG_ERROR',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
+
+        const voiceUrl = TWILIO_FLOW_WEBHOOK_BASE + '/' + accountSid + '/Flows/' + flowSid;
+        const url = TWILIO_API_BASE + '/' + accountSid +
+                    '/IncomingPhoneNumbers/' + phoneSid + '.json';
+        const result = httpPostForm(url, auth, {
+            VoiceUrl: voiceUrl,
+            VoiceMethod: 'POST'
+        });
+
+        log.audit({
+            title: 'CTC Inbound — set number voice URL',
+            details: 'number=' + maskSid(phoneSid) + ' flow=' + maskSid(flowSid) +
+                     ' status=' + result.status + ' ok=' + result.ok
+        });
+
+        if (!result.ok) return result;
+        return { ok: true, status: result.status, phoneSid: phoneSid, voiceUrl: voiceUrl };
+    };
+
     return {
         buildSecureAuthHeader: buildSecureAuthHeader,
         maskSid: maskSid,
         listApplications: listApplications,
         listPhoneNumbers: listPhoneNumbers,
         listIntelServices: listIntelServices,
-        getCall: getCall
+        getCall: getCall,
+        httpPostForm: httpPostForm,
+        upsertStudioFlow: upsertStudioFlow,
+        setNumberVoiceUrl: setNumberVoiceUrl,
+        DEFAULT_FLOW_NAME: DEFAULT_FLOW_NAME
     };
 });

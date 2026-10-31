@@ -24,6 +24,7 @@ const subtitleFor = (section: SectionName): string => {
     switch (section) {
         case 'overview':    return 'Overview';
         case 'phones':      return 'Phones & reps';
+        case 'inbound':     return 'Inbound calls';
         case 'voice':       return 'Voice config';
         case 'credentials': return 'Credentials';
         case 'health':      return 'Health';

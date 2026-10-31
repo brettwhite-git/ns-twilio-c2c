@@ -77,13 +77,17 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                 'AND',
                 ['custevent_ctc_call_sid', 'isnotempty', '']
             ],
-            columns: ['internalid', 'custevent_ctc_call_sid']
+            columns: ['internalid', 'custevent_ctc_call_sid', 'custevent_ctc_inbound']
         }).run().getRange({ start: 0, end: 50 });
 
-        return results.map((r) => ({
-            recordId: r.id,
-            callSid: r.getValue('custevent_ctc_call_sid')
-        }));
+        return results.map((r) => {
+            const inbound = r.getValue('custevent_ctc_inbound');
+            return {
+                recordId: r.id,
+                callSid: r.getValue('custevent_ctc_call_sid'),
+                inbound: inbound === true || inbound === 'T'
+            };
+        });
     };
 
     /**
@@ -369,12 +373,105 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         return phoneCall.save();
     };
 
+    // Result of one checkCall() pass over an unprocessed call.
+    const OUTCOME = {
+        PROCESSED: 'processed',          // enriched, status Transcribed
+        PENDING: 'pending',              // Twilio may still deliver; poll again
+        NO_TRANSCRIPT: 'noTranscript',   // Twilio never will; close the call
+        TRANSIENT: 'transient'           // Twilio unreachable; status untouched
+    };
+
+    /**
+     * Ask Twilio where one call stands; enrich it when the transcript is
+     * ready. The caller writes the status for PENDING / NO_TRANSCRIPT.
+     * Throws on unexpected errors (the caller marks the call FAILED).
+     *
+     * A call Twilio never recorded (unanswered outbound, inbound with
+     * recording off, Twilio data gone) or never transcribed gets no terminal
+     * status from Twilio. recordingWaitExpired / transcriptWaitExpired bound
+     * those waits, so every such call ends as No transcript instead of being
+     * polled forever.
+     *
+     * Inbound calls (custevent_ctc_inbound): the stored CallSid is the child
+     * leg that rang the rep; the Studio flow's recording hangs on the parent
+     * (caller) leg. When the child has no recording of its own, read the
+     * child call and look under its parent_call_sid
+     * (utils.fetchParentCallRecording). The 1 h wait still runs from the
+     * child call's end.
+     */
+    const checkCall = (call, ctx) => {
+        const accountSid = ctx.config.accountSid;
+        let recording = utils.fetchRecordingForCall(accountSid, call.callSid, ctx.authHeader);
+        // Sprint 2b (HIGH-1) — transient Twilio errors (5xx / network /
+        // timeout / malformed JSON / 401 / 403 / 429) leave call_status
+        // untouched so the next cycle picks the call up cleanly, instead
+        // of churning every call during a sustained Twilio outage.
+        if (utils.isTransientError(recording)) return OUTCOME.TRANSIENT;
+
+        let twilioCall;
+        let fetchedCall = false;
+        if (!recording && call.inbound) {
+            twilioCall = utils.fetchCall(accountSid, call.callSid, ctx.authHeader);
+            fetchedCall = true;
+            if (utils.isTransientError(twilioCall)) return OUTCOME.TRANSIENT;
+            recording = utils.fetchParentCallRecording(accountSid, twilioCall, ctx.authHeader);
+            if (utils.isTransientError(recording)) return OUTCOME.TRANSIENT;
+        }
+        if (!recording) {
+            if (!fetchedCall) {
+                twilioCall = utils.fetchCall(accountSid, call.callSid, ctx.authHeader);
+                if (utils.isTransientError(twilioCall)) return OUTCOME.TRANSIENT;
+            }
+            return utils.recordingWaitExpired(twilioCall) ? OUTCOME.NO_TRANSCRIPT : OUTCOME.PENDING;
+        }
+        if (utils.isRecordingTerminal(recording)) return OUTCOME.NO_TRANSCRIPT;
+
+        const transcript = utils.fetchTranscript(recording.sid, ctx.authHeader);
+        if (utils.isTransientError(transcript)) return OUTCOME.TRANSIENT;
+        if (utils.isTranscriptTerminal(transcript)) return OUTCOME.NO_TRANSCRIPT;
+        if (!transcript || !utils.isTranscriptComplete(transcript)) {
+            return utils.transcriptWaitExpired(recording) ? OUTCOME.NO_TRANSCRIPT : OUTCOME.PENDING;
+        }
+
+        const sentences = utils.fetchSentences(transcript.sid, ctx.authHeader);
+        const transcriptText = utils.formatTranscript(sentences, { inbound: !!call.inbound });
+
+        let analysis = {
+            summary: '',
+            brief: '',
+            satisfaction_score: 5,
+            tone_keywords: [],
+            action_items: []
+        };
+
+        if (ctx.hasLlmQuota && transcriptText) {
+            analysis = utils.analyzeTranscript(transcriptText);
+        }
+
+        updatePhoneCallRecord(call.recordId, recording, ctx.config, transcriptText, analysis);
+
+        // Sprint 2 U4 (HIGH-4) — handle the new deleteRecording
+        // return shape. TRANSIENT_ERROR means we couldn't reach
+        // Twilio to confirm the delete; set the cleanup_pending
+        // flag so the next cycle's retry pass picks it up.
+        // Any other return (true / null / false) means we have
+        // an authoritative answer from Twilio — nothing to retry.
+        const deleteResult = utils.deleteRecording(ctx.config.accountSid, recording.sid, ctx.authHeader);
+        if (utils.isTransientError(deleteResult)) {
+            markCleanupPending(call.recordId, true);
+        }
+        return OUTCOME.PROCESSED;
+    };
+
     const execute = () => {
         // Sprint 2 review #7 — counters for all three passes, exposed
         // in the final audit message so admins can see when retry
         // passes are doing work or stuck.
         let processed = 0;
-        let skipped = 0;
+        let skipped = 0;        // still waiting on Twilio — polled again next cycle
+        let noTranscript = 0;   // closed this cycle: Twilio will never transcribe
+        let transient = 0;      // Twilio unreachable — retried next cycle
+        let alreadyDone = 0;    // terminal at lookup (another path finished it)
         let errors = 0;
         let cleanupResolved = 0;
         let cleanupTransient = 0;
@@ -460,6 +557,7 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             // factory function (so utils mock-time injection works
             // in tests).
             const terminalStatuses = TERMINAL_STATUSES();
+            const ctx = { config, authHeader, hasLlmQuota };
 
             for (const call of unprocessedCalls) {
                 // Sprint 2 U2 (HIGH-6) — yield before the next call to
@@ -492,84 +590,31 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                             title: 'CTC Skip — already terminal',
                             details: `${call.recordId} processed=${alreadyProcessed} status=${callStatus}`
                         });
-                        skipped++;
+                        // A terminal status with processed=F (hand edit or
+                        // import) would match the search every cycle, forever.
+                        // Set processed so the call leaves the queue.
+                        if (!alreadyProcessed) {
+                            utils.markCallStatus(call.recordId, callStatus, true);
+                        }
+                        alreadyDone++;
                         continue;
                     }
 
-                    const recording = utils.fetchRecordingForCall(config.accountSid, call.callSid, authHeader);
-                    // Sprint 2b (HIGH-1) — distinguish transient Twilio errors
-                    // (5xx / network / timeout / malformed JSON) from "no
-                    // recording yet." For transient: leave call_status
-                    // untouched so the next cycle picks it up cleanly,
-                    // instead of churning every call to PROCESSING during
-                    // a sustained Twilio outage.
-                    if (utils.isTransientError(recording)) {
-                        skipped++;
-                        continue;
-                    }
-                    if (!recording) {
-                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
-                        skipped++;
-                        continue;
-                    }
-
-                    if (utils.isRecordingTerminal(recording)) {
+                    const outcome = checkCall(call, ctx);
+                    if (outcome === OUTCOME.PROCESSED) {
+                        processed++;
+                    } else if (outcome === OUTCOME.TRANSIENT) {
+                        transient++;
+                    } else if (outcome === OUTCOME.NO_TRANSCRIPT) {
                         utils.markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                        noTranscript++;
+                    } else {
+                        // Still pending. Write Processing once, not every cycle.
+                        if (callStatus !== utils.CALL_STATUS.PROCESSING) {
+                            utils.markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
+                        }
                         skipped++;
-                        continue;
                     }
-
-                    const transcript = utils.fetchTranscript(recording.sid, authHeader);
-                    if (utils.isTransientError(transcript)) {
-                        skipped++;
-                        continue;
-                    }
-                    if (!transcript) {
-                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
-                        skipped++;
-                        continue;
-                    }
-
-                    if (utils.isTranscriptTerminal(transcript)) {
-                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
-                        skipped++;
-                        continue;
-                    }
-
-                    if (!utils.isTranscriptComplete(transcript)) {
-                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.PROCESSING, false);
-                        skipped++;
-                        continue;
-                    }
-
-                    const sentences = utils.fetchSentences(transcript.sid, authHeader);
-                    const transcriptText = utils.formatTranscript(sentences);
-
-                    let analysis = {
-                        summary: '',
-                        brief: '',
-                        satisfaction_score: 5,
-                        tone_keywords: [],
-                        action_items: []
-                    };
-
-                    if (hasLlmQuota && transcriptText) {
-                        analysis = utils.analyzeTranscript(transcriptText);
-                    }
-
-                    updatePhoneCallRecord(call.recordId, recording, config, transcriptText, analysis);
-
-                    // Sprint 2 U4 (HIGH-4) — handle the new deleteRecording
-                    // return shape. TRANSIENT_ERROR means we couldn't reach
-                    // Twilio to confirm the delete; set the cleanup_pending
-                    // flag so the next cycle's retry pass picks it up.
-                    // Any other return (true / null / false) means we have
-                    // an authoritative answer from Twilio — nothing to retry.
-                    const deleteResult = utils.deleteRecording(config.accountSid, recording.sid, authHeader);
-                    if (utils.isTransientError(deleteResult)) {
-                        markCleanupPending(call.recordId, true);
-                    }
-                    processed++;
                 } catch (e) {
                     log.error({ title: 'CTC Call Processing Error', details: `${call.callSid}: ${e.message || e}` });
                     utils.markCallStatus(call.recordId, utils.CALL_STATUS.FAILED, false);
@@ -587,7 +632,8 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         // silent retry failures.
         log.audit({
             title: 'CTC Poll Complete',
-            details: `main(processed=${processed}, skipped=${skipped}, errors=${errors}) ` +
+            details: `main(processed=${processed}, skipped=${skipped}, noTranscript=${noTranscript}, ` +
+                     `transient=${transient}, alreadyDone=${alreadyDone}, errors=${errors}) ` +
                      `cleanup(resolved=${cleanupResolved}, transient=${cleanupTransient}) ` +
                      `orphan(resolved=${orphanResolved}, failed=${orphanFailed}, rejected=${orphanRejected})`
         });

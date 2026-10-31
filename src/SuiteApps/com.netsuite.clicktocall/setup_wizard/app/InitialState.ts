@@ -18,7 +18,7 @@
 
 export type Mode = 'stepper' | 'console';
 
-export type SectionName = 'overview' | 'phones' | 'voice' | 'credentials' | 'health';
+export type SectionName = 'overview' | 'phones' | 'inbound' | 'voice' | 'credentials' | 'health';
 
 // ─────────────────────────────────────────────────────────────────────
 // Per-step state shapes
@@ -76,6 +76,8 @@ export interface ConsoleState {
     phonesLoading: boolean;
     phonesSaving: Record<string, boolean>;
     phonesError: string | null;
+    /** Numbers whose inbound routing did not update after the last save. */
+    phonesRoutingErrors: InboundPublishError[];
 
     // Voice section
     voiceEditing: 'twimlAppSid' | 'phoneNumber' | 'intelServiceSid' | null;
@@ -99,6 +101,66 @@ export interface ConsoleState {
 
     // Cross-section error surface
     actionError: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Inbound calls section — server contract of wizardLoadInbound /
+// wizardSaveInbound / wizardPublishRouting (ctc_sl_wizard_api.js)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface InboundPublishError {
+    phoneNumber: string;
+    message: string;
+}
+
+export interface InboundPublishResult {
+    ok: boolean;
+    flowSid?: string;
+    publishedAt?: string;
+    numbersUpdated?: number;
+    errors?: InboundPublishError[];
+    skipped?: 'inbound_off' | 'not_published';
+}
+
+export interface InboundRoute {
+    phoneSid: string;
+    phoneNumber: string;
+    employeeId: number | string;
+    employeeName: string;
+}
+
+export interface InboundSettings {
+    inboundEnabled: boolean;
+    ringSeconds: number;
+    noAnswerMessage: string;
+    recordInbound: boolean;
+    recordingNoticeOn: boolean;
+    recordingNotice: string;
+}
+
+export interface InboundState {
+    /** True once wizardLoadInbound returned; false forces a reload on mount. */
+    loaded: boolean;
+    loading: boolean;
+    loadError: string | null;
+
+    /** Form values (edited in place; sent by Save & publish). */
+    inboundEnabled: boolean;
+    ringSeconds: number;
+    noAnswerMessage: string;
+    recordInbound: boolean;
+    recordingNoticeOn: boolean;
+    recordingNotice: string;
+
+    flowSid: string;
+    publishedAt: string;
+    routes: InboundRoute[];
+
+    saving: boolean;
+    saveError: string | null;
+    publishing: boolean;
+    /** Result of the last save/publish this session (status line source). */
+    lastPublish: InboundPublishResult | null;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -138,6 +200,9 @@ export interface AppState {
 
     // Console state
     console: ConsoleState;
+
+    // Inbound calls section
+    inbound: InboundState;
 }
 
 /**
@@ -192,6 +257,7 @@ const initialState: AppState = {
         phonesLoading: false,
         phonesSaving: {},
         phonesError: null,
+        phonesRoutingErrors: [],
         voiceEditing: null,
         voicePendingValue: null,
         voiceLists: {
@@ -207,6 +273,24 @@ const initialState: AppState = {
         deactivateError: null,
         preflightRefreshing: false,
         actionError: null
+    },
+    inbound: {
+        loaded: false,
+        loading: false,
+        loadError: null,
+        inboundEnabled: false,
+        ringSeconds: 20,
+        noAnswerMessage: '',
+        recordInbound: true,
+        recordingNoticeOn: false,
+        recordingNotice: '',
+        flowSid: '',
+        publishedAt: '',
+        routes: [],
+        saving: false,
+        saveError: null,
+        publishing: false,
+        lastPublish: null
     }
 };
 

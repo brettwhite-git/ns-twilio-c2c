@@ -427,8 +427,14 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 return { error: 'forbidden', code: 'CALLSID_MISMATCH' };
             }
 
+            // Inbound calls store the child leg that rang the rep, so the
+            // ownership check uses the inbound rule (to === client:<id>).
+            // The flag comes from the stored record, never from the body.
+            const inboundFlag = phoneCallForCheck.getValue({ fieldId: 'custevent_ctc_inbound' });
+            const inbound = inboundFlag === true || inboundFlag === 'T';
+
             const userId = runtime.getCurrentUser().id;
-            const auth = verifyCallOwnership(body.callSid, userId);
+            const auth = verifyCallOwnership(body.callSid, userId, inbound ? 'inbound' : 'outbound');
             if (!auth.ok) {
                 log.audit({
                     title: 'CTC checkTranscript — verification rejected',
@@ -442,13 +448,25 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             const config = loadConfig();
             const authHeader = buildSecureAuthHeader(config);
 
-            const recording = utils.fetchRecordingForCall(config.accountSid, body.callSid, authHeader);
+            let recording = utils.fetchRecordingForCall(config.accountSid, body.callSid, authHeader);
             // Sprint 2b (HIGH-1) — transient Twilio failure: tell the
             // browser to retry, don't flip call_status. The browser poll
             // retries every 15s for up to 3 minutes; the scheduled script
             // backfills any calls still pending after that.
             if (utils.isTransientError(recording)) {
                 return { status: 'transient', reason: 'twilio_unreachable' };
+            }
+            // Inbound: the Studio flow's recording hangs on the parent
+            // (caller) leg. Same lookup as the scheduled poller.
+            if (!recording && inbound) {
+                const childCall = utils.fetchCall(config.accountSid, body.callSid, authHeader);
+                if (utils.isTransientError(childCall)) {
+                    return { status: 'transient', reason: 'twilio_unreachable' };
+                }
+                recording = utils.fetchParentCallRecording(config.accountSid, childCall, authHeader);
+                if (utils.isTransientError(recording)) {
+                    return { status: 'transient', reason: 'twilio_unreachable' };
+                }
             }
             if (!recording) {
                 return { status: 'no_recording' };
@@ -479,7 +497,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             }
 
             const sentences = utils.fetchSentences(transcript.sid, authHeader);
-            const transcriptText = utils.formatTranscript(sentences);
+            const transcriptText = utils.formatTranscript(sentences, { inbound: inbound });
 
             let analysis = {
                 summary: '',

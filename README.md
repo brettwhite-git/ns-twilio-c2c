@@ -111,7 +111,7 @@ ENRICHMENT (async, polled every 15 min)
 | **Auth** | RESTlet mints Twilio JWTs using N/crypto HMAC-SHA256 |
 | **Transcription** | Twilio Conversational Intelligence (async, $0.035/min) |
 | **AI analysis** | N/llm (Cohere Command A, free tier ~1000 req/mo) |
-| **Polling** | Scheduled Script every 15 min on weekdays |
+| **Polling** | Scheduled Script every 15 min, every day |
 | **Sales Rep dashboard** | Portlet (Sales Rep Central) |
 | **Packaging** | SDF SuiteApp (`com.netsuite.clicktocall`) |
 

@@ -34,6 +34,7 @@ import Step4 from './components/steps/Step4';
 import Step5 from './components/steps/Step5';
 import OverviewPage from './components/page/OverviewPage';
 import PhonesPage from './components/page/PhonesPage';
+import InboundPage from './components/page/InboundPage';
 import VoicePage from './components/page/VoicePage';
 import CredentialsPage from './components/page/CredentialsPage';
 import HealthPage from './components/page/HealthPage';
@@ -144,6 +145,7 @@ export default class App extends PureComponent<unknown, AppInternalState> {
         switch (section) {
             case 'overview':    return <OverviewPage tick={tick} />;
             case 'phones':      return <PhonesPage tick={tick} />;
+            case 'inbound':     return <InboundPage tick={tick} />;
             case 'voice':       return <VoicePage tick={tick} />;
             case 'credentials': return <CredentialsPage tick={tick} />;
             case 'health':      return <HealthPage tick={tick} />;

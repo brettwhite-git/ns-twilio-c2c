@@ -29,6 +29,7 @@ export const NavRail = (): core.VDom.Node => {
         { value: 'overview',    label: 'Overview',          icon: core.SystemIcon.CARD_VIEW },
         { value: 'phones',      label: 'Phones & reps',     icon: core.SystemIcon.CALL,
           badge: assignmentBadge },
+        { value: 'inbound',     label: 'Inbound calls',     icon: core.SystemIcon.CALL },
         { value: 'voice',       label: 'Voice config',      icon: core.SystemIcon.SETTINGS },
         { value: 'credentials', label: 'Credentials',       icon: core.SystemIcon.LOCK },
         { value: 'health',      label: 'Health',            icon: core.SystemIcon.HEART_FILLED },

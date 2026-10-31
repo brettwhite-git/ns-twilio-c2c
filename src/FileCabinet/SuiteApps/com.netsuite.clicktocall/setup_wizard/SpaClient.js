@@ -40,6 +40,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         PHONES_LOAD_START: Symbol('phonesLoadStart'),
         PHONES_LOAD_SUCCESS: Symbol('phonesLoadSuccess'),
         PHONES_ASSIGNMENT_SAVE: Symbol('phonesAssignmentSave'),
+        INBOUND_LOAD_START: Symbol('inboundLoadStart'),
+        INBOUND_LOAD_SUCCESS: Symbol('inboundLoadSuccess'),
+        INBOUND_LOAD_FAILURE: Symbol('inboundLoadFailure'),
+        INBOUND_FIELD_CHANGE: Symbol('inboundFieldChange'),
+        INBOUND_SAVE: Symbol('inboundSave'),
+        INBOUND_PUBLISH: Symbol('inboundPublish'),
+        INBOUND_ROUTING_UPDATE: Symbol('inboundRoutingUpdate'),
         VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
         VOICE_FIELD_SAVE: Symbol('voiceFieldSave'),
         DEACTIVATE_REQUEST: Symbol('deactivateRequest'),
@@ -108,6 +115,27 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         phonesAssignmentSave(payload) {
             return { type: ActionType.PHONES_ASSIGNMENT_SAVE, payload };
         },
+        inboundLoadStart() {
+            return { type: ActionType.INBOUND_LOAD_START, payload: null };
+        },
+        inboundLoadSuccess(payload) {
+            return { type: ActionType.INBOUND_LOAD_SUCCESS, payload };
+        },
+        inboundLoadFailure(error) {
+            return { type: ActionType.INBOUND_LOAD_FAILURE, payload: { error } };
+        },
+        inboundFieldChange(changes) {
+            return { type: ActionType.INBOUND_FIELD_CHANGE, payload: changes };
+        },
+        inboundSave(payload) {
+            return { type: ActionType.INBOUND_SAVE, payload };
+        },
+        inboundPublish(payload) {
+            return { type: ActionType.INBOUND_PUBLISH, payload };
+        },
+        inboundRoutingUpdate(publish) {
+            return { type: ActionType.INBOUND_ROUTING_UPDATE, payload: publish };
+        },
         voiceFieldEdit(field, pendingValue = null) {
             return { type: ActionType.VOICE_FIELD_EDIT, payload: { field, pendingValue } };
         },
@@ -137,6 +165,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     };
 
+    const applyPublish = (inbound, publish) => {
+        inbound.lastPublish = publish;
+        if (publish.ok) {
+            if (publish.flowSid)
+                inbound.flowSid = publish.flowSid;
+            if (publish.publishedAt)
+                inbound.publishedAt = publish.publishedAt;
+        }
+    };
     function reducer(state, action) {
         const a = action;
         const handlers = new Map([
@@ -225,6 +262,75 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     if (p.error !== undefined) {
                         d.console.phonesError = p.error;
                     }
+                    if (p.routingErrors !== undefined) {
+                        d.console.phonesRoutingErrors = p.routingErrors;
+                    }
+                })],
+            [ActionType.INBOUND_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.inbound.loading = true;
+                    d.inbound.loadError = null;
+                })],
+            [ActionType.INBOUND_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.inbound.loading = false;
+                    d.inbound.loaded = true;
+                    d.inbound.loadError = null;
+                    d.inbound.inboundEnabled = p.inboundEnabled;
+                    d.inbound.ringSeconds = p.ringSeconds;
+                    d.inbound.noAnswerMessage = p.noAnswerMessage;
+                    d.inbound.recordInbound = p.recordInbound;
+                    d.inbound.recordingNoticeOn = p.recordingNoticeOn;
+                    d.inbound.recordingNotice = p.recordingNotice;
+                    d.inbound.flowSid = p.flowSid;
+                    d.inbound.publishedAt = p.publishedAt;
+                    d.inbound.routes = p.routes;
+                })],
+            [ActionType.INBOUND_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.inbound.loading = false;
+                    d.inbound.loadError = p.error;
+                })],
+            [ActionType.INBOUND_FIELD_CHANGE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    Object.assign(d.inbound, a.payload);
+                })],
+            [ActionType.INBOUND_SAVE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    if (p.phase === 'start') {
+                        d.inbound.saving = true;
+                        d.inbound.saveError = null;
+                    }
+                    else if (p.phase === 'success') {
+                        d.inbound.saving = false;
+                        d.inbound.saveError = null;
+                        if (p.settings)
+                            Object.assign(d.inbound, p.settings);
+                        if (p.publish)
+                            applyPublish(d.inbound, p.publish);
+                    }
+                    else {
+                        d.inbound.saving = false;
+                        d.inbound.saveError = p.error ?? 'Save failed';
+                    }
+                })],
+            [ActionType.INBOUND_PUBLISH, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    if (p.phase === 'start') {
+                        d.inbound.publishing = true;
+                        d.inbound.saveError = null;
+                    }
+                    else if (p.phase === 'success') {
+                        d.inbound.publishing = false;
+                        if (p.publish)
+                            applyPublish(d.inbound, p.publish);
+                    }
+                    else {
+                        d.inbound.publishing = false;
+                        d.inbound.saveError = p.error ?? 'Publish failed';
+                    }
+                })],
+            [ActionType.INBOUND_ROUTING_UPDATE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    applyPublish(d.inbound, a.payload);
+                    d.inbound.loaded = false;
                 })],
             [ActionType.VOICE_FIELD_EDIT, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
@@ -333,6 +439,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             phonesLoading: false,
             phonesSaving: {},
             phonesError: null,
+            phonesRoutingErrors: [],
             voiceEditing: null,
             voicePendingValue: null,
             voiceLists: {
@@ -348,6 +455,24 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             deactivateError: null,
             preflightRefreshing: false,
             actionError: null
+        },
+        inbound: {
+            loaded: false,
+            loading: false,
+            loadError: null,
+            inboundEnabled: false,
+            ringSeconds: 20,
+            noAnswerMessage: '',
+            recordInbound: true,
+            recordingNoticeOn: false,
+            recordingNotice: '',
+            flowSid: '',
+            publishedAt: '',
+            routes: [],
+            saving: false,
+            saveError: null,
+            publishing: false,
+            lastPublish: null
         }
     };
 
@@ -516,7 +641,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
     async function savePhonesAssignment(phoneSid, phoneNumber, employeeIds, label, primaryEmployeeId) {
-        store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: true, error: null }));
+        store.dispatch(Action.phonesAssignmentSave({
+            phoneSid, saving: true, error: null, routingErrors: []
+        }));
         try {
             const payload = {
                 assignments: [{
@@ -534,6 +661,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: err }));
                 return;
             }
+            const routing = result.routing;
+            if (routing && routing.ok) {
+                store.dispatch(Action.inboundRoutingUpdate(routing));
+            }
+            const routingErrors = routing && Array.isArray(routing.errors) ? routing.errors : [];
             const [phonesPayload, refreshedAssignments] = await Promise.all([
                 wizardCall('wizardListPhoneNumbers', {}),
                 wizardCall('wizardLoadAssignments', {})
@@ -542,7 +674,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const assignmentRows = (refreshedAssignments && refreshedAssignments.items) || [];
             const byPhone = groupByPhone(numbers, assignmentRows);
             store.dispatch(Action.phonesLoadSuccess({ byPhone }));
-            store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: null }));
+            store.dispatch(Action.phonesAssignmentSave({
+                phoneSid, saving: false, error: null, routingErrors
+            }));
         }
         catch (e) {
             const msg = e instanceof Error ? e.message : 'Save failed';
@@ -1706,6 +1840,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const formatPhone = (e164) => {
+        const raw = String(e164 || '');
+        const m = /^\+1([0-9]{3})([0-9]{3})([0-9]{4})$/.exec(raw);
+        return m ? '+1 (' + m[1] + ') ' + m[2] + '-' + m[3] : raw;
+    };
+
     const truncSid = (sid) => {
         if (!sid)
             return '';
@@ -1879,6 +2019,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const items = [
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Refresh from Twilio", startIcon: core__namespace.SystemIcon.REFRESH, action: () => { loadPhonesData(); } }) }) }) })),
                 c.phonesError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.phonesError] }) })),
+                c.phonesRoutingErrors.length > 0 && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: '⚠ Inbound routing did not update for: ' +
+                            c.phonesRoutingErrors.map((e) => formatPhone(e.phoneNumber)).join(', ') }) })),
                 grouped.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No phone numbers found in your Twilio account. Buy one in the Twilio Console (link above) then click \"Refresh from Twilio\" to pick it up and assign reps inline." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
                         dataSource: rowsDs,
                         columns,
@@ -1892,6 +2034,262 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     }) }))
             ].filter(Boolean);
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XL, children: items }));
+        }
+    }
+
+    const errorText = (e, fallback) => e instanceof Error && e.message ? e.message : fallback;
+    const failureText = (result, fallback) => (result && (result.message || result.error)) || fallback;
+    async function loadInbound() {
+        store.dispatch(Action.inboundLoadStart());
+        try {
+            const result = (await wizardCall('wizardLoadInbound', {}));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.inboundLoadFailure(failureText(result, 'Could not load inbound settings')));
+                return;
+            }
+            store.dispatch(Action.inboundLoadSuccess({
+                inboundEnabled: result.inboundEnabled === true,
+                ringSeconds: Number(result.ringSeconds) || 20,
+                noAnswerMessage: result.noAnswerMessage || '',
+                recordInbound: result.recordInbound !== false,
+                recordingNoticeOn: result.recordingNoticeOn === true,
+                recordingNotice: result.recordingNotice || '',
+                flowSid: result.flowSid || '',
+                publishedAt: result.publishedAt || '',
+                routes: Array.isArray(result.routes) ? result.routes : []
+            }));
+        }
+        catch (e) {
+            store.dispatch(Action.inboundLoadFailure(errorText(e, 'Could not load inbound settings')));
+        }
+    }
+    async function saveInbound() {
+        const inbound = store.getState().inbound;
+        const settings = {
+            inboundEnabled: inbound.inboundEnabled,
+            ringSeconds: inbound.ringSeconds,
+            noAnswerMessage: inbound.noAnswerMessage,
+            recordInbound: inbound.recordInbound,
+            recordingNoticeOn: inbound.recordingNoticeOn,
+            recordingNotice: inbound.recordingNotice
+        };
+        store.dispatch(Action.inboundSave({ phase: 'start' }));
+        try {
+            const result = (await wizardCall('wizardSaveInbound', { ...settings }));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.inboundSave({
+                    phase: 'failure',
+                    error: failureText(result, 'Save failed')
+                }));
+                return;
+            }
+            store.dispatch(Action.inboundSave({
+                phase: 'success',
+                settings: result.settings || settings,
+                publish: result.publish
+            }));
+        }
+        catch (e) {
+            store.dispatch(Action.inboundSave({ phase: 'failure', error: errorText(e, 'Save failed') }));
+        }
+    }
+    async function publishRouting() {
+        store.dispatch(Action.inboundPublish({ phase: 'start' }));
+        try {
+            const result = (await wizardCall('wizardPublishRouting', {}));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.inboundPublish({
+                    phase: 'failure',
+                    error: failureText(result, 'Publish failed')
+                }));
+                return;
+            }
+            store.dispatch(Action.inboundPublish({ phase: 'success', publish: result.publish }));
+        }
+        catch (e) {
+            store.dispatch(Action.inboundPublish({ phase: 'failure', error: errorText(e, 'Publish failed') }));
+        }
+    }
+
+    const DEFAULT_NO_ANSWER_MESSAGE = 'Sorry, no one is available to take your call. Please try again later. Goodbye.';
+    const NO_ANSWER_MAX_LENGTH = 300;
+    const DEFAULT_RECORDING_NOTICE = 'This call may be recorded for quality and training.';
+    const RECORDING_NOTICE_MAX_LENGTH = 300;
+    const RING_SECONDS = [10, 15, 20, 25, 30, 45, 60];
+    const statusLine = (inbound) => {
+        const last = inbound.lastPublish;
+        if (last && last.skipped === 'inbound_off') {
+            return 'Inbound is off — routing not published';
+        }
+        if (!inbound.publishedAt)
+            return 'Not published yet';
+        const when = new Date(inbound.publishedAt);
+        const whenText = isNaN(when.getTime()) ? inbound.publishedAt : when.toLocaleString();
+        const count = last && last.ok && typeof last.numbersUpdated === 'number'
+            ? ' · ' + last.numbersUpdated + (last.numbersUpdated === 1 ? ' number' : ' numbers')
+            : '';
+        return 'Published ' + whenText + count;
+    };
+    const item = (node) => node ? jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }) : false;
+    const vstack = (gap, nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: gap, children: nodes.map(item).filter(Boolean) }));
+    const weak = (text) => (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }));
+    class InboundPage extends core.PureComponent {
+        componentDidMount() {
+            const inbound = store.getState().inbound;
+            if (!inbound.loaded && !inbound.loading) {
+                loadInbound();
+            }
+        }
+        buildColumns() {
+            const CT = component__namespace.DataGrid.ColumnType;
+            return [
+                {
+                    type: CT.TEMPLATED,
+                    name: 'number',
+                    label: 'Number',
+                    stretchFactor: 1,
+                    content: (args) => new component__namespace.Text({
+                        text: formatPhone(args?.cell?.row?.dataItem?.phoneNumber),
+                        type: component__namespace.Text.Type.STRONG
+                    })
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'rings',
+                    label: 'Rings',
+                    stretchFactor: 1,
+                    content: (args) => new component__namespace.Text({
+                        text: args?.cell?.row?.dataItem?.employeeName || ''
+                    })
+                }
+            ];
+        }
+        renderSettings(inbound) {
+            const busy = inbound.saving || inbound.publishing;
+            const ringOptions = RING_SECONDS.indexOf(inbound.ringSeconds) >= 0
+                ? RING_SECONDS
+                : RING_SECONDS.concat([inbound.ringSeconds]).sort((x, y) => x - y);
+            const ringDs = new core__namespace.ArrayDataSource(ringOptions.map((n) => ({ value: n, label: n + ' seconds' })));
+            const inboundSwitch = vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Switch, { label: "Ring reps in the browser", value: inbound.inboundEnabled, action: (args) => {
+                        store.dispatch(Action.inboundFieldChange({ inboundEnabled: !!(args && args.value) }));
+                    } }),
+                !inbound.inboundEnabled &&
+                    weak('Off: phones do not ring; callers hear the no-answer message.'),
+                weak('Open phones pick up a change within an hour, or at once after a reload.')
+            ]);
+            const ringTime = vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Ring time" }),
+                jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: ringDs, valueMember: "value", displayMember: "label", selectedValue: inbound.ringSeconds, onSelectionChanged: (args) => {
+                        const n = Number(args && args.value);
+                        if (n > 0)
+                            store.dispatch(Action.inboundFieldChange({ ringSeconds: n }));
+                    }, rootStyle: { width: '200px' } })
+            ]);
+            const message = vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "No-answer message" }),
+                jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.noAnswerMessage, placeholder: DEFAULT_NO_ANSWER_MESSAGE, maxLength: NO_ANSWER_MAX_LENGTH, rowCount: 3, onTextChanged: (args) => {
+                        store.dispatch(Action.inboundFieldChange({
+                            noAnswerMessage: ((args && args.text) || '').slice(0, NO_ANSWER_MAX_LENGTH)
+                        }));
+                    }, rootStyle: { width: '100%' } })
+            ]);
+            const showNotice = inbound.recordInbound && inbound.recordingNoticeOn;
+            const recording = vstack(component__namespace.StackPanel.GapSize.S, [
+                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Recording" }),
+                vstack(component__namespace.StackPanel.GapSize.XXS, [
+                    jsxRuntime.jsx(component__namespace.Switch, { label: "Record inbound calls", value: inbound.recordInbound, action: (args) => {
+                            store.dispatch(Action.inboundFieldChange({ recordInbound: !!(args && args.value) }));
+                        } }),
+                    weak('Recordings are transcribed and summarised like outbound calls.')
+                ]),
+                vstack(component__namespace.StackPanel.GapSize.XXS, [
+                    jsxRuntime.jsx(component__namespace.Switch, { label: "Play a recording notice first", value: inbound.recordingNoticeOn, enabled: inbound.recordInbound, action: (args) => {
+                            store.dispatch(Action.inboundFieldChange({ recordingNoticeOn: !!(args && args.value) }));
+                        } }),
+                    weak('Callers hear this before the phone rings.')
+                ]),
+                showNotice && vstack(component__namespace.StackPanel.GapSize.XXS, [
+                    jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Recording notice" }),
+                    jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.recordingNotice, placeholder: DEFAULT_RECORDING_NOTICE, maxLength: RECORDING_NOTICE_MAX_LENGTH, rowCount: 2, enabled: showNotice, onTextChanged: (args) => {
+                            store.dispatch(Action.inboundFieldChange({
+                                recordingNotice: ((args && args.text) || '').slice(0, RECORDING_NOTICE_MAX_LENGTH)
+                            }));
+                        }, rootStyle: { width: '100%' } })
+                ])
+            ]);
+            const saveButton = new component__namespace.Button({
+                label: inbound.saving ? 'Publishing…' : 'Save & publish',
+                type: component__namespace.Button.Type.PRIMARY,
+                enabled: !busy,
+                action: () => { saveInbound(); }
+            });
+            const errors = (inbound.lastPublish && inbound.lastPublish.errors) || [];
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, rootStyle: { maxWidth: '560px' }, children: [
+                    item(inboundSwitch),
+                    item(ringTime),
+                    item(message),
+                    item(recording),
+                    item(saveButton),
+                    item(inbound.saveError ? jsxRuntime.jsx(ErrorText, { message: inbound.saveError }) : false),
+                    item(vstack(component__namespace.StackPanel.GapSize.XXS, [
+                        jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: statusLine(inbound) }),
+                        ...errors.map((e) => (jsxRuntime.jsx(ErrorText, { message: formatPhone(e.phoneNumber) + ': ' + e.message })))
+                    ]))
+                ].filter(Boolean) }));
+        }
+        renderRouting(inbound) {
+            const busy = inbound.saving || inbound.publishing;
+            const table = inbound.routes.length === 0
+                ? jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: 'No numbers have reps yet. Assign reps on Phones & reps.' })
+                : new component__namespace.DataGrid({
+                    dataSource: new core__namespace.ArrayDataSource(inbound.routes),
+                    columns: this.buildColumns(),
+                    columnStretch: true,
+                    highlightRowsOnHover: true,
+                    stripedRows: true,
+                    dataRowHeight: 48,
+                    headerRowHeight: 40,
+                    rootStyle: { width: '100%' }
+                });
+            return vstack(component__namespace.StackPanel.GapSize.S, [
+                table,
+                weak('The primary rep on Phones & reps is the one who rings.'),
+                new component__namespace.Button({
+                    label: 'Publish again',
+                    enabled: !busy,
+                    action: () => { publishRouting(); }
+                })
+            ]);
+        }
+        render() {
+            const inbound = store.getState().inbound;
+            const description = (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Calls to your Twilio numbers ring the number's primary rep in the browser. NetSuite publishes one Twilio Studio flow for all numbers." }));
+            if (inbound.loading || (!inbound.loaded && !inbound.loadError)) {
+                return vstack(component__namespace.StackPanel.GapSize.L, [
+                    description,
+                    new component__namespace.Loader({
+                        label: 'Loading inbound settings…',
+                        indeterminate: true
+                    })
+                ]);
+            }
+            if (!inbound.loaded) {
+                return vstack(component__namespace.StackPanel.GapSize.L, [
+                    description,
+                    jsxRuntime.jsx(ErrorText, { message: inbound.loadError || 'Could not load inbound settings' }),
+                    new component__namespace.Button({
+                        label: 'Retry',
+                        startIcon: core__namespace.SystemIcon.REFRESH,
+                        action: () => { loadInbound(); }
+                    })
+                ]);
+            }
+            return vstack(component__namespace.StackPanel.GapSize.XL, [
+                description,
+                this.renderSettings(inbound),
+                this.renderRouting(inbound)
+            ]);
         }
     }
 
@@ -2524,6 +2922,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             { value: 'overview', label: 'Overview', icon: core__namespace.SystemIcon.CARD_VIEW },
             { value: 'phones', label: 'Phones & reps', icon: core__namespace.SystemIcon.CALL,
                 badge: assignmentBadge },
+            { value: 'inbound', label: 'Inbound calls', icon: core__namespace.SystemIcon.CALL },
             { value: 'voice', label: 'Voice config', icon: core__namespace.SystemIcon.SETTINGS },
             { value: 'credentials', label: 'Credentials', icon: core__namespace.SystemIcon.LOCK },
             { value: 'health', label: 'Health', icon: core__namespace.SystemIcon.HEART_FILLED },
@@ -2590,6 +2989,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         switch (section) {
             case 'overview': return 'Overview';
             case 'phones': return 'Phones & reps';
+            case 'inbound': return 'Inbound calls';
             case 'voice': return 'Voice config';
             case 'credentials': return 'Credentials';
             case 'health': return 'Health';
@@ -2714,6 +3114,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             switch (section) {
                 case 'overview': return jsxRuntime.jsx(OverviewPage, { tick: tick });
                 case 'phones': return jsxRuntime.jsx(PhonesPage, { tick: tick });
+                case 'inbound': return jsxRuntime.jsx(InboundPage, { tick: tick });
                 case 'voice': return jsxRuntime.jsx(VoicePage, { tick: tick });
                 case 'credentials': return jsxRuntime.jsx(CredentialsPage, { tick: tick });
                 case 'health': return jsxRuntime.jsx(HealthPage, { tick: tick });

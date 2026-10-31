@@ -14,6 +14,7 @@
 import {store} from '../Store';
 import {Action} from '../Action';
 import {wizardCall} from '../../services/wizardApi';
+import type {InboundPublishError, InboundPublishResult} from '../InitialState';
 
 interface PhoneRow {
     sid: string;
@@ -134,7 +135,9 @@ export async function savePhonesAssignment(
     label: string,
     primaryEmployeeId: number | null
 ): Promise<void> {
-    store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: true, error: null }));
+    store.dispatch(Action.phonesAssignmentSave({
+        phoneSid, saving: true, error: null, routingErrors: []
+    }));
 
     try {
         const payload = {
@@ -154,6 +157,16 @@ export async function savePhonesAssignment(
             return;
         }
 
+        // Inbound routing republishes with every assignment save. On ok,
+        // copy flowSid/publishedAt to the inbound slice; on errors, keep
+        // them for the one-line warning on this page.
+        const routing = (result as { routing?: InboundPublishResult }).routing;
+        if (routing && routing.ok) {
+            store.dispatch(Action.inboundRoutingUpdate(routing));
+        }
+        const routingErrors: InboundPublishError[] =
+            routing && Array.isArray(routing.errors) ? routing.errors : [];
+
         // Refetch numbers + assignments and recompute byPhone.
         const [phonesPayload, refreshedAssignments] = await Promise.all([
             wizardCall('wizardListPhoneNumbers', {}),
@@ -164,7 +177,9 @@ export async function savePhonesAssignment(
         const byPhone = groupByPhone(numbers, assignmentRows);
 
         store.dispatch(Action.phonesLoadSuccess({ byPhone }));
-        store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: null }));
+        store.dispatch(Action.phonesAssignmentSave({
+            phoneSid, saving: false, error: null, routingErrors
+        }));
     } catch (e) {
         const msg = e instanceof Error ? e.message : 'Save failed';
         store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: msg }));
