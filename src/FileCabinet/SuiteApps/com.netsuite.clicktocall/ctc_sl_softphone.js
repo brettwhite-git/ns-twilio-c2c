@@ -1825,7 +1825,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     startedAt: callStartTime,
                     muted: !!(activeCall && activeCall.isMuted()),
                     lastLog: dockLastLog,
-                    audio: dockAudio()
+                    audio: dockAudio(),
+                    // true / false: inbound is granted and the device is /
+                    // is not registered (Twilio can ring it). null: no inbound.
+                    canReceive: incomingGranted ? !!(device && device.state === 'registered') : null
                 }
             });
         }
@@ -2463,20 +2466,192 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // stays registered with the old grant, so a renewal that flips the
         // grant registers again (on) or unregisters (off).
         var incomingGranted = false;
+        // The Twilio Client identity (NetSuite employee id) the device runs
+        // as. Inbound calls ring this identity. If the NetSuite login changes
+        // user, a renewed token carries a new identity and the device is
+        // built again for it (see refreshDeviceToken).
+        var deviceIdentity = '';
+        // Set when the identity changed during a live or ringing call; the
+        // rebuild runs right after the call ends (afterCallSettled).
+        var identityRebuildPending = false;
 
-        // Reads grants.voice.incoming.allow from the JWT payload. The token
-        // is only decoded here, never trusted for anything else.
-        function tokenAllowsIncoming(token) {
+        // The JWT payload, decoded (base64url). null when it is not a JWT.
+        // The token is only decoded here, never trusted for anything else.
+        function tokenPayload(token) {
             try {
                 var part = String(token || '').split('.')[1] || '';
                 part = part.replace(/-/g, '+').replace(/_/g, '/');
                 while (part.length % 4) part += '=';
                 var payload = JSON.parse(atob(part));
-                var voice = payload && payload.grants && payload.grants.voice;
-                return !!(voice && voice.incoming && voice.incoming.allow === true);
+                return payload && typeof payload === 'object' ? payload : null;
             } catch (e) {
-                return false;
+                return null;
             }
+        }
+
+        // Reads grants.voice.incoming.allow from the JWT payload.
+        function tokenAllowsIncoming(token) {
+            var payload = tokenPayload(token);
+            var voice = payload && payload.grants && payload.grants.voice;
+            return !!(voice && voice.incoming && voice.incoming.allow === true);
+        }
+
+        // Reads grants.identity from the JWT payload. '' when absent.
+        function tokenIdentity(token) {
+            var payload = tokenPayload(token);
+            var id = payload && payload.grants && payload.grants.identity;
+            return (typeof id === 'string' || typeof id === 'number') ? String(id) : '';
+        }
+
+        // --- Registration watchdog ---
+        // Inbound calls ring only a REGISTERED device. The signaling socket
+        // can drop (sleep, network change, background-tab throttling) and
+        // leave the phone unregistered: outbound still works, inbound never
+        // rings. While the token grants incoming, this re-registers:
+        //   - on 'unregistered' (and device errors that leave it unregistered):
+        //     retry after REGISTER_RETRY_DELAYS_MS (2 s, 5 s, 15 s, 30 s,
+        //     then every 60 s), one timer at a time;
+        //   - on visibilitychange (visible), online and focus: try now;
+        //   - every REGISTER_WATCH_MS: try when no retry timer is pending.
+        // Never while a call is live or ringing, or a token refresh is in
+        // flight. One register() at a time. A token-expiry failure goes
+        // through refreshDeviceToken(true).
+        var REGISTER_RETRY_DELAYS_MS = [2000, 5000, 15000, 30000, 60000];
+        var REGISTER_WATCH_MS = 60000;
+        var registerInFlight = false;
+        var registerRetryTimer = null;
+        var registerAttempt = 0;
+        var registrationWatchStarted = false;
+
+        function regLog(msg) {
+            console.log('[CTC] ' + msg + ' @ ' + new Date().toISOString());
+        }
+
+        function registrationWatched() {
+            return !!device && incomingGranted;
+        }
+
+        function clearRegisterRetry() {
+            if (registerRetryTimer) {
+                clearTimeout(registerRetryTimer);
+                registerRetryTimer = null;
+            }
+        }
+
+        function scheduleRegisterRetry(reason) {
+            if (registerRetryTimer || !registrationWatched()) return;
+            var delay = REGISTER_RETRY_DELAYS_MS[Math.min(registerAttempt, REGISTER_RETRY_DELAYS_MS.length - 1)];
+            registerAttempt++;
+            regLog('Registration retry in ' + (delay / 1000) + ' s (' + reason + ')');
+            registerRetryTimer = setTimeout(function () {
+                registerRetryTimer = null;
+                ensureRegistered('retry ' + registerAttempt);
+            }, delay);
+        }
+
+        function ensureRegistered(reason) {
+            if (!registrationWatched()) return;
+            if (device.state !== 'unregistered' || registerInFlight) return;
+            if (activeCall || pendingInbound || tokenRefreshInFlight) return;
+            clearRegisterRetry();
+            registerInFlight = true;
+            var d = device;
+            regLog('Registering (' + reason + ')');
+            var p;
+            try { p = d.register(); } catch (err) { p = Promise.reject(err); }
+            Promise.resolve(p).then(function () {
+                if (d === device) registerInFlight = false;
+            }, function (err) {
+                if (d !== device) return;
+                registerInFlight = false;
+                regLog('Register failed: ' + (err && (err.code || err.message)));
+                if (isTokenExpiryError(err)) {
+                    refreshDeviceToken(true);
+                    return;
+                }
+                scheduleRegisterRetry('register failed');
+            });
+        }
+
+        // Registration listeners for one device instance. initDevice calls
+        // this for every new device; destroy() drops the old device's
+        // listeners, and the d !== device guard ignores any late event.
+        function watchRegistration(d) {
+            d.on('registering', function () {
+                if (d !== device) return;
+                regLog('Registration state: registering');
+                publishDock();
+            });
+            d.on('registered', function () {
+                if (d !== device) return;
+                registerInFlight = false;
+                registerAttempt = 0;
+                clearRegisterRetry();
+                regLog('Registration state: registered');
+                publishDock();
+            });
+            d.on('unregistered', function () {
+                if (d !== device) return;
+                registerInFlight = false;
+                regLog('Registration state: unregistered');
+                publishDock();
+                // Our own grant-off unregister clears incomingGranted first,
+                // so scheduleRegisterRetry does nothing then.
+                scheduleRegisterRetry('unregistered');
+            });
+            d.on('error', function (err) {
+                if (d !== device) return;
+                regLog('Device error ' + (err && err.code) + ' (state ' + d.state + ')');
+                if (isTokenExpiryError(err)) return; // the main error handler renews
+                if (d.state === 'unregistered') {
+                    registerInFlight = false;
+                    scheduleRegisterRetry('device error');
+                }
+            });
+        }
+
+        // Page-level triggers, installed once (not per device).
+        function startRegistrationWatch() {
+            if (registrationWatchStarted) return;
+            registrationWatchStarted = true;
+            document.addEventListener('visibilitychange', function () {
+                if (document.visibilityState === 'visible') ensureRegistered('page visible');
+            });
+            window.addEventListener('online', function () { ensureRegistered('back online'); });
+            window.addEventListener('focus', function () { ensureRegistered('window focus'); });
+            setInterval(function () {
+                if (!registerRetryTimer) ensureRegistered('watchdog');
+            }, REGISTER_WATCH_MS);
+        }
+
+        // A call ended (any direction or outcome). Runs a rebuild deferred
+        // by an identity change, else re-registers if the phone dropped
+        // its registration during the call.
+        function afterCallSettled() {
+            setTimeout(function () {
+                if (activeCall || pendingInbound) return;
+                if (identityRebuildPending) {
+                    refreshDeviceToken(false);
+                    return;
+                }
+                ensureRegistered('call ended');
+            }, 0);
+        }
+
+        // Replaces the device with a new one for a new token (identity
+        // change). Only with no live or ringing call.
+        function rebuildDevice(token, reason) {
+            regLog('Rebuilding the phone: ' + reason);
+            var old = device;
+            device = null;
+            clearRegisterRetry();
+            registerInFlight = false;
+            registerAttempt = 0;
+            identityRebuildPending = false;
+            try { if (old) old.destroy(); } catch (err) { console.error('[CTC] destroy failed', err); }
+            // The new device has its own audio helper: fill its lists again.
+            audioPrimed = false;
+            initDevice(token);
         }
 
         function applyIncomingGrant(allow) {
@@ -2509,6 +2684,25 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             }
             fetchToken(true)
                 .then(function (result) {
+                    if (!device) { tokenRefreshInFlight = false; return; }
+                    // The NetSuite login changed user: the new token rings a
+                    // different identity. Build the device again for it, now
+                    // or right after the live / ringing call ends.
+                    var newIdentity = tokenIdentity(result.token);
+                    if (newIdentity && deviceIdentity && newIdentity !== deviceIdentity) {
+                        tokenRefreshInFlight = false;
+                        tokenExpired = false;
+                        if (activeCall || pendingInbound) {
+                            identityRebuildPending = true;
+                            regLog('Phone user changed (' + deviceIdentity + ' to ' + newIdentity
+                                + '); rebuild after this call');
+                            return;
+                        }
+                        if (result.phoneNumber) callerId = result.phoneNumber;
+                        rebuildDevice(result.token, 'user changed (' + deviceIdentity + ' to ' + newIdentity + ')');
+                        return;
+                    }
+                    identityRebuildPending = false;
                     device.updateToken(result.token);
                     tokenRefreshInFlight = false;
                     tokenExpired = false;
@@ -2544,6 +2738,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function initDevice(token) {
             incomingGranted = tokenAllowsIncoming(token);
+            deviceIdentity = tokenIdentity(token);
+            regLog('Phone starting as identity ' + (deviceIdentity || '(unknown)')
+                + (incomingGranted ? ' with inbound' : ' (outbound only)'));
             device = new Twilio.Device(token, {
                 codecPreferences: ['opus', 'pcmu'],
                 logLevel: 1,
@@ -2613,6 +2810,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 if (typeof applyAudioDefaults === 'function') applyAudioDefaults();
             });
 
+            watchRegistration(device);
+            startRegistrationWatch();
             device.register();
         }
 
@@ -2660,6 +2859,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 var callSid = call.parameters ? call.parameters.CallSid : '';
                 var duration = callStartTime ? Math.floor((Date.now() - callStartTime) / 1000) : 0;
                 activeCall = null;
+                afterCallSettled();
                 resetTimer();
                 setStatus('Call ended \\u2014 ready to redial', 'ended');
                 setButtons(true, false, false);
@@ -2687,6 +2887,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 showError('Call error: ' + err.message);
                 if (pendingInbound === call) pendingInbound = null;
                 activeCall = null;
+                afterCallSettled();
                 resetTimer();
                 setStatus('Error', 'error');
                 setButtons(true, false, false);
@@ -2724,6 +2925,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 call.on('cancel', function () {
                     console.log('[CTC] Call cancelled');
                     activeCall = null;
+                    afterCallSettled();
                     resetTimer();
                     setStatus('Call cancelled \\u2014 ready to redial', 'ended');
                     setButtons(true, false, false);
@@ -2767,6 +2969,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         function inboundEnded(status, message) {
+            afterCallSettled();
             setStatus('Ready to call', '');
             setButtons(true, false, false);
             setCallView('idle');

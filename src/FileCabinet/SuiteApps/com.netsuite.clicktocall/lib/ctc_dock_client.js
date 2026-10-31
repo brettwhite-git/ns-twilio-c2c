@@ -428,6 +428,10 @@
         incoming: { dot: '#14B981', label: 'Incoming call' },
         connected: { dot: '#14B981', label: 'Connected' }
     };
+    // Ready, but Twilio cannot ring this phone (snap.canReceive === false:
+    // inbound is on and the anchor is re-registering). Quiet: amber dot and
+    // tooltip / aria text only.
+    var READY_NOT_RECEIVING = { dot: '#F4C76A', label: 'Ready to call · not receiving calls — reconnecting' };
     var ARROWS_HINT = ' Arrow keys move the dock.';
 
     function render() {
@@ -495,6 +499,7 @@
     function renderChip(phaseIn, mirror) {
         var phase = PHASE_VIEW[phaseIn] ? phaseIn : 'offline';
         var view = PHASE_VIEW[phase];
+        if (!mirror && phase === 'ready' && snap && snap.canReceive === false) view = READY_NOT_RECEIVING;
         var active = isActive();
         var light = !mirror && (phase === 'offline' || phase === 'error');
         var name = active ? callName() : '';

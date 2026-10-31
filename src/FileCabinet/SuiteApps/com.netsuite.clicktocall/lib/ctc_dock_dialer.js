@@ -38,6 +38,8 @@
         incoming: { dot: '#14B981', label: 'Incoming call' },
         connected: { dot: '#14B981', label: 'Connected' }
     };
+    // Header badge when snap.canReceive === false in the ready phase.
+    var READY_NOT_RECEIVING = { dot: '#F4C76A', label: 'Ready · reconnecting' };
     var KEYS = [
         ['1', ''], ['2', 'ABC'], ['3', 'DEF'], ['4', 'GHI'], ['5', 'JKL'], ['6', 'MNO'],
         ['7', 'PQRS'], ['8', 'TUV'], ['9', 'WXYZ'], ['*', ''], ['0', '+'], ['#', '']
@@ -870,6 +872,8 @@
         var phase = snap && PHASE_VIEW[snap.phase] ? snap.phase : 'offline';
         var view = PHASE_VIEW[phase];
         if (pending && phase !== 'ready' && !ACTIVE[phase]) view = PHASE_VIEW.starting;
+        // Ready, but Twilio cannot ring this phone (anchor re-registering).
+        if (phase === 'ready' && snap && snap.canReceive === false) view = READY_NOT_RECEIVING;
         el.style.setProperty('--dl-dot', view.dot);
         el.setAttribute('data-phase', phase);
         ui.statusLabel.textContent = view.label;

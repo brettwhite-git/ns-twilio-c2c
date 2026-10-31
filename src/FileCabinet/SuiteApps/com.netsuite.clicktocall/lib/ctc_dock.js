@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '13';
+    const DOCK_ASSET_VERSION = '14';
 
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
     // shell's #ctc-phone-frame) and every dock. Message shapes (all carry v: 1):
@@ -35,7 +35,8 @@ define(['./ctc_html'], (ctcHtml) => {
     //                  { type: 'request', action: 'setInput' | 'setOutput', id }  (refused during a call)
     //                  { type: 'request', action: 'answer' | 'decline' }  (only while phase is 'incoming')
     //   anchor → docks: { type: 'snapshot', snap: { phase, direction, caller, entityId, entityType,
-    //                     entityName, contactName, number, startedAt, muted, lastLog, audio } }
+    //                     entityName, contactName, number, startedAt, muted, lastLog, audio,
+    //                     canReceive } }
     // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'incoming' | 'connected' | 'error'
     //   incoming: Twilio rings this phone (inbound). Docks show Answer / Decline.
     // direction: 'outbound' | 'inbound' (the current or last call)
@@ -43,6 +44,10 @@ define(['./ctc_html'], (ctcHtml) => {
     //   entity fill in after the anchor's lookupCaller answer (a second snapshot).
     // lastLog: null | { status: 'saved' | 'skipped' | 'error' | 'missed', message, recordUrl }
     //   missed: an inbound call that stopped ringing before Answer ("Missed call from …").
+    // canReceive: null (the token does not grant inbound) | true (Twilio can ring this phone:
+    //   the device is registered) | false (inbound is on but the device is not registered;
+    //   the anchor's watchdog is re-registering). A new snapshot goes out on every
+    //   registration change. In the ready phase, false shows an amber dot ("reconnecting").
     //
     // Anchor → shell (not the bus): after Answer on a matched caller the anchor
     // asks the shell to open the record in the NetSuite frame (screen-pop):
