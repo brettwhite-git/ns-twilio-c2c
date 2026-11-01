@@ -67,32 +67,21 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     const callSvg = (size) => '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="' + PATH.call + '"></path></svg>';
 
     // Call status (custevent_ctc_call_status) -> what a row shows when there
-    // is no AI brief. ONE rule set: briefOf / lenIsDash / dirKind use it on
-    // the server, and buildRefreshOnclick ships it as JSON to the client
-    // rebuilder.
-    //   text  placeholder in the AI brief cell (muted grey unless `chip`)
-    //   chip  status chip modifier: ctc-pl-status ctc-pl-status-<chip>
-    //   len   'dash' = Length is always "—"; 'dashZero' = "—" when 0 s
-    //   dir   'missed' = a missed call (see isMissedCall)
-    // A status not listed here shows "—".
-    const STATUS_RULES = {
-        'Logged':        { text: 'Processing…' },
-        'Processing':    { text: 'Processing…' },
-        'No transcript': { text: 'No transcript' },
-        'Too short':     { text: 'Too short to summarize' },
-        'Failed':        { text: 'Summary failed' },
-        'Missed':        { text: 'Missed call', chip: 'missed', len: 'dash', dir: 'missed' },
-        'No answer':     { text: 'No answer', chip: 'quiet', len: 'dashZero' }
-    };
+    // is no AI brief. ONE rule set, shared with Reporting Central
+    // (lib/ctc_html CALL_STATUS_RULES): briefOf / lenIsDash / dirKind use it
+    // on the server, and buildRefreshOnclick ships it as JSON to the client
+    // rebuilder. Chips: ctc-pl-status ctc-pl-status-<chip>.
+    const STATUS_RULES = ctcHtml.CALL_STATUS_RULES;
 
-    // Direction chip before the time: ctc-pl-status-dir ctc-pl-status-dir-<kind>.
-    // Missed = status rule dir 'missed', or an inbound call with no talk
-    // time. The arrow is the call's own direction. Shipped to the client
-    // rebuilder as JSON (words and labels only).
+    // Direction icon before the time: a 20 px circle with a 12 px arrow
+    // (down-left for in / missed, up-right for out), classes
+    // ctc-pl-status-dir ctc-pl-status-dir-<kind>. Missed = status rule dir
+    // 'missed', or an inbound call with no talk time. Shipped to the client
+    // rebuilder as JSON (labels only).
     const DIR_CHIP = {
-        in:     { word: 'In',     aria: 'Inbound call' },
-        out:    { word: 'Out',    aria: 'Outbound call' },
-        missed: { word: 'Missed', aria: 'Missed call' }
+        in:     { aria: 'Inbound call' },
+        out:    { aria: 'Outbound call' },
+        missed: { aria: 'Missed call' }
     };
     const statusRule = (r) => {
         const st = r.callStatus || '';
@@ -430,11 +419,11 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             "function setT(id,v){var e=document.getElementById(id);if(e){e.textContent=v}}" +
             "function dsec(r){return Math.max(0,parseInt(r.duration,10)||0)}" +
             "function rule(r){var st=r.callStatus||'';return Object.prototype.hasOwnProperty.call(SR,st)?SR[st]:null}" +
-            // Direction chip — mirrors server dirKind + buildDirChipHtml.
+            // Direction icon — mirrors server dirKind + buildDirChipHtml.
             "function dchip(r){var inb=r.direction==='inbound';" +
                 "var k=ismc(r)||(inb&&dsec(r)===0)?'missed':(inb?'in':'out');" +
-                "var c=el('span','ctc-pl-status-dir ctc-pl-status-dir-'+k);c.setAttribute('role','img');c.setAttribute('aria-label',DC[k].aria);" +
-                "c.appendChild(sv(inb?PIN:POUT,12,'2.2',''));c.appendChild(el('span','',DC[k].word));return c}" +
+                "var c=el('span','ctc-pl-status-dir ctc-pl-status-dir-'+k);c.setAttribute('role','img');c.setAttribute('aria-label',DC[k].aria);c.title=DC[k].aria;" +
+                "c.appendChild(sv(k==='out'?POUT:PIN,12,'2.2',''));return c}" +
             "function tod(r){var dt=r.date?new Date(r.date):null;return r.timeOfDay||(dt&&!isNaN(dt.getTime())?pad(dt.getHours())+':'+pad(dt.getMinutes()):'—')}" +
             "function state(t,s,bc,bt,fn,tg){var g=el('div','ctc-pl-state');g.appendChild(el('span','ctc-pl-state-title',t));g.appendChild(el('span','ctc-pl-state-sub',s));" +
                 "if(fn){var k=el('button',bc,bt);k.type='button';k.onclick=fn;g.appendChild(k)}(tg||box).appendChild(g);return g}" +
@@ -604,13 +593,13 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         return inbound ? 'in' : 'out';
     };
 
-    // Chip before the time: arrow (the call's direction, 12 px) + word.
+    // Icon before the time: 20 px circle, 12 px arrow (down-left for in /
+    // missed, up-right for out). aria-label + title name the kind.
     const buildDirChipHtml = (r) => {
         const kind = dirKind(r);
         const chip = DIR_CHIP[kind];
-        return '<span class="ctc-pl-status-dir ctc-pl-status-dir-' + kind + '" role="img" aria-label="' + chip.aria + '">' +
-            strokeSvg(r.direction === 'inbound' ? PATH.inbound : PATH.outbound, 12, '2.2') +
-            '<span>' + chip.word + '</span></span>';
+        return '<span class="ctc-pl-status-dir ctc-pl-status-dir-' + kind + '" role="img" aria-label="' + chip.aria + '" title="' + chip.aria + '">' +
+            strokeSvg(kind === 'out' ? PATH.outbound : PATH.inbound, 12, '2.2') + '</span>';
     };
 
     const SAT_CLASS = { high: 'ctc-pl-sat-hi', mid: 'ctc-pl-sat-mid', low: 'ctc-pl-sat-low', none: 'ctc-pl-sat-none' };
@@ -936,14 +925,14 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-show-tasks .ctc-pl-fubar { display: none; }
 
 /* Calls table */
-.ctc-pl-colhead, .ctc-pl-row { display: grid; grid-template-columns: 112px minmax(0, 1.3fr) minmax(0, 1.7fr) 56px 64px 80px; gap: 14px; align-items: center; }
+.ctc-pl-colhead, .ctc-pl-row { display: grid; grid-template-columns: 80px minmax(0, 1.3fr) minmax(0, 1.7fr) 56px 64px 80px; gap: 14px; align-items: center; }
 .ctc-pl-colhead { padding: 10px 12px; font-size: 11.5px; color: #5C5955; }
 .ctc-pl-r { text-align: right; }
 .ctc-pl-row { min-height: 56px; padding: 6px 12px; border-radius: 8px; transition: background-color 120ms ease; }
 .ctc-pl-row:hover { background: #F7F6F3; }
 .ctc-pl-when { display: flex; align-items: center; gap: 8px; }
-/* Direction chip before the time (In / Out / Missed) */
-.ctc-pl-status-dir { display: inline-flex; align-items: center; justify-content: flex-start; gap: 3px; flex: none; min-width: 70px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+/* Direction icon before the time (In / Out / Missed): 20 px circle, 12 px arrow */
+.ctc-pl-status-dir { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 999px; }
 .ctc-pl-status-dir svg { display: block; flex: none; }
 .ctc-pl-status-dir-in { background: #E8F3FC; color: #1B6097; }
 .ctc-pl-status-dir-out { background: #F1EFEA; color: #5C5955; }
@@ -1010,7 +999,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-root a.ctc-pl-fu-link { font-weight: 500; }
 
 /* Missed tab */
-.ctc-pl-mrow { display: grid; grid-template-columns: 112px minmax(0, 1.2fr) minmax(0, 1.6fr) auto; gap: 14px; align-items: center; min-height: 56px; padding: 6px 12px; border-radius: 8px; transition: background-color 120ms ease; }
+.ctc-pl-mrow { display: grid; grid-template-columns: 80px minmax(0, 1.2fr) minmax(0, 1.6fr) auto; gap: 14px; align-items: center; min-height: 56px; padding: 6px 12px; border-radius: 8px; transition: background-color 120ms ease; }
 .ctc-pl-mrow:hover { background: #F7F6F3; }
 .ctc-pl-mwhen { display: flex; align-items: center; gap: 8px; }
 .ctc-pl-mtime { font-size: 13px; color: #5C5955; font-variant-numeric: tabular-nums; white-space: nowrap; }

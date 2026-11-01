@@ -47,15 +47,16 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
 
     const CSV_HEADERS = ['When', 'Direction', 'Customer', 'Contact', 'Phone', 'Length (s)', 'Satisfaction', 'After the call'];
 
-    // Direction chip before the time in call rows (matches the portlet's
-    // ctc-pl-status-dir): word + arrow + aria-label, never colour alone.
-    // Missed = status 'Missed', a voicemail, or an inbound call with no
-    // talk time; the arrow is the call's own direction. Fixed min-width so
-    // the times line up.
+    // Direction icon before the time in call rows (matches the portlet's
+    // ctc-pl-status-dir): 20 px circle, 12 px arrow (down-left for in /
+    // missed, up-right for out), aria-label + title. Missed = status
+    // 'Missed', a voicemail, or an inbound call with no talk time; missed
+    // rows also carry words in "After the call" ("Not connected" /
+    // "Voicemail"), so the meaning is never colour alone.
     const DIR_CHIP = {
-        in:     { word: 'In',     aria: 'Inbound call' },
-        out:    { word: 'Out',    aria: 'Outbound call' },
-        missed: { word: 'Missed', aria: 'Missed call' }
+        in:     { aria: 'Inbound call' },
+        out:    { aria: 'Outbound call' },
+        missed: { aria: 'Missed call' }
     };
     const ARROW = { inbound: 'M17 7L7 17M15 17H7V9', outbound: 'M7 17L17 7M9 7h8v8' };
 
@@ -182,10 +183,15 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
      * "After the call" text and its tone for a call row.
      * @param {Object} row - loadHistoryRows row
      * @param {number} pending - pending follow-ups from this call
-     * @returns {{text: string, tone: string}} tone: 'muted' | 'warn' | 'bad'
+     * @returns {{text: string, tone: string, chip?: string}} tone: 'muted' | 'warn';
+     *   chip ('missed' | 'quiet') when the text shows as a status chip
      */
     const afterCall = (row, pending) => {
-        if (wq.isUnconnected(row)) return { text: 'Not connected', tone: 'bad' };
+        // Unanswered calls read like the portlet (shared CALL_STATUS_RULES):
+        // status Missed / inbound with no talk time -> "Missed call" (coral
+        // chip); status No answer / outbound with no talk time -> "No answer".
+        const unanswered = ctcHtml.unansweredRule(row);
+        if (unanswered) return { text: unanswered.text, tone: 'muted', chip: unanswered.chip };
         if (pending > 0) return { text: pending + ' follow-up' + (pending === 1 ? '' : 's') + ' to approve', tone: 'warn' };
         const status = String(row.callStatus || '');
         if (status === 'Logged' || status === 'Processing') return { text: 'Processing…', tone: 'muted' };
@@ -251,6 +257,28 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
     };
 
     // ─── Data ──────────────────────────────────────────────────────────────
+
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    /**
+     * Short date for the line under the time: "Oct 30", with the year when
+     * it is not `thisYear` ("Oct 30, 2025"). The row date is a NetSuite date
+     * string in the user's format; one that cannot be parsed is shown as is.
+     * @param {string} nsDate
+     * @param {number} thisYear
+     * @returns {string}
+     */
+    const shortDate = (nsDate, thisYear) => {
+        let d = null;
+        try {
+            d = format.parse({ value: nsDate, type: format.Type.DATE });
+        } catch (e) {
+            d = null;
+        }
+        if (!(d instanceof Date) || isNaN(d.getTime())) return String(nsDate || '');
+        const y = d.getFullYear();
+        return MONTHS[d.getMonth()] + ' ' + d.getDate() + (y !== thisYear ? ', ' + y : '');
+    };
 
     const toNsDate = (iso) => {
         const m = iso.split('-');
@@ -389,15 +417,15 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
 
     const dirChip = (r) => {
         const kind = dirChipKind(r);
-        return '<span class="rc-dir rc-dir-' + kind + '" role="img" aria-label="' + DIR_CHIP[kind].aria + '">' +
-            svgIcon(r.direction === 'inbound' ? ARROW.inbound : ARROW.outbound, { size: 12, width: 2.2 }) +
-            '<span>' + DIR_CHIP[kind].word + '</span></span>';
+        return '<span class="rc-dir rc-dir-' + kind + '" role="img" aria-label="' + DIR_CHIP[kind].aria + '" title="' + DIR_CHIP[kind].aria + '">' +
+            svgIcon(kind === 'out' ? ARROW.outbound : ARROW.inbound, { size: 12, width: 2.2 }) + '</span>';
     };
 
     const callRow = (r, m) => {
         const after = afterCall(r, m.pendingByCall[r.id] || 0);
         const sat = satClass(r.satisfaction);
         const multiDay = m.state.range !== 'today' && m.state.range !== 'yesterday';
+        const thisYear = new Date().getFullYear();
         const when = r.timeOfDay || r.date || '—';
         const company = r.companyName || 'Unknown caller';
         const contact = r.contactName || (r.companyId ? 'Main line' : formatPhone(r.phone));
@@ -405,7 +433,7 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
             '<span role="cell" class="rc-when">' + dirChip(r) +
                 '<span class="rc-when-text"><a class="rc-row-link" href="' + escapeHtml(CALL_URL + encodeURIComponent(r.id)) + '" aria-label="' +
                 escapeHtml('Open call with ' + company + ', ' + [r.date, r.timeOfDay].filter(Boolean).join(' ')) + '">' + escapeHtml(when) + '</a>' +
-                (multiDay && r.timeOfDay && r.date ? '<span class="rc-date">' + escapeHtml(r.date) + '</span>' : '') + '</span></span>' +
+                (multiDay && r.timeOfDay && r.date ? '<span class="rc-date">' + escapeHtml(shortDate(r.date, thisYear)) + '</span>' : '') + '</span></span>' +
             '<span role="cell" class="rc-who-cell">' +
                 (r.companyId
                     ? '<a class="rc-co" href="' + escapeHtml(ENTITY_URL + encodeURIComponent(r.companyId)) + '">' + escapeHtml(company) + '</a>'
@@ -415,7 +443,9 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
                 // A voicemail reads "Voicemail", with the AI brief below when present.
                 ? '<span role="cell" class="rc-after rc-vm"><span class="rc-vm-kind">Voicemail</span>' +
                     (r.brief ? '<span class="rc-vm-brief" title="' + escapeHtml(r.brief) + '">' + escapeHtml(r.brief) + '</span>' : '') + '</span>'
-                : '<span role="cell" class="rc-after rc-' + after.tone + '">' + escapeHtml(after.text) + '</span>') +
+                : after.chip
+                    ? '<span role="cell" class="rc-after"><span class="rc-status rc-status-' + after.chip + '">' + escapeHtml(after.text) + '</span></span>'
+                    : '<span role="cell" class="rc-after rc-' + after.tone + '">' + escapeHtml(after.text) + '</span>') +
             '<span role="cell"><span class="rc-sat rc-sat-' + sat + '">' + (sat === 'none' ? '—' : escapeHtml(String(r.satisfaction))) + '</span></span>' +
             '<span role="cell" class="rc-len">' + escapeHtml(formatLength(r.duration)) + '</span>' +
             '</div>';
@@ -649,7 +679,7 @@ ${skeleton()}
   .rc-card { border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(22,21,19,0.08), 0 1px 2px rgba(22,21,19,0.04); }
   .rc-scroll { overflow-x: auto; }
   .rc-table { min-width: 680px; }
-  .rc-row { position: relative; display: grid; grid-template-columns: 150px minmax(180px, 1.4fr) minmax(160px, 1.6fr) 56px 64px; gap: 14px;
+  .rc-row { position: relative; display: grid; grid-template-columns: 100px minmax(180px, 1.4fr) minmax(160px, 1.6fr) 56px 64px; gap: 14px;
     align-items: center; min-height: 58px; padding: 0 18px; border-bottom: 1px solid var(--line-soft); transition: background-color 120ms ease; }
   .rc-row:last-child { border-bottom: 0; }
   .rc-row:not(.rc-row-head):hover { background: var(--panel); }
@@ -657,7 +687,7 @@ ${skeleton()}
   .rc-right { text-align: right; }
   .rc-when { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .rc-when svg { flex: none; }
-  .rc-dir { display: inline-flex; align-items: center; justify-content: flex-start; gap: 3px; flex: none; min-width: 70px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+  .rc-dir { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 999px; }
   .rc-dir svg { display: block; }
   .rc-dir-in { background: var(--in-bg); color: var(--in-fg); }
   .rc-dir-out { background: var(--out-bg); color: var(--out-fg); }
@@ -668,7 +698,7 @@ ${skeleton()}
   .rc-row-link::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
   .rc-row-link:focus-visible { box-shadow: none; }
   .rc-row-link:focus-visible::after { box-shadow: inset 0 0 0 2px var(--focus); }
-  .rc-date { font-size: 11.5px; color: var(--faint); }
+  .rc-date { font-size: 11.5px; color: var(--faint); white-space: nowrap; }
   .rc-who-cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .rc-co { position: relative; z-index: 1; align-self: flex-start; max-width: 100%; font-size: 14px; font-weight: 500; color: var(--ink); text-decoration: none;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -679,7 +709,9 @@ ${skeleton()}
   .rc-vm-brief { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rc-muted { color: var(--muted); }
   .rc-warn { color: var(--mid-fg); }
-  .rc-bad { color: var(--low-fg); }
+  .rc-status { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.4; }
+  .rc-status-missed { background: var(--missed-bg); color: var(--missed-fg); }
+  .rc-status-quiet { background: var(--line-soft); color: var(--muted); }
   .rc-sat { display: inline-flex; height: 22px; padding: 0 8px; align-items: center; border-radius: 999px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .rc-sat-good { background: var(--good-bg); color: var(--good-fg); }
   .rc-sat-mid { background: var(--mid-bg); color: var(--mid-fg); }
@@ -875,6 +907,7 @@ ${skeleton()}
         formatLength,
         formatPhone,
         afterCall,
+        shortDate,
         csvCell,
         buildHtml
     };

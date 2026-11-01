@@ -215,7 +215,11 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             // (today, yesterday, thisweek, lastweek, last7days, last30days), or
             // explicit dateFrom/dateTo. `todayOnly` is the legacy shortcut kept
             // for back-compat. `last7days` was added for the softphone Recents
-            // tab (Iteration B Phase 5).
+            // tab (Iteration B Phase 5). It uses the rolling relative date
+            // `daysago7` with `onorafter`: the range keyword `lastweektodate`
+            // means "last week up to the same weekday", not the last 7 days,
+            // so Recents came back empty. `last30days` uses `daysago30` the
+            // same way (`lastthirtydays` is not a NetSuite date keyword).
             const dateRange = p.dateRange;
             if (dateRange === 'yesterday') {
                 searchFilters.push('AND', ['startdate', 'on', 'yesterday']);
@@ -224,9 +228,9 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             } else if (dateRange === 'lastweek') {
                 searchFilters.push('AND', ['startdate', 'within', 'lastweek']);
             } else if (dateRange === 'last7days') {
-                searchFilters.push('AND', ['startdate', 'within', 'lastweektodate']);
+                searchFilters.push('AND', ['startdate', 'onorafter', 'daysago7']);
             } else if (dateRange === 'last30days') {
-                searchFilters.push('AND', ['startdate', 'within', 'lastthirtydays']);
+                searchFilters.push('AND', ['startdate', 'onorafter', 'daysago30']);
             } else if (dateRange === 'today' || p.todayOnly) {
                 searchFilters.push('AND', ['startdate', 'on', 'today']);
             } else {
@@ -284,6 +288,9 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     timeOfDay: parseTimeOfDay(ctcTime.localTimeOfIso(r.getValue('custevent_ctc_call_started'))) ||
                                parseTimeOfDay(r.getValue('starttime')) ||
                                parseTimeOfDay(r.getValue('createddate')),
+                    // ISO UTC call start ('' on older Phone Calls). The dock's
+                    // Recents matches its pending missed row against it.
+                    startedAt: String(r.getValue('custevent_ctc_call_started') || ''),
                     companyId: extractId(r.getValue('company')),
                     companyName: extractText(r.getText ? r.getText('company') : r.getValue('company')),
                     contactName: extractText(r.getText ? r.getText('contact') : r.getValue('contact')),

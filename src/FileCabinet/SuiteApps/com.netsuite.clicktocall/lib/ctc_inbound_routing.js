@@ -14,7 +14,8 @@
  * Flow shape (per route n):
  *   Trigger ─incomingCall─▶ split_dialed ─To == route n─▶ ring_n
  *   ring_n (connect-call-to client <employeeId>) ─callCompleted─▶ answered_n
- *   answered_n: DialCallStatus == completed → end, else → no_answer
+ *   answered_n: DialCallStatus completed / answered → end, else → talked_n
+ *   talked_n: DialCallDuration > 0 → end, else → no_answer
  *   split_dialed noMatch → no_answer (say-play message)
  *
  * Voicemail (voicemailOn, default on): no_answer is the greeting, then
@@ -262,24 +263,60 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
                     record: recordCalls
                 }
             });
+            // An answered call ends with DialCallStatus 'completed' OR
+            // 'answered' (seen live when the rep hangs up from the browser),
+            // so both end the flow. talked_n is the safety net: any talk time
+            // means the call was answered. Only a call with neither reaches
+            // the no-answer message / voicemail.
+            const dialStatus = '{{widgets.ring_' + n + '.DialCallStatus}}';
             states.push({
                 name: 'answered_' + n,
+                type: 'split-based-on',
+                transitions: [
+                    { next: 'talked_' + n, event: 'noMatch' },
+                    {
+                        event: 'match',
+                        conditions: [{
+                            friendly_name: 'answered',
+                            arguments: [dialStatus],
+                            type: 'equal_to',
+                            value: 'completed'
+                        }]
+                    },
+                    {
+                        event: 'match',
+                        conditions: [{
+                            friendly_name: 'answered (rep hung up)',
+                            arguments: [dialStatus],
+                            type: 'equal_to',
+                            value: 'answered'
+                        }]
+                    }
+                ],
+                properties: {
+                    input: dialStatus,
+                    offset: { x: x, y: ROW_HEIGHT * (row0 + 3) }
+                }
+            });
+            const dialDuration = '{{widgets.ring_' + n + '.DialCallDuration}}';
+            states.push({
+                name: 'talked_' + n,
                 type: 'split-based-on',
                 transitions: [
                     { next: 'no_answer', event: 'noMatch' },
                     {
                         event: 'match',
                         conditions: [{
-                            friendly_name: 'answered',
-                            arguments: ['{{widgets.ring_' + n + '.DialCallStatus}}'],
-                            type: 'equal_to',
-                            value: 'completed'
+                            friendly_name: 'had talk time',
+                            arguments: [dialDuration],
+                            type: 'greater_than',
+                            value: '0'
                         }]
                     }
                 ],
                 properties: {
-                    input: '{{widgets.ring_' + n + '.DialCallStatus}}',
-                    offset: { x: x, y: ROW_HEIGHT * (row0 + 3) }
+                    input: dialDuration,
+                    offset: { x: x + 200, y: ROW_HEIGHT * (row0 + 3) }
                 }
             });
         });

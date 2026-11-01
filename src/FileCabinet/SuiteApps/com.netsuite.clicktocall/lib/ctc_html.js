@@ -90,5 +90,41 @@ define([], () => {
         "if(d.length===11&&d.charAt(0)==='1'){return '+1 '+n(d.slice(1))}" +
         "if(d.length===10&&s.charAt(0)!=='+'){return n(d)}return s}";
 
-    return { escapeHtml, escapeJs, safeJsonEmbed, setNoStoreHeaders, formatPhone, FORMAT_PHONE_JS };
+    // Call status (custevent_ctc_call_status) -> what a call row shows when
+    // there is no AI brief. ONE rule set for the Sales Rep Central portlet
+    // (briefOf / lenIsDash / dirKind on the server; shipped as JSON to its
+    // client rebuilder) and Reporting Central (unansweredRule).
+    //   text  placeholder text (muted grey unless `chip`)
+    //   chip  status chip modifier (portlet ctc-pl-status-<chip>,
+    //         Reporting Central rc-status-<chip>)
+    //   len   'dash' = Length is always "—"; 'dashZero' = "—" when 0 s
+    //   dir   'missed' = a missed call (portlet isMissedCall)
+    // A status not listed here shows "—".
+    const CALL_STATUS_RULES = {
+        'Logged':        { text: 'Processing…' },
+        'Processing':    { text: 'Processing…' },
+        'No transcript': { text: 'No transcript' },
+        'Too short':     { text: 'Too short to summarize' },
+        'Failed':        { text: 'Summary failed' },
+        'Missed':        { text: 'Missed call', chip: 'missed', len: 'dash', dir: 'missed' },
+        'No answer':     { text: 'No answer', chip: 'quiet', len: 'dashZero' }
+    };
+
+    /**
+     * The rule for an unanswered call, else null: status 'Missed' or an
+     * inbound call with no talk time -> "Missed call"; status 'No answer' or
+     * an outbound call with no talk time -> "No answer". Voicemails are the
+     * caller's job to handle first (they read "Voicemail").
+     * @param {{callStatus?: string, direction?: string, duration?: number}} row
+     * @returns {{text: string, chip?: string}|null}
+     */
+    const unansweredRule = (row) => {
+        const r = row || {};
+        if (r.callStatus === 'Missed') return CALL_STATUS_RULES['Missed'];
+        if (r.callStatus === 'No answer') return CALL_STATUS_RULES['No answer'];
+        if (!(Number(r.duration) > 0)) return CALL_STATUS_RULES[r.direction === 'inbound' ? 'Missed' : 'No answer'];
+        return null;
+    };
+
+    return { escapeHtml, escapeJs, safeJsonEmbed, setNoStoreHeaders, formatPhone, FORMAT_PHONE_JS, CALL_STATUS_RULES, unansweredRule };
 });

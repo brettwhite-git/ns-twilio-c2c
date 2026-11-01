@@ -31,6 +31,12 @@
     var REFUSED_SHOW_MS = 4000;
     var SEARCH_DEBOUNCE_MS = 250;
     var NOTE_HIDE_MS = 10000; // 'saved' and 'skipped' notes hide by themselves
+    var RECENTS_STALE_MS = 60000; // Recents reloads when opened after this long
+    // A pending missed row goes once Recents has a Phone Call from the same
+    // number that started no earlier than this before the miss was counted
+    // (missedUnseen.at is when the ringing stopped; the record keeps the
+    // time the ringing started).
+    var PENDING_MATCH_MS = 120000;
     var TYPE_LABEL = { customer: 'CUSTOMER', prospect: 'PROSPECT', lead: 'LEAD', contact: 'CONTACT' };
     var PHASE_VIEW = {
         offline: { dot: '#8B8780', label: 'Phone offline' },
@@ -77,6 +83,12 @@
     var ICON_MIC = '<rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"></path>';
     var ICON_MIC_OFF = '<path d="M2 2l20 20M9 9v3a3 3 0 0 0 5.1 2.1M15 9.3V5a3 3 0 0 0-5.9-.6M19 10v2a7 7 0 0 1-.6 2.8M5 10v2a7 7 0 0 0 12 5M12 19v3"></path>';
     var STROKE = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+    // Recents direction icons: arrow down-left (in, missed), up-right (out).
+    var DIR_VIEW = {
+        'in': { label: 'Inbound call', path: 'M17 7L7 17M7 9v8h8' },
+        out: { label: 'Outbound call', path: 'M7 17L17 7M9 7h8v8' },
+        missed: { label: 'Missed call', path: 'M17 7L7 17M7 9v8h8' }
+    };
 
     host.css([
         // Position, width and height come from the client (placePanel): one
@@ -195,6 +207,19 @@
         '.dl-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
         '.dl-row-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.dl-row-sub{font-size:11px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        // Recents: the card is the list item, so a missed row can carry a
+        // Call back button next to the row button (no button inside a button).
+        '.dl-recent{display:flex;align-items:center;gap:4px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)}',
+        '.dl-recent:hover{background:rgba(255,255,255,0.08)}',
+        '.dl-recent .dl-row,.dl-recent .dl-row:hover{flex:1;min-width:0;background:transparent;border:0}',
+        '.dl-recent-cb{flex-shrink:0;margin-right:6px}',
+        // Direction icon: 20 px circle, 12 px arrow (panel tints of the
+        // portlet's In / Out / Missed colours; arrow vs circle >= 5:1).
+        '.dl-dir{width:20px;height:20px;border-radius:999px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-dir-in{background:rgba(116,192,252,0.18);color:#9FD0FA}',
+        '.dl-dir-out{background:rgba(255,255,255,0.10);color:#C9D3E1}',
+        '.dl-dir-missed{background:rgba(238,110,92,0.20);color:#FFA595}',
+        '.dl-row-flag{color:#FF9E8C;font-weight:600}',
         '.dl-row-meta{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:10px;color:#94A6BF;flex-shrink:0;text-align:right;white-space:pre-line}',
         '.dl-empty,.dl-msg{font-size:12px;color:#94A6BF;text-align:center;padding:12px 0}',
         '.dl-msg.err{color:#FCA5A5}',
@@ -370,6 +395,10 @@
     var suggested = null;
     var bookCounts = null;
     var recentsLoaded = false;
+    var recentsAt = 0;        // when Recents was last asked for
+    var recentsSeq = 0;
+    var recentRows = null;    // last softphoneRecents rows
+    var pendingMissed = null; // { caller, at }: newest missed call not yet a Phone Call
     var noteKey = null;       // key of the lastLog the note shows (null: a local note)
     var noteDismissed = null; // key of the lastLog the rep closed (or that hid itself)
     var noteTimer = null;
@@ -457,7 +486,7 @@
         ui.call.parentNode.hidden = next !== 'dial';
         ui.backspace.parentNode.hidden = next !== 'dial';
         if (next === 'search' && suggested === null) loadSuggested();
-        if (next === 'recents' && !recentsLoaded) loadRecents();
+        if (next === 'recents' && (!recentsLoaded || Date.now() - recentsAt > RECENTS_STALE_MS)) loadRecents();
     }
 
     ui.tabs.forEach(function (t) {
@@ -730,35 +759,128 @@
     });
 
     // --- Recents tab ---
+    // Missed = status 'Missed' or a voicemail (the portlet's isMissedCall rule).
+    function isMissedRow(r) { return r.callStatus === 'Missed' || r.voicemail === true; }
+
+    function lastTen(n) { return digitsOf(n).replace('+', '').slice(-10); }
+
+    function dirIcon(kind) {
+        var v = DIR_VIEW[kind];
+        var i = document.createElement('span');
+        i.className = 'dl-dir dl-dir-' + kind;
+        i.setAttribute('role', 'img');
+        i.setAttribute('aria-label', v.label);
+        i.title = v.label;
+        i.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + v.path + '"></path></svg>';
+        return i;
+    }
+
+    function ago(at) {
+        var mins = Math.floor((Date.now() - at) / 60000);
+        if (mins < 1) return 'just now';
+        return mins < 60 ? mins + ' min ago' : Math.floor(mins / 60) + ' h ago';
+    }
+
+    // Load the call's number on Dial and dial it through the normal path.
+    function callBack(c) {
+        if (!c || !c.number) return;
+        if (c.entityId) {
+            loadEntity({ entityId: c.entityId, entityName: c.name, entityType: c.entityType, phone: c.number });
+        } else {
+            clearEntity();
+            setDisplay(c.number, true);
+        }
+        setTab('dial');
+        placeCall();
+        focusPanel('call');
+    }
+
+    function recentItem(r) {
+        var missed = isMissedRow(r);
+        var kind = missed ? 'missed' : (r.direction === 'inbound' ? 'in' : 'out');
+        var name = r.companyName || formatPhone(r.phone) || r.phone || 'Unknown';
+        var li = document.createElement('li');
+        li.className = 'dl-recent';
+        li.setAttribute('data-dir', kind);
+        if (r.pending) li.setAttribute('data-pending', '1');
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dl-row';
+        var main = document.createElement('span');
+        main.className = 'dl-row-main';
+        main.appendChild(span('dl-row-name', name));
+        var rest = r.pending ? [ago(r.at)] : [r.contactName, formatPhone(r.phone)];
+        rest = rest.filter(Boolean).join(' · ');
+        var sub = span('dl-row-sub', '');
+        if (missed) {
+            sub.appendChild(span('dl-row-flag', r.voicemail ? 'Voicemail' : 'Missed'));
+            if (rest) sub.appendChild(document.createTextNode(' · ' + rest));
+        } else {
+            sub.textContent = rest;
+        }
+        main.appendChild(sub);
+        var mins = r.duration ? Math.max(1, Math.round(r.duration / 60)) + ' min' : '';
+        b.appendChild(dirIcon(kind));
+        b.appendChild(main);
+        if (!r.pending) b.appendChild(span('dl-row-meta', [r.date, mins].filter(Boolean).join('\n')));
+        b.addEventListener('click', function () {
+            loadEntity({ entityId: r.companyId, entityName: r.companyName, entityType: r.entityType || 'customer', phone: r.phone });
+            setTab('dial');
+            ui.display.focus();
+        });
+        li.appendChild(b);
+        if (missed && r.phone) {
+            var cb = document.createElement('button');
+            cb.type = 'button';
+            cb.className = 'dl-text dl-recent-cb';
+            cb.textContent = 'Call back';
+            cb.setAttribute('aria-label', 'Call back ' + name);
+            cb.addEventListener('click', function () {
+                callBack({ name: r.companyName || '', number: r.phone, entityId: r.companyId || '', entityType: r.entityType || 'customer' });
+            });
+            li.appendChild(cb);
+        }
+        return li;
+    }
+
+    // The newest missed call (missedUnseen.last) stays on top as a pending
+    // row until the reconciled Phone Call (same number, start no earlier
+    // than PENDING_MATCH_MS before the miss) is in the list.
+    function missedLogged(p, rows) {
+        var want = lastTen(p.caller.number);
+        return !!want && rows.some(function (r) {
+            var t = Date.parse(r.startedAt || '');
+            return lastTen(r.phone) === want && !isNaN(t) && t >= p.at - PENDING_MATCH_MS;
+        });
+    }
+
+    function renderRecents() {
+        var rows = recentRows || [];
+        if (pendingMissed && recentRows && missedLogged(pendingMissed, rows)) pendingMissed = null;
+        clear(ui.recents);
+        if (pendingMissed) {
+            var c = pendingMissed.caller;
+            ui.recents.appendChild(recentItem({
+                pending: true, at: pendingMissed.at, callStatus: 'Missed', direction: 'inbound', voicemail: false,
+                companyId: c.entityId || '', companyName: c.name || '', entityType: c.entityType || '', phone: c.number || ''
+            }));
+        }
+        rows.forEach(function (r) { ui.recents.appendChild(recentItem(r)); });
+        if (recentRows) ui.recentMsg.textContent = rows.length || pendingMissed ? '' : 'No calls in the last 7 days.';
+    }
+
     function loadRecents() {
         recentsLoaded = true;
+        recentsAt = Date.now();
+        var seq = ++recentsSeq;
         ui.recentMsg.className = 'dl-msg dl-recent-msg';
-        ui.recentMsg.textContent = 'Loading…';
+        if (!recentRows) ui.recentMsg.textContent = 'Loading…';
         api('softphoneRecents', { dateRange: 'last7days', limit: 50 }).then(function (d) {
-            var rows = d.rows || [];
-            clear(ui.recents);
-            rows.forEach(function (r) {
-                var li = document.createElement('li');
-                var b = document.createElement('button');
-                b.type = 'button';
-                b.className = 'dl-row';
-                var main = document.createElement('span');
-                main.className = 'dl-row-main';
-                main.appendChild(span('dl-row-name', r.companyName || formatPhone(r.phone) || 'Unknown'));
-                main.appendChild(span('dl-row-sub', [r.contactName, formatPhone(r.phone)].filter(Boolean).join(' · ')));
-                var mins = r.duration ? Math.max(1, Math.round(r.duration / 60)) + ' min' : '';
-                b.appendChild(main);
-                b.appendChild(span('dl-row-meta', [r.date, mins].filter(Boolean).join('\n')));
-                b.addEventListener('click', function () {
-                    loadEntity({ entityId: r.companyId, entityName: r.companyName, entityType: r.entityType || 'customer', phone: r.phone });
-                    setTab('dial');
-                    ui.display.focus();
-                });
-                li.appendChild(b);
-                ui.recents.appendChild(li);
-            });
-            ui.recentMsg.textContent = rows.length ? '' : 'No calls in the last 7 days.';
+            if (seq !== recentsSeq) return;
+            recentRows = d.rows || [];
+            renderRecents();
         }).catch(function (err) {
+            if (seq !== recentsSeq) return;
             recentsLoaded = false;
             ui.recentMsg.className = 'dl-msg dl-recent-msg err';
             ui.recentMsg.textContent = 'Could not load recent calls: ' + err.message;
@@ -941,15 +1063,7 @@
         if (!c || !c.number) return;
         if (noteKey) noteDismissed = noteKey;
         hideNote();
-        if (c.entityId) {
-            loadEntity({ entityId: c.entityId, entityName: c.name, entityType: c.entityType, phone: c.number });
-        } else {
-            clearEntity();
-            setDisplay(c.number, true);
-        }
-        setTab('dial');
-        placeCall();
-        focusPanel('call');
+        callBack(c);
     });
 
     ui.noteX.addEventListener('click', function () {
@@ -1054,7 +1168,16 @@
         }
 
         var m = snap && snap.missedUnseen;
-        if (m && m.count > 0 && m.last) missedCaller = m.last;
+        if (m && m.count > 0 && m.last) {
+            missedCaller = m.last;
+            // A new miss: pending row on top of Recents (kept after markMissedSeen).
+            var at = typeof m.at === 'number' ? m.at : 0;
+            var p = pendingMissed;
+            if (m.last.number && (!p || (at ? p.at !== at : lastTen(p.caller.number) !== lastTen(m.last.number)))) {
+                pendingMissed = { caller: m.last, at: at || Date.now() };
+                if (recentRows) renderRecents();
+            }
+        }
         renderAlert();
         renderRefused();
         renderAlerts();
@@ -1068,6 +1191,11 @@
             var later = deferredCtx.ctx;
             deferredCtx = null;
             followContext(later);
+        }
+        // The call ended: Recents is stale (reloads now if it is in front).
+        if (wasActive && !active) {
+            recentsLoaded = false;
+            if (tab === 'recents') loadRecents();
         }
         wasActive = active;
         // Incoming shows the live view too (caller + Answer / Decline).
@@ -1087,9 +1215,12 @@
             ui.dtmf.hidden = true;
             ui.keys.setAttribute('aria-pressed', 'false');
             var log = snap && snap.lastLog;
-            if (ui.note.getAttribute('data-kind') !== 'error') {
+            var kind = ui.note.getAttribute('data-kind');
+            if (kind !== 'error') {
                 if (log) showLog(log);
-                else hideNote();
+                // A missed note stays until the rep closes it, also when the
+                // anchor restarts without a lastLog.
+                else if (kind !== 'missed' || ui.note.hidden) hideNote();
             }
         }
         syncCallButton();
