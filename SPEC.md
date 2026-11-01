@@ -91,7 +91,7 @@ Windows with `window.opener` draw nothing.
 - **Security limit:** BroadcastChannel cannot authenticate a same-origin sender; any page on the account origin can post requests. origin / nonce / rate limits stop accidents and replays only. Server-side allow-listing of dialled numbers is the backstop (future, §13).
 - The dock draws every field above (see Pill and Panel). Unknown phases fall back to the offline view.
 
-**Rules & limits.** Nothing of ours may sit on a snap point. **Bump `DOCK_ASSET_VERSION` in `F/lib/ctc_dock.js` (now `'18'`) on every change to `ctc_dock_client.js` or `ctc_dock_dialer.js`**; it is the cache-bust query on both script URLs.
+**Rules & limits.** Nothing of ours may sit on a snap point. **Bump `DOCK_ASSET_VERSION` in `F/lib/ctc_dock.js` (now `'19'`) on every change to `ctc_dock_client.js` or `ctc_dock_dialer.js`**; it is the cache-bust query on both script URLs.
 
 **Mounts.** Record pages via `F/ctc_ue_phone_button.js` (shown only when `custrecord_ctc_active` is true); dashboard via a hidden `<img onerror>` loader (`buildDockLoaderHtml`) because portlets strip `<script>`.
 
@@ -367,3 +367,4 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 - `lib/ctc_workspace_queries.js` comments still say "CTC is outbound only" / missed inbound calls are not logged.
 
 - 2026-11-01 — No screen-pop on Answer (user: reps may be in the middle of something; Open record exists in the panel). Vertical pill always shows the phone button (no bare-dot pill while starting or ringing). DOCK_ASSET_VERSION 18.
+- 2026-11-01 — Ringing pill (both shapes): sky dot plus a green Answer button with a pulsing ring orb (`.v-main.answer`, `ctc-orb` 1.6 s; reduced motion: static ring). The button answers (bus `answer`); the pill body opens the phone. DOCK_ASSET_VERSION 19.

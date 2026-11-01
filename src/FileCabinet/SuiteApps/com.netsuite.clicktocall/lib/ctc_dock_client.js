@@ -271,13 +271,16 @@
         '.v-mute[aria-pressed="true"] svg{stroke:#1F2F4D}',
         '.v-main{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
         '.v-main.call{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
+        // Ringing: the Answer button wears a green ring orb that pulses out.
+        '.v-main.answer{background:#14B981;animation:ctc-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-orb{0%{box-shadow:0 0 0 0 rgba(20,185,129,0.55),0 4px 12px rgba(20,185,129,0.36)}70%,100%{box-shadow:0 0 0 10px rgba(20,185,129,0),0 4px 12px rgba(20,185,129,0.36)}}',
         '.v-main.end{background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
         '.v-main.end:hover{background:#D85440}',
         '.v-main.end svg{transform:rotate(135deg)}',
         '.v-main.offline{background:#F4F2EE}',
         '.v-main.retry{width:36px;height:36px;border-radius:12px;background:#FCE9E7}',
         '.v-ico{display:none}',
-        '.v-main.call .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
+        '.v-main.call .ico-call,.v-main.answer .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
         /* offline / error: light pill */
         '.vchip.light{background:#FFFFFF;border:1px solid #E5E2DD;box-shadow:0 6px 16px rgba(22,21,19,0.08)}',
         '.vchip.light .v-grip i{background:#D9D5CF}',
@@ -345,7 +348,7 @@
         '.card.dl{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out}',
         '.card.dl.settling{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out,translate ' + SETTLE + '}',
         '.card.dl.lifted{scale:' + (1 + LIFT) + ';box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 24px 56px rgba(15,27,48,0.36)}',
-        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot{animation:none}}'
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot,.v-main.answer{animation:none}.v-main.answer{box-shadow:0 0 0 3px rgba(20,185,129,0.35)}}'
     ].join('\n');
 
     var HTML = ''
@@ -815,13 +818,15 @@
             // Ringing in: the incoming card above / beside the pill holds
             // Answer / Decline (here and in a mirror tab: the anchor answers;
             // the audio plays in the tab that holds the phone). The pill
-            // only says "Ringing" (horizontal) and rings its sky dot.
+            // says "Ringing" (horizontal), rings its sky dot, and shows a
+            // green Answer button with a ring orb (both shapes).
             var who = callerText();
             var words0 = pillWords(phase, mirror, active);
             renderPill({
                 stage: phase,
                 dot: true,
-                main: null,
+                main: 'answer',
+                mainLabel: 'Answer call from ' + who,
                 label: 'Incoming call from ' + who + '.' + (panel ? ' Open phone.' : '') + ARROWS_HINT,
                 title: 'Incoming call from ' + who,
                 l1: words0.l1,
@@ -982,7 +987,7 @@
         vMain.hidden = !o.main;
         vMain.className = 'v-main' + (o.main ? ' ' + o.main : '');
         vMain.setAttribute('aria-label', o.mainLabel || (o.main === 'end' ? 'End call' : o.label));
-        var bodyIsMain = !vOnly && o.main && o.main !== 'end';
+        var bodyIsMain = !vOnly && o.main && o.main !== 'end' && o.main !== 'answer';
         vBody.tabIndex = bodyIsMain ? -1 : 0;
         if (bodyIsMain) {
             vBody.removeAttribute('aria-label');
@@ -1764,6 +1769,7 @@
     vMain.addEventListener('click', function () {
         var a = takePillAction();
         if (vMain.classList.contains('end')) send('hangup');
+        else if (vMain.classList.contains('answer')) respondIncoming('answer');
         else if (!runPillAction(a)) openFromPill();
     });
     useHereItem.addEventListener('click', function () {
