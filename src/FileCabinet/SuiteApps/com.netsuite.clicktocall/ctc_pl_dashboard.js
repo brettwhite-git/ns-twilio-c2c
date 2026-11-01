@@ -4,7 +4,8 @@
  * @NModuleScope SameAccount
  *
  * CTC Sales Dashboard Portlet ("Sales Rep Central") — period switch, KPI
- * strip, Calls / Follow-ups tabs, inline actions, Reporting Central link.
+ * strip, Calls / Missed / Follow-ups tabs, inline actions, Reporting
+ * Central links.
  *
  * IMPORTANT ARCHITECTURE NOTE
  * ---------------------------
@@ -23,7 +24,8 @@
  * containing fully self-contained logic. No external client.js needed.
  *
  * UI state lives in classes on #ctc-pl-root (`ctc-pl-show-tasks`,
- * `ctc-pl-no-fu`); CSS responds. The period refresh logic lives once, in the
+ * `ctc-pl-show-missed`, `ctc-pl-no-fu`, `ctc-pl-fu-all`,
+ * `ctc-pl-no-missed`); CSS responds. The period refresh logic lives once, in the
  * onclick of the hidden #ctc-pl-refresh button; the period chips and the
  * Try again buttons set its data-range and call .click() on it.
  *
@@ -38,6 +40,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
+    const formatPhone = ctcHtml.formatPhone;
     // Calls live only in the phone mode shell (ctc_sl_shell.js). Launchers
     // here ask the shell's dialer when the dashboard runs inside it, and move
     // the tab into the shell otherwise. No popup window.
@@ -63,18 +66,14 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         '><path d="' + d + '"></path></svg>';
     const callSvg = (size) => '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="' + PATH.call + '"></path></svg>';
 
-    const DIRECTION = {
-        outbound: { label: 'Outbound', cls: 'ctc-pl-dir ctc-pl-dir-out', path: PATH.outbound },
-        inbound:  { label: 'Inbound',  cls: 'ctc-pl-dir ctc-pl-dir-in',  path: PATH.inbound }
-    };
-
     // Call status (custevent_ctc_call_status) -> what a row shows when there
-    // is no AI brief. ONE rule set: briefOf / lenIsDash use it on the server,
-    // and buildRefreshOnclick ships it as JSON to the client rebuilder.
+    // is no AI brief. ONE rule set: briefOf / lenIsDash / dirKind use it on
+    // the server, and buildRefreshOnclick ships it as JSON to the client
+    // rebuilder.
     //   text  placeholder in the AI brief cell (muted grey unless `chip`)
     //   chip  status chip modifier: ctc-pl-status ctc-pl-status-<chip>
     //   len   'dash' = Length is always "—"; 'dashZero' = "—" when 0 s
-    // Missed rows also tint the direction arrow (ctc-pl-dir-missed).
+    //   dir   'missed' = a missed call (see isMissedCall)
     // A status not listed here shows "—".
     const STATUS_RULES = {
         'Logged':        { text: 'Processing…' },
@@ -82,14 +81,42 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         'No transcript': { text: 'No transcript' },
         'Too short':     { text: 'Too short to summarize' },
         'Failed':        { text: 'Summary failed' },
-        'Missed':        { text: 'Missed call', chip: 'missed', len: 'dash' },
+        'Missed':        { text: 'Missed call', chip: 'missed', len: 'dash', dir: 'missed' },
         'No answer':     { text: 'No answer', chip: 'quiet', len: 'dashZero' }
     };
-    const MISSED = 'Missed';
+
+    // Direction chip before the time: ctc-pl-status-dir ctc-pl-status-dir-<kind>.
+    // Missed = status rule dir 'missed', or an inbound call with no talk
+    // time. The arrow is the call's own direction. Shipped to the client
+    // rebuilder as JSON (words and labels only).
+    const DIR_CHIP = {
+        in:     { word: 'In',     aria: 'Inbound call' },
+        out:    { word: 'Out',    aria: 'Outbound call' },
+        missed: { word: 'Missed', aria: 'Missed call' }
+    };
     const statusRule = (r) => {
         const st = r.callStatus || '';
         return Object.prototype.hasOwnProperty.call(STATUS_RULES, st) ? STATUS_RULES[st] : null;
     };
+
+    // A missed call: status rule dir 'missed' (status Missed) OR a voicemail
+    // (custevent_ctc_voicemail T). ONE rule for the direction chip, the Calls
+    // KPI "<n> missed" and the Missed tab badge; the Missed tab's search
+    // (loadHistoryRows missedOnly) applies the same rule. The client
+    // rebuilder mirrors it (MISSED_CALL_JS).
+    const isMissedCall = (r) => {
+        const rule = statusRule(r);
+        return !!(rule && rule.dir === 'missed') || r.voicemail === true;
+    };
+    const MISSED_CALL_JS = "function(r){var st=r.callStatus||'';var ru=Object.prototype.hasOwnProperty.call(SR,st)?SR[st]:null;" +
+        "return !!(ru&&ru.dir==='missed')||r.voicemail===true}";
+
+    // The missed count shown by the KPI sub-line and the tab badge: the
+    // missedOnly search's full count, or (when that search failed) the
+    // missed calls among the loaded rows.
+    const missedCountOf = (opts, rows) => (opts.missedError
+        ? rows.filter(isMissedCall).length
+        : Math.max(opts.missedTotal || 0, (opts.missedRows || []).length));
 
     // Period segmented control. `calls` names the data in the error state;
     // `empty` is the empty-state title.
@@ -101,6 +128,14 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     ];
     const EMPTY_SUB = 'Calls you make from NetSuite show up here.';
     const ERROR_SUB = 'The rest of your dashboard is fine.';
+
+    // Missed tab: the period's missed calls and voicemails, newest first.
+    const MISSED_LIMIT = 5;
+    const MISSED_EMPTY = 'No missed calls in this period.';
+    const MISSED_ERROR = 'Couldn’t load missed calls';
+
+    // Follow-ups shown in the portlet (the newest pending ones).
+    const TASK_LIMIT = 5;
 
     /**
      * Portlet entry point.
@@ -147,7 +182,12 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         }
 
         const historyResult = workspaceQueries.loadHistoryRows({ userId, todayOnly: true, limit: 5 });
-        const tasksResult   = workspaceQueries.loadTaskGroups({ userId, tab: 'pending', limit: 5 });
+        // Missed calls + voicemails today (status 'Missed' OR voicemail T).
+        // `total` is the full count for the tab badge.
+        const missedResult  = workspaceQueries.loadHistoryRows({
+            userId, todayOnly: true, limit: MISSED_LIMIT, missedOnly: true, countTotal: true
+        }) || {};
+        const tasksResult   = workspaceQueries.loadTaskGroups({ userId, tab: 'pending', limit: TASK_LIMIT });
         const stats         = workspaceQueries.computeStats(historyResult.rows || []);
 
         portlet.html = ctcFonts.buildFigtreeStyle() + buildHtml({
@@ -155,6 +195,9 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             restletUrl,
             reportingUrl,
             rows: historyResult.rows || [],
+            missedRows: missedResult.rows || [],
+            missedTotal: missedResult.total || 0,
+            missedError: missedResult.error || '',
             groups: tasksResult.groups || [],
             totalTasks: tasksResult.totalTasks || 0,
             stats: stats,
@@ -232,7 +275,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     const buildTabOnclick = (tabName) => {
         const tn = escapeJs(tabName);
         return "var tn='" + tn + "';var R=document.getElementById('ctc-pl-root');" +
-            "if(R){if(tn==='tasks'){R.classList.add('ctc-pl-show-tasks')}else{R.classList.remove('ctc-pl-show-tasks')}}" +
+            "if(R){R.classList.remove('ctc-pl-show-tasks');R.classList.remove('ctc-pl-show-missed');" +
+                "if(tn==='tasks'){R.classList.add('ctc-pl-show-tasks')}else if(tn==='missed'){R.classList.add('ctc-pl-show-missed')}}" +
             "var ts=document.querySelectorAll('.ctc-pl-tab');" +
             "for(var i=0;i<ts.length;i++){" +
                 "var on=ts[i].getAttribute('data-tab')===tn;" +
@@ -246,6 +290,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     // total lives in the root's data-fu-total, because the portlet shows only
     // the newest few; taskExitJs lowers it by one per row. At 0 the root gets
     // `ctc-pl-no-fu` (CSS hides the badge/bar/button, shows "All caught up").
+    // When every pending follow-up is on screen the root gets `ctc-pl-fu-all`
+    // (CSS hides "Showing x of N" in the footer).
     // The count changes at once, without animation.
     const FU_SYNC_JS = "var R=document.getElementById('ctc-pl-root');" +
         "var n=R?(parseInt(R.getAttribute('data-fu-total'),10)||0):0;" +
@@ -253,7 +299,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         "var ns=document.querySelectorAll('.ctc-pl-fu-n');for(var q=0;q<ns.length;q++){ns[q].textContent=String(n)}" +
         "var nh=document.querySelectorAll('.ctc-pl-fu-shown');for(var h=0;h<nh.length;h++){nh[h].textContent=String(sh)}" +
         "var nw=document.querySelectorAll('.ctc-pl-fu-noun');for(var w=0;w<nw.length;w++){nw[w].textContent=n===1?'follow-up':'follow-ups'}" +
-        "if(R){if(n){R.classList.remove('ctc-pl-no-fu')}else{R.classList.add('ctc-pl-no-fu')}}";
+        "if(R){if(n){R.classList.remove('ctc-pl-no-fu')}else{R.classList.add('ctc-pl-no-fu')}" +
+            "if(n<=sh){R.classList.add('ctc-pl-fu-all')}else{R.classList.remove('ctc-pl-fu-all')}}";
 
     // Row exit: opacity, then height (CSS transitions on .ctc-pl-task-leaving),
     // then the node is removed. `v` is the JS variable that holds the row.
@@ -335,14 +382,17 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             "}" +
             "var R=document.getElementById('ctc-pl-root');if(R){R.setAttribute('data-range',rg)}" +
             "var a=document.getElementById('ctc-pl-report');if(a){a.href=a.getAttribute('data-base')+encodeURIComponent(rg)}" +
+            "var a2=document.getElementById('ctc-pl-fu-report');if(a2){a2.href=a2.getAttribute('data-base')+encodeURIComponent(rg)}" +
             "var f=document.getElementById('ctc-pl-refresh');if(f){f.setAttribute('data-range',rg);f.click()}";
     };
 
     const RETRY_JS = "var f=document.getElementById('ctc-pl-refresh');if(f){f.click()}";
 
     // The period refresh. Runs from the hidden #ctc-pl-refresh button: shows
-    // the static skeleton, fetches getWorkspaceHistory for data-range, then
-    // recomputes the KPIs and rebuilds the rows with createElement (never
+    // the static skeleton, fetches getWorkspaceHistory for data-range (with
+    // includeMissed, so the Missed tab gets the same period's missed calls
+    // and voicemails in the same response), then recomputes the KPIs and
+    // rebuilds the Calls rows and the Missed list with createElement (never
     // innerHTML with data). Error and empty states match the server render.
     // A sequence number drops responses from an older click.
     const buildRefreshOnclick = (restletUrl, shellUrl) => {
@@ -356,10 +406,18 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 "{entityId:String(r.companyId||''),entityName:String(r.companyName||'')," +
                 "entityType:r.companyId?'customer':'',phone:String(r.phone||'')}")
             : '';
+        // Closure-based onclick (NOT a setAttribute string) so `r` is
+        // captured at row-build time.
+        const bindCallJs = (v) => (redialJs
+            ? v + ".onclick=function(){" + redialJs + "};"
+            : v + ".disabled=true;" + v + ".title='Phone unavailable';");
         return "var rg=this.getAttribute('data-range')||'today';" +
             "var box=document.getElementById('ctc-pl-calls');if(!box)return;" +
+            "var mb=document.getElementById('ctc-pl-missed');" +
             "var seq=String((parseInt(box.getAttribute('data-seq'),10)||0)+1);box.setAttribute('data-seq',seq);" +
-            "var LBL=" + JSON.stringify(lbl) + ",EMP=" + JSON.stringify(emp) + ",SR=" + JSON.stringify(STATUS_RULES) + ",MS=" + JSON.stringify(MISSED) + ";" +
+            "var LBL=" + JSON.stringify(lbl) + ",EMP=" + JSON.stringify(emp) + ",SR=" + JSON.stringify(STATUS_RULES) +
+                ",DC=" + JSON.stringify(DIR_CHIP) + ",PIN='" + PATH.inbound + "',POUT='" + PATH.outbound + "';" +
+            "var ismc=" + MISSED_CALL_JS + ",fph=" + ctcHtml.FORMAT_PHONE_JS + ";" +
             "var NS='http://www.w3.org/2000/svg';" +
             "function el(t,c,x){var e=document.createElement(t);if(c){e.className=c}if(x!=null){e.textContent=x}return e}" +
             "function cell(e){e.setAttribute('role','cell');return e}" +
@@ -370,20 +428,34 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 "var q=document.createElementNS(NS,'path');q.setAttribute('d',p);s.appendChild(q);return s}" +
             "function pad(n){return(n<10?'0':'')+n}" +
             "function setT(id,v){var e=document.getElementById(id);if(e){e.textContent=v}}" +
-            "function state(t,s,bc,bt,fn){var g=el('div','ctc-pl-state');g.appendChild(el('span','ctc-pl-state-title',t));g.appendChild(el('span','ctc-pl-state-sub',s));" +
-                "if(fn){var k=el('button',bc,bt);k.type='button';k.onclick=fn;g.appendChild(k)}box.appendChild(g);return g}" +
+            "function dsec(r){return Math.max(0,parseInt(r.duration,10)||0)}" +
+            "function rule(r){var st=r.callStatus||'';return Object.prototype.hasOwnProperty.call(SR,st)?SR[st]:null}" +
+            // Direction chip — mirrors server dirKind + buildDirChipHtml.
+            "function dchip(r){var inb=r.direction==='inbound';" +
+                "var k=ismc(r)||(inb&&dsec(r)===0)?'missed':(inb?'in':'out');" +
+                "var c=el('span','ctc-pl-status-dir ctc-pl-status-dir-'+k);c.setAttribute('role','img');c.setAttribute('aria-label',DC[k].aria);" +
+                "c.appendChild(sv(inb?PIN:POUT,12,'2.2',''));c.appendChild(el('span','',DC[k].word));return c}" +
+            "function tod(r){var dt=r.date?new Date(r.date):null;return r.timeOfDay||(dt&&!isNaN(dt.getTime())?pad(dt.getHours())+':'+pad(dt.getMinutes()):'—')}" +
+            "function state(t,s,bc,bt,fn,tg){var g=el('div','ctc-pl-state');g.appendChild(el('span','ctc-pl-state-title',t));g.appendChild(el('span','ctc-pl-state-sub',s));" +
+                "if(fn){var k=el('button',bc,bt);k.type='button';k.onclick=fn;g.appendChild(k)}(tg||box).appendChild(g);return g}" +
+            "function retry(){" + RETRY_JS + "}" +
+            "function setMissed(n){setT('ctc-pl-missed-n',String(n));var R=document.getElementById('ctc-pl-root');" +
+                "if(R){if(n){R.classList.remove('ctc-pl-no-missed')}else{R.classList.add('ctc-pl-no-missed')}}}" +
+            "function mfail(m){if(!mb)return;mb.textContent='';mb.removeAttribute('aria-busy');" +
+                "var g=state(" + JSON.stringify(MISSED_ERROR) + "," + JSON.stringify(ERROR_SUB) + ",'ctc-pl-btn ctc-pl-btn-secondary','Try again',retry,mb);g.title=String(m||'')}" +
             "function fail(m){box.textContent='';box.removeAttribute('aria-busy');" +
-                "var g=state('Couldn’t load '+(LBL[rg]||'calls')," + JSON.stringify(ERROR_SUB) + ",'ctc-pl-btn ctc-pl-btn-secondary','Try again',function(){" + RETRY_JS + "});" +
-                "g.title=String(m||'')}" +
+                "var g=state('Couldn’t load '+(LBL[rg]||'calls')," + JSON.stringify(ERROR_SUB) + ",'ctc-pl-btn ctc-pl-btn-secondary','Try again',retry);" +
+                "g.title=String(m||'');mfail(m)}" +
             // Loading: static skeleton bars, no shimmer.
-            "box.textContent='';box.setAttribute('aria-busy','true');" +
-            "var sk=el('div','ctc-pl-skel');sk.setAttribute('aria-label','Loading calls');" +
-            "['70%','55%','80%','45%'].forEach(function(wd){var l=el('div','ctc-pl-skel-line');l.appendChild(el('span','ctc-pl-skel-bar ctc-pl-skel-short'));var br=el('span','ctc-pl-skel-bar');br.style.width=wd;l.appendChild(br);sk.appendChild(l)});" +
-            "box.appendChild(sk);" +
+            "function skel(tg,lb){tg.textContent='';tg.setAttribute('aria-busy','true');" +
+                "var sk=el('div','ctc-pl-skel');sk.setAttribute('aria-label',lb);" +
+                "['70%','55%','80%','45%'].forEach(function(wd){var l=el('div','ctc-pl-skel-line');l.appendChild(el('span','ctc-pl-skel-bar ctc-pl-skel-short'));var br=el('span','ctc-pl-skel-bar');br.style.width=wd;l.appendChild(br);sk.appendChild(l)});" +
+                "tg.appendChild(sk)}" +
+            "skel(box,'Loading calls');if(mb){skel(mb,'Loading missed calls')}" +
             "fetch('" + escapeJs(restletUrl) + "',{" +
                 "method:'POST',credentials:'same-origin'," +
                 "headers:{'Content-Type':'application/json'}," +
-                "body:JSON.stringify({action:'getWorkspaceHistory',dateRange:rg,limit:25})" +
+                "body:JSON.stringify({action:'getWorkspaceHistory',dateRange:rg,limit:25,includeMissed:true,missedLimit:" + MISSED_LIMIT + "})" +
             "}).then(function(x){return x.json()})" +
             ".then(function(d){" +
                 "if(box.getAttribute('data-seq')!==seq)return;" +
@@ -393,17 +465,41 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 // KPIs — parallels server-side computeStats + buildKpiSubs.
                 "var sc=rows.filter(function(r){return r.satisfaction});" +
                 "var avg=sc.length?(sc.reduce(function(a,r){return a+r.satisfaction},0)/sc.length).toFixed(1):'—';" +
-                "function dsec(r){return Math.max(0,parseInt(r.duration,10)||0)}" +
                 "var ts=rows.reduce(function(a,r){return a+dsec(r)},0);" +
                 "var tk=rows.filter(function(r){return dsec(r)>0});" +
                 "var av=tk.length?Math.round(ts/tk.length):0;" +
-                "var ms=rows.filter(function(r){return r.callStatus===MS}).length;" +
+                // One missed count for the KPI sub-line and the badge — mirrors
+                // server missedCountOf.
+                "var md=d.missed;var mok=!!md&&!md.error;var mr=mok?(md.rows||[]):[];" +
+                "var ms=mok?Math.max(parseInt(md.total,10)||0,mr.length):rows.filter(ismc).length;" +
                 "setT('ctc-pl-kpi-calls',String(rows.length));" +
                 "setT('ctc-pl-kpi-calls-sub',ms?ms+' missed':'');" +
                 "setT('ctc-pl-kpi-sat',String(avg));" +
                 "setT('ctc-pl-kpi-time',String(Math.round(ts/60)));" +
                 "setT('ctc-pl-kpi-sat-sub',rows.length?sc.length+' of '+rows.length+' scored':'');" +
                 "setT('ctc-pl-kpi-time-sub',tk.length?'Avg '+(av<60?av+' s':Math.floor(av/60)+' min '+(av%60)+' s')+' per call':'');" +
+                // Missed tab — mirrors server buildMissedHtml.
+                "setMissed(ms);" +
+                "if(mb){mb.textContent='';mb.removeAttribute('aria-busy');" +
+                    "if(md&&md.error){mfail(md.error)}else{" +
+                        "if(!mr.length){state(" + JSON.stringify(MISSED_EMPTY) + ",'','',''," + "null,mb)}" +
+                        "mr.forEach(function(r){" +
+                            "var row=el('div','ctc-pl-mrow');row.setAttribute('role','listitem');" +
+                            "var w=el('span','ctc-pl-mwhen');w.appendChild(dchip(r));w.appendChild(el('span','ctc-pl-mtime',tod(r)));row.appendChild(w);" +
+                            "var nm=r.companyName||'';var who=el('span','ctc-pl-mwho');" +
+                            "var ph=fph(r.phone);" +
+                            "if(nm&&r.companyId){var co=el('a','ctc-pl-mco',nm);co.href='/app/common/entity/custjob.nl?id='+encodeURIComponent(r.companyId);co.title=nm;who.appendChild(co)}" +
+                            "else{who.appendChild(el('span','ctc-pl-mco',nm||ph||'Unknown caller'))}" +
+                            "who.appendChild(el('span','ctc-pl-msub',nm?(r.contactName||ph||''):(r.contactName||'')));row.appendChild(who);" +
+                            "var tx=el('span','ctc-pl-mtext');tx.appendChild(el('span','ctc-pl-mkind',r.voicemail?'Voicemail':'Missed call'));" +
+                            "if(r.voicemail&&r.brief){var bb=el('span','ctc-pl-mbrief',r.brief);bb.title=r.brief;tx.appendChild(bb)}row.appendChild(tx);" +
+                            "var cb=el('button','ctc-pl-callback');cb.type='button';cb.setAttribute('aria-label','Call back '+(nm||ph||'caller'));" +
+                            "cb.appendChild(sv('" + PATH.call + "',13,'',''));cb.appendChild(el('span','','Call back'));" +
+                            bindCallJs('cb') +
+                            "row.appendChild(cb);mb.appendChild(row)" +
+                        "})" +
+                    "}" +
+                "}" +
                 "if(!rows.length){" +
                     "state(EMP[rg]||'No calls in this period'," + JSON.stringify(EMPTY_SUB) + ",'ctc-pl-btn ctc-pl-btn-call','Make a call'," +
                         (placeJs ? "function(){" + placeJs + "}" : "null") + ");return" +
@@ -414,23 +510,21 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 "box.appendChild(h);" +
                 "rows.forEach(function(r){" +
                     "var row=el('div','ctc-pl-row');row.setAttribute('role','row');" +
-                    "var inb=r.direction==='inbound';" +
-                    "var wh=cell(el('span','ctc-pl-when'));" +
-                    "var st=r.callStatus||'';var ru=Object.prototype.hasOwnProperty.call(SR,st)?SR[st]:null;" +
-                    "var ds=sv(inb?'" + PATH.inbound + "':'" + PATH.outbound + "',13,'2.2',(inb?'ctc-pl-dir ctc-pl-dir-in':'ctc-pl-dir ctc-pl-dir-out')+(st===MS?' ctc-pl-dir-missed':''));" +
-                    "ds.removeAttribute('aria-hidden');ds.setAttribute('role','img');ds.setAttribute('aria-label',inb?'Inbound':'Outbound');wh.appendChild(ds);" +
-                    "var dt=r.date?new Date(r.date):null;" +
-                    "wh.appendChild(el('span','ctc-pl-time',r.timeOfDay||(dt&&!isNaN(dt.getTime())?pad(dt.getHours())+':'+pad(dt.getMinutes()):'—')));" +
+                    "var ru=rule(r);" +
+                    "var wh=cell(el('span','ctc-pl-when'));wh.appendChild(dchip(r));" +
+                    "wh.appendChild(el('span','ctc-pl-time',tod(r)));" +
                     "row.appendChild(wh);" +
                     "var nm=r.companyName||'Unknown';" +
                     "var wo=cell(el('span','ctc-pl-who'));" +
                     "var co=el('a','ctc-pl-company',nm);co.href='/app/common/entity/custjob.nl?id='+encodeURIComponent(r.companyId||'');co.title=nm;wo.appendChild(co);" +
                     "wo.appendChild(el('span','ctc-pl-contact',r.contactName||''));row.appendChild(wo);" +
                     // Brief or status placeholder — mirrors server briefOf.
+                    "var bf;if(r.voicemail===true){bf=cell(el('span','ctc-pl-brief ctc-pl-brief-vm'));bf.title=r.brief||'';" +
+                        "bf.appendChild(el('span','ctc-pl-mkind','Voicemail'));if(r.brief){bf.appendChild(el('span','ctc-pl-mbrief',r.brief))}}else{" +
                     "var bc=!r.brief&&ru&&ru.chip?ru.chip:'';" +
                     "var bt=r.brief||(ru?ru.text:'—');" +
-                    "var bf=cell(el('span','ctc-pl-brief'+(r.brief||bc?'':' ctc-pl-brief-muted'),bc?null:bt));bf.title=r.brief||'';" +
-                    "if(bc){bf.appendChild(el('span','ctc-pl-status ctc-pl-status-'+bc,bt))}row.appendChild(bf);" +
+                    "bf=cell(el('span','ctc-pl-brief'+(r.brief||bc?'':' ctc-pl-brief-muted'),bc?null:bt));bf.title=r.brief||'';" +
+                    "if(bc){bf.appendChild(el('span','ctc-pl-status ctc-pl-status-'+bc,bt))}}row.appendChild(bf);" +
                     "var sa=r.satisfaction;var sp=cell(el('span','ctc-pl-sat'));" +
                     "sp.appendChild(el('span','ctc-pl-pill '+(!sa?'ctc-pl-sat-none':sa>=7?'ctc-pl-sat-hi':sa>=5?'ctc-pl-sat-mid':'ctc-pl-sat-low'),sa?String(sa):'—'));row.appendChild(sp);" +
                     // Length dash — mirrors server lenIsDash.
@@ -442,11 +536,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                     "op.appendChild(sv('" + PATH.open + "',15,'1.8',''));ac.appendChild(op);" +
                     "var rd=el('button','ctc-pl-icon-btn ctc-pl-redial');rd.type='button';rd.title='Call again';rd.setAttribute('aria-label','Call '+nm+' again');" +
                     "rd.appendChild(sv('" + PATH.call + "',14,'',''));" +
-                    // Closure-based onclick (NOT a setAttribute string) so `r` is
-                    // captured at row-build time.
-                    (redialJs
-                        ? "rd.onclick=function(){" + redialJs + "};"
-                        : "rd.disabled=true;rd.title='Phone unavailable';") +
+                    bindCallJs('rd') +
                     "ac.appendChild(rd);row.appendChild(ac);" +
                     "box.appendChild(row);" +
                 "});" +
@@ -490,6 +580,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
     // AI brief text, or a grey placeholder by call status.
     // `chip` set = render the text as a status chip instead of grey text.
+    // A voicemail reads "Voicemail" (+ the brief below): see buildBriefCellHtml.
     const briefOf = (r) => {
         if (r.brief) return { text: r.brief, muted: false, chip: '' };
         const rule = statusRule(r);
@@ -505,16 +596,32 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         return !!rule && (rule.len === 'dash' || (rule.len === 'dashZero' && durSecs(r) === 0));
     };
 
+    // Direction chip kind: 'missed' for a status rule with dir 'missed' (or
+    // an inbound call with no talk time), else 'in' / 'out'.
+    const dirKind = (r) => {
+        const inbound = r.direction === 'inbound';
+        if (isMissedCall(r) || (inbound && durSecs(r) === 0)) return 'missed';
+        return inbound ? 'in' : 'out';
+    };
+
+    // Chip before the time: arrow (the call's direction, 12 px) + word.
+    const buildDirChipHtml = (r) => {
+        const kind = dirKind(r);
+        const chip = DIR_CHIP[kind];
+        return '<span class="ctc-pl-status-dir ctc-pl-status-dir-' + kind + '" role="img" aria-label="' + chip.aria + '">' +
+            strokeSvg(r.direction === 'inbound' ? PATH.inbound : PATH.outbound, 12, '2.2') +
+            '<span>' + chip.word + '</span></span>';
+    };
+
     const SAT_CLASS = { high: 'ctc-pl-sat-hi', mid: 'ctc-pl-sat-mid', low: 'ctc-pl-sat-low', none: 'ctc-pl-sat-none' };
     const satClass = (sat) => SAT_CLASS[workspaceQueries.satClass(sat)];
 
     // Avg talk time counts only calls with talk time (duration > 0).
-    const buildKpiSubs = (rows) => {
+    const buildKpiSubs = (rows, missed) => {
         const scored = rows.filter((r) => r.satisfaction).length;
         const talked = rows.filter((r) => durSecs(r) > 0);
         const totalSec = talked.reduce((a, r) => a + durSecs(r), 0);
         const avg = talked.length ? Math.round(totalSec / talked.length) : 0;
-        const missed = rows.filter((r) => r.callStatus === MISSED).length;
         return {
             calls: missed ? missed + ' missed' : '',
             sat: rows.length ? scored + ' of ' + rows.length + ' scored' : '',
@@ -538,8 +645,6 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     };
 
     const buildCallRowHtml = (r, shellUrl) => {
-        const dir = r.direction === 'inbound' ? DIRECTION.inbound : DIRECTION.outbound;
-        const dirCls = dir.cls + (r.callStatus === MISSED ? ' ctc-pl-dir-missed' : '');
         const time = escapeHtml(r.timeOfDay || fmtTime(r.date) || '—');
         const companyId = encodeURIComponent(r.companyId || '');
         // Standard NetSuite Phone Call record URL — the ctc_ue_transcript_viewer
@@ -551,16 +656,21 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const redialOnclick = buildRedialOnclick(shellUrl, r.phone, r.companyId, r.companyName);
 
         return '<div class="ctc-pl-row" role="row">' +
-            '<span class="ctc-pl-when" role="cell">' + strokeSvg(dir.path, 13, '2.2', dirCls, dir.label) +
+            '<span class="ctc-pl-when" role="cell">' + buildDirChipHtml(r) +
                 '<span class="ctc-pl-time">' + time + '</span></span>' +
             '<span class="ctc-pl-who" role="cell">' +
                 '<a class="ctc-pl-company" href="/app/common/entity/custjob.nl?id=' + companyId + '" title="' + companyName + '">' + companyName + '</a>' +
                 '<span class="ctc-pl-contact">' + contact + '</span>' +
             '</span>' +
-            '<span class="ctc-pl-brief' + (brief.muted ? ' ctc-pl-brief-muted' : '') + '" role="cell" title="' + escapeHtml(r.brief || '') + '">' +
-                (brief.chip
-                    ? '<span class="ctc-pl-status ctc-pl-status-' + brief.chip + '">' + escapeHtml(brief.text) + '</span>'
-                    : escapeHtml(brief.text)) + '</span>' +
+            (r.voicemail === true
+                // A voicemail reads "Voicemail", with the AI brief below when present.
+                ? '<span class="ctc-pl-brief ctc-pl-brief-vm" role="cell" title="' + escapeHtml(r.brief || '') + '">' +
+                    '<span class="ctc-pl-mkind">Voicemail</span>' +
+                    (r.brief ? '<span class="ctc-pl-mbrief">' + escapeHtml(r.brief) + '</span>' : '') + '</span>'
+                : '<span class="ctc-pl-brief' + (brief.muted ? ' ctc-pl-brief-muted' : '') + '" role="cell" title="' + escapeHtml(r.brief || '') + '">' +
+                    (brief.chip
+                        ? '<span class="ctc-pl-status ctc-pl-status-' + brief.chip + '">' + escapeHtml(brief.text) + '</span>'
+                        : escapeHtml(brief.text)) + '</span>') +
             '<span class="ctc-pl-sat" role="cell"><span class="ctc-pl-pill ' + satClass(r.satisfaction) + '">' +
                 escapeHtml(r.satisfaction ? String(r.satisfaction) : '—') + '</span></span>' +
             '<span class="ctc-pl-dur" role="cell">' + escapeHtml(lenIsDash(r) ? '—' : fmtLen(r.duration)) + '</span>' +
@@ -573,6 +683,42 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                 ) +
             '</span>' +
         '</div>';
+    };
+
+    // One Missed-tab row: chip + time, customer (or the number), "Voicemail"
+    // (with the AI brief when present) or "Missed call", and Call back.
+    // The client rebuilder in buildRefreshOnclick mirrors this.
+    const buildMissedRowHtml = (r, shellUrl) => {
+        const name = r.companyName || '';
+        const phone = formatPhone(r.phone);
+        const time = escapeHtml(r.timeOfDay || fmtTime(r.date) || '—');
+        const whoMain = name && r.companyId
+            ? '<a class="ctc-pl-mco" href="/app/common/entity/custjob.nl?id=' + encodeURIComponent(r.companyId) + '" title="' + escapeHtml(name) + '">' + escapeHtml(name) + '</a>'
+            : '<span class="ctc-pl-mco">' + escapeHtml(name || phone || 'Unknown caller') + '</span>';
+        const whoSub = name ? (r.contactName || phone || '') : (r.contactName || '');
+        const callback = buildRedialOnclick(shellUrl, r.phone, r.companyId, r.companyName);
+        const label = 'Call back ' + (name || phone || 'caller');
+        return '<div class="ctc-pl-mrow" role="listitem">' +
+            '<span class="ctc-pl-mwhen">' + buildDirChipHtml(r) + '<span class="ctc-pl-mtime">' + time + '</span></span>' +
+            '<span class="ctc-pl-mwho">' + whoMain + '<span class="ctc-pl-msub">' + escapeHtml(whoSub) + '</span></span>' +
+            '<span class="ctc-pl-mtext"><span class="ctc-pl-mkind">' + (r.voicemail ? 'Voicemail' : 'Missed call') + '</span>' +
+                (r.voicemail && r.brief ? '<span class="ctc-pl-mbrief" title="' + escapeHtml(r.brief) + '">' + escapeHtml(r.brief) + '</span>' : '') +
+            '</span>' +
+            (callback
+                ? '<button class="ctc-pl-callback" type="button" aria-label="' + escapeHtml(label) + '" onclick="' + escapeHtml(callback) + '">' + callSvg(13) + '<span>Call back</span></button>'
+                : '<button class="ctc-pl-callback" type="button" disabled title="Phone unavailable" aria-label="Phone unavailable">' + callSvg(13) + '<span>Call back</span></button>') +
+        '</div>';
+    };
+
+    const buildMissedHtml = (opts, refreshOnclick) => {
+        if (opts.missedError) {
+            return buildStateHtml(MISSED_ERROR, ERROR_SUB,
+                refreshOnclick ? '<button class="ctc-pl-btn ctc-pl-btn-secondary" type="button" onclick="' + escapeHtml(RETRY_JS) + '">Try again</button>' : '',
+                ' title="' + escapeHtml(opts.missedError) + '"');
+        }
+        const rows = opts.missedRows || [];
+        if (!rows.length) return buildStateHtml(MISSED_EMPTY, '', '');
+        return rows.map((r) => buildMissedRowHtml(r, opts.shellUrl || '')).join('');
     };
 
     const buildStateHtml = (title, sub, buttonHtml, extraAttrs) => {
@@ -640,15 +786,26 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const noFollowUps = !!opts.tasksError || !totalTasks;
         const fuNoun = totalTasks === 1 ? 'follow-up' : 'follow-ups';
         const fuCount = escapeHtml(String(totalTasks));
-        const shownTasks = groups.reduce((n, g) => n + ((g.tasks || []).length), 0);
+        // Every task with its call, newest first (loadTaskGroups `rank` is
+        // the place in its created-DESC search), capped at TASK_LIMIT.
+        const flatTasks = [];
+        groups.forEach((g) => (g.tasks || []).forEach((t) => flatTasks.push({ task: t, call: g.call || {} })));
+        flatTasks.sort((a, b) => (typeof a.task.rank === 'number' && typeof b.task.rank === 'number') ? a.task.rank - b.task.rank : 0);
+        flatTasks.splice(TASK_LIMIT);
+        const shownTasks = flatTasks.length;
+        const allTasksShown = totalTasks <= shownTasks;
+        const missedTotal = missedCountOf(opts, rows);
 
         const placeCallOnclick = buildPlaceCallOnclick(shellUrl);
         const refreshOnclick = buildRefreshOnclick(restletUrl, shellUrl);
-        const subs = buildKpiSubs(rows);
+        const subs = buildKpiSubs(rows, missedTotal);
 
         // ── Header: title, period, Reporting Central, Call ──────────────────
         const reportBase = reportingUrl
             ? reportingUrl + (reportingUrl.indexOf('?') >= 0 ? '&' : '?') + 'range='
+            : '';
+        const fuReportBase = reportingUrl
+            ? reportingUrl + (reportingUrl.indexOf('?') >= 0 ? '&' : '?') + 'tab=followups&range='
             : '';
         const reportHtml = reportBase
             ? '<a class="ctc-pl-report" id="ctc-pl-report" href="' + escapeHtml(reportBase + 'today') + '" data-base="' + escapeHtml(reportBase) + '">' +
@@ -674,6 +831,9 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             callsHtml = buildCallsColumnHeaderHtml() + rows.map((r) => buildCallRowHtml(r, shellUrl)).join('');
         }
 
+        // ── Missed panel ────────────────────────────────────────────────────
+        const missedHtml = buildMissedHtml(opts, refreshOnclick);
+
         // ── Follow-ups panel ────────────────────────────────────────────────
         let tasksHtml;
         if (opts.tasksError) {
@@ -681,14 +841,17 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         } else {
             const callLengths = {};
             rows.forEach((r) => { if (r.id && r.duration) callLengths[String(r.id)] = fmtLen(r.duration); });
-            const taskRows = [];
-            groups.forEach((g) => {
-                (g.tasks || []).forEach((t) => {
-                    taskRows.push(buildTaskRowHtml(t, g.call || {}, restletUrl, callLengths));
-                });
-            });
+            const taskRows = flatTasks.map((x) => buildTaskRowHtml(x.task, x.call, restletUrl, callLengths));
+            const fuReportHtml = fuReportBase
+                ? '<a class="ctc-pl-fu-link" id="ctc-pl-fu-report" href="' + escapeHtml(fuReportBase + 'today') + '" data-base="' + escapeHtml(fuReportBase) + '">See all in Reporting Central ↗</a>'
+                : '';
             tasksHtml = '<div id="ctc-pl-tasks-container" class="ctc-pl-tasks">' + taskRows.join('') + '</div>' +
-                buildStateHtml('All caught up', 'No follow-ups are waiting for you.', '', ' id="ctc-pl-tasks-empty"');
+                buildStateHtml('All caught up', 'No follow-ups are waiting for you.', '', ' id="ctc-pl-tasks-empty"') +
+                '<div class="ctc-pl-fu-foot">' +
+                    '<span class="ctc-pl-fu-count">Showing <span class="ctc-pl-fu-shown">' + escapeHtml(String(shownTasks)) + '</span> of ' +
+                        '<span class="ctc-pl-fu-n">' + fuCount + '</span> · newest first</span>' +
+                    fuReportHtml +
+                '</div>';
         }
 
         const bulkOnclick = buildBulkApproveOnclick(restletUrl);
@@ -758,28 +921,33 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-tab:hover { color: #161513; }
 .ctc-pl-tab.ctc-pl-tab-active { font-weight: 600; color: #161513; box-shadow: inset 0 -2px 0 #161513; }
 .ctc-pl-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #FFF3D6; color: #8A5A00; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+.ctc-pl-badge.ctc-pl-badge-missed { background: #FCE9E7; color: #9A3A2C; }
+.ctc-pl-no-missed .ctc-pl-badge-missed { display: none; }
 .ctc-pl-root .ctc-pl-approve-all { display: none; margin: 0 0 8px auto; height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #D9D5CF; font-size: 12.5px; font-weight: 500; color: #161513; align-items: center; gap: 4px; }
 .ctc-pl-approve-all:hover:not(:disabled) { background: #F7F6F3; }
 .ctc-pl-root.ctc-pl-show-tasks .ctc-pl-approve-all { display: inline-flex; }
 
 /* Panels (class on the root picks one) */
 .ctc-pl-panel { padding: 4px 10px 0; }
-#ctc-pl-tab-tasks { display: none; }
-.ctc-pl-show-tasks #ctc-pl-tab-today { display: none; }
+#ctc-pl-tab-tasks, #ctc-pl-tab-missed { display: none; }
+.ctc-pl-show-tasks #ctc-pl-tab-today, .ctc-pl-show-missed #ctc-pl-tab-today { display: none; }
 .ctc-pl-show-tasks #ctc-pl-tab-tasks { display: block; }
+.ctc-pl-show-missed #ctc-pl-tab-missed { display: block; }
 .ctc-pl-show-tasks .ctc-pl-fubar { display: none; }
 
 /* Calls table */
-.ctc-pl-colhead, .ctc-pl-row { display: grid; grid-template-columns: 64px minmax(0, 1.3fr) minmax(0, 1.7fr) 56px 64px 80px; gap: 14px; align-items: center; }
+.ctc-pl-colhead, .ctc-pl-row { display: grid; grid-template-columns: 112px minmax(0, 1.3fr) minmax(0, 1.7fr) 56px 64px 80px; gap: 14px; align-items: center; }
 .ctc-pl-colhead { padding: 10px 12px; font-size: 11.5px; color: #5C5955; }
 .ctc-pl-r { text-align: right; }
 .ctc-pl-row { min-height: 56px; padding: 6px 12px; border-radius: 8px; transition: background-color 120ms ease; }
 .ctc-pl-row:hover { background: #F7F6F3; }
 .ctc-pl-when { display: flex; align-items: center; gap: 8px; }
-.ctc-pl-dir { display: block; flex: none; }
-.ctc-pl-dir-out { color: #0E7A4F; }
-.ctc-pl-dir-in { color: #1B6097; }
-.ctc-pl-dir.ctc-pl-dir-missed { color: #D9553F; }
+/* Direction chip before the time (In / Out / Missed) */
+.ctc-pl-status-dir { display: inline-flex; align-items: center; justify-content: flex-start; gap: 3px; flex: none; min-width: 70px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.ctc-pl-status-dir svg { display: block; flex: none; }
+.ctc-pl-status-dir-in { background: #E8F3FC; color: #1B6097; }
+.ctc-pl-status-dir-out { background: #F1EFEA; color: #5C5955; }
+.ctc-pl-status-dir-missed { background: #FCE9E7; color: #9A3A2C; }
 .ctc-pl-time { font-size: 13px; color: #5C5955; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ctc-pl-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .ctc-pl-company { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -787,6 +955,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-contact:empty { display: none; }
 .ctc-pl-brief { font-size: 13px; line-height: 1.45; color: #2E2C29; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ctc-pl-brief-muted { color: #8B8780; }
+.ctc-pl-brief.ctc-pl-brief-vm { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .ctc-pl-status { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.4; }
 .ctc-pl-status-missed { background: #FCE9E7; color: #9A3A2C; }
 .ctc-pl-status-quiet { background: #F1EFEA; color: #5C5955; }
@@ -810,6 +979,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 168px; padding: 16px; text-align: center; }
 .ctc-pl-state-title { font-size: 13.5px; font-weight: 500; }
 .ctc-pl-state-sub { font-size: 12px; color: #5C5955; }
+.ctc-pl-state-sub:empty { display: none; }
 .ctc-pl-btn { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; font-size: 12px; font-weight: 600; }
 .ctc-pl-btn-call { background: #0F1B30; color: #FFFFFF; }
 .ctc-pl-btn-call:hover:not(:disabled) { background: #1B2A44; }
@@ -835,6 +1005,23 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-reject svg, .ctc-pl-approve svg { display: block; }
 .ctc-pl-task-row.ctc-pl-task-leaving { opacity: 0; height: 0 !important; padding-top: 0; padding-bottom: 0; border-bottom-color: transparent; pointer-events: none; }
 #ctc-pl-tasks-empty { display: none; }
+.ctc-pl-fu-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 10px 12px 0; font-size: 12px; color: #5C5955; }
+.ctc-pl-fu-all .ctc-pl-fu-count { display: none; }
+.ctc-pl-root a.ctc-pl-fu-link { font-weight: 500; }
+
+/* Missed tab */
+.ctc-pl-mrow { display: grid; grid-template-columns: 112px minmax(0, 1.2fr) minmax(0, 1.6fr) auto; gap: 14px; align-items: center; min-height: 56px; padding: 6px 12px; border-radius: 8px; transition: background-color 120ms ease; }
+.ctc-pl-mrow:hover { background: #F7F6F3; }
+.ctc-pl-mwhen { display: flex; align-items: center; gap: 8px; }
+.ctc-pl-mtime { font-size: 13px; color: #5C5955; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ctc-pl-mwho, .ctc-pl-mtext { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ctc-pl-mco { font-size: 13.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctc-pl-msub, .ctc-pl-mbrief { font-size: 12px; color: #5C5955; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctc-pl-msub:empty { display: none; }
+.ctc-pl-mkind { font-size: 13px; color: #2E2C29; }
+.ctc-pl-callback { height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: rgba(20,185,129,0.10); color: #0E7A4F; font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ctc-pl-callback:hover:not(:disabled) { background: rgba(20,185,129,0.18); }
+.ctc-pl-callback svg { display: block; }
 
 /* Follow-up bar */
 .ctc-pl-fubar { display: flex; align-items: center; gap: 12px; margin: 10px 22px 4px; padding: 12px 14px; border-radius: 10px; background: #FFFBF0; box-shadow: inset 0 0 0 1px #F4E3B5; }
@@ -847,7 +1034,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-review:hover { background: #FFF6E0; }
 
 /* No follow-ups left: hide count UI, show "All caught up" */
-.ctc-pl-root.ctc-pl-no-fu .ctc-pl-approve-all, .ctc-pl-no-fu .ctc-pl-badge, .ctc-pl-no-fu .ctc-pl-fubar { display: none; }
+.ctc-pl-root.ctc-pl-no-fu .ctc-pl-approve-all, .ctc-pl-no-fu .ctc-pl-badge.ctc-pl-fu-n, .ctc-pl-no-fu .ctc-pl-fubar { display: none; }
 .ctc-pl-no-fu #ctc-pl-tasks-empty { display: flex; }
 
 /* Narrow portlet column */
@@ -871,9 +1058,14 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     .ctc-pl-tabs { padding: 12px 16px 0; }
     .ctc-pl-panel { padding: 8px 6px 0; }
     .ctc-pl-colhead { display: none; }
-    .ctc-pl-row { grid-template-columns: 13px auto minmax(0, 1fr) auto auto; grid-template-areas: "dir co co len act" "dir time brief len act"; column-gap: 10px; row-gap: 0; min-height: 48px; padding: 5px 10px; }
+    .ctc-pl-row { grid-template-columns: auto auto minmax(0, 1fr) auto auto; grid-template-areas: "dir co co len act" "dir time brief len act"; column-gap: 10px; row-gap: 0; min-height: 48px; padding: 5px 10px; }
     .ctc-pl-when, .ctc-pl-who { display: contents; }
-    .ctc-pl-dir { grid-area: dir; }
+    .ctc-pl-row .ctc-pl-status-dir { grid-area: dir; }
+    .ctc-pl-mrow { grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; row-gap: 2px; min-height: 48px; padding: 6px 10px; }
+    .ctc-pl-mwhen, .ctc-pl-mwho, .ctc-pl-mtext { grid-column: 1; }
+    .ctc-pl-callback { grid-column: 2; grid-row: 1 / span 3; }
+    .ctc-pl-mwho { flex-direction: row; gap: 6px; align-items: baseline; }
+    .ctc-pl-fu-foot { padding: 8px 10px 0; }
     .ctc-pl-company { grid-area: co; font-size: 13px; }
     .ctc-pl-time { grid-area: time; font-size: 11.5px; margin-right: -6px; }
     .ctc-pl-time::after { content: "·"; margin-left: 4px; }
@@ -898,7 +1090,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 }
 </style>
 
-<div class="ctc-pl-root${noFollowUps ? ' ctc-pl-no-fu' : ''}" id="ctc-pl-root" data-range="today" data-fu-total="${fuCount}">
+<div class="ctc-pl-root${noFollowUps ? ' ctc-pl-no-fu' : ''}${allTasksShown ? ' ctc-pl-fu-all' : ''}${missedTotal ? '' : ' ctc-pl-no-missed'}" id="ctc-pl-root" data-range="today" data-fu-total="${fuCount}">
     <div class="ctc-pl-head">
         <h2 class="ctc-pl-title">Sales Rep Central</h2>
         ${buildChipsHtml(restletUrl)}
@@ -932,12 +1124,16 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
     <div class="ctc-pl-tabs" role="tablist" aria-label="Sections">
         <button class="ctc-pl-tab ctc-pl-tab-active" type="button" role="tab" aria-selected="true" data-tab="today" onclick="${escapeHtml(buildTabOnclick('today'))}">Calls</button>
+        <button class="ctc-pl-tab" type="button" role="tab" aria-selected="false" data-tab="missed" onclick="${escapeHtml(buildTabOnclick('missed'))}">Missed <span class="ctc-pl-badge ctc-pl-badge-missed" id="ctc-pl-missed-n">${escapeHtml(String(missedTotal))}</span></button>
         <button class="ctc-pl-tab" type="button" role="tab" aria-selected="false" data-tab="tasks" onclick="${escapeHtml(buildTabOnclick('tasks'))}">Follow-ups <span class="ctc-pl-badge ctc-pl-fu-n">${fuCount}</span></button>
         ${approveAllHtml}
     </div>
 
     <div id="ctc-pl-tab-today" class="ctc-pl-panel" role="tabpanel">
         <div id="ctc-pl-calls" role="table" aria-label="Calls">${callsHtml}</div>
+    </div>
+    <div id="ctc-pl-tab-missed" class="ctc-pl-panel" role="tabpanel">
+        <div id="ctc-pl-missed" role="list" aria-label="Missed calls">${missedHtml}</div>
     </div>
     <div id="ctc-pl-tab-tasks" class="ctc-pl-panel" role="tabpanel">${tasksHtml}</div>
 

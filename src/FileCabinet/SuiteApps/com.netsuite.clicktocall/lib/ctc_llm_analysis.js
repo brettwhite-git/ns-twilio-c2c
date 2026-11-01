@@ -16,7 +16,12 @@
  *      LLM. Exported as ANALYSIS_PROMPT_PREFIX. Defines the output JSON
  *      shape (title, brief, summary, satisfaction_score, tone_keywords,
  *      action_items), the 1-10 satisfaction scoring guide, and conventions
- *      for tone keywords + action items.
+ *      for tone keywords + action items. buildAnalysisPrompt puts a date
+ *      reference line in front of it ("Today is <Weekday, YYYY-MM-DD>
+ *      (<time zone>). The call took place on <Weekday, YYYY-MM-DD>.") so
+ *      the model can turn "next Tuesday" into a date. action_items are
+ *      objects {"task": string, "due_date": "YYYY-MM-DD" | null}; plain
+ *      strings are still accepted downstream (back-compat).
  *
  *   2. MODEL PARAMETERS — modelFamily + temperature + maxTokens.
  *      Exported as DEFAULT_MODEL_PARAMS so callers can override per-call
@@ -48,9 +53,10 @@
  *     and model params could move into the customrecord_ctc_config singleton
  *     as CLOBTEXT fields with the in-source values acting as fallback.
  *   - Per-call logging of prompt + response would let us build an eval
- *     dataset for tuning. Currently we log only on parse failure
- *     (log.audit "CTC LLM JSON Parse Failed"). Wider logging is deferred
- *     until we have production volume.
+ *     dataset for tuning. Currently we log only the fallbacks (log.error
+ *     "CTC LLM quota below reserve" / "CTC LLM call failed" / "CTC LLM
+ *     JSON Parse Failed", with the Phone Call id). Wider logging is
+ *     deferred until we have production volume.
  *   - Per-account model selection (Cohere vs. Anthropic vs. OpenAI via
  *     N/llm 2026.1's expanded model catalog) could become a config knob
  *     after we benchmark output quality on the same eval set.
@@ -62,6 +68,8 @@ define(['N/llm', 'N/log'], (llm, log) => {
      * Prompt template prepended to the transcript text. The output JSON
      * shape declared here MUST match FALLBACK_ANALYSIS below and the field
      * writers in lib/ctc_transcript_utils.js#writePhoneCallEnrichmentFields.
+     * buildAnalysisPrompt puts the date reference line (buildDateLine) in
+     * front of it; "the CALL DATE given above" refers to that line.
      *
      * Embedded in source (not config record) so it ships with the SAFE-
      * reviewed bundle and cannot be misconfigured at runtime. See module
@@ -75,7 +83,7 @@ define(['N/llm', 'N/log'], (llm, log) => {
   "summary": "2-3 sentence summary of call purpose, key points, and outcome",
   "satisfaction_score": <integer 1-10>,
   "tone_keywords": ["keyword1", "keyword2", "keyword3"],
-  "action_items": ["item1", "item2"]
+  "action_items": [{"task": "Short follow-up the rep must do", "due_date": "YYYY-MM-DD or null"}]
 }
 
 SCORING GUIDE:
@@ -84,8 +92,63 @@ SCORING GUIDE:
 - 6-7: Positive, engaged, follow-up likely
 - 8-10: Highly positive, strong buying signals, deal progression
 
+ACTION ITEMS:
+- One object per follow-up: "task" is a short instruction, "due_date" is a date as YYYY-MM-DD or null.
+- Resolve relative timing ("tomorrow", "next Tuesday", "end of week", "in two weeks") against the CALL DATE given above, not against today.
+- Use null when the call gives no timing for that item. Do not guess a date.
+
 TRANSCRIPT:
 `;
+
+    const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const ISO_DATE = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/;
+
+    /**
+     * 'YYYY-MM-DD' that is a real calendar date → its weekday name, else ''.
+     * @param {*} iso
+     * @returns {string}
+     */
+    const weekdayOf = (iso) => {
+        const m = ISO_DATE.exec(typeof iso === 'string' ? iso : '');
+        if (!m) return '';
+        const y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+        const dt = new Date(Date.UTC(y, mo - 1, d));
+        if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return '';
+        return WEEKDAYS[dt.getUTCDay()];
+    };
+
+    const serverToday = () => {
+        const d = new Date();
+        const p2 = (n) => (n < 10 ? '0' : '') + n;
+        return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+    };
+
+    /**
+     * The date reference line that goes in front of the prompt:
+     * "Today is Sunday, 2026-11-01 (America/Los_Angeles). The call took
+     * place on Saturday, 2026-10-31." A missing or invalid `today` uses the
+     * server clock; a missing or invalid `callDate` uses today; the time
+     * zone part is left out when unknown.
+     * @param {{today?: string, callDate?: string, timezone?: string}} [context]
+     * @returns {string}
+     */
+    const buildDateLine = (context) => {
+        const c = context || {};
+        const today = weekdayOf(c.today) ? c.today : serverToday();
+        const callDate = weekdayOf(c.callDate) ? c.callDate : today;
+        const tz = typeof c.timezone === 'string' ? c.timezone.trim() : '';
+        return 'Today is ' + weekdayOf(today) + ', ' + today + (tz ? ' (' + tz + ')' : '') + '. ' +
+            'The call took place on ' + weekdayOf(callDate) + ', ' + callDate + '.';
+    };
+
+    /**
+     * Full prompt: date reference line, instructions, transcript.
+     * @param {string} transcriptText
+     * @param {{today?: string, callDate?: string, timezone?: string}} [context]
+     * @returns {string}
+     */
+    const buildAnalysisPrompt = (transcriptText, context) =>
+        buildDateLine(context) + '\n\n' + ANALYSIS_PROMPT_PREFIX + transcriptText;
 
     /**
      * Default LLM parameters.
@@ -127,7 +190,8 @@ TRANSCRIPT:
      * @property {string} summary - 2-3 sentence summary
      * @property {number} satisfaction_score - 1-10
      * @property {Array<string>} tone_keywords
-     * @property {Array<string>} action_items
+     * @property {Array<{task: string, due_date: (string|null)}|string>} action_items
+     *   objects from the current prompt; plain strings from older output
      */
     const FALLBACK_ANALYSIS = Object.freeze({
         title: '',
@@ -169,15 +233,23 @@ TRANSCRIPT:
      * catch in the scheduled poller (which would mark the call FAILED and
      * permanently lose the transcript).
      *
+     * Every fallback is logged with log.error: the reason (quota, the
+     * error name and message, or the JSON parse failure) and the Phone
+     * Call id from `context.phoneCallId`.
+     *
      * @param {string} transcriptText - formatted "[REP] ...\n[CUSTOMER] ..." text
-     * @param {{modelFamily?: any, modelParameters?: Object}} [opts] - override defaults
+     * @param {{modelFamily?: any, modelParameters?: Object}|null} [opts] - override defaults
+     * @param {{today?: string, callDate?: string, timezone?: string, phoneCallId?: (string|number)}} [context]
+     *   dates for the reference line (lib/ctc_time.analysisDates) and the
+     *   Phone Call id for the logs
      * @returns {AnalysisResult}
      */
-    const analyzeTranscript = (transcriptText, opts) => {
+    const analyzeTranscript = (transcriptText, opts, context) => {
+        const callRef = 'phoneCall=' + ((context && context.phoneCallId) || 'unknown');
         if (!hasQuota()) {
-            log.audit({
+            log.error({
                 title: 'CTC LLM quota below reserve',
-                details: 'Returning fallback analysis; transcript text still saved'
+                details: callRef + ' reason=quota — returning fallback analysis; transcript text still saved'
             });
             return Object.assign({}, FALLBACK_ANALYSIS);
         }
@@ -187,14 +259,14 @@ TRANSCRIPT:
         let response;
         try {
             response = llm.generateText({
-                prompt: ANALYSIS_PROMPT_PREFIX + transcriptText,
+                prompt: buildAnalysisPrompt(transcriptText, context),
                 modelFamily: params.modelFamily,
                 modelParameters: params.modelParameters
             });
         } catch (e) {
             log.error({
                 title: 'CTC LLM call failed',
-                details: 'name=' + (e && e.name) +
+                details: callRef + ' reason=llm_error name=' + (e && e.name) +
                          ' message=' + ((e && e.message) || String(e))
             });
             return Object.assign({}, FALLBACK_ANALYSIS);
@@ -206,18 +278,27 @@ TRANSCRIPT:
             .replace(/```\n?/g, '')
             .trim();
 
+        let parsed;
+        let parseError = '';
         try {
-            const parsed = JSON.parse(cleaned);
-            // Merge into fallback so missing keys default to neutral
-            // rather than undefined. The N/record field writes downstream
-            // call .substring() / .join() on these so undefined would crash.
-            return Object.assign({}, FALLBACK_ANALYSIS, parsed);
+            parsed = JSON.parse(cleaned);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) parseError = 'not a JSON object';
         } catch (e) {
-            log.audit({ title: 'CTC LLM JSON Parse Failed', details: cleaned.substring(0, 500) });
+            parseError = (e && e.message) || String(e);
+        }
+        if (parseError) {
+            log.error({
+                title: 'CTC LLM JSON Parse Failed',
+                details: callRef + ' reason=json_parse error=' + parseError + ' text=' + cleaned.substring(0, 500)
+            });
             return Object.assign({}, FALLBACK_ANALYSIS, {
                 summary: rawText.substring(0, 500)
             });
         }
+        // Merge into fallback so missing keys default to neutral
+        // rather than undefined. The N/record field writes downstream
+        // call .substring() / .join() on these so undefined would crash.
+        return Object.assign({}, FALLBACK_ANALYSIS, parsed);
     };
 
     return {
@@ -226,6 +307,8 @@ TRANSCRIPT:
         FALLBACK_ANALYSIS,
         QUOTA_RESERVE_THRESHOLD,
         hasQuota,
+        buildDateLine,
+        buildAnalysisPrompt,
         analyzeTranscript
     };
 });

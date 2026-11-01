@@ -65,5 +65,30 @@ define([], () => {
         });
     };
 
-    return { escapeHtml, escapeJs, safeJsonEmbed, setNoStoreHeaders };
+    /**
+     * Display form of a phone number. North American numbers (11 digits
+     * starting with 1, or 10 digits without a leading +) read
+     * "+1 (303) 555-0111" / "(303) 555-0111"; any other number comes back
+     * as given. Used by Reporting Central and the portlet (server render).
+     * @param {*} raw
+     * @returns {string}
+     */
+    const formatPhone = (raw) => {
+        const s = String(raw || '').trim();
+        const d = s.replace(/[^0-9]/g, '');
+        const nanp = (ten) => '(' + ten.slice(0, 3) + ') ' + ten.slice(3, 6) + '-' + ten.slice(6);
+        if (d.length === 11 && d.charAt(0) === '1') return '+1 ' + nanp(d.slice(1));
+        if (d.length === 10 && s.charAt(0) !== '+') return nanp(d);
+        return s;
+    };
+
+    // The same rules as formatPhone, as ES5 source for inline client JS
+    // (the portlet's period refresh). No backticks, no dollar-brace, no
+    // backslash escapes. Tests keep the two in step.
+    const FORMAT_PHONE_JS = "function(raw){var s=String(raw||'').trim();var d=s.replace(/[^0-9]/g,'');" +
+        "function n(t){return '('+t.slice(0,3)+') '+t.slice(3,6)+'-'+t.slice(6)}" +
+        "if(d.length===11&&d.charAt(0)==='1'){return '+1 '+n(d.slice(1))}" +
+        "if(d.length===10&&s.charAt(0)!=='+'){return n(d)}return s}";
+
+    return { escapeHtml, escapeJs, safeJsonEmbed, setNoStoreHeaders, formatPhone, FORMAT_PHONE_JS };
 });

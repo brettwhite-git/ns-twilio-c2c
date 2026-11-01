@@ -784,9 +784,20 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 action_items: []
             };
 
+            // Dates for the prompt's reference line and the proposed task
+            // due dates: today and the call date in the user's time zone.
+            const dates = ctcTime.analysisDates(phoneCallForCheck.getValue({ fieldId: 'custevent_ctc_call_started' })) || {};
+
             const hasLlmQuota = llmAnalysis.hasQuota();
             if (hasLlmQuota && transcriptText) {
-                analysis = utils.analyzeTranscript(transcriptText);
+                analysis = utils.analyzeTranscript(transcriptText, null, {
+                    today: dates.today, callDate: dates.callDate, timezone: dates.timezone, phoneCallId: body.recordId
+                });
+            } else if (!hasLlmQuota && transcriptText) {
+                log.error({
+                    title: 'CTC LLM analysis skipped',
+                    details: 'phoneCall=' + body.recordId + ' reason=quota — free usage below the reserve; transcript saved without AI fields'
+                });
             }
 
             const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: body.recordId, isDynamic: true });
@@ -796,7 +807,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 accountSid: config.accountSid,
                 transcriptText: transcriptText,
                 analysis: analysis,
-                includeDuration: false
+                includeDuration: false,
+                callDate: dates.callDate
             });
             const savedRecordId = phoneCall.save();
             saved = true;
@@ -950,16 +962,36 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      * @param {string} [body.filters.status]      - call status filter (e.g. 'Transcribed')
      * @param {boolean} [body.todayOnly]          - shortcut: filter to today only
      * @param {number} [body.limit=30]            - max rows to return
-     * @returns {Object} { rows: [...], total } or { error }
+     * @param {boolean} [body.includeMissed]      - also return `missed`: the same period's
+     *                                              missed calls and voicemails (portlet Missed tab)
+     * @param {number} [body.missedLimit=5]       - max missed rows (1-25)
+     * @returns {Object} { rows: [...], total, missed?: { rows, total } } or { error }
      */
     const getWorkspaceHistory = (body) => {
-        return workspaceQueries.loadHistoryRows({
-            userId: runtime.getCurrentUser().id,
+        const userId = runtime.getCurrentUser().id;
+        const result = workspaceQueries.loadHistoryRows({
+            userId: userId,
             filters: body.filters,
             todayOnly: !!body.todayOnly,
             dateRange: body.dateRange,
             limit: body.limit
         });
+        if (body.includeMissed && result && !result.error) {
+            const missedLimit = Math.min(25, Math.max(1, parseInt(String(body.missedLimit || ''), 10) || 5));
+            const missed = workspaceQueries.loadHistoryRows({
+                userId: userId,
+                filters: body.filters,
+                todayOnly: !!body.todayOnly,
+                dateRange: body.dateRange,
+                limit: missedLimit,
+                missedOnly: true,
+                countTotal: true
+            });
+            result.missed = missed.error
+                ? { error: missed.error, rows: [], total: 0 }
+                : { rows: missed.rows || [], total: missed.total || 0 };
+        }
+        return result;
     };
 
     /**

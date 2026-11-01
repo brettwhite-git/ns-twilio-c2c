@@ -371,30 +371,132 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
     const analyzeTranscript = llmAnalysis.analyzeTranscript;
 
     /**
+     * LLM action_items → [{ task, due_date }]. Accepts the current object
+     * shape {"task": string, "due_date": "YYYY-MM-DD" | null} and plain
+     * strings (older prompt; due_date null). Anything else, and items with
+     * an empty task, are dropped. due_date is passed on only when it is a
+     * string; it is NOT validated here (see resolveDueDate).
+     * @param {*} items
+     * @returns {Array<{task: string, due_date: (string|null)}>}
+     */
+    const normalizeActionItems = (items) => {
+        if (!Array.isArray(items)) return [];
+        /** @type {Array<{task: string, due_date: (string|null)}>} */
+        const out = [];
+        items.forEach((it) => {
+            if (typeof it === 'string') {
+                if (it.trim()) out.push({ task: it.trim(), due_date: null });
+                return;
+            }
+            if (it && typeof it === 'object' && typeof it.task === 'string' && it.task.trim()) {
+                out.push({ task: it.task.trim(), due_date: typeof it.due_date === 'string' ? it.due_date.trim() : null });
+            }
+        });
+        return out;
+    };
+
+    const DUE_MAX_DAYS = 90;
+    const DUE_FALLBACK_BUSINESS_DAYS = 3;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
+    /**
+     * 'YYYY-MM-DD' that is a real calendar date → local-midnight Date, else null.
+     * @param {*} value
+     * @returns {Date|null}
+     */
+    const parseIsoDay = (value) => {
+        const m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(typeof value === 'string' ? value.trim() : '');
+        if (!m) return null;
+        const y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+        const dt = new Date(y, mo - 1, d);
+        if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+        return dt;
+    };
+
+    /**
+     * `days` business days after `from` (Saturday and Sunday skipped).
+     * @param {Date} from
+     * @param {number} days
+     * @returns {Date}
+     */
+    const addBusinessDays = (from, days) => {
+        const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+        let left = days;
+        while (left > 0) {
+            d.setDate(d.getDate() + 1);
+            const wd = d.getDay();
+            if (wd !== 0 && wd !== 6) left--;
+        }
+        return d;
+    };
+
+    /**
+     * Proposed due date for one action item. The AI's due_date wins when it
+     * is a real 'YYYY-MM-DD' date from the call date through call date + 90
+     * days; anything else (null, malformed, impossible, in the past, too
+     * far out) gives call date + 3 business days.
+     * @param {*} dueDate - the item's due_date
+     * @param {Date} callDay - local midnight of the call date
+     * @returns {Date}
+     */
+    const resolveDueDate = (dueDate, callDay) => {
+        const due = parseIsoDay(dueDate);
+        if (due) {
+            const diffDays = Math.round((due.getTime() - callDay.getTime()) / DAY_MS);
+            if (diffDays >= 0 && diffDays <= DUE_MAX_DAYS) return due;
+        }
+        return addBusinessDays(callDay, DUE_FALLBACK_BUSINESS_DAYS);
+    };
+
+    /**
      * Spawn one customrecord_ctc_proposed_task per non-empty action item.
      * Called from inside writePhoneCallEnrichmentFields so both LLM-callers
      * (RESTlet checkTranscript + Scheduled Script poll) get this for free.
      * Failures here never block enrichment — wrapped in try/catch at the call site.
      *
+     * Due date per item: resolveDueDate (the AI date when valid, else call
+     * date + 3 business days).
+     *
      * @param {string|number} phoneCallId - the source Phone Call internal ID
      * @param {Object} analysis - LLM output (expects analysis.action_items[] array)
+     * @param {string} [callDate] - 'YYYY-MM-DD' local call date; today when missing or invalid
      * @returns {Array<number>} IDs of created proposed_task records
      */
-    const createProposedTasksFromAnalysis = (phoneCallId, analysis) => {
-        const items = (analysis && analysis.action_items) || [];
-        if (!Array.isArray(items) || !items.length) return [];
-        const due = new Date();
-        due.setDate(due.getDate() + 3);
-        // Filter for non-empty STRING entries — guards against LLM returning
-        // object-shaped items like {task:'x', due:'y'} which String()'d become '[object Object]'.
-        return items.filter((t) => typeof t === 'string' && t.trim()).map((text) => {
+    const createProposedTasksFromAnalysis = (phoneCallId, analysis, callDate) => {
+        const items = normalizeActionItems(analysis && analysis.action_items);
+        if (!items.length) return [];
+        const now = new Date();
+        const callDay = parseIsoDay(callDate) || new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        return items.map((item) => {
             const rec = record.create({ type: 'customrecord_ctc_proposed_task' });
             rec.setValue({ fieldId: 'custrecord_ctc_pt_phone_call', value: phoneCallId });
-            rec.setValue({ fieldId: 'custrecord_ctc_pt_text', value: String(text).trim() });
+            rec.setValue({ fieldId: 'custrecord_ctc_pt_text', value: item.task });
             rec.setText({ fieldId: 'custrecord_ctc_pt_status', text: 'Pending' });
-            rec.setValue({ fieldId: 'custrecord_ctc_pt_proposed_due', value: due });
+            rec.setValue({ fieldId: 'custrecord_ctc_pt_proposed_due', value: resolveDueDate(item.due_date, callDay) });
             return rec.save({ ignoreMandatoryFields: true });
         });
+    };
+
+    /**
+     * Title when the AI gave no title and no summary: "Voicemail from
+     * <who>", "Inbound call from <who>" or "Call to <who>". <who> is the
+     * company, else the contact, else the phone number, else "unknown".
+     * Never the recording SID.
+     * @param {Object} phoneCallRec
+     * @returns {string}
+     */
+    const fallbackCallTitle = (phoneCallRec) => {
+        const read = (fn, fieldId) => {
+            try {
+                return String(phoneCallRec[fn]({ fieldId: fieldId }) || '').trim();
+            } catch (e) {
+                return '';
+            }
+        };
+        const who = read('getText', 'company') || read('getText', 'contact') || read('getValue', 'phone') || 'unknown';
+        if (isChecked(phoneCallRec.getValue({ fieldId: 'custevent_ctc_voicemail' }))) return 'Voicemail from ' + who;
+        if (isChecked(phoneCallRec.getValue({ fieldId: 'custevent_ctc_inbound' }))) return 'Inbound call from ' + who;
+        return 'Call to ' + who;
     };
 
     /**
@@ -414,6 +516,7 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
      *                                  satisfaction_score, tone_keywords, action_items })
      * @param {boolean} [opts.includeDuration=false] - whether to set custevent_ctc_duration
      *                                                 from recording.duration (Scheduled Script path does)
+     * @param {string} [opts.callDate] - 'YYYY-MM-DD' local call date, for proposed task due dates
      */
     const writePhoneCallEnrichmentFields = (phoneCallRec, opts) => {
         const recording = opts.recording || {};
@@ -422,11 +525,14 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         let title = (analysis.title || '').substring(0, 80);
         if (!title) {
             const firstClause = (analysis.summary || '').split(/[.!?]/)[0] || '';
-            title = firstClause.substring(0, 60) || `Call — ${recording.sid}`;
+            title = firstClause.trim().substring(0, 60);
         }
-        // A voicemail keeps its marker in the title: 'Voicemail: <AI title>'.
-        if (isChecked(phoneCallRec.getValue({ fieldId: 'custevent_ctc_voicemail' })) &&
+        if (!title) {
+            // No AI title or summary: a plain-words title, never the SID.
+            title = fallbackCallTitle(phoneCallRec).substring(0, 80);
+        } else if (isChecked(phoneCallRec.getValue({ fieldId: 'custevent_ctc_voicemail' })) &&
             title.indexOf(VOICEMAIL_TITLE_PREFIX) !== 0) {
+            // A voicemail keeps its marker in the title: 'Voicemail: <AI title>'.
             title = (VOICEMAIL_TITLE_PREFIX + title).substring(0, 80);
         }
 
@@ -441,14 +547,15 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_summary', value: analysis.summary || '' });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_satisfaction', value: analysis.satisfaction_score || 5 });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_tone_keywords', value: (analysis.tone_keywords || []).join(', ') });
-        phoneCallRec.setValue({ fieldId: 'custevent_ctc_action_items', value: (analysis.action_items || []).join('\n') });
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_action_items',
+            value: normalizeActionItems(analysis.action_items).map((i) => i.task).join('\n') });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_brief', value: (analysis.brief || analysis.summary || '').substring(0, 120) });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_processed', value: true });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_call_status', value: CALL_STATUS.TRANSCRIBED });
 
         try {
             if (phoneCallRec.id) {
-                createProposedTasksFromAnalysis(phoneCallRec.id, analysis);
+                createProposedTasksFromAnalysis(phoneCallRec.id, analysis, opts.callDate);
             }
         } catch (e) {
             log.error({ title: 'CTC Proposed Task Creation Failed', details: e.toString() });
@@ -590,7 +697,10 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         fetchSentences,
         formatTranscript,
         analyzeTranscript,
+        normalizeActionItems,
+        resolveDueDate,
         createProposedTasksFromAnalysis,
+        fallbackCallTitle,
         writePhoneCallEnrichmentFields,
         markCallStatus,
         lookupContactCompany,

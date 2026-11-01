@@ -47,11 +47,23 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
 
     const CSV_HEADERS = ['When', 'Direction', 'Customer', 'Contact', 'Phone', 'Length (s)', 'Satisfaction', 'After the call'];
 
-    // Direction icons (24 grid). Colour plus aria-label, never colour alone.
+    // Direction chip before the time in call rows (matches the portlet's
+    // ctc-pl-status-dir): word + arrow + aria-label, never colour alone.
+    // Missed = status 'Missed', a voicemail, or an inbound call with no
+    // talk time; the arrow is the call's own direction. Fixed min-width so
+    // the times line up.
+    const DIR_CHIP = {
+        in:     { word: 'In',     aria: 'Inbound call' },
+        out:    { word: 'Out',    aria: 'Outbound call' },
+        missed: { word: 'Missed', aria: 'Missed call' }
+    };
+    const ARROW = { inbound: 'M17 7L7 17M15 17H7V9', outbound: 'M7 17L17 7M9 7h8v8' };
+
+    // Direction labels for the CSV (directionKey: missed = not connected).
     const ICONS = {
-        outbound: { label: 'Outbound', color: '#0E7A4F', path: 'M7 17L17 7M9 7h8v8' },
-        inbound: { label: 'Inbound', color: '#1B6097', path: 'M17 7L7 17M15 17H7V9' },
-        missed: { label: 'Missed', color: '#B83A33', path: 'M15 9l-6 6M9 9l6 6' }
+        outbound: { label: 'Outbound' },
+        inbound: { label: 'Inbound' },
+        missed: { label: 'Missed' }
     };
 
     const SEARCH_ICON = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5C5955" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
@@ -162,20 +174,9 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
         return Math.floor(s / 60) + ':' + (sec < 10 ? '0' : '') + sec;
     };
 
-    /**
-     * E.164 or loose digits to a readable North American number; other
-     * numbers come back as given.
-     * @param {*} raw
-     * @returns {string}
-     */
-    const formatPhone = (raw) => {
-        const s = String(raw || '').trim();
-        const d = s.replace(/[^0-9]/g, '');
-        const nanp = (ten) => '(' + ten.slice(0, 3) + ') ' + ten.slice(3, 6) + '-' + ten.slice(6);
-        if (d.length === 11 && d.charAt(0) === '1') return '+1 ' + nanp(d.slice(1));
-        if (d.length === 10 && s.charAt(0) !== '+') return nanp(d);
-        return s;
-    };
+    // E.164 or loose digits to a readable North American number; other
+    // numbers come back as given (shared with the portlet: lib/ctc_html).
+    const formatPhone = ctcHtml.formatPhone;
 
     /**
      * "After the call" text and its tone for a call row.
@@ -200,6 +201,14 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
     const satClass = (n) => SAT_CLASS[wq.satClass(n)];
 
     const directionKey = (row) => (wq.isUnconnected(row) ? 'missed' : (row.direction === 'inbound' ? 'inbound' : 'outbound'));
+
+    // Direction chip kind for a call row: 'missed' | 'in' | 'out'.
+    // Missed = status 'Missed', a voicemail, or an inbound call with no talk time.
+    const dirChipKind = (row) => {
+        const inbound = row.direction === 'inbound';
+        if (row.callStatus === 'Missed' || row.voicemail === true || (inbound && wq.isUnconnected(row))) return 'missed';
+        return inbound ? 'in' : 'out';
+    };
 
     // ─── CSV ───────────────────────────────────────────────────────────────
 
@@ -378,8 +387,14 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
         return '<section class="rc-kpis" aria-label="Summary">' + cells.map(kpiCell).join('') + '</section>';
     };
 
+    const dirChip = (r) => {
+        const kind = dirChipKind(r);
+        return '<span class="rc-dir rc-dir-' + kind + '" role="img" aria-label="' + DIR_CHIP[kind].aria + '">' +
+            svgIcon(r.direction === 'inbound' ? ARROW.inbound : ARROW.outbound, { size: 12, width: 2.2 }) +
+            '<span>' + DIR_CHIP[kind].word + '</span></span>';
+    };
+
     const callRow = (r, m) => {
-        const dir = ICONS[directionKey(r)];
         const after = afterCall(r, m.pendingByCall[r.id] || 0);
         const sat = satClass(r.satisfaction);
         const multiDay = m.state.range !== 'today' && m.state.range !== 'yesterday';
@@ -387,7 +402,7 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
         const company = r.companyName || 'Unknown caller';
         const contact = r.contactName || (r.companyId ? 'Main line' : formatPhone(r.phone));
         return '<div role="row" class="rc-row">' +
-            '<span role="cell" class="rc-when">' + svgIcon(dir.path, { stroke: dir.color, width: 2.2, label: dir.label }) +
+            '<span role="cell" class="rc-when">' + dirChip(r) +
                 '<span class="rc-when-text"><a class="rc-row-link" href="' + escapeHtml(CALL_URL + encodeURIComponent(r.id)) + '" aria-label="' +
                 escapeHtml('Open call with ' + company + ', ' + [r.date, r.timeOfDay].filter(Boolean).join(' ')) + '">' + escapeHtml(when) + '</a>' +
                 (multiDay && r.timeOfDay && r.date ? '<span class="rc-date">' + escapeHtml(r.date) + '</span>' : '') + '</span></span>' +
@@ -396,7 +411,11 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
                     ? '<a class="rc-co" href="' + escapeHtml(ENTITY_URL + encodeURIComponent(r.companyId)) + '">' + escapeHtml(company) + '</a>'
                     : '<span class="rc-co">' + escapeHtml(company) + '</span>') +
                 '<span class="rc-contact">' + escapeHtml(contact) + '</span></span>' +
-            '<span role="cell" class="rc-after rc-' + after.tone + '">' + escapeHtml(after.text) + '</span>' +
+            (r.voicemail === true
+                // A voicemail reads "Voicemail", with the AI brief below when present.
+                ? '<span role="cell" class="rc-after rc-vm"><span class="rc-vm-kind">Voicemail</span>' +
+                    (r.brief ? '<span class="rc-vm-brief" title="' + escapeHtml(r.brief) + '">' + escapeHtml(r.brief) + '</span>' : '') + '</span>'
+                : '<span role="cell" class="rc-after rc-' + after.tone + '">' + escapeHtml(after.text) + '</span>') +
             '<span role="cell"><span class="rc-sat rc-sat-' + sat + '">' + (sat === 'none' ? '—' : escapeHtml(String(r.satisfaction))) + '</span></span>' +
             '<span role="cell" class="rc-len">' + escapeHtml(formatLength(r.duration)) + '</span>' +
             '</div>';
@@ -570,6 +589,7 @@ ${skeleton()}
     --seg: #F4F2EE; --panel: #FAFAF8; --input: #D9D5CF; --link: #1B6097; --link-hover: #345D7E;
     --blue: #345D7E; --blue-hover: #2B4D69; --focus: #74C0FC;
     --good-fg: #0E6B45; --good-bg: #E3F5EC; --mid-fg: #8A5A00; --mid-bg: #FFF3D6; --low-fg: #9A2A23; --low-bg: #FCE9E7;
+    --in-fg: var(--link); --in-bg: #E8F3FC; --out-fg: var(--muted); --out-bg: var(--line-soft); --missed-fg: #9A3A2C; --missed-bg: #FCE9E7;
     --font: ${ctcFonts.FONT_STACK};
     --mono: ${ctcFonts.MONO_STACK};
   }
@@ -628,8 +648,8 @@ ${skeleton()}
   .rc-btn-quiet:hover { color: var(--link-hover); }
   .rc-card { border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(22,21,19,0.08), 0 1px 2px rgba(22,21,19,0.04); }
   .rc-scroll { overflow-x: auto; }
-  .rc-table { min-width: 620px; }
-  .rc-row { position: relative; display: grid; grid-template-columns: 90px minmax(180px, 1.4fr) minmax(160px, 1.6fr) 56px 64px; gap: 14px;
+  .rc-table { min-width: 680px; }
+  .rc-row { position: relative; display: grid; grid-template-columns: 150px minmax(180px, 1.4fr) minmax(160px, 1.6fr) 56px 64px; gap: 14px;
     align-items: center; min-height: 58px; padding: 0 18px; border-bottom: 1px solid var(--line-soft); transition: background-color 120ms ease; }
   .rc-row:last-child { border-bottom: 0; }
   .rc-row:not(.rc-row-head):hover { background: var(--panel); }
@@ -637,6 +657,11 @@ ${skeleton()}
   .rc-right { text-align: right; }
   .rc-when { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .rc-when svg { flex: none; }
+  .rc-dir { display: inline-flex; align-items: center; justify-content: flex-start; gap: 3px; flex: none; min-width: 70px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+  .rc-dir svg { display: block; }
+  .rc-dir-in { background: var(--in-bg); color: var(--in-fg); }
+  .rc-dir-out { background: var(--out-bg); color: var(--out-fg); }
+  .rc-dir-missed { background: var(--missed-bg); color: var(--missed-fg); }
   .rc-when-text { display: flex; flex-direction: column; min-width: 0; }
   .rc-row-link { color: var(--muted); text-decoration: none; }
   .rc-row-link:hover { color: var(--muted); }
@@ -650,6 +675,8 @@ ${skeleton()}
   a.rc-co:hover { color: var(--link); text-decoration: underline; }
   .rc-contact { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rc-after { font-size: 13px; }
+  .rc-vm { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .rc-vm-brief { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .rc-muted { color: var(--muted); }
   .rc-warn { color: var(--mid-fg); }
   .rc-bad { color: var(--low-fg); }

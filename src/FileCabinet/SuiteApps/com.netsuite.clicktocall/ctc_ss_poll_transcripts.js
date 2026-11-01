@@ -16,7 +16,7 @@
  *     governance budget: after Phases A-C it often had too little left.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile', './lib/ctc_call_claim'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile, callClaim) => {
+define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile', './lib/ctc_call_claim', './lib/ctc_time'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile, callClaim, ctcTime) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
@@ -107,7 +107,7 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                 'AND',
                 ['custevent_ctc_call_sid', 'isnotempty', '']
             ],
-            columns: ['internalid', 'custevent_ctc_call_sid', 'custevent_ctc_inbound']
+            columns: ['internalid', 'custevent_ctc_call_sid', 'custevent_ctc_inbound', 'custevent_ctc_call_started']
         }).run().getRange({ start: 0, end: 50 });
 
         return results.map((r) => {
@@ -115,7 +115,9 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             return {
                 recordId: r.id,
                 callSid: r.getValue('custevent_ctc_call_sid'),
-                inbound: inbound === true || inbound === 'T'
+                inbound: inbound === true || inbound === 'T',
+                // ISO-8601 UTC; the call date for the AI prompt and due dates.
+                callStarted: r.getValue('custevent_ctc_call_started') || ''
             };
         });
     };
@@ -391,7 +393,7 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         }
     };
 
-    const updatePhoneCallRecord = (recordId, recording, config, transcriptText, analysis) => {
+    const updatePhoneCallRecord = (recordId, recording, config, transcriptText, analysis, callDate) => {
         const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: recordId, isDynamic: true });
         callClaim.clearClaimOnRecord(phoneCall);
         utils.writePhoneCallEnrichmentFields(phoneCall, {
@@ -399,7 +401,8 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             accountSid: config.accountSid,
             transcriptText: transcriptText,
             analysis: analysis,
-            includeDuration: true
+            includeDuration: true,
+            callDate: callDate
         });
         return phoneCall.save();
     };
@@ -485,11 +488,21 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             action_items: []
         };
 
+        // Today and the call date in the user's time zone: the prompt's
+        // reference line and the proposed task due dates.
+        const dates = ctcTime.analysisDates(call.callStarted) || {};
         if (ctx.hasLlmQuota && transcriptText) {
-            analysis = utils.analyzeTranscript(transcriptText);
+            analysis = utils.analyzeTranscript(transcriptText, null, {
+                today: dates.today, callDate: dates.callDate, timezone: dates.timezone, phoneCallId: call.recordId
+            });
+        } else if (!ctx.hasLlmQuota && transcriptText) {
+            log.error({
+                title: 'CTC LLM analysis skipped',
+                details: `phoneCall=${call.recordId} reason=quota — free usage below the reserve; transcript saved without AI fields`
+            });
         }
 
-        updatePhoneCallRecord(call.recordId, recording, ctx.config, transcriptText, analysis);
+        updatePhoneCallRecord(call.recordId, recording, ctx.config, transcriptText, analysis, dates.callDate);
 
         // Sprint 2 U4 (HIGH-4) — handle the new deleteRecording
         // return shape. TRANSIENT_ERROR means we couldn't reach

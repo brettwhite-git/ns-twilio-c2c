@@ -98,5 +98,52 @@ define(['N/format', 'N/config', 'N/log'], (format, config, log) => {
         }
     };
 
-    return { userTimezone, clearTimezoneCache, localParts, isoUtc, parseIsoUtc, localTimeOfIso };
+    const pad2 = (n) => (n < 10 ? '0' : '') + n;
+
+    /**
+     * The wall-clock date of an instant in `tz` as 'YYYY-MM-DD', or ''.
+     * N/format writes the date in the user's own format, so the date part
+     * of localParts goes back through format.parse (DATE) to read y/m/d.
+     * @param {number} ms - epoch ms
+     * @param {string} tz - time zone id, or '' for the N/format default
+     * @returns {string}
+     */
+    const localIsoDate = (ms, tz) => {
+        try {
+            const parts = localParts(ms, tz);
+            if (!parts) return '';
+            const d = format.parse({ value: parts.date, type: format.Type.DATE });
+            if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+            return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+        } catch (e) {
+            return '';
+        }
+    };
+
+    /** Server-clock 'YYYY-MM-DD' of an instant (last-resort fallback). */
+    const serverIsoDate = (ms) => {
+        const d = new Date(ms);
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    };
+
+    /**
+     * Dates for the AI analysis prompt: today and the call date in the
+     * user's time zone (userTimezone), as 'YYYY-MM-DD'. The call date comes
+     * from the stored ISO start (custevent_ctc_call_started) when it reads,
+     * else it is today. When N/format cannot give a date, the server clock
+     * is used, so both dates are always set.
+     * @param {*} callStartedIso - custevent_ctc_call_started value
+     * @param {number} [nowMs] - defaults to Date.now()
+     * @returns {{today: string, callDate: string, timezone: string}}
+     */
+    const analysisDates = (callStartedIso, nowMs) => {
+        const now = typeof nowMs === 'number' ? nowMs : Date.now();
+        const tz = userTimezone();
+        const today = localIsoDate(now, tz) || serverIsoDate(now);
+        const startedMs = parseIsoUtc(callStartedIso);
+        const callDate = startedMs === null ? today : (localIsoDate(startedMs, tz) || serverIsoDate(startedMs));
+        return { today: today, callDate: callDate, timezone: tz };
+    };
+
+    return { userTimezone, clearTimezoneCache, localParts, isoUtc, parseIsoUtc, localTimeOfIso, localIsoDate, analysisDates };
 });

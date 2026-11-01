@@ -168,8 +168,14 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      *   todayOnly?: boolean,
      *   dateRange?: string,
      *   limit?: number,
-     *   bookCustomerIds?: Array<string>
+     *   bookCustomerIds?: Array<string>,
+     *   missedOnly?: boolean,
+     *   countTotal?: boolean
      * }} [params]
+     * `missedOnly` keeps only missed calls and voicemails (status 'Missed'
+     * OR custevent_ctc_voicemail T). `countTotal` makes `total` the number
+     * of matching calls, not only the rows returned (runPaged count, only
+     * when the limit may have cut the list).
      * @returns {{rows: Array<Object>, total: number, error?: string}} `{error}` on failure
      */
     const loadHistoryRows = (params) => {
@@ -229,11 +235,16 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             }
             if (filters.satMin) searchFilters.push('AND', ['custevent_ctc_satisfaction', 'greaterthanorequalto', String(filters.satMin)]);
             if (filters.status) searchFilters.push('AND', ['custevent_ctc_call_status', 'is', filters.status]);
+            if (p.missedOnly) {
+                searchFilters.push('AND', [
+                    ['custevent_ctc_call_status', 'is', 'Missed'], 'OR', ['custevent_ctc_voicemail', 'is', 'T']
+                ]);
+            }
 
             // `createddate` is the second sort key so calls on the same day
             // come newest first (startdate has no time part). The rows are
             // then re-ordered inside each day by their effective time.
-            const results = search.create({
+            const historySearch = search.create({
                 type: search.Type.PHONE_CALL,
                 filters: searchFilters,
                 columns: [
@@ -248,9 +259,11 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     'custevent_ctc_satisfaction',
                     'custevent_ctc_duration',
                     'custevent_ctc_call_status',
-                    'custevent_ctc_inbound'
+                    'custevent_ctc_inbound',
+                    'custevent_ctc_voicemail'
                 ]
-            }).run().getRange({ start: 0, end: limit });
+            });
+            const results = historySearch.run().getRange({ start: 0, end: limit });
 
             const rows = results.map((r) => {
                 const duration = parseInt(r.getValue('custevent_ctc_duration'), 10) || 0;
@@ -259,6 +272,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                 // calls the rep answered in the phone, else outbound. Missed
                 // inbound calls are not logged as Phone Calls in the spike.
                 const inbound = r.getValue('custevent_ctc_inbound');
+                const voicemail = r.getValue('custevent_ctc_voicemail');
                 return {
                     id: r.id,
                     date: r.getValue('startdate') || '',
@@ -279,6 +293,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     duration: duration,
                     callStatus: callStatus,
                     direction: (inbound === true || inbound === 'T') ? 'inbound' : 'outbound',
+                    voicemail: voicemail === true || voicemail === 'T',
                     isMissed: false,
                     entityType: ''
                 };
@@ -290,7 +305,10 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             // customer for unique companyIds. Same pattern loadTaskGroups uses.
             enrichRowsWithEntityType(rows);
 
-            return { rows: sortWithinDay(rows), total: rows.length };
+            const total = (p.countTotal && results.length >= limit && historySearch.runPaged)
+                ? historySearch.runPaged({ pageSize: 1000 }).count
+                : rows.length;
+            return { rows: sortWithinDay(rows), total: total };
         } catch (e) {
             log.error({ title: 'CTC loadHistoryRows Failed', details: e.message || e });
             return { error: 'History fetch failed', rows: [], total: 0 };
@@ -372,8 +390,11 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             const taskSearch = search.create({
                 type: 'customrecord_ctc_proposed_task',
                 filters: filters,
+                // Newest first: created DESC, then internal id DESC (created
+                // has minute precision, so same-minute tasks need a tie-break).
                 columns: [
                     { name: 'created', sort: search.Sort.DESC },
+                    { name: 'internalid', sort: search.Sort.DESC },
                     'custrecord_ctc_pt_phone_call',
                     'custrecord_ctc_pt_text',
                     'custrecord_ctc_pt_status',
@@ -403,11 +424,18 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                 return extractText(r.getValue(col));
             };
 
+            // Groups keep the order of their newest task. Object.keys would
+            // put integer-like call ids in ascending order, so the order
+            // lives in its own array. Each task carries `rank` (its place
+            // in the newest-first search) so callers can flatten the groups
+            // and still list tasks newest first.
             const groupsByCallId = {};
-            results.forEach((r) => {
+            const groupOrder = [];
+            results.forEach((r, rank) => {
                 const callValue = r.getValue('custrecord_ctc_pt_phone_call');
                 const callId = extractId(callValue) || callValue || '';
                 if (!groupsByCallId[callId]) {
+                    groupOrder.push(callId);
                     groupsByCallId[callId] = {
                         call: {
                             id: callId,
@@ -432,6 +460,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
 
                 groupsByCallId[callId].tasks.push({
                     id: r.id,
+                    rank: rank,
                     text: r.getValue('custrecord_ctc_pt_text') || '',
                     status: localText('custrecord_ctc_pt_status'),
                     proposedDue: r.getValue('custrecord_ctc_pt_proposed_due') || '',
@@ -442,7 +471,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                 });
             });
 
-            const groups = Object.keys(groupsByCallId).map((k) => groupsByCallId[k]);
+            const groups = groupOrder.map((k) => groupsByCallId[k]);
 
             // Second-pass batched stage lookup so each group.call gets a Lead /
             // Prospect / Customer label. NetSuite doesn't support the 3-hop join
