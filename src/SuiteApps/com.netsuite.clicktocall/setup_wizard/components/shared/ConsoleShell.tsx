@@ -27,7 +27,6 @@ const subtitleFor = (section: SectionName): string => {
         case 'inbound':     return 'Inbound calls';
         case 'voice':       return 'Voice config';
         case 'credentials': return 'Credentials';
-        case 'health':      return 'Health';
     }
 };
 

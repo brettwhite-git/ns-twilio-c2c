@@ -462,7 +462,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             assignments: null,
             preflight: null,
             activity: null,
-            recentCalls: null,
             drift: null,
             loading: false,
             phonesEmployees: null,
@@ -570,18 +569,16 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         store.dispatch(Action.consoleLoadStart());
         const safe = (promise) => promise.catch(() => null);
         try {
-            const [snapshot, assignments, preflight, recentCalls] = await Promise.all([
+            const [snapshot, assignments, preflight] = await Promise.all([
                 safe(wizardCall('wizardSnapshot', {})),
                 safe(wizardCall('wizardLoadAssignments', {})),
-                safe(wizardCall('wizardRunPreflight', {})),
-                safe(wizardCall('wizardListRecentCalls', { limit: 25 }))
+                safe(wizardCall('wizardRunPreflight', {}))
             ]);
             const snap = snapshot && snapshot.snapshot;
             const slice = {
                 snapshot: snap || null,
                 assignments: (assignments && assignments.items) || [],
-                preflight: (preflight && preflight.checks) || [],
-                recentCalls: (recentCalls && recentCalls.items) || []
+                preflight: (preflight && preflight.checks) || []
             };
             store.dispatch(Action.consoleLoadSuccess(slice));
         }
@@ -1552,6 +1549,335 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const toRow = (raw) => {
+        const r = (raw || {});
+        return {
+            employeeId: String(r.employeeId ?? ''),
+            employeeName: String(r.employeeName ?? ''),
+            canReceive: r.canReceive === true,
+            state: String(r.state ?? ''),
+            lastSeen: String(r.lastSeen ?? ''),
+            lastChange: String(r.lastChange ?? ''),
+            stale: r.stale !== false
+        };
+    };
+    async function loadPresence() {
+        if (store.getState().presence.loading)
+            return;
+        store.dispatch(Action.presenceLoadStart());
+        try {
+            const result = (await wizardCall('wizardLoadPresence', {}));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.presenceLoadFailure((result && (result.message || result.error)) || 'Could not load phone status'));
+                return;
+            }
+            const serverNow = Date.parse(result.now || '');
+            const skew = isNaN(serverNow) ? 0 : serverNow - Date.now();
+            const items = Array.isArray(result.items) ? result.items.map(toRow) : [];
+            store.dispatch(Action.presenceLoadSuccess(items, skew));
+        }
+        catch (e) {
+            store.dispatch(Action.presenceLoadFailure(e instanceof Error && e.message ? e.message : 'Could not load phone status'));
+        }
+    }
+
+    const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#14B981' };
+    const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#F4C76A' };
+    const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#9CA3AF' };
+    const phoneStatus = (row) => {
+        if (!row || row.stale || row.state === 'offline' || !row.state)
+            return PHONE_STATUS_OFFLINE;
+        if (row.state !== 'registered' || !row.canReceive)
+            return PHONE_STATUS_NOT_RECEIVING;
+        return PHONE_STATUS_RECEIVING;
+    };
+    const relativeTime = (iso, nowMs) => {
+        const t = Date.parse(iso || '');
+        if (isNaN(t))
+            return 'Never';
+        const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
+        if (sec < 60)
+            return 'Just now';
+        const min = Math.floor(sec / 60);
+        if (min < 60)
+            return min + ' min ago';
+        const hr = Math.floor(min / 60);
+        if (hr < 24)
+            return hr + ' h ago';
+        const days = Math.floor(hr / 24);
+        return days + (days === 1 ? ' day ago' : ' days ago');
+    };
+    const exactTime = (iso) => {
+        const t = Date.parse(iso || '');
+        return isNaN(t) ? '' : new Date(t).toLocaleString();
+    };
+    const buildPhoneStatusCell = (row) => {
+        const status = phoneStatus(row);
+        return new component__namespace.StackPanel({
+            items: [
+                new component__namespace.Text({
+                    text: '●',
+                    rootStyle: { color: status.color },
+                    rootAttributes: { 'aria-hidden': 'true' }
+                }),
+                new component__namespace.Text({ text: status.label })
+            ],
+            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
+            itemGap: component__namespace.StackPanel.GapSize.XS,
+            alignment: component__namespace.StackPanel.Alignment.CENTER
+        });
+    };
+    const buildLastSeenCell = (row, nowMs) => {
+        const iso = (row && row.lastSeen) || '';
+        const title = exactTime(iso);
+        return new component__namespace.Text({
+            text: relativeTime(iso, nowMs),
+            type: component__namespace.Text.Type.WEAK,
+            rootAttributes: title ? { title: title } : {}
+        });
+    };
+
+    const statusToBadge = (status) => {
+        switch (status) {
+            case 'pass': return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
+            case 'fail': return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
+            case 'warn': return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
+            case 'info_enabled': return { text: 'Enabled', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
+            case 'info_disabled': return { text: 'Disabled', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+        }
+    };
+    const statusIcon = (status) => {
+        switch (status) {
+            case 'pass': return { icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED, color: core__namespace.ImageConstant.Color.SUCCESS };
+            case 'fail': return { icon: core__namespace.SystemIcon.STATUS_ERROR_FILLED, color: core__namespace.ImageConstant.Color.DANGER };
+            case 'warn': return { icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED, color: core__namespace.ImageConstant.Color.WARNING };
+            case 'info_enabled': return { icon: core__namespace.SystemIcon.STATUS_INFO_FILLED, color: core__namespace.ImageConstant.Color.INFO };
+            default: return { icon: core__namespace.SystemIcon.STATUS_INFO, color: core__namespace.ImageConstant.Color.NEUTRAL };
+        }
+    };
+    class HealthChecks extends core.PureComponent {
+        componentDidMount() {
+            loadPresence();
+        }
+        buildPresenceColumns(nowMs) {
+            const CT = component__namespace.DataGrid.ColumnType;
+            return [
+                {
+                    type: CT.TEMPLATED,
+                    name: 'rep',
+                    label: 'Rep',
+                    stretchFactor: 3,
+                    content: (args) => new component__namespace.Text({
+                        text: args?.cell?.row?.dataItem?.employeeName || '(unnamed rep)',
+                        type: component__namespace.Text.Type.STRONG
+                    })
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'status',
+                    label: 'Status',
+                    stretchFactor: 3,
+                    content: (args) => buildPhoneStatusCell(args?.cell?.row?.dataItem)
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'lastSeen',
+                    label: 'Last seen',
+                    stretchFactor: 2,
+                    content: (args) => buildLastSeenCell(args?.cell?.row?.dataItem, nowMs)
+                }
+            ];
+        }
+        buildPhonesContent(presence) {
+            const content = [];
+            const push = (node) => {
+                content.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node })));
+            };
+            push(jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Phones" }));
+            if (presence.error) {
+                push(jsxRuntime.jsx(ErrorText, { message: presence.error }));
+            }
+            if (!presence.loaded) {
+                if (!presence.error) {
+                    push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Loading phones\u2026" }));
+                }
+            }
+            else if (presence.items.length === 0) {
+                push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No reps have phones yet." }));
+            }
+            else {
+                const nowMs = Date.now() + presence.clockSkewMs;
+                push(new component__namespace.DataGrid({
+                    dataSource: new core__namespace.ArrayDataSource(presence.items),
+                    columns: this.buildPresenceColumns(nowMs),
+                    columnStretch: true,
+                    highlightRowsOnHover: true,
+                    stripedRows: true,
+                    dataRowHeight: 48,
+                    headerRowHeight: 40,
+                    rootStyle: { width: '100%' }
+                }));
+            }
+            push(new component__namespace.Button({
+                label: presence.loading ? 'Refreshing…' : 'Refresh',
+                startIcon: core__namespace.SystemIcon.REFRESH,
+                enabled: !presence.loading,
+                action: () => { loadPresence(); }
+            }));
+            return content;
+        }
+        rerunPreflight = async () => {
+            store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true }));
+            try {
+                const payload = await wizardCall('wizardRunPreflight', {});
+                const checks = payload && payload.checks;
+                store.dispatch(Action.consoleLoadSuccess({
+                    preflight: Array.isArray(checks) ? checks : []
+                }));
+            }
+            catch (e) {
+                const err = e;
+                store.dispatch(Action.actionErrorSet('Preflight failed: ' + (err.message || String(e))));
+            }
+            finally {
+                store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: false }));
+            }
+        };
+        buildCheckColumns() {
+            const CT = component__namespace.DataGrid.ColumnType;
+            const BdgType = component__namespace.Badge.Type;
+            return [
+                {
+                    type: CT.TEMPLATED,
+                    name: 'statusIcon',
+                    label: '',
+                    stretchFactor: 1,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        const status = row?.status || 'info_enabled';
+                        const si = statusIcon(status);
+                        return new component__namespace.Image({
+                            image: si.icon,
+                            size: component__namespace.Image.Size.M,
+                            color: si.color,
+                            presentation: true
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'check',
+                    label: 'Check',
+                    stretchFactor: 4,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({
+                            text: row?.label || '(unlabeled check)',
+                            type: component__namespace.Text.Type.STRONG
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'detail',
+                    label: 'Detail',
+                    stretchFactor: 6,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        return new component__namespace.Text({
+                            text: row?.detail || '—',
+                            type: component__namespace.Text.Type.WEAK,
+                            size: component__namespace.Text.Size.S
+                        });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'status',
+                    label: 'Status',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        const status = row?.status || 'info_enabled';
+                        const sb = statusToBadge(status);
+                        return new component__namespace.Badge({
+                            content: sb.text,
+                            type: BdgType.SUBTLE,
+                            rootStyle: {
+                                backgroundColor: sb.palette.bg,
+                                color: sb.palette.fg,
+                                border: '1px solid ' + sb.palette.border
+                            }
+                        });
+                    }
+                }
+            ];
+        }
+        render() {
+            const state = store.getState();
+            const c = state.console;
+            const preflight = c.preflight;
+            const drift = (c.drift || {});
+            const refreshing = !!c.preflightRefreshing;
+            const driftRows = [
+                { label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'pass', detail: drift.voiceUrl === 'fail' ? 'VoiceUrl does not match the wizard\'s expected Suitelet URL' : '' },
+                { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
+                { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
+            ];
+            const columns = this.buildCheckColumns();
+            const phonesContent = this.buildPhonesContent(state.presence);
+            const preflightContent = [];
+            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight" }) })));
+            if (preflight === null || preflight === undefined) {
+                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Click \"Re-run\" to evaluate." }) })));
+            }
+            else if (preflight.length === 0) {
+                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No checks returned." }) })));
+            }
+            else {
+                const preflightDs = new core__namespace.ArrayDataSource(preflight);
+                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+                        dataSource: preflightDs,
+                        columns,
+                        columnStretch: true,
+                        highlightRowsOnHover: true,
+                        stripedRows: true,
+                        dataRowHeight: 64,
+                        headerRowHeight: 40,
+                        rootStyle: { width: '100%' }
+                    }) })));
+            }
+            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Re-running…' : 'Re-run preflight', type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { this.rerunPreflight(); }, rootStyle: {
+                        backgroundColor: '#2D4458',
+                        color: '#FFFFFF',
+                        borderColor: '#2D4458'
+                    } }) })));
+            const driftContent = [];
+            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Drift detection" }) })));
+            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Compares the saved wizard config against the live Twilio account. Re-runs each time the console mounts." }) })));
+            const driftDs = new core__namespace.ArrayDataSource(driftRows);
+            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+                    dataSource: driftDs,
+                    columns,
+                    columnStretch: true,
+                    highlightRowsOnHover: true,
+                    stripedRows: true,
+                    dataRowHeight: 64,
+                    headerRowHeight: 40,
+                    rootStyle: { width: '100%' }
+                }) })));
+            const outerItems = [
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: preflightContent }) })),
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: driftContent }) })),
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: phonesContent }) })),
+                c.deactivateError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Deactivate failed: ", c.deactivateError] }) })),
+                c.actionError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.actionError] }) }))
+            ].filter(Boolean);
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: outerItems }));
+        }
+    }
+
     const toneToImageColor = (tone) => {
         switch (tone) {
             case 'success': return core__namespace.ImageConstant.Color.SUCCESS;
@@ -1624,230 +1950,18 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     };
     const StatCard = (props) => buildStatCard(props);
-    const formatCallStatus = (status) => {
-        const norm = (status || '').trim();
-        if (!norm)
-            return '—';
-        return norm.charAt(0).toUpperCase() + norm.slice(1).toLowerCase();
-    };
-    const statusBadgePalette = (status) => {
-        const norm = (status || '').toLowerCase().trim();
-        switch (norm) {
-            case 'transcribed': return { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' };
-            case 'processing': return { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' };
-            case 'logged': return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
-            case 'no_transcript':
-            case 'no transcript': return { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
-            case 'failed': return { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' };
-            default: return { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' };
-        }
-    };
-    const ROWS_PER_PAGE = 10;
     class OverviewPage extends core.PureComponent {
-        recentCallsColumns;
-        constructor(props, context) {
-            super(props, context);
-            this.state = { currentPage: 0 };
-            const CT = component__namespace.DataGrid.ColumnType;
-            const BdgType = component__namespace.Badge.Type;
-            this.recentCallsColumns = [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'date',
-                    label: 'Date',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.date || '—',
-                            size: component__namespace.Text.Size.S
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'contact',
-                    label: 'Customer',
-                    stretchFactor: 3,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        const primary = row?.companyName || row?.contactName || '(unknown)';
-                        return new component__namespace.Text({ text: primary, type: component__namespace.Text.Type.STRONG });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'rep',
-                    label: 'Sales rep',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({ text: row?.repName || '(unassigned)' });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'status',
-                    label: 'Status',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row)
-                            return new component__namespace.Text({ text: '—' });
-                        const palette = statusBadgePalette(row.status);
-                        return new component__namespace.Badge({
-                            content: formatCallStatus(row.status),
-                            type: BdgType.SUBTLE,
-                            rootStyle: {
-                                backgroundColor: palette.bg,
-                                color: palette.fg,
-                                border: '1px solid ' + palette.border
-                            }
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'open',
-                    label: '',
-                    stretchFactor: 1,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row?.id)
-                            return new component__namespace.Text({ text: '' });
-                        return new component__namespace.Button({
-                            label: '',
-                            startIcon: core__namespace.SystemIcon.CALL,
-                            action: () => {
-                                try {
-                                    window.open('/app/crm/calendar/call.nl?id=' +
-                                        encodeURIComponent(String(row.id)), '_blank');
-                                }
-                                catch (e) { }
-                            }
-                        });
-                    }
-                }
-            ];
-        }
-        handlePageChange = (args) => {
-            const next = (args && typeof args.index === 'number') ? args.index : 0;
-            this.setState({ currentPage: next });
-        };
-        buildRecentCallsGrid(allCalls) {
-            const totalRows = allCalls.length;
-            const start = this.state.currentPage * ROWS_PER_PAGE;
-            const pageSlice = allCalls.slice(start, start + ROWS_PER_PAGE);
-            const pageRowsDs = new core__namespace.ArrayDataSource(pageSlice);
-            const headerTitle = new component__namespace.Text({
-                text: 'Recent calls',
-                type: component__namespace.Text.Type.STRONG
-            });
-            const pagination = new component__namespace.Pagination({
-                pages: { rowsCount: totalRows, rowsPerPage: ROWS_PER_PAGE },
-                selectedPageIndex: this.state.currentPage,
-                rowsCounter: totalRows,
-                navigation: {
-                    type: component__namespace.Pagination
-                        .NavigationType.DEFAULT,
-                    buttons: {
-                        firstPage: true,
-                        previousPage: true,
-                        nextPage: true,
-                        lastPage: true
-                    },
-                    pageIndicator: true
-                },
-                onPageSelected: this.handlePageChange
-            });
-            const headerRow = new component__namespace.StackPanel({
-                items: [headerTitle, pagination],
-                orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-                justification: component__namespace.StackPanel.Justification.SPACE_BETWEEN,
-                alignment: component__namespace.StackPanel.Alignment.CENTER,
-                itemGap: component__namespace.StackPanel.GapSize.M
-            });
-            const grid = new component__namespace.DataGrid({
-                dataSource: pageRowsDs,
-                columns: this.recentCallsColumns,
-                columnStretch: true,
-                highlightRowsOnHover: true,
-                stripedRows: true,
-                dataRowHeight: 48,
-                headerRowHeight: 40,
-                onRowClick: this.handleRowClick,
-                rootStyle: { width: '100%', height: '440px' }
-            });
-            return new component__namespace.StackPanel({
-                items: [headerRow, grid],
-                orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-                itemGap: component__namespace.StackPanel.GapSize.S,
-                rootStyle: { width: '100%' }
-            });
-        }
-        aggregateByRep(calls) {
-            const buckets = {};
-            for (const c of calls) {
-                const key = c.repName || '(unassigned)';
-                if (!buckets[key])
-                    buckets[key] = { calls: 0, seconds: 0 };
-                buckets[key].calls += 1;
-                buckets[key].seconds += c.duration || 0;
-            }
-            const categories = Object.keys(buckets);
-            const callCounts = categories.map((k) => buckets[k].calls);
-            const durationMinutes = categories.map((k) => Math.round((buckets[k].seconds / 60) * 10) / 10);
-            return { categories, callCounts, durationMinutes };
-        }
-        buildRepChart(calls) {
-            const { categories, callCounts, durationMinutes } = this.aggregateByRep(calls);
-            return new component__namespace.Chart({
-                title: 'Sales rep activity',
-                subtitle: 'From the ' + calls.length + ' most recent calls',
-                xAxis: {
-                    categories,
-                    title: 'Sales rep'
-                },
-                yAxis: [
-                    { title: 'Calls' },
-                    { title: 'Duration (min)', opposite: true }
-                ],
-                series: [
-                    {
-                        name: 'Calls',
-                        type: component__namespace.Chart.Type.COLUMN,
-                        yAxis: 0,
-                        data: callCounts
-                    },
-                    {
-                        name: 'Duration (min)',
-                        color: component__namespace.Chart.Color.YELLOW,
-                        yAxis: 1,
-                        data: durationMinutes
-                    }
-                ],
-                rootStyle: { width: '100%', height: '480px' }
-            });
-        }
         handleNav = (section) => goToSection(section);
+        handleRequestDeactivate = () => { store.dispatch(Action.deactivateRequest()); };
+        handleCancelDeactivate = () => { store.dispatch(Action.deactivateSuccess()); };
         handleDeactivate = () => { deactivate(); };
         handleReactivate = () => { reactivate(); };
-        handleRowClick = (args) => {
-            const dataItem = args?.row?.dataItem;
-            if (!dataItem?.id)
-                return;
-            try {
-                window.open('/app/crm/calendar/call.nl?id=' + encodeURIComponent(String(dataItem.id)), '_blank');
-            }
-            catch (e) { }
-        };
         render() {
             const state = store.getState();
             const c = state.console;
             const snap = (c.snapshot || {});
             const assignments = (c.assignments || []);
             const preflight = (c.preflight || []);
-            const recentCalls = c.recentCalls;
             const phoneCount = {};
             assignments.forEach((a) => { if (a.phoneSid)
                 phoneCount[a.phoneSid] = true; });
@@ -1870,16 +1984,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                                             : (repCount === 1 ? '1 rep' : repCount + ' reps') }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Preflight", metric: preflightTotal > 0
                                             ? preflightPassed + ' of ' + preflightTotal
                                             : '—', description: preflightTotal > 0
-                                            ? 'See Health for detail'
+                                            ? 'See checks below'
                                             : 'Not yet run' }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
                                 border: '1px solid #E2E3E5',
                                 borderRadius: '8px',
                                 padding: '18px 22px',
                                 background: '#FAFAFB'
-                            }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add a phone number", startIcon: core__namespace.SystemIcon.ADD, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.REFRESH, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.PLAY, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Rotate API Key Secret", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: snap.active === false ? (jsxRuntime.jsx(component__namespace.Button, { label: "Reactivate", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, action: this.handleReactivate })) : (jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleDeactivate })) })] }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Recent activity" }) }), recentCalls === null ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
-                                        label: 'Loading recent activity…',
-                                        indeterminate: true
-                                    }) })) : recentCalls.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No calls logged yet. Once reps start placing calls through Click-to-Call, recent activity will show up here." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: this.buildRecentCallsGrid(recentCalls) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: this.buildRepChart(recentCalls) })] }) }))] }) })] }));
+                            }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add a phone number", startIcon: core__namespace.SystemIcon.ADD, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.REFRESH, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.PLAY, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Rotate API Key Secret", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), snap.active === false ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reactivate", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, action: this.handleReactivate }) })) : c.pendingDeactivateConfirm ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", action: this.handleCancelDeactivate }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Confirm deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleDeactivate }) })] }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleRequestDeactivate }) }))] }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(HealthChecks, { tick: this.props.tick }) })] }));
         }
     }
 
@@ -2162,94 +2273,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             store.dispatch(Action.inboundPublish({ phase: 'failure', error: errorText(e, 'Publish failed') }));
         }
     }
-
-    const toRow = (raw) => {
-        const r = (raw || {});
-        return {
-            employeeId: String(r.employeeId ?? ''),
-            employeeName: String(r.employeeName ?? ''),
-            canReceive: r.canReceive === true,
-            state: String(r.state ?? ''),
-            lastSeen: String(r.lastSeen ?? ''),
-            lastChange: String(r.lastChange ?? ''),
-            stale: r.stale !== false
-        };
-    };
-    async function loadPresence() {
-        if (store.getState().presence.loading)
-            return;
-        store.dispatch(Action.presenceLoadStart());
-        try {
-            const result = (await wizardCall('wizardLoadPresence', {}));
-            if (!result || result.ok !== true) {
-                store.dispatch(Action.presenceLoadFailure((result && (result.message || result.error)) || 'Could not load phone status'));
-                return;
-            }
-            const serverNow = Date.parse(result.now || '');
-            const skew = isNaN(serverNow) ? 0 : serverNow - Date.now();
-            const items = Array.isArray(result.items) ? result.items.map(toRow) : [];
-            store.dispatch(Action.presenceLoadSuccess(items, skew));
-        }
-        catch (e) {
-            store.dispatch(Action.presenceLoadFailure(e instanceof Error && e.message ? e.message : 'Could not load phone status'));
-        }
-    }
-
-    const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#14B981' };
-    const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#F4C76A' };
-    const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#9CA3AF' };
-    const phoneStatus = (row) => {
-        if (!row || row.stale || row.state === 'offline' || !row.state)
-            return PHONE_STATUS_OFFLINE;
-        if (row.state !== 'registered' || !row.canReceive)
-            return PHONE_STATUS_NOT_RECEIVING;
-        return PHONE_STATUS_RECEIVING;
-    };
-    const relativeTime = (iso, nowMs) => {
-        const t = Date.parse(iso || '');
-        if (isNaN(t))
-            return 'Never';
-        const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
-        if (sec < 60)
-            return 'Just now';
-        const min = Math.floor(sec / 60);
-        if (min < 60)
-            return min + ' min ago';
-        const hr = Math.floor(min / 60);
-        if (hr < 24)
-            return hr + ' h ago';
-        const days = Math.floor(hr / 24);
-        return days + (days === 1 ? ' day ago' : ' days ago');
-    };
-    const exactTime = (iso) => {
-        const t = Date.parse(iso || '');
-        return isNaN(t) ? '' : new Date(t).toLocaleString();
-    };
-    const buildPhoneStatusCell = (row) => {
-        const status = phoneStatus(row);
-        return new component__namespace.StackPanel({
-            items: [
-                new component__namespace.Text({
-                    text: '●',
-                    rootStyle: { color: status.color },
-                    rootAttributes: { 'aria-hidden': 'true' }
-                }),
-                new component__namespace.Text({ text: status.label })
-            ],
-            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-            itemGap: component__namespace.StackPanel.GapSize.XS,
-            alignment: component__namespace.StackPanel.Alignment.CENTER
-        });
-    };
-    const buildLastSeenCell = (row, nowMs) => {
-        const iso = (row && row.lastSeen) || '';
-        const title = exactTime(iso);
-        return new component__namespace.Text({
-            text: relativeTime(iso, nowMs),
-            type: component__namespace.Text.Type.WEAK,
-            rootAttributes: title ? { title: title } : {}
-        });
-    };
 
     const DEFAULT_NO_ANSWER_MESSAGE = 'Sorry, no one is available to take your call. Please try again later. Goodbye.';
     const DEFAULT_VOICEMAIL_GREETING = 'Sorry, no one is available. Please leave a message after the tone.';
@@ -2924,269 +2947,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
-    const statusToBadge = (status) => {
-        switch (status) {
-            case 'pass': return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
-            case 'fail': return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
-            case 'warn': return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
-            case 'info_enabled': return { text: 'Enabled', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
-            case 'info_disabled': return { text: 'Disabled', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-            default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-        }
-    };
-    const statusIcon = (status) => {
-        switch (status) {
-            case 'pass': return { icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED, color: core__namespace.ImageConstant.Color.SUCCESS };
-            case 'fail': return { icon: core__namespace.SystemIcon.STATUS_ERROR_FILLED, color: core__namespace.ImageConstant.Color.DANGER };
-            case 'warn': return { icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED, color: core__namespace.ImageConstant.Color.WARNING };
-            case 'info_enabled': return { icon: core__namespace.SystemIcon.STATUS_INFO_FILLED, color: core__namespace.ImageConstant.Color.INFO };
-            default: return { icon: core__namespace.SystemIcon.STATUS_INFO, color: core__namespace.ImageConstant.Color.NEUTRAL };
-        }
-    };
-    class HealthPage extends core.PureComponent {
-        componentDidMount() {
-            loadPresence();
-        }
-        buildPresenceColumns(nowMs) {
-            const CT = component__namespace.DataGrid.ColumnType;
-            return [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'rep',
-                    label: 'Rep',
-                    stretchFactor: 3,
-                    content: (args) => new component__namespace.Text({
-                        text: args?.cell?.row?.dataItem?.employeeName || '(unnamed rep)',
-                        type: component__namespace.Text.Type.STRONG
-                    })
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'status',
-                    label: 'Status',
-                    stretchFactor: 3,
-                    content: (args) => buildPhoneStatusCell(args?.cell?.row?.dataItem)
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'lastSeen',
-                    label: 'Last seen',
-                    stretchFactor: 2,
-                    content: (args) => buildLastSeenCell(args?.cell?.row?.dataItem, nowMs)
-                }
-            ];
-        }
-        buildPhonesContent(presence) {
-            const content = [];
-            const push = (node) => {
-                content.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node })));
-            };
-            push(jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Phones" }));
-            if (presence.error) {
-                push(jsxRuntime.jsx(ErrorText, { message: presence.error }));
-            }
-            if (!presence.loaded) {
-                if (!presence.error) {
-                    push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Loading phones\u2026" }));
-                }
-            }
-            else if (presence.items.length === 0) {
-                push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No reps have phones yet." }));
-            }
-            else {
-                const nowMs = Date.now() + presence.clockSkewMs;
-                push(new component__namespace.DataGrid({
-                    dataSource: new core__namespace.ArrayDataSource(presence.items),
-                    columns: this.buildPresenceColumns(nowMs),
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    stripedRows: true,
-                    dataRowHeight: 48,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                }));
-            }
-            push(new component__namespace.Button({
-                label: presence.loading ? 'Refreshing…' : 'Refresh',
-                startIcon: core__namespace.SystemIcon.REFRESH,
-                enabled: !presence.loading,
-                action: () => { loadPresence(); }
-            }));
-            return content;
-        }
-        rerunPreflight = async () => {
-            store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true }));
-            try {
-                const payload = await wizardCall('wizardRunPreflight', {});
-                const checks = payload && payload.checks;
-                store.dispatch(Action.consoleLoadSuccess({
-                    preflight: Array.isArray(checks) ? checks : []
-                }));
-            }
-            catch (e) {
-                const err = e;
-                store.dispatch(Action.actionErrorSet('Preflight failed: ' + (err.message || String(e))));
-            }
-            finally {
-                store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: false }));
-            }
-        };
-        cancelDeactivateConfirm = () => {
-            store.dispatch(Action.deactivateSuccess());
-        };
-        requestDeactivate = () => {
-            store.dispatch(Action.deactivateRequest());
-        };
-        confirmDeactivate = () => {
-            deactivate();
-        };
-        buildCheckColumns() {
-            const CT = component__namespace.DataGrid.ColumnType;
-            const BdgType = component__namespace.Badge.Type;
-            return [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'statusIcon',
-                    label: '',
-                    stretchFactor: 1,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        const status = row?.status || 'info_enabled';
-                        const si = statusIcon(status);
-                        return new component__namespace.Image({
-                            image: si.icon,
-                            size: component__namespace.Image.Size.M,
-                            color: si.color,
-                            presentation: true
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'check',
-                    label: 'Check',
-                    stretchFactor: 4,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.label || '(unlabeled check)',
-                            type: component__namespace.Text.Type.STRONG
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'detail',
-                    label: 'Detail',
-                    stretchFactor: 6,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.detail || '—',
-                            type: component__namespace.Text.Type.WEAK,
-                            size: component__namespace.Text.Size.S
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'status',
-                    label: 'Status',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        const status = row?.status || 'info_enabled';
-                        const sb = statusToBadge(status);
-                        return new component__namespace.Badge({
-                            content: sb.text,
-                            type: BdgType.SUBTLE,
-                            rootStyle: {
-                                backgroundColor: sb.palette.bg,
-                                color: sb.palette.fg,
-                                border: '1px solid ' + sb.palette.border
-                            }
-                        });
-                    }
-                }
-            ];
-        }
-        render() {
-            const state = store.getState();
-            const c = state.console;
-            const preflight = c.preflight;
-            const drift = (c.drift || {});
-            const snap = (c.snapshot || {});
-            const isPaused = snap.active === false;
-            const refreshing = !!c.preflightRefreshing;
-            const driftRows = [
-                { label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'pass', detail: drift.voiceUrl === 'fail' ? 'VoiceUrl does not match the wizard\'s expected Suitelet URL' : '' },
-                { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
-                { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
-            ];
-            const dangerZoneItems = isPaused ? [] : [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Danger zone" }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Deactivate cuts rep phone-icon access across all roles. In-progress calls finish; new calls are blocked. Reactivate any time." }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: c.pendingDeactivateConfirm ? (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", action: this.cancelDeactivateConfirm }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Confirm deactivate", type: component__namespace.Button.Type.DANGER, action: this.confirmDeactivate }) })] })) : (jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, action: this.requestDeactivate })) })),
-                c.deactivateError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Deactivate failed: ", c.deactivateError] }) }))
-            ].filter(Boolean);
-            const columns = this.buildCheckColumns();
-            const phonesContent = this.buildPhonesContent(state.presence);
-            const preflightContent = [];
-            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight" }) })));
-            if (preflight === null || preflight === undefined) {
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Click \"Re-run\" to evaluate." }) })));
-            }
-            else if (preflight.length === 0) {
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No checks returned." }) })));
-            }
-            else {
-                const preflightDs = new core__namespace.ArrayDataSource(preflight);
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
-                        dataSource: preflightDs,
-                        columns,
-                        columnStretch: true,
-                        highlightRowsOnHover: true,
-                        stripedRows: true,
-                        dataRowHeight: 64,
-                        headerRowHeight: 40,
-                        rootStyle: { width: '100%' }
-                    }) })));
-            }
-            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Re-running…' : 'Re-run preflight', type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { this.rerunPreflight(); }, rootStyle: {
-                        backgroundColor: '#2D4458',
-                        color: '#FFFFFF',
-                        borderColor: '#2D4458'
-                    } }) })));
-            const driftContent = [];
-            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Drift detection" }) })));
-            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Compares the saved wizard config against the live Twilio account. Re-runs each time the console mounts." }) })));
-            const driftDs = new core__namespace.ArrayDataSource(driftRows);
-            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
-                    dataSource: driftDs,
-                    columns,
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    stripedRows: true,
-                    dataRowHeight: 64,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                }) })));
-            const outerItems = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: preflightContent }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: driftContent }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: phonesContent }) })),
-                !isPaused && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
-                            border: '1px solid #D33A2C',
-                            borderRadius: '8px',
-                            backgroundColor: '#FDF4F3',
-                            padding: '16px 20px'
-                        }, children: dangerZoneItems }) })),
-                c.actionError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.actionError] }) }))
-            ].filter(Boolean);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: outerItems }));
-        }
-    }
-
     const NavRail = () => {
         const state = store.getState();
         const assignments = state.console.assignments;
@@ -3198,7 +2958,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             { value: 'inbound', label: 'Inbound calls', icon: core__namespace.SystemIcon.CALL },
             { value: 'voice', label: 'Voice config', icon: core__namespace.SystemIcon.SETTINGS },
             { value: 'credentials', label: 'Credentials', icon: core__namespace.SystemIcon.LOCK },
-            { value: 'health', label: 'Health', icon: core__namespace.SystemIcon.HEART_FILLED },
             { value: 're-run', label: 'Re-run wizard', icon: core__namespace.SystemIcon.REFRESH,
                 separatorTop: true,
                 action: () => { goToStep(1); } }
@@ -3265,7 +3024,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             case 'inbound': return 'Inbound calls';
             case 'voice': return 'Voice config';
             case 'credentials': return 'Credentials';
-            case 'health': return 'Health';
         }
     };
     const ConsoleShell = (props) => {
@@ -3390,7 +3148,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 case 'inbound': return jsxRuntime.jsx(InboundPage, { tick: tick });
                 case 'voice': return jsxRuntime.jsx(VoicePage, { tick: tick });
                 case 'credentials': return jsxRuntime.jsx(CredentialsPage, { tick: tick });
-                case 'health': return jsxRuntime.jsx(HealthPage, { tick: tick });
                 default: return jsxRuntime.jsx(OverviewPage, { tick: tick });
             }
         }

@@ -1,13 +1,12 @@
 /**
- * Health page (U6) — JSX.
- *
- * Phase 4 (2026-05-28) — JSX rewrite of components/sections/health.ts.
- * Four sub-blocks stacked vertically:
+ * Health checks — JSX. Rendered on the Overview page below the KPIs and
+ * quick actions (2026-11-01: the Health nav item and the Overview's
+ * Recent activity block were removed; Deactivate lives in the quick
+ * actions). Three sub-blocks stacked vertically:
  *   1. Preflight    — re-run button + DataGrid of check rows
  *   2. Drift        — DataGrid of 3 client-computed detector rows
  *   3. Phones       — read-only DataGrid of each rep's browser phone
  *                     (wizardLoadPresence) + Refresh button
- *   4. Danger zone  — Deactivate flow with two-click confirm
  *
  * Spike (2026-05-28) — DataGrid layout. Preflight + Drift now use the same
  * 4-column DataGrid pattern (Status icon / Check / Detail / Status badge),
@@ -19,7 +18,6 @@ import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
-import {deactivate} from '../../app/effects/console';
 import {loadPresence} from '../../app/effects/presence';
 import {wizardCall} from '../../services/wizardApi';
 import type {AppState, PresenceRow, PresenceState} from '../../app/InitialState';
@@ -69,7 +67,7 @@ const statusIcon = (status: string): { icon: unknown; color: unknown } => {
     }
 };
 
-export default class HealthPage extends PureComponent<PageTickProps, unknown> {
+export default class HealthChecks extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
         loadPresence();
     }
@@ -169,21 +167,6 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
         }
     };
 
-    private cancelDeactivateConfirm = (): void => {
-        store.dispatch(Action.deactivateSuccess());
-        // deactivateSuccess clears pendingDeactivateConfirm in the
-        // reducer; alternatively we could add a dedicated action.
-        // Phase 7 cleanup: introduce DEACTIVATE_CONFIRM_CANCEL.
-    };
-
-    private requestDeactivate = (): void => {
-        store.dispatch(Action.deactivateRequest());
-    };
-
-    private confirmDeactivate = (): void => {
-        deactivate();
-    };
-
     private buildCheckColumns(): unknown[] {
         const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
         const BdgType = component.Badge.Type;
@@ -261,8 +244,6 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
         const c = state.console;
         const preflight = c.preflight as CheckItem[] | null | undefined;
         const drift = (c.drift || {}) as DriftSnapshot;
-        const snap = (c.snapshot || {}) as { active?: boolean };
-        const isPaused = snap.active === false;
         const refreshing = !!c.preflightRefreshing;
 
         const driftRows: CheckItem[] = [
@@ -270,68 +251,6 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
             { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
             { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
         ];
-
-        // Danger zone — flat items list. The red-bordered card wrapper
-        // is added downstream in `outerItems` (this avoids the doubled-
-        // border bug where both this list AND the outer wrapper carried
-        // border styling). Hidden entirely when CTC is already paused —
-        // the top banner already surfaces a Reactivate path.
-        const dangerZoneItems = isPaused ? [] : [
-            (
-                <component.StackPanel.Item>
-                    <component.Heading level={3}>Danger zone</component.Heading>
-                </component.StackPanel.Item>
-            ),
-            (
-                <component.StackPanel.Item>
-                    <component.Text
-                        type={component.Text.Type.WEAK}
-                        size={component.Text.Size.S}
-                    >
-                        Deactivate cuts rep phone-icon access across all
-                        roles. In-progress calls finish; new calls are
-                        blocked. Reactivate any time.
-                    </component.Text>
-                </component.StackPanel.Item>
-            ),
-            (
-                <component.StackPanel.Item>
-                    {c.pendingDeactivateConfirm ? (
-                        <component.StackPanel
-                            orientation={component.StackPanel.Orientation.HORIZONTAL}
-                            itemGap={component.StackPanel.GapSize.S}
-                        >
-                            <component.StackPanel.Item>
-                                <component.Button
-                                    label="Cancel"
-                                    action={this.cancelDeactivateConfirm}
-                                />
-                            </component.StackPanel.Item>
-                            <component.StackPanel.Item>
-                                <component.Button
-                                    label="Confirm deactivate"
-                                    type={component.Button.Type.DANGER}
-                                    action={this.confirmDeactivate}
-                                />
-                            </component.StackPanel.Item>
-                        </component.StackPanel>
-                    ) : (
-                        <component.Button
-                            label="Deactivate"
-                            type={component.Button.Type.DANGER}
-                            action={this.requestDeactivate}
-                        />
-                    )}
-                </component.StackPanel.Item>
-            ),
-            c.deactivateError && (
-                <component.StackPanel.Item>
-                    <component.Text type={component.Text.Type.STRONG}>
-                        ✕ Deactivate failed: {c.deactivateError}
-                    </component.Text>
-                </component.StackPanel.Item>
-            )
-        ].filter(Boolean);
 
         const columns = this.buildCheckColumns();
         const phonesContent = this.buildPhonesContent(state.presence);
@@ -486,21 +405,11 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
                     </component.StackPanel>
                 </component.StackPanel.Item>
             ),
-            /* Danger zone (hidden when paused) */
-            !isPaused && (
+            c.deactivateError && (
                 <component.StackPanel.Item>
-                    <component.StackPanel
-                        orientation={component.StackPanel.Orientation.VERTICAL}
-                        itemGap={component.StackPanel.GapSize.S}
-                        rootStyle={{
-                            border: '1px solid #D33A2C',
-                            borderRadius: '8px',
-                            backgroundColor: '#FDF4F3',
-                            padding: '16px 20px'
-                        }}
-                    >
-                        {dangerZoneItems as never}
-                    </component.StackPanel>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        ✕ Deactivate failed: {c.deactivateError}
+                    </component.Text>
                 </component.StackPanel.Item>
             ),
             c.actionError && (

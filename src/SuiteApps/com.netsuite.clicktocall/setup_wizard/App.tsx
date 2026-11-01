@@ -37,7 +37,6 @@ import PhonesPage from './components/page/PhonesPage';
 import InboundPage from './components/page/InboundPage';
 import VoicePage from './components/page/VoicePage';
 import CredentialsPage from './components/page/CredentialsPage';
-import HealthPage from './components/page/HealthPage';
 import {ConsoleShell} from './components/shared/ConsoleShell';
 import {StepperShell} from './components/shared/StepperShell';
 
@@ -148,7 +147,6 @@ export default class App extends PureComponent<unknown, AppInternalState> {
             case 'inbound':     return <InboundPage tick={tick} />;
             case 'voice':       return <VoicePage tick={tick} />;
             case 'credentials': return <CredentialsPage tick={tick} />;
-            case 'health':      return <HealthPage tick={tick} />;
             default:            return <OverviewPage tick={tick} />;
         }
     }

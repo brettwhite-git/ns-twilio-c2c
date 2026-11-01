@@ -32,15 +32,10 @@ export async function loadConsole(): Promise<void> {
         promise.catch(() => null);
 
     try {
-        const [snapshot, assignments, preflight, recentCalls] = await Promise.all([
+        const [snapshot, assignments, preflight] = await Promise.all([
             safe(wizardCall('wizardSnapshot', {})),
             safe(wizardCall('wizardLoadAssignments', {})),
-            safe(wizardCall('wizardRunPreflight', {})),
-            // Server clamps limit to [1, 25] (see ctc_sl_wizard_api.js
-            // wizardListRecentCalls handler). Ask for the max so the
-            // Overview chart has the widest sample of recent CTC-tagged
-            // Phone Calls to aggregate by sales rep.
-            safe(wizardCall('wizardListRecentCalls', { limit: 25 }))
+            safe(wizardCall('wizardRunPreflight', {}))
         ]);
 
         // Server-response shape extraction — match the legacy
@@ -48,15 +43,13 @@ export async function loadConsole(): Promise<void> {
         //   wizardSnapshot           -> { snapshot: {...} }
         //   wizardLoadAssignments    -> { items: [...] }
         //   wizardRunPreflight       -> { checks: [...] }
-        //   wizardListRecentCalls    -> { items: [...] }   (NOT .calls!)
         // Default to [] (empty array) on missing/failed so the UI can
         // render its "no data" state instead of staying in "loading…".
         const snap = snapshot && (snapshot as { snapshot?: unknown }).snapshot;
         const slice: Partial<ConsoleState> = {
             snapshot: snap || null,
             assignments: (assignments && (assignments as { items?: unknown[] }).items) || [],
-            preflight: (preflight && (preflight as { checks?: unknown[] }).checks) || [],
-            recentCalls: (recentCalls && (recentCalls as { items?: unknown[] }).items) || []
+            preflight: (preflight && (preflight as { checks?: unknown[] }).checks) || []
         };
 
         store.dispatch(Action.consoleLoadSuccess(slice));

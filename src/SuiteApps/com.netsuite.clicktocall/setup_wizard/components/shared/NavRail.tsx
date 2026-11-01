@@ -32,7 +32,6 @@ export const NavRail = (): core.VDom.Node => {
         { value: 'inbound',     label: 'Inbound calls',     icon: core.SystemIcon.CALL },
         { value: 'voice',       label: 'Voice config',      icon: core.SystemIcon.SETTINGS },
         { value: 'credentials', label: 'Credentials',       icon: core.SystemIcon.LOCK },
-        { value: 'health',      label: 'Health',            icon: core.SystemIcon.HEART_FILLED },
         { value: 're-run',      label: 'Re-run wizard',     icon: core.SystemIcon.REFRESH,
           separatorTop: true,
           action: (): void => { goToStep(1); } }

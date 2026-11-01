@@ -18,7 +18,7 @@
 
 export type Mode = 'stepper' | 'console';
 
-export type SectionName = 'overview' | 'phones' | 'inbound' | 'voice' | 'credentials' | 'health';
+export type SectionName = 'overview' | 'phones' | 'inbound' | 'voice' | 'credentials';
 
 // ─────────────────────────────────────────────────────────────────────
 // Per-step state shapes
@@ -65,7 +65,6 @@ export interface ConsoleState {
     assignments: unknown[] | null;
     preflight: unknown[] | null;
     activity: unknown[] | null;
-    recentCalls: unknown[] | null;
     drift: unknown | null;
     loading: boolean;
 
@@ -295,7 +294,6 @@ const initialState: AppState = {
         assignments: null,
         preflight: null,
         activity: null,
-        recentCalls: null,
         drift: null,
         loading: false,
         phonesEmployees: null,
