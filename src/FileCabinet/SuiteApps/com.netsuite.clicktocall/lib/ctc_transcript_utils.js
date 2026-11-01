@@ -545,7 +545,9 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         }
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_transcript', value: opts.transcriptText || '' });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_summary', value: analysis.summary || '' });
-        phoneCallRec.setValue({ fieldId: 'custevent_ctc_satisfaction', value: analysis.satisfaction_score || 5 });
+        // A voicemail is not a conversation: no satisfaction score.
+        phoneCallRec.setValue({ fieldId: 'custevent_ctc_satisfaction',
+            value: isChecked(phoneCallRec.getValue({ fieldId: 'custevent_ctc_voicemail' })) ? '' : (analysis.satisfaction_score || 5) });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_tone_keywords', value: (analysis.tone_keywords || []).join(', ') });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_action_items',
             value: normalizeActionItems(analysis.action_items).map((i) => i.task).join('\n') });

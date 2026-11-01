@@ -296,7 +296,10 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     contactName: extractText(r.getText ? r.getText('contact') : r.getValue('contact')),
                     phone: r.getValue('phone') || '',
                     brief: r.getValue('custevent_ctc_ai_brief') || '',
-                    satisfaction: parseInt(r.getValue('custevent_ctc_satisfaction'), 10) || null,
+                    // A voicemail is not a conversation: never scored (older
+                    // voicemails may still hold a score; it is ignored).
+                    satisfaction: (voicemail === true || voicemail === 'T') ? null
+                        : (parseInt(r.getValue('custevent_ctc_satisfaction'), 10) || null),
                     duration: duration,
                     callStatus: callStatus,
                     direction: (inbound === true || inbound === 'T') ? 'inbound' : 'outbound',
@@ -411,6 +414,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     'custrecord_ctc_pt_created_task',
                     search.createColumn({ name: 'custevent_ctc_ai_brief', join: 'custrecord_ctc_pt_phone_call' }),
                     search.createColumn({ name: 'custevent_ctc_satisfaction', join: 'custrecord_ctc_pt_phone_call' }),
+                    search.createColumn({ name: 'custevent_ctc_voicemail', join: 'custrecord_ctc_pt_phone_call' }),
                     search.createColumn({ name: 'startdate', join: 'custrecord_ctc_pt_phone_call' }),
                     search.createColumn({ name: 'company', join: 'custrecord_ctc_pt_phone_call' })
                 ]
@@ -449,7 +453,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                             companyId: extractId(r.getValue({ name: 'company', join: 'custrecord_ctc_pt_phone_call' })),
                             companyName: joinedText(r, 'company'),
                             brief: r.getValue({ name: 'custevent_ctc_ai_brief', join: 'custrecord_ctc_pt_phone_call' }) || '',
-                            satisfaction: parseInt(r.getValue({ name: 'custevent_ctc_satisfaction', join: 'custrecord_ctc_pt_phone_call' }), 10) || null,
+                            satisfaction: isVoicemailValue(r.getValue({ name: 'custevent_ctc_voicemail', join: 'custrecord_ctc_pt_phone_call' })) ? null
+                                : (parseInt(r.getValue({ name: 'custevent_ctc_satisfaction', join: 'custrecord_ctc_pt_phone_call' }), 10) || null),
                             date: r.getValue({ name: 'startdate', join: 'custrecord_ctc_pt_phone_call' }) || ''
                         },
                         tasks: []
@@ -529,6 +534,9 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         if (n >= 5) return 'mid';
         return 'low';
     };
+
+    // Checkbox search value: true / 'T' when checked.
+    const isVoicemailValue = (v) => v === true || v === 'T';
 
     /**
      * True when a call did not connect: no talk time, or a voicemail (its

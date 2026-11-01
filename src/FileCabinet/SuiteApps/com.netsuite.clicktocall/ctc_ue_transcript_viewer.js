@@ -107,7 +107,8 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 
     const buildViewerHtml = (data) => {
         const safeSummary = escapeHtml(data.summary);
-        const score = parseInt(data.satisfaction, 10) || 0;
+        // A voicemail is not a conversation: never scored.
+        const score = data.voicemail ? 0 : (parseInt(data.satisfaction, 10) || 0);
         const duration = parseInt(data.duration, 10) || 0;
         const safeRecordingUrl = escapeHtml(data.recordingUrl);
 
