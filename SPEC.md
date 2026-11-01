@@ -185,7 +185,7 @@ Windows with `window.opener` draw nothing.
 
 **Poller** `customscript_ctc_ss_poll` (`F/ctc_ss_poll_transcripts.js`), two deployments picked by the script parameter `custscript_ctc_poll_mode` (TEXT, not mandatory):
 - `customdeploy_ctc_ss_poll`, mode `transcripts` (also when empty): daily, every 1 day, from 00:00Z, repeat PT15M. Phases A cleanup-pending recording deletes (≤ 50); B orphan retry (≤ 50); C0 stale analysis claims (≤ 20, below); C unprocessed Phone Calls (≤ 50). Yields with `task.create` (this deployment) when fewer than 1000 units remain. Audit `CTC Poll Complete`: `main(…) cleanup(…) orphan(…) stale(released, gaveUp)`.
-- `customdeploy_ctc_ss_poll_recon`, mode `reconcile`: daily, from 00:07Z, repeat PT15M. Phase D reconciliation only (§7), with the whole run's budget. Audit `CTC Poll Complete`: `recon(seen, existing, created(missed, tooShort, noAnswer, logged, voicemail), deferred, skipped, errors, complete[, stopped])`.
+- `customdeploy_ctc_ss_poll_recon`, mode `reconcile`: daily, from 00:00Z (SDF allows only 30-minute start increments), repeat PT15M. Phase D reconciliation only (§7), with the whole run's budget. Audit `CTC Poll Complete`: `recon(seen, existing, created(missed, tooShort, noAnswer, logged, voicemail), deferred, skipped, errors, complete[, stopped])`.
 - Any other mode: error `CTC Poll — unknown mode`, nothing done.
 
 **Claim before the LLM** (`F/lib/ctc_call_claim.js`). The browser (`checkTranscript`) and Phase C both claim a call before the LLM: a fresh read (`lookupFields`), then, only when not terminal and not processed, write `Processing` + `custevent_ctc_processed` T + `custevent_ctc_analysis_claim` = `<ISO-8601 UTC claim time>|<claim count>` (the count goes on from the stored stamp). processed T takes the call out of Phase C's search; the enrichment save then writes Transcribed. Already finished or claimed → no LLM (Phase C counts `alreadyDone`; the RESTlet answers as above). A failed claim write is transient (retry). An error after the claim releases it: `Failed` + processed F (Phase C retries). NetSuite has no compare-and-swap: the race window is the gap between the fresh read and the write. The enrichment save (both paths) empties the stamp.
@@ -318,7 +318,7 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 - 2026-11-01 — Screen-pop stays automatic. An inbound toast (shell, top level) plus system notification and title flash when the tab is away.
 - 2026-11-01 — The phone stays controllable from any tab over the bus (gated: origin, nonce, dial rate and number checks). A waiting shell takes over by itself when the phone tab goes away, and "Use phone here" moves the phone when no call is live.
 - 2026-11-01 — Tokens and phone actions only for phone users: CTC active AND (active rep assignment, supervisor of an assigned rep, or Administrator).
-- 2026-11-01 — Reconciliation gets its own scheduled deployment (`customdeploy_ctc_ss_poll_recon`, offset 00:07Z).
+- 2026-11-01 — Reconciliation gets its own scheduled deployment (`customdeploy_ctc_ss_poll_recon`, from 00:00Z).
 - 2026-11-01 — Outbound ownership needs `client:<rep id>` on the leg or its parent; a caller ID alone is not proof.
 - 2026-11-01 — One analysis per call: claim (Processing + processed T) before the LLM.
 - 2026-11-01 — Unanswered and unrouted inbound callers go to a voicemail that is transcribed. Voicemail = `Logged` + `custevent_ctc_voicemail` checkbox (one transcript path, no new status). Fallback owner for unrouted numbers and inactive reps.

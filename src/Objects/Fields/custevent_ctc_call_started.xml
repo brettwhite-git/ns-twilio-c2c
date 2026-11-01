@@ -2,7 +2,7 @@
     <label>Call started (UTC)</label>
     <fieldtype>CLOBTEXT</fieldtype>
     <appliestophonecall>T</appliestophonecall>
-    <displaytype>INLINE</displaytype>
+    <displaytype>HIDDEN</displaytype>
     <ismandatory>F</ismandatory>
     <searchlevel>2</searchlevel>
 </crmcustomfield>
