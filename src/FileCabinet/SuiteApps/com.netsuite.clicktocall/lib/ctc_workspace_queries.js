@@ -531,17 +531,29 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
     };
 
     /**
-     * True when a call did not connect (no talk time). CTC is outbound only,
-     * so this is the "missed" source until inbound calls exist.
-     * @param {{duration?: number}} row
+     * True when a call did not connect: no talk time, or a voicemail (its
+     * duration is the recording, not a conversation).
+     * @param {{duration?: number, voicemail?: boolean}} row
      * @returns {boolean}
      */
-    const isUnconnected = (row) => !(row && row.duration > 0);
+    const isUnconnected = (row) => !(row && row.duration > 0) || !!(row && row.voicemail === true);
+
+    /**
+     * True for a missed call: status 'Missed' (reconciliation), a voicemail,
+     * or an inbound call with no talk time (calls logged before
+     * reconciliation). The same rule as the direction icon.
+     * @param {{callStatus?: string, voicemail?: boolean, direction?: string, duration?: number}} row
+     * @returns {boolean}
+     */
+    const isMissedCall = (row) => !!row && (row.callStatus === 'Missed' || row.voicemail === true ||
+        (row.direction === 'inbound' && !(row.duration > 0)));
 
     /**
      * Filter history rows by direction and a search text. Pure: no queries.
-     * direction: 'all' | 'outbound' | 'inbound' | 'missed'. 'missed' means
-     * not connected; 'outbound' / 'inbound' mean connected in that direction.
+     * direction: 'all' | 'outbound' | 'inbound' | 'missed'. 'missed' =
+     * isMissedCall; 'outbound' / 'inbound' = the other calls in that
+     * direction (an unanswered outbound call is outbound). The three
+     * directions split the rows with no overlap.
      * The search matches company or contact name (case-insensitive), or the
      * phone digits when the text holds 3 or more digits.
      * @param {Array<Object>} rows
@@ -554,9 +566,9 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         const text = String(o.search || '').trim().toLowerCase();
         const digits = text.replace(/[^0-9]/g, '');
         return (rows || []).filter((r) => {
-            if (dir === 'missed' && !isUnconnected(r)) return false;
+            if (dir === 'missed' && !isMissedCall(r)) return false;
             if ((dir === 'outbound' || dir === 'inbound') &&
-                (isUnconnected(r) || (r.direction || 'outbound') !== dir)) return false;
+                (isMissedCall(r) || (r.direction || 'outbound') !== dir)) return false;
             if (!text) return true;
             const names = (String(r.companyName || '') + ' ' + String(r.contactName || '')).toLowerCase();
             if (names.indexOf(text) !== -1) return true;
@@ -1227,6 +1239,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         getBookCustomerIds,
         parseTimeOfDay,
         isUnconnected,
+        isMissedCall,
         satClass,
         filterCallRows,
         computeReportKpis,

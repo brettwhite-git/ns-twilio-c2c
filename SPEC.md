@@ -275,9 +275,9 @@ Windows with `window.opener` draw nothing.
 
 **Portlet call statuses** (one `STATUS_RULES` table = `ctcHtml.CALL_STATUS_RULES` in `F/lib/ctc_html.js`, shared with Reporting Central; used by the server render and the period-refresh JS). With no AI brief: Logged / Processing → "Processing…"; No transcript → "No transcript"; Too short → "Too short to summarize"; Failed → "Summary failed"; Missed → coral chip "Missed call" (`ctc-pl-status-missed`) + "Missed call" direction icon + Length "—"; No answer → grey chip "No answer" (`ctc-pl-status-quiet`), Length "—" when 0 s. Calls KPI sub-line "<n> missed" (coral; same count as the Missed badge: status Missed + voicemail); average talk time excludes 0 s rows. Status chips and direction icons use `ctc-pl-status*`, never `ctc-pl-chip` (that class belongs to the period buttons).
 
-**Rules.** **Reporting Central's Missed tab and Missed filter still mean a call with no talk time (duration 0, `isUnconnected`), not status `Missed`.** The direction icon uses its own rule (status `Missed` or inbound with no talk time), so an unanswered outbound call is in the Missed tab with an "Outbound call" icon. The portlet Missed tab reads status `Missed` / voicemail.
+**Rules.** One missed rule in Reporting Central (`wq.isMissedCall`, 2026-11-01): status `Missed`, a voicemail (`custevent_ctc_voicemail` T), or an inbound call with no talk time (calls logged before reconciliation). It drives the direction icon, the Missed tab, the Missed filter and the CSV "Direction". The direction filters split the rows with no overlap: Missed = `isMissedCall`; Outbound / Inbound = the other calls in that direction (an unanswered outbound call is Outbound, with the "No answer" chip). Connected KPI and talk time: a voicemail is not connected (`isUnconnected` = no talk time or a voicemail), so its recording length is not talk time. The portlet Missed tab reads status `Missed` / voicemail.
 
-**Open gaps.** Reporting Central's Missed tab should read status `Missed` / voicemail like the portlet once reconciliation ships. Reporting Central's Missed tab / filter and Connected KPI do not count voicemails as missed yet (a voicemail has talk time = recording length). Portlet `<style>` / `@container` survival in the live portlet copy not verified; the Missed tab, chips and footer are not live-tested.
+**Open gaps.** Portlet `<style>` / `@container` survival in the live portlet copy not verified; the Missed tab, chips and footer are not live-tested.
 
 ---
 
@@ -302,13 +302,15 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 
 ## 11. Phone Call record
 
-**Today.** `customscript_ctc_ue_transcript_viewer` (VIEW and EDIT) injects a "Call Intelligence" panel above Primary Information: status pill (Logged / Processing / Transcribed / No transcript / Failed only), AI summary block, 4-column metrics (satisfaction, duration, tone keywords, recording), transcript, action items. Redundant CTC fields are hidden in VIEW mode.
+**Today.** `customscript_ctc_ue_transcript_viewer` (VIEW and EDIT) injects a "Call Intelligence" panel above Primary Information: status pill, AI summary block, 4-column metrics (satisfaction, duration, tone keywords, recording), transcript, action items. Redundant CTC fields are hidden in VIEW mode.
+- **Pills:** Logged / Processing / Transcribed / No transcript / Failed, plus (reconciliation) `Missed` → coral "Missed call" (`#FCE9E7` / `#9A3A2C`, the portlet chip colours), `No answer` → grey "No answer", `Too short` → grey "Too short to summarize". A voicemail (`custevent_ctc_voicemail` T) adds a sky "Voicemail" pill (`#E8F3FC` / `#1B6097`) before the status pill.
+- **Unanswered calls** (status Missed / No answer / Too short, not a voicemail, no summary and no transcript): the panel shows the pills and one line instead of the summary, metrics and transcript: "The caller did not reach anyone and left no voicemail." / "The person you called did not pick up." / "The call lasted under 3 seconds, so there is nothing to summarize."
 
 **Phone Call fields** (`custevent_ctc_*`): `call_sid`, `call_started` (CLOBTEXT, ISO-8601 UTC, "Call started (UTC)", inline), `call_status`, `duration`, `inbound`, `processed`, `recording_sid`, `recording_url`, `recording_cleanup_pending`, `voicemail` (checkbox, voicemail marker), `analysis_claim` (CLOBTEXT, hidden, `<ISO>|<count>`, §6), `transcript`, `ai_summary`, `ai_brief`, `satisfaction`, `tone_keywords`, `action_items`.
 
 **Planned redesign (not built):** design canvas "Phone Call Record — Enhanced", https://claude.ai/artifact/TDtqWmXLx2rehn8YMVk7zt.
 
-**Open gaps.** Panel has no style for `Missed`, `Too short`, `No answer` (no pill shows).
+**Open gaps.** The full redesign (canvas above) is not built; its questions are open.
 
 ---
 

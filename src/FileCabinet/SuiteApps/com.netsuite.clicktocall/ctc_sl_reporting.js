@@ -60,7 +60,7 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
     };
     const ARROW = { inbound: 'M17 7L7 17M15 17H7V9', outbound: 'M7 17L17 7M9 7h8v8' };
 
-    // Direction labels for the CSV (directionKey: missed = not connected).
+    // Direction labels for the CSV (directionKey: missed = wq.isMissedCall).
     const ICONS = {
         outbound: { label: 'Outbound' },
         inbound: { label: 'Inbound' },
@@ -206,15 +206,14 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
     const SAT_CLASS = { high: 'good', mid: 'mid', low: 'low', none: 'none' };
     const satClass = (n) => SAT_CLASS[wq.satClass(n)];
 
-    const directionKey = (row) => (wq.isUnconnected(row) ? 'missed' : (row.direction === 'inbound' ? 'inbound' : 'outbound'));
+    // Missed = wq.isMissedCall: status 'Missed', a voicemail, or an inbound
+    // call with no talk time. The icon, the CSV, the Missed tab and filter
+    // use this one rule.
+    const directionKey = (row) => (wq.isMissedCall(row) ? 'missed' : (row.direction === 'inbound' ? 'inbound' : 'outbound'));
 
     // Direction chip kind for a call row: 'missed' | 'in' | 'out'.
-    // Missed = status 'Missed', a voicemail, or an inbound call with no talk time.
-    const dirChipKind = (row) => {
-        const inbound = row.direction === 'inbound';
-        if (row.callStatus === 'Missed' || row.voicemail === true || (inbound && wq.isUnconnected(row))) return 'missed';
-        return inbound ? 'in' : 'out';
-    };
+    const DIR_KIND = { missed: 'missed', inbound: 'in', outbound: 'out' };
+    const dirChipKind = (row) => DIR_KIND[directionKey(row)];
 
     // ─── CSV ───────────────────────────────────────────────────────────────
 
@@ -494,7 +493,7 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
     const buildMissedTab = (m) => {
         if (m.historyError) return errorBox('Couldn’t load your calls', m);
         if (!m.missedRows.length) {
-            return '<div class="rc-card">' + stateBox('No missed calls', 'Calls that did not connect show up here.') + '</div>';
+            return '<div class="rc-card">' + stateBox('No missed calls', 'Missed calls and voicemails show up here.') + '</div>';
         }
         return callTable(m.missedRows, m, 'Missed calls');
     };

@@ -35,7 +35,9 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
             toneKeywords: rec.getValue({ fieldId: 'custevent_ctc_tone_keywords' }) || '',
             actionItems:  rec.getValue({ fieldId: 'custevent_ctc_action_items' }) || '',
             transcript:   rec.getValue({ fieldId: 'custevent_ctc_transcript' }) || '',
-            recordingUrl: rec.getValue({ fieldId: 'custevent_ctc_recording_url' }) || ''
+            recordingUrl: rec.getValue({ fieldId: 'custevent_ctc_recording_url' }) || '',
+            voicemail:    isChecked(rec.getValue({ fieldId: 'custevent_ctc_voicemail' })),
+            inbound:      isChecked(rec.getValue({ fieldId: 'custevent_ctc_inbound' }))
         };
 
         const html = buildViewerHtml(data);
@@ -65,20 +67,43 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 
     const splitLines = (text) => text.split(/\n|<br\s*\/?>/).filter(Boolean);
 
-    // Map a status string to a (bg, fg) color pair for the pill.
+    // Checkbox values arrive as true / 'T' (record) or false / 'F' / ''.
+    const isChecked = (v) => v === true || v === 'T';
+
+    // Map a status string to a (bg, fg) color pair for the pill. Missed /
+    // No answer / Too short come from Twilio call reconciliation; their
+    // colours match the portlet and Reporting Central chips.
     const STATUS_STYLES = {
         'Logged':        { bg: '#e8edf3', fg: '#4a5568', label: 'Logged' },
         'Processing':    { bg: '#fef9f0', fg: '#b47200', label: 'Processing — transcript pending' },
         'Transcribed':   { bg: '#e6f7ee', fg: '#0e7a4f', label: 'Transcribed' },
         'No transcript': { bg: '#fef9f0', fg: '#b47200', label: 'No transcript — call too brief or recording absent' },
-        'Failed':        { bg: '#fce8e6', fg: '#b83a33', label: 'Failed — needs admin review' }
+        'Failed':        { bg: '#fce8e6', fg: '#b83a33', label: 'Failed — needs admin review' },
+        'Missed':        { bg: '#FCE9E7', fg: '#9A3A2C', label: 'Missed call' },
+        'No answer':     { bg: '#F1EFEA', fg: '#5C5955', label: 'No answer' },
+        'Too short':     { bg: '#F1EFEA', fg: '#5C5955', label: 'Too short to summarize' }
     };
+    const VOICEMAIL_STYLE = { bg: '#E8F3FC', fg: '#1B6097', label: 'Voicemail' };
+
+    // Calls with no conversation to analyse: the panel shows the pill and
+    // one line instead of the summary, metrics and transcript.
+    const UNANSWERED_NOTE = {
+        'Missed':    'The caller did not reach anyone and left no voicemail.',
+        'No answer': 'The person you called did not pick up.',
+        'Too short': 'The call lasted under 3 seconds, so there is nothing to summarize.'
+    };
+
+    const pill = (style) =>
+        `<span class="ctc-status-pill" style="background:${style.bg};color:${style.fg}">${escapeHtml(style.label)}</span>`;
 
     const buildStatusPill = (status) => {
         const style = STATUS_STYLES[status];
-        if (!style) return '';
-        return `<span class="ctc-status-pill" style="background:${style.bg};color:${style.fg}">${escapeHtml(style.label)}</span>`;
+        return style ? pill(style) : '';
     };
+
+    // Voicemail pill first (what the call was), then the status pill.
+    const buildPills = (data) =>
+        '<span class="ctc-pills">' + (data.voicemail ? pill(VOICEMAIL_STYLE) : '') + buildStatusPill(data.status) + '</span>';
 
     const buildViewerHtml = (data) => {
         const safeSummary = escapeHtml(data.summary);
@@ -127,6 +152,8 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
             ? '<a href="' + safeRecordingUrl + '" target="_blank" class="ctc-link">Download recording (MP3)</a>'
             : '<span class="ctc-muted">No recording</span>';
 
+        const note = (!data.voicemail && !data.transcript && !data.summary && UNANSWERED_NOTE[data.status]) || '';
+
         const actionBlock = data.actionItems
             ? '<hr class="ctc-divider"><div class="ctc-section"><div class="ctc-section-title">Action Items</div><div class="ctc-action-block">' + actionItemsHtml + '</div></div>'
             : '';
@@ -136,6 +163,8 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 #ctc-viewer { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; color: #333; margin: 16px 0; }
 #ctc-viewer .ctc-header { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid #e8e8e8; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 #ctc-viewer .ctc-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; }
+#ctc-viewer .ctc-pills { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+#ctc-viewer .ctc-note { color: #5C5955; line-height: 1.5; }
 #ctc-viewer .ctc-status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 #ctc-viewer .ctc-section { margin-bottom: 14px; }
 #ctc-viewer .ctc-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
@@ -157,8 +186,8 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 #ctc-viewer hr.ctc-divider { border: none; border-top: 1px solid #e8e8e8; margin: 14px 0; }
 #ctc-viewer .ctc-metrics-row > div:not(:last-child) { border-right: 1px solid #e8e8e8; padding-right: 16px; }
 </style>
-<div class="ctc-header"><span>Call Intelligence</span>${buildStatusPill(data.status)}</div>
-<div class="ctc-section">
+<div class="ctc-header"><span>Call Intelligence</span>${buildPills(data)}</div>
+${note ? '<div class="ctc-section ctc-note">' + escapeHtml(note) + '</div>' : `<div class="ctc-section">
 <div class="ctc-section-title">AI Summary</div>
 <div class="ctc-summary">${safeSummary || '<span class="ctc-muted">No summary available</span>'}</div>
 </div>
@@ -171,7 +200,7 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 </div>
 <hr class="ctc-divider">
 ${transcriptSection}
-${actionBlock}
+${actionBlock}`}
 <script>(function(){var el=document.getElementById('ctc-viewer');if(!el)return;var tr=el.closest('tr');if(!tr)return;var tbody=tr.parentElement;if(tbody)tbody.insertBefore(tr,tbody.firstChild);})()</script>
 </div>`;
     };
