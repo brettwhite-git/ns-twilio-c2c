@@ -28,6 +28,12 @@
  * size). Pill and panel are one unit: dragging the panel's header snaps it
  * to one of the same eight points, and the pill comes back there. On the
  * left and right middle points (ml, mr) the pill stands vertical.
+ *
+ * Inbound ring (phase 'incoming'), panel closed: the incoming card (Answer /
+ * Decline) rises out of the pill (above it on the bottom row, below it on the
+ * top row, beside it on ml / mr); the pill itself only says "Ringing". The
+ * shell and remote tabs both draw it. With the panel open, the panel's ring
+ * view takes its place.
  */
 (function () {
     'use strict';
@@ -176,6 +182,13 @@
     var ENTER_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
     var ENTER_SHIFT = 6; // px the pill travels in from its edge
     var PANEL_FADE_MS = 200;
+    // Incoming card: gap to the pill, motion (enter / exit / reduced), and
+    // how far it starts toward the pill.
+    var INC_GAP = 10;
+    var INC_ENTER_MS = 240;
+    var INC_EXIT_MS = 160;
+    var INC_REDUCED_MS = 120;
+    var INC_SHIFT = 8;
     var HELLO_TIMEOUT_MS = 600;
     // Shell: the phone frame loads after the dock. While it boots (up to
     // this long) a silent bus means "starting", not "offline".
@@ -256,20 +269,14 @@
         '.v-mute[aria-pressed="true"]{background:#F4C76A}',
         '.v-mute[aria-pressed="true"] svg{stroke:#1F2F4D}',
         '.v-main{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
-        '.v-main.call,.v-main.answer{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
-        '.v-main.answer:hover{background:#0E9E6D}',
-        /* incoming: Decline (coral, like End) before Answer; vertical puts it under Answer */
-        '.v-decline{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
-        '.v-decline:hover{background:#D85440}',
-        '.v-decline svg{transform:rotate(135deg)}',
-        '.dock.vert .v-decline{order:1}',
+        '.v-main.call{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
         '.v-main.end{background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
         '.v-main.end:hover{background:#D85440}',
         '.v-main.end svg{transform:rotate(135deg)}',
         '.v-main.offline{background:#F4F2EE}',
         '.v-main.retry{width:36px;height:36px;border-radius:12px;background:#FCE9E7}',
         '.v-ico{display:none}',
-        '.v-main.call .ico-call,.v-main.answer .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
+        '.v-main.call .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
         /* offline / error: light pill */
         '.vchip.light{background:#FFFFFF;border:1px solid #E5E2DD;box-shadow:0 6px 16px rgba(22,21,19,0.08)}',
         '.vchip.light .v-grip i{background:#D9D5CF}',
@@ -289,6 +296,22 @@
         '.dock[data-row="m"][data-col="r"] .v-menu{left:auto;right:calc(100% + 8px);transform-origin:right center}',
         '.v-menu-item{display:block;width:100%;padding:9px 12px;border-radius:8px;background:transparent;text-align:left;font-size:13px;font-weight:500;color:#FFFFFF;white-space:nowrap}',
         '.v-menu-item:hover{background:rgba(255,255,255,0.08)}',
+        /* incoming card: rises out of the pill (placed by script with
+           translate; enter / exit run on transform + opacity, WAAPI). Row:
+           sky dot, caller text, Decline, Answer. */
+        '.inc{position:fixed;left:0;top:0;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:16px;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26)}',
+        '.inc-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:#74C0FC}',
+        '.inc-text{flex:1;min-width:0;display:flex;flex-direction:column}',
+        '.inc-label{font-size:11px;font-weight:500;line-height:14px;color:#9FC9EE}',
+        '.inc-name{margin-top:2px;font-size:15px;font-weight:600;line-height:20px;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.inc-sub{margin-top:1px;font-size:12px;line-height:16px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.inc-acts{display:flex;gap:8px;flex-shrink:0}',
+        '.inc-btn{width:36px;height:36px;border-radius:999px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
+        '.inc-decline{background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
+        '.inc-decline:hover{background:#D85440}',
+        '.inc-decline svg{transform:rotate(135deg)}',
+        '.inc-answer{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
+        '.inc-answer:hover{background:#0E9E6D}',
         /* screen-reader-only live regions */
         '.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}',
 
@@ -337,9 +360,6 @@
         +     '<button type="button" class="v-mute" aria-label="Mute" aria-pressed="false">'
         +       '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_MIC + '</svg>'
         +     '</button>'
-        +     '<button type="button" class="v-decline" aria-label="Decline call" hidden>'
-        +       '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>'
-        +     '</button>'
         +     '<button type="button" class="v-main call">'
         +       '<svg class="v-ico ico-call" width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>'
         +       '<svg class="v-ico ico-offline" width="16" height="16" viewBox="0 0 24 24" fill="#345D7E" aria-hidden="true">' + ICON_PHONE + '</svg>'
@@ -365,6 +385,23 @@
         +         '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg>'
         +       '</button>'
         +     '</div>'
+        +   '</div>'
+        + '</div>'
+        // Incoming card: outside .dock (the dock's transform would carry it).
+        + '<div class="inc navy" role="alertdialog" aria-label="Incoming call" hidden>'
+        +   '<span class="inc-dot" aria-hidden="true"></span>'
+        +   '<div class="inc-text">'
+        +     '<span class="inc-label">Incoming call</span>'
+        +     '<span class="inc-name"></span>'
+        +     '<span class="inc-sub" hidden></span>'
+        +   '</div>'
+        +   '<div class="inc-acts">'
+        +     '<button type="button" class="inc-btn inc-decline" aria-label="Decline call">'
+        +       '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>'
+        +     '</button>'
+        +     '<button type="button" class="inc-btn inc-answer" aria-label="Answer call">'
+        +       '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>'
+        +     '</button>'
         +   '</div>'
         + '</div>'
         // Live regions stay outside .dock: a hidden dock must still speak.
@@ -403,6 +440,13 @@
     var pillAction = '';
     var pressAction = null;
     var menuOpen = false;
+    // Incoming card: incShown = it shows (or enters); incAnim = the running
+    // enter / exit (WAAPI); incDismissed = the ring (callSid) the rep already
+    // answered or declined here, so a late 'incoming' snapshot of the same
+    // ring does not bring it back.
+    var incShown = false;
+    var incAnim = null;
+    var incDismissed = '';
     var bus = new BroadcastChannel(cfg.bus);
 
     // --- DOM ---
@@ -425,7 +469,6 @@
     var vSs = $('.v-ss');
     var vMute = $('.v-mute');
     var vMain = $('.v-main');
-    var vDecline = $('.v-decline');
     var cardEl = $('.card');
     var cardTop = $('.card-top');
     var avatarEl = $('.avatar');
@@ -438,6 +481,11 @@
     var vCount = $('.v-count');
     var menuEl = $('.v-menu');
     var useHereItem = $('.v-use-here');
+    var incEl = $('.inc');
+    var incName = $('.inc-name');
+    var incSub = $('.inc-sub');
+    var incAnswer = $('.inc-answer');
+    var incDecline = $('.inc-decline');
     var srAssertive = $('.sr-assertive');
     var srPolite = $('.sr-polite');
 
@@ -573,8 +621,8 @@
         if (!prev || !next) return;
         var a = prev.phase, b = next.phase;
         if (b === 'incoming' && a !== 'incoming') {
-            // The shell's inbound toast has its own assertive region.
-            if (mode !== 'shell') say(srAssertive, 'Incoming call from ' + (whoOf(next.caller) || whoOf({ number: next.number }) || 'unknown caller'));
+            // The one assertive announcement of a ring (shell and other tabs).
+            say(srAssertive, 'Incoming call from ' + (whoOf(next.caller) || whoOf({ number: next.number }) || 'unknown caller'));
             return;
         }
         if (b === 'connected' && a !== 'connected') { say(srPolite, 'Call connected'); return; }
@@ -685,6 +733,7 @@
         // the entrance, at the pill's final size and place.
         if (wasHidden && !dockEl.hidden) enter();
         fitPill();
+        syncIncoming();
     }
 
     // Entrance: 260 ms fade + scale 0.96 -> 1 + a few px in from the pill's
@@ -714,6 +763,7 @@
         if (expanded || (panel && !panel.el.hidden)) setExpanded(false, false);
         if (timerId) { window.clearInterval(timerId); timerId = null; }
         dockEl.hidden = true;
+        syncIncoming();
     }
 
     function renderOutside() {
@@ -761,18 +811,17 @@
         dockEl.hidden = false;
         dockEl.style.setProperty('--dot', view.dot);
         if (phase === 'incoming') {
-            // Ringing in: Decline + Answer, here and in a mirror tab (the
-            // anchor answers; the audio plays in the tab that holds the phone).
+            // Ringing in: the incoming card above / beside the pill holds
+            // Answer / Decline (here and in a mirror tab: the anchor answers;
+            // the audio plays in the tab that holds the phone). The pill
+            // only says "Ringing" (horizontal) and rings its sky dot.
             var who = callerText();
             var words0 = pillWords(phase, mirror, active);
             renderPill({
                 stage: phase,
                 dot: true,
-                main: 'answer',
-                mainLabel: 'Answer call from ' + who,
-                decline: true,
-                declineLabel: 'Decline call from ' + who,
-                label: 'Incoming call from ' + who + '. Open phone.' + ARROWS_HINT,
+                main: null,
+                label: 'Incoming call from ' + who + '.' + (panel ? ' Open phone.' : '') + ARROWS_HINT,
                 title: 'Incoming call from ' + who,
                 l1: words0.l1,
                 l2: words0.l2
@@ -874,7 +923,7 @@
     // Horizontal pill words (two lines; '' = line not shown). The vertical
     // pill shows none. A wrap-up stage slots in here later.
     function pillWords(phase, mirror, active) {
-        if (phase === 'incoming') return { l1: 'Incoming call', l2: callerText() };
+        if (phase === 'incoming') return { l1: 'Ringing', l2: '' }; // the card names the caller
         var number = active ? formatPhone(snap.number) || snap.number || '' : '';
         var name = active ? snap.entityName || snap.contactName || number || 'Call' : '';
         if (mirror) return { l1: 'Phone open in another tab', l2: name };
@@ -895,9 +944,8 @@
     // The pill, both shapes. Grip, status dot, words + timer (horizontal) or
     // timer as mm over ss (vertical), Mute while connected, main button last.
     //   main: 'call' (open phone) | 'end' (hang up) | 'offline' (open phone)
-    //         | 'retry' (open phone) | 'answer' (incoming) | null (no button:
-    //         starting, mirror idle)
-    //   decline: the Decline button before main (incoming only); declineLabel its aria-label
+    //         | 'retry' (open phone) | null (no button: starting, incoming,
+    //         mirror idle)
     // The body button opens the phone / call card. When the main button does
     // that same thing, the body leaves the tab order so keyboard users meet
     // one control per action.
@@ -928,9 +976,7 @@
         vMain.hidden = !o.main;
         vMain.className = 'v-main' + (o.main ? ' ' + o.main : '');
         vMain.setAttribute('aria-label', o.mainLabel || (o.main === 'end' ? 'End call' : o.label));
-        vDecline.hidden = !o.decline;
-        vDecline.setAttribute('aria-label', o.declineLabel || 'Decline call');
-        var bodyIsMain = o.main && o.main !== 'end' && o.main !== 'answer';
+        var bodyIsMain = o.main && o.main !== 'end';
         vBody.tabIndex = bodyIsMain ? -1 : 0;
         if (bodyIsMain) {
             vBody.removeAttribute('aria-label');
@@ -958,7 +1004,7 @@
             return;
         }
         if (pillAction === 'unlock') return;
-        if (opener === vMain && (vMain.classList.contains('end') || vMain.classList.contains('answer'))) return;
+        if (opener === vMain && vMain.classList.contains('end')) return;
         var opens = (mode !== 'outside' || phoneElsewhere()) && (!!panel || isActive());
         if (opens) opener.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     }
@@ -1071,6 +1117,7 @@
             place(false);
             // Opening the phone shows the missed calls: reset the count.
             if (opening && missedCount() > 0) send('markMissedSeen');
+            syncIncoming(); // open panel: its ring view replaces the card
             return;
         }
         var wasOpen = !cardEl.hidden;
@@ -1220,6 +1267,7 @@
             dockEl.style.transition = '';
         }
         applyTransform(false);
+        placeIncoming(glide);
         if (glide && flip) {
             orientTimer = window.setTimeout(function () {
                 orientTimer = null;
@@ -1319,6 +1367,179 @@
         return { x: vx * FLICK_PROJECT_MS, y: vy * FLICK_PROJECT_MS };
     }
 
+    // --- Incoming card ---
+    // Shows while the phase is 'incoming', the pill shows (panel closed) and
+    // this tab draws the shell's pill (the shell, or a tab whose phone runs
+    // in another tab). Opening the panel (its ring view takes over) or
+    // hiding the dock removes it at once; otherwise it exits toward the pill
+    // (answer, decline, caller hung up). It never takes focus by itself and
+    // Escape does nothing (no accidental decline).
+    function ringKey() {
+        if (!snap) return '';
+        var c = snap.caller || {};
+        return String(snap.callSid || '') || ('n:' + String(c.number || snap.number || ''));
+    }
+
+    function incomingWanted() {
+        if (!snap || snap.phase !== 'incoming') return false;
+        if (dockEl.hidden || vchipEl.hidden) return false;
+        if (mode === 'outside' && !phoneElsewhere()) return false;
+        return ringKey() !== incDismissed;
+    }
+
+    // Name line: caller name, else the number in display form. Sub line:
+    // "number · contact", each part only when it adds something.
+    function fillIncoming() {
+        var c = snap.caller || {};
+        var raw = String(c.number || snap.number || '');
+        var number = formatPhone(raw) || raw;
+        var name = String(c.name || '');
+        var contact = String(snap.contactName || '');
+        var title = callerText();
+        var sub = [];
+        if (name && number) sub.push(number);
+        if (contact && contact !== title) sub.push(contact);
+        incName.textContent = title;
+        incSub.textContent = sub.join(' · ');
+        incSub.hidden = !sub.length;
+        incEl.setAttribute('aria-label', 'Incoming call from ' + title);
+        incAnswer.setAttribute('aria-label', 'Answer call from ' + title);
+        incDecline.setAttribute('aria-label', 'Decline call from ' + title);
+    }
+
+    // Card place for a pill at p {x, y, w, h} on snap point c, card size
+    // s {w, h}, viewport vw x vh. INC_GAP from the pill: above it on the
+    // bottom row, below it on the top row (column l: left edges aligned, c:
+    // centred, r: right edges aligned); right of the pill on ml, left of it
+    // on mr (centred on it). Then kept EDGE inside the viewport.
+    function incomingXY(c, p, s, vw, vh) {
+        var row = c.charAt(0);
+        var col = c.charAt(1);
+        var x, y;
+        if (row === 'm') {
+            x = col === 'l' ? p.x + p.w + INC_GAP : p.x - INC_GAP - s.w;
+            y = p.y + (p.h - s.h) / 2;
+        } else {
+            x = col === 'l' ? p.x : col === 'r' ? p.x + p.w - s.w : p.x + (p.w - s.w) / 2;
+            y = row === 'b' ? p.y - INC_GAP - s.h : p.y + p.h + INC_GAP;
+        }
+        return {
+            x: Math.max(EDGE, Math.min(x, vw - s.w - EDGE)),
+            y: Math.max(EDGE, Math.min(y, vh - s.h - EDGE))
+        };
+    }
+
+    // INC_SHIFT px toward the pill (where the enter starts).
+    function incomingShift() {
+        var row = corner.charAt(0);
+        if (row === 'm') return { x: corner.charAt(1) === 'l' ? -INC_SHIFT : INC_SHIFT, y: 0 };
+        return { x: 0, y: row === 'b' ? INC_SHIFT : -INC_SHIFT };
+    }
+
+    // The card at the pill: while dragged, where the pill is drawn; else
+    // where it settles (a snap glide's end, in the shape it takes there).
+    // glide: the card glides with the pill (translate, SETTLE). The scale
+    // origin is the pill's centre in the card's own coordinates.
+    function placeIncoming(glide) {
+        if (!incShown) return;
+        var p;
+        if (drag && drag.moved) {
+            p = { x: pos.x, y: pos.y, w: dockEl.offsetWidth, h: dockEl.offsetHeight };
+        } else {
+            var size = sizeOf(isVertCorner(corner));
+            var xy = cornerXY(corner, size);
+            p = { x: xy.x, y: xy.y, w: size.w, h: size.h };
+        }
+        var at = incomingXY(corner, p, { w: incEl.offsetWidth, h: incEl.offsetHeight }, window.innerWidth, window.innerHeight);
+        var st = incEl.style;
+        st.transition = glide && !reduced() ? 'translate ' + SETTLE : '';
+        st.translate = Math.round(at.x) + 'px ' + Math.round(at.y) + 'px';
+        st.transformOrigin = Math.round(p.x + p.w / 2 - at.x) + 'px ' + Math.round(p.y + p.h / 2 - at.y) + 'px';
+    }
+
+    function stopIncomingAnim() {
+        if (!incAnim) return;
+        incAnim.onfinish = null;
+        incAnim.cancel();
+        incAnim = null;
+    }
+
+    // Enter: INC_ENTER_MS, opacity 0 -> 1 and translate(INC_SHIFT toward the
+    // pill) scale(0.92) -> none. Exit: INC_EXIT_MS, opacity -> 0 and
+    // scale(0.96) toward the pill (the origin). Reduced motion: opacity
+    // only, INC_REDUCED_MS. WAAPI; a new enter / exit starts from what is
+    // drawn now, so a ring during an exit turns it around smoothly.
+    function animateIncoming(show) {
+        var red = reduced();
+        var canAnimate = typeof incEl.animate === 'function';
+        var from = null;
+        if (incAnim && canAnimate) {
+            var cs = window.getComputedStyle(incEl);
+            from = red ? { opacity: cs.opacity } : { opacity: cs.opacity, transform: cs.transform && cs.transform !== 'none' ? cs.transform : 'none' };
+        }
+        stopIncomingAnim();
+        if (!canAnimate) {
+            if (!show) incEl.hidden = true;
+            return;
+        }
+        var sh = incomingShift();
+        var shown = red ? { opacity: 1 } : { opacity: 1, transform: 'none' };
+        var frames = show
+            ? [from || (red ? { opacity: 0 } : { opacity: 0, transform: 'translate(' + sh.x + 'px,' + sh.y + 'px) scale(0.92)' }), shown]
+            : [from || shown, red ? { opacity: 0 } : { opacity: 0, transform: 'scale(0.96)' }];
+        var a = incEl.animate(frames, {
+            duration: red ? INC_REDUCED_MS : show ? INC_ENTER_MS : INC_EXIT_MS,
+            easing: ENTER_EASE,
+            fill: 'both'
+        });
+        incAnim = a;
+        a.onfinish = function () {
+            if (incAnim !== a) return;
+            incAnim = null;
+            if (!show) incEl.hidden = true;
+            a.cancel(); // the end state is the element's own (shown) or hidden
+        };
+    }
+
+    // Show / update / remove the card for the current snapshot and pill.
+    function syncIncoming() {
+        if (!snap || snap.phase !== 'incoming') incDismissed = '';
+        if (incomingWanted()) {
+            fillIncoming();
+            if (!incShown) {
+                incShown = true;
+                incEl.hidden = false;
+                incEl.style.pointerEvents = '';
+                placeIncoming(false);
+                animateIncoming(true);
+            } else {
+                placeIncoming(false); // the sub line may have changed its height
+            }
+            return;
+        }
+        if (!incShown) return;
+        incShown = false;
+        var hadFocus = incEl.contains(root.activeElement);
+        if (dockEl.hidden || vchipEl.hidden) {
+            stopIncomingAnim();
+            incEl.hidden = true;
+            return;
+        }
+        incEl.style.pointerEvents = 'none'; // a fading card never takes a click
+        animateIncoming(false);
+        if (hadFocus) focusPill(); // keyboard Answer / Decline: focus stays with the dock
+    }
+
+    // Answer / Decline on the card: the bus request (origin + nonce), then
+    // the card exits and stays away for this ring.
+    function respondIncoming(action) {
+        if (!snap || snap.phase !== 'incoming') return;
+        incDismissed = ringKey();
+        send(action);
+        syncIncoming();
+    }
+
+
     // --- Drag (pill only) ---
     // The whole pill is the handle, its buttons included. The pointer is captured by
     // the button pressed (else the pill), so a plain press still clicks that
@@ -1350,6 +1571,7 @@
         pos.x = drag.ox + dx;
         pos.y = drag.oy + dy;
         applyTransform(true);
+        placeIncoming(false);
         var now = e.timeStamp || Date.now();
         drag.samples.push({ x: e.clientX, y: e.clientY, t: now });
         while (drag.samples.length > 2 && now - drag.samples[0].t > 100) drag.samples.shift();
@@ -1403,7 +1625,6 @@
     }
     vBody.addEventListener('keydown', onArrow);
     vMain.addEventListener('keydown', onArrow);
-    vDecline.addEventListener('keydown', onArrow);
 
     // --- Drag (panel header) ---
     // Moves 1:1 with the pointer on both axes (translate only), lifted;
@@ -1537,7 +1758,6 @@
     vMain.addEventListener('click', function () {
         var a = takePillAction();
         if (vMain.classList.contains('end')) send('hangup');
-        else if (vMain.classList.contains('answer')) send('answer');
         else if (!runPillAction(a)) openFromPill();
     });
     useHereItem.addEventListener('click', function () {
@@ -1553,7 +1773,8 @@
         var path = typeof e.composedPath === 'function' ? e.composedPath() : [];
         if (path.indexOf(menuEl) === -1 && path.indexOf(vchipEl) === -1) setMenu(false);
     }, true);
-    vDecline.addEventListener('click', function () { send('decline'); });
+    incAnswer.addEventListener('click', function () { respondIncoming('answer'); });
+    incDecline.addEventListener('click', function () { respondIncoming('decline'); });
     vMute.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
     cardTop.addEventListener('click', function () {
         setExpanded(false, false);
@@ -1671,6 +1892,23 @@
             if (panel && panel.setContext) panel.setContext(cfg.context);
             place(false);
             if (expanded) placePanel();
+        },
+
+        /**
+         * While a call rings: focus Answer on the incoming card (or the
+         * panel's Answer when the panel is open). The shell calls it from a
+         * system notification click, after window.focus(). Never called on
+         * a ring by itself: focus is not taken from a NetSuite form.
+         * @returns {boolean} true when something took focus
+         */
+        focusIncoming: function () {
+            if (!snap || snap.phase !== 'incoming') return false;
+            if (incShown && !incEl.hidden) {
+                try { incAnswer.focus({ preventScroll: true }); } catch (e) { incAnswer.focus(); }
+                return true;
+            }
+            if (panel && expanded) { panel.focus(); return true; }
+            return false;
         },
 
         // Extension surface for ctc_dock_dialer.js (shell and outside modes).

@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '16';
+    const DOCK_ASSET_VERSION = '17';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -56,7 +56,7 @@ define(['./ctc_html'], (ctcHtml) => {
     //     'unlockAudio'             handled by the SHELL, not the anchor: send
     //                               it from a user gesture (click / key) in a
     //                               top-level page of the shell tab (the dock in
-    //                               shell mode or the toast). The shell acts only
+    //                               shell mode). The shell acts only
     //                               while it has transient user activation, so
     //                               a request from another tab does nothing.
     //                               In the shell page prefer the direct call
@@ -78,7 +78,9 @@ define(['./ctc_html'], (ctcHtml) => {
     //   Sent on every state change and as the answer to 'hello'.
     // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'incoming'
     //        | 'connected' | 'reconnecting' | 'error' | 'moved'
-    //   incoming: Twilio rings this phone (inbound). Docks show Answer / Decline.
+    //   incoming: Twilio rings this phone (inbound). Docks show the incoming
+    //     card (Answer / Decline) at their pill, or the panel's ring view when
+    //     the panel is open.
     //   reconnecting: a live call lost its media / signaling path and Twilio is
     //     trying to restore it (Call 'reconnecting'). The call, timer and mute
     //     state are kept; the phase goes back to 'connected' on 'reconnected'
