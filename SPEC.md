@@ -30,7 +30,7 @@ Paths: `F/` = `src/FileCabinet/SuiteApps/com.netsuite.clicktocall/`; `W/` = `src
 - Login page (or an unreadable cross-origin page) in the frame (session timeout) → frame blanked, banner "Sign in again" (or "Your call is still connected"). "Reload page" reloads only the NetSuite frame. **Sign-in again:** the first normal (non-login) page the frame loads after the banner hides the banner and restarts the phone frame (`restartPhone`, loads the softphone URL again) when no call is live; during a live call the restart is skipped and the softphone recovers by itself (§3). A login page after Reload shows the banner again, with no restart.
 - Both the shell and the softphone Suitelet send `Cache-Control: no-store, max-age=0` and `Pragma: no-cache` (`ctcHtml.setNoStoreHeaders`; a refused header never breaks the page).
 - A `beforeunload` guard is on while the phase is `incoming`, `dialing`, `ringing`, `connected` or `reconnecting`.
-- **Screen-pop:** the anchor posts `ctc-open-record` to the shell. Accepted only from `#ctc-phone-frame`, same origin, path `/app/common/entity/(custjob|contact).nl?id=<digits>`. `ctc-phone-moved` and `ctc-phone-disabled` are accepted from the same sender only.
+- **Screen-pop: removed (2026-11-01, user decision).** Answering never navigates; the rep may be mid-task, and the panel's Open record link opens the record. The shell still accepts `ctc-open-record`, though nothing sends it: accepted only from `#ctc-phone-frame`, same origin, path `/app/common/entity/(custjob|contact).nl?id=<digits>`. `ctc-phone-moved` and `ctc-phone-disabled` are accepted from the same sender only.
 - **Entry:** the dashboard portlet's dock loader auto-enters phone mode once when no tab holds the lock, sessionStorage `ctc-phone-exit` is not `'1'` and the phone is not marked not-enabled for this browser (localStorage `ctc-phone-not-enabled`, §2). Normal tabs show an "Open phone" chip, or the remote-control dock when another tab holds the phone (§2).
 - **Exit phone mode** (dialer gear view): confirm if a call is live, set `ctc-phone-exit` = `'1'`, load the frame's page as the top page.
 
@@ -67,7 +67,7 @@ Windows with `window.opener` draw nothing.
 - Shows while the phase is `incoming` and the panel is closed, in the shell and in remote tabs (phone held by another tab, with or without the dialer). Opening the panel hides it at once (the panel's ring view has Answer / Decline); closing the panel while it still rings brings it back. No card while the dock is hidden (not enabled).
 - 320 px wide (at most viewport − 32), radius 16 px, navy like the pill, white text. Row: sky dot · "Incoming call" (11 px `#9FC9EE`) over the caller name, else the formatted number (15 px semibold), over "number · contact" (12 px `#94A6BF`, ellipsis, each part only when it adds something) · Decline (36 px round `#EE6E5C`, handset 135°) · Answer (36 px round `#14B981`). Press scale 0.97, 140 ms ease-out.
 - `role="alertdialog"`, `aria-label` "Incoming call from X"; the buttons say "Answer / Decline call from X". It never takes focus by itself (a NetSuite form keeps it); Escape does nothing. `__ctcDock.focusIncoming()` focuses Answer (shell notification click). After a keyboard Answer / Decline, focus goes to the pill.
-- Answer / Decline send bus `answer` / `decline` (origin `dock` + nonce) straight from the dock, in the shell too. The card then exits and stays away for that ring (call SID); screen-pop, the connected pill and missed counting are unchanged.
+- Answer / Decline send bus `answer` / `decline` (origin `dock` + nonce) straight from the dock, in the shell too. The card then exits and stays away for that ring (call SID); the connected pill and missed counting are unchanged. Answering does not navigate.
 - **Placement:** 10 px from the pill, kept 16 px inside the viewport. Bottom row: above the pill (bl left edges aligned, bc centred, br right edges aligned); top row: below it, same alignment; ml: right of the pill, `mr`: left of it, both centred on it vertically. Re-placed on resize, while the pill is dragged, and on a snap (glides with the pill: `translate` 300 ms `cubic-bezier(0.32, 0.72, 0, 1)`).
 - **Motion** (WAAPI, transform + opacity only; `transform-origin` = the pill's centre in the card's coordinates): enter 240 ms `cubic-bezier(0.23, 1, 0.32, 1)`, opacity 0 → 1 and `translate(8 px toward the pill) scale(0.92)` → none; exit (answer, decline, caller hung up, phase leaves `incoming`) 160 ms, same curve, opacity → 0 and scale 0.96 toward the pill; a fading card takes no clicks. A new ring during an exit starts from what is drawn (interruptible). Reduced motion: opacity only, 120 ms.
 
@@ -91,7 +91,7 @@ Windows with `window.opener` draw nothing.
 - **Security limit:** BroadcastChannel cannot authenticate a same-origin sender; any page on the account origin can post requests. origin / nonce / rate limits stop accidents and replays only. Server-side allow-listing of dialled numbers is the backstop (future, §13).
 - The dock draws every field above (see Pill and Panel). Unknown phases fall back to the offline view.
 
-**Rules & limits.** Nothing of ours may sit on a snap point. **Bump `DOCK_ASSET_VERSION` in `F/lib/ctc_dock.js` (now `'17'`) on every change to `ctc_dock_client.js` or `ctc_dock_dialer.js`**; it is the cache-bust query on both script URLs.
+**Rules & limits.** Nothing of ours may sit on a snap point. **Bump `DOCK_ASSET_VERSION` in `F/lib/ctc_dock.js` (now `'18'`) on every change to `ctc_dock_client.js` or `ctc_dock_dialer.js`**; it is the cache-bust query on both script URLs.
 
 **Mounts.** Record pages via `F/ctc_ue_phone_button.js` (shown only when `custrecord_ctc_active` is true); dashboard via a hidden `<img onerror>` loader (`buildDockLoaderHtml`) because portlets strip `<script>`.
 
@@ -169,7 +169,7 @@ Windows with `window.opener` draw nothing.
 
 **Ring & answer.** The dock shows the incoming card at the pill (§2) and, when the tab is away, the shell adds a system notification and a flashing title (§1). Ring time `custrecord_ctc_ring_seconds`: default 20, clamped 10–60. No-answer message `custrecord_ctc_noanswer_message`. Blank, or text equal to a built-in default, gives the default for the voicemail setting: voicemail on → "Sorry, no one is available. Please leave a message after the tone."; off → "Sorry, no one is available to take your call. Please try again later. Goodbye." The wizard stores a built-in default as blank, so the text follows the switch. The anchor holds one pending call; a second call while busy is rejected. Caller cancel / ring timeout → `missed` note and `missedUnseen` + 1 (§3); Decline → `skipped` note.
 
-**Caller match.** RESTlet `lookupCaller` → `lookupCallerByPhone`: last 10 digits (non-digits stripped both sides, SuiteQL `REGEXP_REPLACE`), customer / prospect / lead / contact; a match in the rep's book wins; a contact with a company returns the company as entity. The name fills in by a second snapshot. After Answer on a match, screen-pop opens the record in the NetSuite frame.
+**Caller match.** RESTlet `lookupCaller` → `lookupCallerByPhone`: last 10 digits (non-digits stripped both sides, SuiteQL `REGEXP_REPLACE`), customer / prospect / lead / contact; a match in the rep's book wins; a contact with a company returns the company as entity. The name fills in by a second snapshot. After Answer the page stays where it is; the panel shows the match with Open record.
 
 **Logging.** Answered inbound ≥ 3 s → `logCall` with `direction: 'inbound'` → `custevent_ctc_inbound` T. Missed inbound calls and voicemails are logged only by reconciliation (§7).
 
@@ -323,7 +323,7 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 - 2026-10-31 — Outbound recording notice: optional, off by default. Recommended design: Studio whisper via `<Dial><Number url>` + one manual Bin edit per install. Pending a live spike.
 - 2026-10-31 — Bounded waits for transcripts (1 h no recording, 24 h no transcript); 401/403/429 transient.
 - 2026-10-31 — Twilio is the source of truth for call history; reconciliation fills gaps, the browser stays the fast path.
-- 2026-11-01 — Screen-pop stays automatic. An inbound toast (shell, top level) plus system notification and title flash when the tab is away.
+- 2026-11-01 — (Superseded the same day: no automatic screen-pop on Answer; the rep may be mid-task.) An inbound toast (shell, top level) plus system notification and title flash when the tab is away.
 - 2026-11-01 — The phone stays controllable from any tab over the bus (gated: origin, nonce, dial rate and number checks). A waiting shell takes over by itself when the phone tab goes away, and "Use phone here" moves the phone when no call is live.
 - 2026-11-01 — Tokens and phone actions only for phone users: CTC active AND (active rep assignment, supervisor of an assigned rep, or Administrator).
 - 2026-11-01 — Reconciliation gets its own scheduled deployment (`customdeploy_ctc_ss_poll_recon`, from 00:00Z).
@@ -365,3 +365,5 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 - CLAUDE.md: "6 scripts", "Inbound is not built", "What NOT to Build: no inbound" → 9 scripts + SPA; inbound is built.
 - ARCHITECTURE.md / README.md: TwiML Bin `callerId="{{From}}"` → the browser sends `CallerId`.
 - `lib/ctc_workspace_queries.js` comments still say "CTC is outbound only" / missed inbound calls are not logged.
+
+- 2026-11-01 — No screen-pop on Answer (user: reps may be in the middle of something; Open record exists in the panel). Vertical pill always shows the phone button (no bare-dot pill while starting or ringing). DOCK_ASSET_VERSION 18.

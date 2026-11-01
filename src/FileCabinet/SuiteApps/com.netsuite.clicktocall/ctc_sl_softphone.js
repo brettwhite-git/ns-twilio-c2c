@@ -1815,7 +1815,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var pendingInbound = null;
         var callDirection = 'outbound';
         var dockCaller = null;
-        var screenPopDone = false;
         // The phone was handed to another tab (bus 'takeover'): the device
         // is unregistered and stays so until the shell stops this frame.
         var movedAway = false;
@@ -3737,7 +3736,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             console.log('[CTC] Incoming call');
             pendingInbound = call;
             callDirection = 'inbound';
-            screenPopDone = false;
             dockCaller = { number: formatPhone(from) || from, name: '', entityId: '', entityType: '' };
             dockLastLog = null;
             clearError();
@@ -3789,7 +3787,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 inboundEnded('error', 'Could not answer the call');
                 return;
             }
-            screenPop();
         }
 
         function declineInbound() {
@@ -3828,27 +3825,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 };
                 publishDock();
                 if (call === activeCall) {
-                    screenPop();
                     if (typeof loadAccountSnapshot === 'function' && ENTITY_TYPE !== 'contact') loadAccountSnapshot(ENTITY_ID);
                 }
             })
             .catch(function (err) { console.log('[CTC] Caller lookup failed: ' + (err && err.message)); });
-        }
-
-        // Screen-pop: ask the phone mode shell (this frame's parent) to open
-        // the matched record in the NetSuite frame. Once per call.
-        function screenPop() {
-            if (screenPopDone || !ENTITY_ID || window.parent === window) return;
-            screenPopDone = true;
-            try {
-                window.parent.postMessage({
-                    v: 1,
-                    type: '${escapeJs(ctcDock.OPEN_RECORD_MESSAGE)}',
-                    path: clientResolveEntityUrl(ENTITY_TYPE, ENTITY_ID)
-                }, window.location.origin);
-            } catch (err) {
-                console.error('[CTC] Screen-pop failed', err);
-            }
         }
 
         // --- Iteration B Phase 2: Tab switching + Search tab ---

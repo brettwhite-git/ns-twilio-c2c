@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '17';
+    const DOCK_ASSET_VERSION = '18';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -155,6 +155,9 @@ define(['./ctc_html'], (ctcHtml) => {
     //   when it finds the phone busy (a dock action; see TAKEOVER_PARAM).
     //
     // ---- anchor ↔ shell (window.postMessage, same origin; not the bus) ----
+    //   (No longer sent: the automatic screen-pop on Answer was removed at the user's
+    //   request — reps may be mid-task; the panel's Open record link stays. The shell
+    //   still accepts the message for a future explicit action.)
     //   anchor → shell: { v: 1, type: OPEN_RECORD_MESSAGE, path } after Answer on a
     //     matched caller (screen-pop). Accepted only from #ctc-phone-frame, same
     //     origin, and only an entity record path (/app/common/entity/custjob.nl|contact.nl?id=<digits>).

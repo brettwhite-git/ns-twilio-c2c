@@ -227,7 +227,8 @@
         '.vchip{display:flex;align-items:center;gap:10px;border-radius:26px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26);touch-action:none;user-select:none;-webkit-user-select:none}',
         '.dock:not(.vert) .vchip{flex-direction:row;height:52px;padding:0 6px 0 14px}',
         '.dock.vert .vchip{flex-direction:column;width:52px;padding:10px 0}',
-        '.dock:not(.vert) .vchip[data-main="none"]{padding-right:18px}',
+        '.dock:not(.vert) .vchip[data-main="none"],.dock:not(.vert) .vchip[data-main="vonly"]{padding-right:18px}',
+        '.dock:not(.vert) .vchip[data-main="vonly"] .v-main{display:none}',
         '.dock.vert .vchip[data-main="none"]{padding-bottom:16px}',
         '.dock.lifted .vchip{box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 16px 36px rgba(15,27,48,0.32)}',
         '.v-body{display:flex;align-items:center;gap:10px;padding:0;border-radius:12px;background:transparent;text-align:left}',
@@ -950,9 +951,14 @@
     // that same thing, the body leaves the tab order so keyboard users meet
     // one control per action.
     function renderPill(o) {
+        // A pill with no main button still carries the phone button; CSS
+        // shows it only in the vertical shape, which would otherwise shrink
+        // to a bare dot (starting, ringing, mirror idle). It opens the phone.
+        var vOnly = !o.main;
+        if (vOnly) o.main = 'call';
         vchipEl.setAttribute('data-stage', o.stage);
         vchipEl.setAttribute('data-muted', o.mute && o.muted ? 'true' : 'false');
-        vchipEl.setAttribute('data-main', o.main || 'none');
+        vchipEl.setAttribute('data-main', vOnly ? 'vonly' : o.main);
         vchipEl.classList.toggle('light', !!o.light);
         vchipEl.classList.toggle('navy', !o.light);
         vchipEl.classList.toggle('err', !!o.err);
@@ -976,7 +982,7 @@
         vMain.hidden = !o.main;
         vMain.className = 'v-main' + (o.main ? ' ' + o.main : '');
         vMain.setAttribute('aria-label', o.mainLabel || (o.main === 'end' ? 'End call' : o.label));
-        var bodyIsMain = o.main && o.main !== 'end';
+        var bodyIsMain = !vOnly && o.main && o.main !== 'end';
         vBody.tabIndex = bodyIsMain ? -1 : 0;
         if (bodyIsMain) {
             vBody.removeAttribute('aria-label');
