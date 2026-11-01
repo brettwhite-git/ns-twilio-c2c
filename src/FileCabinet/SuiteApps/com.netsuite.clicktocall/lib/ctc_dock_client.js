@@ -182,13 +182,15 @@
     var ENTER_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
     var ENTER_SHIFT = 6; // px the pill travels in from its edge
     var PANEL_FADE_MS = 200;
-    // Incoming card: gap to the pill, motion (enter / exit / reduced), and
-    // how far it starts toward the pill.
-    var INC_GAP = 10;
-    var INC_ENTER_MS = 240;
-    var INC_EXIT_MS = 160;
+    // Incoming card: the pill morphs into it (A1, 2026-11-01). Enter / exit /
+    // reduced durations; the content fades in from INC_CONTENT_AT of the
+    // enter; INC_OPEN is the clip of the open card (outset so the shadow
+    // shows while the morph ends).
+    var INC_ENTER_MS = 1280;
+    var INC_EXIT_MS = 880;
     var INC_REDUCED_MS = 120;
-    var INC_SHIFT = 8;
+    var INC_CONTENT_AT = 0.4;
+    var INC_OPEN = 'inset(-32px round 48px)';
     var HELLO_TIMEOUT_MS = 600;
     // Shell: the phone frame loads after the dock. While it boots (up to
     // this long) a silent bus means "starting", not "offline".
@@ -445,11 +447,13 @@
     var pressAction = null;
     var menuOpen = false;
     // Incoming card: incShown = it shows (or enters); incAnim = the running
-    // enter / exit (WAAPI); incDismissed = the ring (callSid) the rep already
-    // answered or declined here, so a late 'incoming' snapshot of the same
-    // ring does not bring it back.
+    // enter / exit of the card (WAAPI); incSideAnims = its content and pill
+    // fades; incDismissed = the ring (callSid) the rep already answered or
+    // declined here, so a late 'incoming' snapshot of the same ring does not
+    // bring it back.
     var incShown = false;
     var incAnim = null;
+    var incSideAnims = [];
     var incDismissed = '';
     var bus = new BroadcastChannel(cfg.bus);
 
@@ -1418,41 +1422,22 @@
         incDecline.setAttribute('aria-label', 'Decline call from ' + title);
     }
 
-    // Card place for a pill at p {x, y, w, h} on snap point c, card size
-    // s {w, h}, viewport vw x vh. INC_GAP from the pill: above it on the
-    // bottom row, below it on the top row (column l: left edges aligned, c:
-    // centred, r: right edges aligned); right of the pill on ml, left of it
-    // on mr (centred on it). Then kept EDGE inside the viewport.
-    function incomingXY(c, p, s, vw, vh) {
-        var row = c.charAt(0);
-        var col = c.charAt(1);
-        var x, y;
-        if (row === 'm') {
-            x = col === 'l' ? p.x + p.w + INC_GAP : p.x - INC_GAP - s.w;
-            y = p.y + (p.h - s.h) / 2;
-        } else {
-            x = col === 'l' ? p.x : col === 'r' ? p.x + p.w - s.w : p.x + (p.w - s.w) / 2;
-            y = row === 'b' ? p.y - INC_GAP - s.h : p.y + p.h + INC_GAP;
-        }
+    // Card place for a pill at p {x, y, w, h}, card size s {w, h}, viewport
+    // vw x vh: centred on the pill, kept EDGE inside the viewport. One rule
+    // for every snap point, horizontal or vertical pill.
+    function incomingXY(p, s, vw, vh) {
+        var x = p.x + (p.w - s.w) / 2;
+        var y = p.y + (p.h - s.h) / 2;
         return {
             x: Math.max(EDGE, Math.min(x, vw - s.w - EDGE)),
             y: Math.max(EDGE, Math.min(y, vh - s.h - EDGE))
         };
     }
 
-    // INC_SHIFT px toward the pill (where the enter starts).
-    function incomingShift() {
-        var row = corner.charAt(0);
-        if (row === 'm') return { x: corner.charAt(1) === 'l' ? -INC_SHIFT : INC_SHIFT, y: 0 };
-        return { x: 0, y: row === 'b' ? INC_SHIFT : -INC_SHIFT };
-    }
-
-    // The card at the pill: while dragged, where the pill is drawn; else
-    // where it settles (a snap glide's end, in the shape it takes there).
-    // glide: the card glides with the pill (translate, SETTLE). The scale
-    // origin is the pill's centre in the card's own coordinates.
-    function placeIncoming(glide) {
-        if (!incShown) return;
+    // The pill and the card placed on it: while dragged, the pill where it
+    // is drawn; else where it settles (a snap glide's end, in the shape it
+    // takes there). Returns { p, s, at } (pill rect, card size, card x / y).
+    function incomingGeom() {
         var p;
         if (drag && drag.moved) {
             p = { x: pos.x, y: pos.y, w: dockEl.offsetWidth, h: dockEl.offsetHeight };
@@ -1461,54 +1446,100 @@
             var xy = cornerXY(corner, size);
             p = { x: xy.x, y: xy.y, w: size.w, h: size.h };
         }
-        var at = incomingXY(corner, p, { w: incEl.offsetWidth, h: incEl.offsetHeight }, window.innerWidth, window.innerHeight);
+        var s = { w: incEl.offsetWidth, h: incEl.offsetHeight };
+        var at = incomingXY(p, s, window.innerWidth, window.innerHeight);
+        return { p: p, s: s, at: { x: Math.round(at.x), y: Math.round(at.y) } };
+    }
+
+    // glide: the card glides with the pill (translate, SETTLE).
+    function placeIncoming(glide) {
+        if (!incShown) return;
+        var g = incomingGeom();
         var st = incEl.style;
         st.transition = glide && !reduced() ? 'translate ' + SETTLE : '';
-        st.translate = Math.round(at.x) + 'px ' + Math.round(at.y) + 'px';
-        st.transformOrigin = Math.round(p.x + p.w / 2 - at.x) + 'px ' + Math.round(p.y + p.h / 2 - at.y) + 'px';
+        st.translate = g.at.x + 'px ' + g.at.y + 'px';
+    }
+
+    // The card clipped to the pill's rect (pill radius): where the enter
+    // starts and the exit ends.
+    function pillClip(g) {
+        var l = Math.round(g.p.x - g.at.x);
+        var t = Math.round(g.p.y - g.at.y);
+        var r = Math.round(g.s.w - l - g.p.w);
+        var b = Math.round(g.s.h - t - g.p.h);
+        var rad = Math.round(Math.min(g.p.w, g.p.h) / 2);
+        return 'inset(' + t + 'px ' + r + 'px ' + b + 'px ' + l + 'px round ' + rad + 'px)';
     }
 
     function stopIncomingAnim() {
+        incSideAnims.forEach(function (s) { s.cancel(); });
+        incSideAnims = [];
         if (!incAnim) return;
         incAnim.onfinish = null;
         incAnim.cancel();
         incAnim = null;
     }
 
-    // Enter: INC_ENTER_MS, opacity 0 -> 1 and translate(INC_SHIFT toward the
-    // pill) scale(0.92) -> none. Exit: INC_EXIT_MS, opacity -> 0 and
-    // scale(0.96) toward the pill (the origin). Reduced motion: opacity
-    // only, INC_REDUCED_MS. WAAPI; a new enter / exit starts from what is
-    // drawn now, so a ring during an exit turns it around smoothly.
+    // Pill hidden under the open card (inline opacity, so it outlives the
+    // fade), or shown again.
+    function setPillUnderCard(under) {
+        vchipEl.style.opacity = under ? '0' : '';
+    }
+
+    // Enter: the card's clip grows from the pill's rect to the whole card
+    // (INC_ENTER_MS); its content fades in from INC_CONTENT_AT; the pill
+    // fades out in the first part. Exit (INC_EXIT_MS): the content fades
+    // out, the clip shrinks back to the pill's rect, the pill fades in at
+    // the end. Reduced motion: opacity only, INC_REDUCED_MS. WAAPI; a new
+    // enter / exit starts from what is drawn now, so a ring during an exit
+    // turns it around smoothly.
     function animateIncoming(show) {
         var red = reduced();
         var canAnimate = typeof incEl.animate === 'function';
+        var running = !!incAnim && canAnimate;
+        var content = Array.prototype.slice.call(incEl.children);
         var from = null;
-        if (incAnim && canAnimate) {
+        var opacityNow = function (el) { return window.getComputedStyle(el).opacity; };
+        var pillFrom = running ? opacityNow(vchipEl) : (show ? '1' : '0');
+        var contentFrom = content.map(function (el) { return running ? opacityNow(el) : (show ? '0' : '1'); });
+        if (running) {
             var cs = window.getComputedStyle(incEl);
-            from = red ? { opacity: cs.opacity } : { opacity: cs.opacity, transform: cs.transform && cs.transform !== 'none' ? cs.transform : 'none' };
+            from = red ? { opacity: cs.opacity } : { clipPath: cs.clipPath && cs.clipPath !== 'none' ? cs.clipPath : INC_OPEN };
         }
         stopIncomingAnim();
         if (!canAnimate) {
+            setPillUnderCard(show);
             if (!show) incEl.hidden = true;
             return;
         }
-        var sh = incomingShift();
-        var shown = red ? { opacity: 1 } : { opacity: 1, transform: 'none' };
-        var frames = show
-            ? [from || (red ? { opacity: 0 } : { opacity: 0, transform: 'translate(' + sh.x + 'px,' + sh.y + 'px) scale(0.92)' }), shown]
-            : [from || shown, red ? { opacity: 0 } : { opacity: 0, transform: 'scale(0.96)' }];
-        var a = incEl.animate(frames, {
-            duration: red ? INC_REDUCED_MS : show ? INC_ENTER_MS : INC_EXIT_MS,
+        var g = incomingGeom();
+        var closed = red ? { opacity: 0 } : { clipPath: pillClip(g) };
+        var open = red ? { opacity: 1 } : { clipPath: INC_OPEN };
+        var dur = red ? INC_REDUCED_MS : show ? INC_ENTER_MS : INC_EXIT_MS;
+        var fade = function (el, a, b, delay, ms) {
+            incSideAnims.push(el.animate([{ opacity: a }, { opacity: b }], { duration: ms, delay: delay, easing: ENTER_EASE, fill: 'both' }));
+        };
+        setPillUnderCard(false); // the fade owns the pill's opacity until the end
+        if (red) {
+            fade(vchipEl, pillFrom, show ? 0 : 1, 0, dur);
+        } else if (show) {
+            fade(vchipEl, pillFrom, 0, 0, Math.round(dur * 0.375));
+            content.forEach(function (el, i) { fade(el, contentFrom[i], 1, Math.round(dur * INC_CONTENT_AT), Math.round(dur * (1 - INC_CONTENT_AT))); });
+        } else {
+            content.forEach(function (el, i) { fade(el, contentFrom[i], 0, 0, Math.round(dur * 0.4)); });
+            fade(vchipEl, pillFrom, 1, Math.round(dur * 0.55), Math.round(dur * 0.45));
+        }
+        var a = incEl.animate(show ? [from || closed, open] : [from || open, closed], {
+            duration: dur,
             easing: ENTER_EASE,
             fill: 'both'
         });
         incAnim = a;
         a.onfinish = function () {
             if (incAnim !== a) return;
-            incAnim = null;
+            stopIncomingAnim(); // the end state is the elements' own (shown) or hidden
+            setPillUnderCard(show);
             if (!show) incEl.hidden = true;
-            a.cancel(); // the end state is the element's own (shown) or hidden
         };
     }
 
@@ -1533,6 +1564,7 @@
         var hadFocus = incEl.contains(root.activeElement);
         if (dockEl.hidden || vchipEl.hidden) {
             stopIncomingAnim();
+            setPillUnderCard(false);
             incEl.hidden = true;
             return;
         }

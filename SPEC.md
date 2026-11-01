@@ -63,13 +63,13 @@ Windows with `window.opener` draw nothing.
 - **Entrance:** one 260 ms fade + scale 0.96 → 1 (6 px travel), ease `cubic-bezier(0.23, 1, 0.32, 1)`, when the dock goes from hidden to shown. Reduced motion is honoured.
 - In shell mode, bus silence during the first 15 s shows `starting`; after that a `hello` with no answer in 600 ms means offline. The dock pings every 15 s and on `visibilitychange`.
 
-**Incoming card** (`F/lib/ctc_dock_client.js`, "card rises from pill").
+**Incoming card** (`F/lib/ctc_dock_client.js`, the pill morphs into the card: sample A1, 2026-11-01).
 - Shows while the phase is `incoming` and the panel is closed, in the shell and in remote tabs (phone held by another tab, with or without the dialer). Opening the panel hides it at once (the panel's ring view has Answer / Decline); closing the panel while it still rings brings it back. No card while the dock is hidden (not enabled).
 - 320 px wide (at most viewport − 32), radius 16 px, navy like the pill, white text. Row: sky dot · "Incoming call" (11 px `#9FC9EE`) over the caller name, else the formatted number (15 px semibold), over "number · contact" (12 px `#94A6BF`, ellipsis, each part only when it adds something) · Decline (36 px round `#EE6E5C`, handset 135°) · Answer (36 px round `#14B981`). Press scale 0.97, 140 ms ease-out.
 - `role="alertdialog"`, `aria-label` "Incoming call from X"; the buttons say "Answer / Decline call from X". It never takes focus by itself (a NetSuite form keeps it); Escape does nothing. `__ctcDock.focusIncoming()` focuses Answer (shell notification click). After a keyboard Answer / Decline, focus goes to the pill.
 - Answer / Decline send bus `answer` / `decline` (origin `dock` + nonce) straight from the dock, in the shell too. The card then exits and stays away for that ring (call SID); the connected pill and missed counting are unchanged. Answering does not navigate.
-- **Placement:** 10 px from the pill, kept 16 px inside the viewport. Bottom row: above the pill (bl left edges aligned, bc centred, br right edges aligned); top row: below it, same alignment; ml: right of the pill, `mr`: left of it, both centred on it vertically. Re-placed on resize, while the pill is dragged, and on a snap (glides with the pill: `translate` 300 ms `cubic-bezier(0.32, 0.72, 0, 1)`).
-- **Motion** (WAAPI, transform + opacity only; `transform-origin` = the pill's centre in the card's coordinates): enter 240 ms `cubic-bezier(0.23, 1, 0.32, 1)`, opacity 0 → 1 and `translate(8 px toward the pill) scale(0.92)` → none; exit (answer, decline, caller hung up, phase leaves `incoming`) 160 ms, same curve, opacity → 0 and scale 0.96 toward the pill; a fading card takes no clicks. A new ring during an exit starts from what is drawn (interruptible). Reduced motion: opacity only, 120 ms.
+- **Placement:** centred on the pill, kept 16 px inside the viewport: one rule for all 8 points, horizontal or vertical pill. The pill sits under the open card at opacity 0 and comes back when the card closes (at once when the dock hides). Re-placed on resize, while the pill is dragged, and on a snap (glides with the pill: `translate` 300 ms `cubic-bezier(0.32, 0.72, 0, 1)`).
+- **Motion** (WAAPI, clip-path + opacity; curve `cubic-bezier(0.23, 1, 0.32, 1)`): enter 1280 ms, the card's clip grows from the pill's rect (pill radius) to `inset(-32px round 48px)` (open, room for the shadow); the pill fades out over the first 480 ms; the card content fades in from 40 % (512 ms delay, 768 ms). Exit (answer, decline, caller hung up, phase leaves `incoming`) 880 ms: content fades out over 352 ms, the clip shrinks back to the pill's rect, the pill fades in over the last 396 ms; a closing card takes no clicks. A new ring during an exit starts from what is drawn (interruptible). Reduced motion: opacity only, 120 ms. The user chose the slow pace (4× the sample) on 2026-11-01.
 
 **Panel** (`F/lib/ctc_dock_dialer.js`).
 - Fixed **380 × 620 px** for every view, capped by the screen (16 px each side, 24 px above the bottom). Views that need more scroll.
@@ -252,7 +252,7 @@ Windows with `window.opener` draw nothing.
 - Record `customrecord_ctc_rep_presence`, one row per employee: `custrecord_ctc_rp_employee`, `custrecord_ctc_rp_last_seen` (ISO), `custrecord_ctc_rp_can_receive`, `custrecord_ctc_rp_state` (`registered | unregistered | registering | offline`), `custrecord_ctc_rp_incoming_granted`, `custrecord_ctc_rp_client` (browser label, ≤ 80 chars), `custrecord_ctc_rp_last_change` (last change of can-receive), `custrecord_ctc_rp_last_error` (CLOBTEXT, ≤ 200 chars, last phone error; kept until the next one), `custrecord_ctc_rp_identity_match` (checkbox: the token identity in the body equals the session user).
 - RESTlet `phoneHeartbeat` (phone users only, §3 gate; else `not_a_phone_user`, no row): employee = session user, never a body value; body `identity` is only compared (`identity_match`). `canReceive` is true only when registered and incoming is granted. An unchanged heartbeat within 60 s is not written (a new `lastError` or a changed identity match counts as a change). **Upsert:** reads the newest row plus up to 5 more (internalid DESC), updates the newest and deletes the extra rows (at most 5 per call; a failed delete is logged); returns `removed: n`. The client sends at most one heartbeat per 2 s (§3).
 - Wizard `wizardLoadPresence`: `stale` when no heartbeat in **12 min** (or never). Status rule (`W/components/shared/phoneStatus.ts`): stale or `offline` → Offline (grey); not registered or not can-receive → Not receiving calls (amber); else Receiving calls (green).
-- Shown on the wizard Health page "Phones" table (Rep · Status · Last seen) and the Inbound page routing table "Phone" column.
+- Shown on the wizard Overview "Phones" table (Rep · Status · Last seen) and the Inbound page routing table "Phone" column.
 
 **Open gaps.** Soak test (idle 60 min, sleep, network off/on, background tab) not run. No alerting.
 
@@ -288,16 +288,15 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 **Onboarding steps.** 1 Prerequisites · 2 Connect Twilio (Account SID, API Key SID, API Secret id) · 3 Voice (TwiML App, caller ID, Intelligence service) · 4 Phone numbers + rep assignments · 5 Test & activate (`wizardActivate` sets `custrecord_ctc_active`).
 
 **Console pages.**
-- **Overview** — recent calls, rep activity chart (`wizardListRecentCalls`, `wizardSnapshot`).
+- **Overview** — 4 KPI cards, quick actions (Deactivate asks twice: Cancel / Confirm deactivate), then the health checks: preflight checks, drift rows, "Phones" presence table (`wizardSnapshot`, `wizardRunPreflight`, `wizardLoadPresence`). No separate Health page (removed 2026-11-01 with the recent-calls table and rep chart).
 - **Credentials** — Twilio credential fields (`wizardSavePublicIds`).
 - **Phones & reps** — numbers and assigned reps, primary flag (`wizardLoadAssignments`, `wizardSaveAssignments` → auto-republish when inbound is on).
 - **Voice** — TwiML App, default caller ID, Conversational Intelligence (`wizardSaveVoice`, live Twilio lists).
 - **Inbound calls** — on/off, ring seconds, no-answer message, Voicemail switch + "Longest voicemail" (30 s, 1, 2, 3, 5 min), "Unrouted calls and voicemails go to" (active employees with access, plus the current owner; "Not set"), record inbound, notice on/off + text, publish status, routing table with Phone column (`wizardLoadInbound` adds `voicemailOn`, `voicemailMaxSeconds`, `fallbackOwnerId`, `employees`; `wizardSaveInbound` validates `voicemailOn` boolean, `voicemailMaxSeconds` integer 30–300, `fallbackOwnerId` '' / an active employee id; `wizardPublishRouting`).
-- **Health** — preflight checks, drift rows, "Phones" presence table (`wizardRunPreflight`, `wizardLoadPresence`).
 
 **Build.** `npm run typecheck`, `npm run lint`, `npm test`, `npm run bundle`; bundle is committed; CI checks bundle drift.
 
-**Open gaps.** Voice page and Step 3 say "The wizard registers this app's VoiceUrl" — no code does. Health "TwiML VoiceUrl" drift row gets no data and always shows Pass.
+**Open gaps.** Voice page and Step 3 say "The wizard registers this app's VoiceUrl" — no code does. Overview "TwiML VoiceUrl" drift row gets no data and always shows Pass.
 
 ---
 
@@ -344,7 +343,7 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 - 2026-11-01 — Outbound ownership needs `client:<rep id>` on the leg or its parent; a caller ID alone is not proof.
 - 2026-11-01 — One analysis per call: claim (Processing + processed T) before the LLM.
 - 2026-11-01 — Unanswered and unrouted inbound callers go to a voicemail that is transcribed. Voicemail = `Logged` + `custevent_ctc_voicemail` checkbox (one transcript path, no new status). Fallback owner for unrouted numbers and inactive reps.
-- 2026-11-01 — The inbound alert moves from the shell's centred toast into the dock: a card that rises out of the pill (variant B), in the shell and remote tabs. The shell keeps only the away alerts (system notification, title flash). The pill says "Ringing"; Answer / Decline live on the card or the open panel.
+- 2026-11-01 — The inbound alert moves from the shell's centred toast into the dock: a card that rises out of the pill (variant B; replaced the same day by the pill-to-card morph, sample A1), in the shell and remote tabs. The shell keeps only the away alerts (system notification, title flash). The pill says "Ringing"; Answer / Decline live on the card or the open panel.
 
 ---
 
@@ -353,7 +352,7 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 1. **Outbound recording notice spike** — callee hears the notice and the call bridges; notice inside / outside the recording; token params priority; `answerOnBridge`. Legal wording for all-party-consent states needs counsel.
 2. **New status chips UI** — `Missed` / `Too short` / `No answer` in the portlet, Reporting Central (Missed tab from status) and the Phone Call panel.
 3. **Phone Call record redesign** — build from the approved canvas (§11).
-4. **Wizard VoiceUrl claim** — Voice page / Step 3 say the wizard registers the TwiML App VoiceUrl; no code does. Health "TwiML VoiceUrl" drift row always passes.
+4. **Wizard VoiceUrl claim** — Voice page / Step 3 say the wizard registers the TwiML App VoiceUrl; no code does. Overview "TwiML VoiceUrl" drift row always passes.
 5. **Identity / grant change** caught only at token renewal (up to 1 h).
 6. **Inactive primary rep** still routed in the flow (the call goes to no-answer / voicemail; reconciliation gives it to the fallback owner).
 7. **Inbound off** leaves numbers pointed at the flow.
