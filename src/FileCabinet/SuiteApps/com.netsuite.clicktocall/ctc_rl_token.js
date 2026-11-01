@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -27,34 +27,114 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     const post = (requestBody) => {
         const body = requestBody || {};
 
-        if (body.action === 'logCall')              return logCall(body);
-        if (body.action === 'checkTranscript')      return checkTranscript(body);
+        // Actions open to any internal user: the dashboard portlet and
+        // Reporting Central (managers, admins) call these and scope the
+        // data to the session user's book; the proposed-task actions have
+        // their own owner / sales-rep checks.
         if (body.action === 'searchEntities')       return searchEntities(body);
         if (body.action === 'getWorkspaceHistory')  return getWorkspaceHistory(body);
         if (body.action === 'getWorkspaceTasks')    return getWorkspaceTasks(body);
+        if (body.action === 'approveProposedTask')  return approveProposedTask(body);
+        if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
+        if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
+
+        // Phone actions act for the session user: only phone users
+        // (isPhoneUser). Decided once per request, never cached across
+        // requests: an assignment change applies at the next request.
+        const gate = isPhoneUser();
+        if (!gate.ok) {
+            log.audit({
+                title: 'CTC RESTlet — not a phone user',
+                details: 'action=' + (body.action || 'token') + ' reason=' + gate.reason +
+                         ' userId=' + runtime.getCurrentUser().id
+            });
+            return { error: NOT_A_PHONE_USER };
+        }
+
+        if (body.action === 'logCall')              return logCall(body);
+        if (body.action === 'checkTranscript')      return checkTranscript(body);
         if (body.action === 'softphoneSuggested')   return softphoneSuggested(body);
         if (body.action === 'softphoneSearch')      return softphoneSearch(body);
         if (body.action === 'softphoneContacts')    return softphoneContacts(body);
         if (body.action === 'softphoneRecents')     return softphoneRecents(body);
         if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body);
         if (body.action === 'softphoneBookCounts')  return softphoneBookCounts(body);
-        if (body.action === 'approveProposedTask')  return approveProposedTask(body);
-        if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
-        if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
         if (body.action === 'lookupCaller')         return lookupCaller(body);
         if (body.action === 'phoneHeartbeat')       return phoneHeartbeat(body);
 
-        return generateToken(body);
+        return generateToken(body, gate.config);
+    };
+
+    // --- Phone user gate (tokens + phone actions) ---
+    const NOT_A_PHONE_USER = 'not_a_phone_user';
+    const ADMINISTRATOR_ROLE_ID = '3';
+    const REP_ASSIGNMENT_TYPE = 'customrecord_ctc_rep_assignment';
+
+    /**
+     * True when at least one active rep assignment matches the filter.
+     * Throws on a search error (the caller fails closed).
+     * @param {Array} filter - N/search filter on the assignment record
+     * @returns {boolean}
+     */
+    const hasActiveAssignment = (filter) => {
+        const rows = search.create({
+            type: REP_ASSIGNMENT_TYPE,
+            filters: [filter, 'AND', ['isinactive', 'is', 'F']],
+            columns: ['internalid']
+        }).run().getRange({ start: 0, end: 1 });
+        return !!(rows && rows.length);
     };
 
     /**
-     * Generate a Twilio Access Token.
+     * Who may get a Twilio token and use the phone actions (user
+     * decision 2026-11-01): CTC is active (custrecord_ctc_active) AND the
+     * session user has an active rep assignment, OR supervises an employee
+     * who has one, OR the session role is Administrator (3).
+     * Fails closed: a config or search error denies.
+     * Cost: config search (10) + up to 2 assignment searches (10 each).
+     * @returns {{ok:true, config:Object} | {ok:false, reason:string}}
+     */
+    const isPhoneUser = () => {
+        let config;
+        try {
+            config = loadConfig();
+        } catch (e) {
+            log.error({ title: 'CTC phone user check — config failed', details: (e && e.message) || String(e) });
+            return { ok: false, reason: 'config_unavailable' };
+        }
+        if (!config || config.active !== true) return { ok: false, reason: 'ctc_inactive' };
+
+        const user = runtime.getCurrentUser();
+        if (String(user.role) === ADMINISTRATOR_ROLE_ID) return { ok: true, config: config };
+        const userId = parseInt(user.id, 10);
+        if (!(userId > 0)) return { ok: false, reason: 'no_user' };
+
+        try {
+            if (hasActiveAssignment(['custrecord_ctc_ra_employee', 'anyof', String(userId)])) {
+                return { ok: true, config: config };
+            }
+            // Managers: the assigned employee's supervisor is this user.
+            // Joins the Employee record; a role that cannot read employees
+            // gets an error here and is denied (logged).
+            if (hasActiveAssignment(['custrecord_ctc_ra_employee.supervisor', 'anyof', String(userId)])) {
+                return { ok: true, config: config };
+            }
+        } catch (e) {
+            log.error({ title: 'CTC phone user check — assignment search failed', details: (e && e.message) || String(e) });
+            return { ok: false, reason: 'check_failed' };
+        }
+        return { ok: false, reason: 'no_assignment' };
+    };
+
+    /**
+     * Generate a Twilio Access Token. The caller (post) has already
+     * checked isPhoneUser and passes the config it loaded.
      * @param {Object} body
+     * @param {Object} config - loaded CTC config
      * @returns {Object} { token, phoneNumber } or { error }
      */
-    const generateToken = (body) => {
+    const generateToken = (body, config) => {
         try {
-            const config = loadConfig();
             // CRIT-1 (SAFE review 2026-05-21) — identity MUST come from the
             // authenticated session, never from the request body. The previous
             // `body.employeeId ? ... : runtime.getCurrentUser().id` pattern
@@ -107,22 +187,49 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         state:           'custrecord_ctc_rp_state',
         incomingGranted: 'custrecord_ctc_rp_incoming_granted',
         client:          'custrecord_ctc_rp_client',
-        lastChange:      'custrecord_ctc_rp_last_change'
+        lastChange:      'custrecord_ctc_rp_last_change',
+        lastError:       'custrecord_ctc_rp_last_error',
+        identityMatch:   'custrecord_ctc_rp_identity_match'
     };
-    const PRESENCE_STATES = ['registered', 'unregistered', 'registering', 'offline'];
+    const PRESENCE_STATES = ['registered', 'unregistered', 'registering', 'offline', 'frozen'];
     const PRESENCE_CLIENT_MAX = 80;
+    const PRESENCE_ERROR_MAX = 200;
     // An unchanged heartbeat inside this window is not written.
     const PRESENCE_MIN_WRITE_MS = 60 * 1000;
+    // Extra rows for one employee (concurrent first heartbeats) deleted per
+    // call. The newest row is kept and updated.
+    const PRESENCE_MAX_DELETES = 5;
 
     const isChecked = (v) => v === true || v === 'T';
+    // eslint-disable-next-line no-control-regex
+    const cleanText = (v, max) => String(v || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, max);
+
+    /**
+     * Delete the extra presence rows of one employee (all but the newest).
+     * A failed delete is logged and skipped.
+     * @param {Array<Object>} extras - search results, newest first
+     */
+    const deleteExtraPresenceRows = (extras) => {
+        extras.slice(0, PRESENCE_MAX_DELETES).forEach((row) => {
+            try {
+                record.delete({ type: PRESENCE_TYPE, id: row.id });
+            } catch (e) {
+                log.error({ title: 'CTC phoneHeartbeat extra row not deleted', details: `${row.id}: ${(e && e.message) || e}` });
+            }
+        });
+    };
 
     /**
      * The softphone reports whether this rep's browser phone can receive
-     * calls. One row per employee (upsert). The employee is the session
-     * user, never a body value. Cost: one search (10 units) plus, when it
-     * writes, submitFields (2) or create + save (2 + 4).
-     * @param {Object} body - { state, canReceive, incomingGranted, client }
-     * @returns {Object} { ok: true, skipped? } or { error }
+     * calls. One row per employee (upsert): the newest row is updated and
+     * up to 5 extra rows are deleted. The employee is the session user,
+     * never a body value. body.identity (the token's Twilio identity) is
+     * only compared with the session user (identityMatch). body.lastError
+     * (≤ 200 chars) is stored when present and kept when absent.
+     * Cost: one search (10 units) plus, when it writes, submitFields (2)
+     * or create + save (2 + 4), plus 4 units per extra row deleted.
+     * @param {Object} body - { state, canReceive, incomingGranted, client, identity, lastError }
+     * @returns {Object} { ok: true, skipped?, removed? } or { error }
      */
     const phoneHeartbeat = (body) => {
         try {
@@ -134,9 +241,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             const incomingGranted = body.incomingGranted === true;
             // Twilio rings only a registered device whose token grants incoming.
             const canReceive = body.canReceive === true && incomingGranted && state === 'registered';
-            // eslint-disable-next-line no-control-regex
-            const client = String(body.client || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim()
-                .slice(0, PRESENCE_CLIENT_MAX);
+            const client = cleanText(body.client, PRESENCE_CLIENT_MAX);
+            const lastError = cleanText(body.lastError, PRESENCE_ERROR_MAX);
+            const identityMatch = String(body.identity == null ? '' : body.identity).trim() === String(employeeId);
 
             const now = new Date();
             const nowIso = now.toISOString();
@@ -147,11 +254,11 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 filters: [[F.employee, 'anyof', String(employeeId)]],
                 columns: [
                     search.createColumn({ name: 'internalid', sort: search.Sort.DESC }),
-                    F.lastSeen, F.canReceive, F.state, F.incomingGranted, F.client
+                    F.lastSeen, F.canReceive, F.state, F.incomingGranted, F.client, F.lastError, F.identityMatch
                 ]
-            }).run().getRange({ start: 0, end: 1 });
+            }).run().getRange({ start: 0, end: 1 + PRESENCE_MAX_DELETES }) || [];
 
-            if (!rows || !rows.length) {
+            if (!rows.length) {
                 const rec = record.create({ type: PRESENCE_TYPE });
                 rec.setValue({ fieldId: F.employee, value: employeeId });
                 rec.setValue({ fieldId: F.lastSeen, value: nowIso });
@@ -160,21 +267,33 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 rec.setValue({ fieldId: F.incomingGranted, value: incomingGranted });
                 rec.setValue({ fieldId: F.client, value: client });
                 rec.setValue({ fieldId: F.lastChange, value: nowIso });
+                rec.setValue({ fieldId: F.identityMatch, value: identityMatch });
+                if (lastError) rec.setValue({ fieldId: F.lastError, value: lastError });
                 rec.save({ ignoreMandatoryFields: true });
                 return { ok: true };
             }
 
             const row = rows[0];
+            const extras = rows.slice(1);
+            if (extras.length) deleteExtraPresenceRows(extras);
+            const removed = Math.min(extras.length, PRESENCE_MAX_DELETES);
+            const withRemoved = (res) => {
+                if (removed) res.removed = removed;
+                return res;
+            };
+
             const prevCanReceive = isChecked(row.getValue(F.canReceive));
             const changed = prevCanReceive !== canReceive
                 || String(row.getValue(F.state) || '') !== state
                 || isChecked(row.getValue(F.incomingGranted)) !== incomingGranted
-                || String(row.getValue(F.client) || '') !== client;
+                || String(row.getValue(F.client) || '') !== client
+                || isChecked(row.getValue(F.identityMatch)) !== identityMatch
+                || (!!lastError && String(row.getValue(F.lastError) || '') !== lastError);
             const lastSeenMs = Date.parse(String(row.getValue(F.lastSeen) || ''));
             const recent = !isNaN(lastSeenMs)
                 && now.getTime() - lastSeenMs >= 0
                 && now.getTime() - lastSeenMs < PRESENCE_MIN_WRITE_MS;
-            if (!changed && recent) return { ok: true, skipped: true };
+            if (!changed && recent) return withRemoved({ ok: true, skipped: true });
 
             const values = {};
             values[F.lastSeen] = nowIso;
@@ -182,6 +301,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             values[F.state] = state;
             values[F.incomingGranted] = incomingGranted;
             values[F.client] = client;
+            values[F.identityMatch] = identityMatch;
+            if (lastError) values[F.lastError] = lastError;
             if (prevCanReceive !== canReceive) values[F.lastChange] = nowIso;
             record.submitFields({
                 type: PRESENCE_TYPE,
@@ -189,7 +310,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 values: values,
                 options: { enableSourcing: false, ignoreMandatoryFields: true }
             });
-            return { ok: true };
+            return withRemoved({ ok: true });
         } catch (e) {
             log.error({ title: 'CTC phoneHeartbeat Failed', details: (e && e.message) || String(e) });
             return { error: 'Heartbeat failed' };
@@ -241,8 +362,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      * by the scheduled pass), false otherwise (either non-transient
      * exception class, or the orphan write itself threw).
      */
+    // SSS_RECORD_TYPE_REQ_FIELD_MISSING is not here: a missing mandatory
+    // field fails the same way on every retry (2026-11-01).
     const TRANSIENT_SAVE_ERROR_NAMES = [
-        'SSS_RECORD_TYPE_REQ_FIELD_MISSING', // mandatory-field race
         'RCRD_HAS_BEEN_CHANGED',             // optimistic lock failure (NetSuite concurrent edit)
         'SSS_REQUEST_LIMIT_EXCEEDED',        // transient governance edge
         'CONCURRENT_REQUEST_LIMIT_EXCEEDED', // transient concurrency limit
@@ -326,6 +448,28 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      * @param {Object} body
      * @returns {Object} { success, recordId, duplicate? } or { error }
      */
+    // A client-sent call start is used only within this window of now.
+    const STARTED_AT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+    /**
+     * When the call started, ISO-8601 UTC, for custevent_ctc_call_started.
+     * In order: Twilio's start_time from the ownership check (server
+     * truth); the softphone's startedAt (epoch ms, its answer time) when it
+     * is within ±1 day of now; else now minus the duration.
+     * @param {Object|undefined} twilioCall - verifyCallOwnership's call
+     * @param {*} startedAt - body.startedAt (client, epoch ms)
+     * @param {number} duration - seconds
+     * @returns {string}
+     */
+    const callStartedIso = (twilioCall, startedAt, duration) => {
+        const nowMs = Date.now();
+        const twilioMs = utils.parseTwilioDate(twilioCall && twilioCall.start_time);
+        if (typeof twilioMs === 'number' && Math.abs(nowMs - twilioMs) <= STARTED_AT_WINDOW_MS) return ctcTime.isoUtc(twilioMs);
+        const clientMs = typeof startedAt === 'number' ? startedAt : NaN;
+        if (isFinite(clientMs) && Math.abs(nowMs - clientMs) <= STARTED_AT_WINDOW_MS) return ctcTime.isoUtc(clientMs);
+        return ctcTime.isoUtc(nowMs - duration * 1000);
+    };
+
     const logCall = (body) => {
         try {
             const duration = parseInt(body.duration, 10) || 0;
@@ -398,6 +542,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
             if (inbound) phoneCall.setValue({ fieldId: 'custevent_ctc_inbound', value: true });
+            phoneCall.setValue({ fieldId: 'custevent_ctc_call_started', value: callStartedIso(auth.call, body.startedAt, duration) });
 
             // Numeric-id guard: Phone Call's `company` and `contact` fields
             // require numeric record IDs. NetSuite sometimes injects sentinel
@@ -473,13 +618,30 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     };
 
     /**
+     * Answer for a call that is not open for analysis
+     * (callClaim.stateOf / claimForAnalysis reasons).
+     * @param {string} where - 'transcribed' | 'terminal' | 'claimed'
+     * @returns {Object}
+     */
+    const settledTranscriptAnswer = (where) => {
+        if (where === 'transcribed') return { status: 'completed', alreadyDone: true };
+        if (where === 'claimed') return { status: 'pending', reason: 'claimed' };
+        return { status: 'terminal', reason: 'already_closed' };
+    };
+
+    /**
      * Check if a transcript is ready for a given call, and if so, enrich the Phone Call record.
+     * Idempotent: a call with processed T or a terminal status is never
+     * touched again, and the call is claimed (lib/ctc_call_claim) before
+     * the LLM so the poller does not analyse it too.
      * @param {Object} body
      * @param {string} body.callSid - Twilio Call SID
      * @param {string} body.recordId - NetSuite Phone Call internal ID
-     * @returns {Object} { status: 'completed'|'pending'|'no_recording' } or { error }
+     * @returns {Object} { status: 'completed'|'pending'|'no_recording'|'terminal'|'transient', alreadyDone?, reason? } or { error }
      */
     const checkTranscript = (body) => {
+        let claimed = false;
+        let saved = false;
         try {
             // CRIT-3 gate (SAFE review 2026-05-21) — checkTranscript pre-fix
             // accepted any body-supplied {callSid, recordId} pair and pulled
@@ -544,6 +706,15 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 return { error: 'forbidden', code: auth.reason };
             }
 
+            // Already finished (Transcribed / No transcript / Missed / Too
+            // short / No answer, or processed T) or claimed by the poller:
+            // no Twilio work, no status write, no second analysis.
+            const storedState = callClaim.stateOf({
+                processed: phoneCallForCheck.getValue({ fieldId: 'custevent_ctc_processed' }),
+                status: phoneCallForCheck.getValue({ fieldId: 'custevent_ctc_call_status' })
+            });
+            if (storedState !== 'open') return settledTranscriptAnswer(storedState);
+
             const config = loadConfig();
             const authHeader = buildSecureAuthHeader(config);
 
@@ -595,6 +766,14 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 return { status: 'pending' };
             }
 
+            // Claim before the LLM (fresh read + Processing / processed T).
+            const claim = callClaim.claimForAnalysis(body.recordId);
+            if (!claim.ok) {
+                if (claim.reason === 'claim_failed') return { status: 'transient', reason: 'claim_failed' };
+                return settledTranscriptAnswer(claim.reason);
+            }
+            claimed = true;
+
             const sentences = utils.fetchSentences(transcript.sid, authHeader);
             const transcriptText = utils.formatTranscript(sentences, { inbound: inbound });
 
@@ -611,6 +790,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             }
 
             const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: body.recordId, isDynamic: true });
+            callClaim.clearClaimOnRecord(phoneCall);
             utils.writePhoneCallEnrichmentFields(phoneCall, {
                 recording: recording,
                 accountSid: config.accountSid,
@@ -619,6 +799,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 includeDuration: false
             });
             const savedRecordId = phoneCall.save();
+            saved = true;
 
             // Sprint 2 review #8 — mirror the scheduled-script's
             // cleanup_pending flag-set on transient DELETE failure.
@@ -643,6 +824,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             return { status: 'completed' };
         } catch (e) {
             log.error({ title: 'CTC Check Transcript Failed', details: e.message || e });
+            // Give the claim back (Failed + processed F) so the poller retries.
+            if (claimed && !saved) callClaim.releaseClaim(body.recordId);
             return { error: 'Transcript check failed' };
         }
     };

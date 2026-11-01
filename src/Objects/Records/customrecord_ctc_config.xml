@@ -134,5 +134,28 @@
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_voicemail_on">
+            <label>Inbound Voicemail</label>
+            <description>When checked, an inbound caller who is not answered (or who calls a number with no rep) hears the no-answer message, then can leave a voicemail. The voicemail is transcribed and logged as a Phone Call. When not checked, the caller hears the no-answer message and the call ends. Checked by default.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultchecked>T</defaultchecked>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_voicemail_max_seconds">
+            <label>Voicemail Max Length (Seconds)</label>
+            <description>Longest voicemail a caller can leave, in whole seconds, 30 to 300. Blank means 120.</description>
+            <fieldtype>INTEGER</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_fallback_owner">
+            <label>Fallback Call Owner</label>
+            <description>Employee who owns the Phone Call for inbound calls and voicemails to a number with no rep, and for calls whose rep is inactive. Blank means such calls are not logged.</description>
+            <fieldtype>SELECT</fieldtype>
+            <selectrecordtype>-4</selectrecordtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
     </customrecordcustomfields>
 </customrecordtype>

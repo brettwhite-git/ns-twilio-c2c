@@ -168,6 +168,10 @@ export default function reducer(state: AppState, action: AppAction): AppState {
             d.inbound.recordInbound = p.recordInbound;
             d.inbound.recordingNoticeOn = p.recordingNoticeOn;
             d.inbound.recordingNotice = p.recordingNotice;
+            d.inbound.voicemailOn = p.voicemailOn;
+            d.inbound.voicemailMaxSeconds = p.voicemailMaxSeconds;
+            d.inbound.fallbackOwnerId = p.fallbackOwnerId;
+            d.inbound.employees = p.employees;
             d.inbound.flowSid = p.flowSid;
             d.inbound.publishedAt = p.publishedAt;
             d.inbound.routes = p.routes;

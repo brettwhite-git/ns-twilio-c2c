@@ -110,6 +110,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
         const framePath = safeFramePath(params.u);
         const softphoneUrl = resolveSuitelet('customscript_ctc_sl_softphone', 'customdeploy_ctc_sl_softphone', { entryPoint: 'dashboard' });
         const shellBase = resolveSuitelet('customscript_ctc_sl_shell', 'customdeploy_ctc_sl_shell');
+        ctcHtml.setNoStoreHeaders(context.response);
         context.response.write(buildHtml({
             framePath,
             softphoneUrl,
@@ -118,6 +119,9 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             dockTags: buildShellDockTags(shellBase)
         }));
     };
+
+    // Handset glyph (same path as the softphone's Call button). Decline turns it 135°.
+    const HANDSET_PATH = 'M1.5 4.5a3 3 0 0 1 3-3h1.372c.86 0 1.61.586 1.819 1.42l1.105 4.423a1.875 1.875 0 0 1-.694 1.955l-1.293.97c-.135.101-.164.249-.126.352a11.285 11.285 0 0 0 6.697 6.697c.103.038.25.009.352-.126l.97-1.293a1.875 1.875 0 0 1 1.955-.694l4.423 1.105c.834.209 1.42.959 1.42 1.82V19.5a3 3 0 0 1-3 3h-2.25C8.552 22.5 1.5 15.448 1.5 6.75V4.5z';
 
     /**
      * Build the shell page. Client code below is plain ES5 inside a template
@@ -138,7 +142,20 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             signInUrl: '/app/center/card.nl',
             lockName: ctcDock.PHONE_LOCK_NAME,
             exitKey: ctcDock.EXIT_KEY,
-            openRecordType: ctcDock.OPEN_RECORD_MESSAGE
+            openRecordType: ctcDock.OPEN_RECORD_MESSAGE,
+            busChannel: ctcDock.BUS_CHANNEL,
+            phaseIncoming: ctcDock.PHASE_INCOMING,
+            phaseMoved: ctcDock.PHASE_MOVED,
+            requestOrigin: ctcDock.REQUEST_ORIGIN,
+            requestAnswer: ctcDock.REQUEST_ANSWER,
+            requestDecline: ctcDock.REQUEST_DECLINE,
+            requestTakeover: ctcDock.REQUEST_TAKEOVER,
+            requestUnlock: ctcDock.REQUEST_UNLOCK_AUDIO,
+            phoneMovedType: ctcDock.PHONE_MOVED_MESSAGE,
+            phoneDisabledType: ctcDock.PHONE_DISABLED_MESSAGE,
+            shellStateType: ctcDock.SHELL_STATE_MESSAGE,
+            unlockAudioType: ctcDock.UNLOCK_AUDIO_MESSAGE,
+            takeoverParam: ctcDock.TAKEOVER_PARAM
         };
         return `<!DOCTYPE html>
 <html lang="en">
@@ -165,8 +182,46 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   .ctc-pm-banner .text { flex: 1; min-width: 0; }
   .ctc-pm-banner .title { font-size: 13px; font-weight: 600; color: #161513; }
   .ctc-pm-banner .sub { font-size: 12px; color: #5F5B55; margin-top: 2px; }
-  #ctc-pm-reload, #ctc-pm-busy-reload { background: none; border: 0; color: #1B6097; font-size: 13px; padding: 0 8px; height: 32px; border-radius: 6px; }
-  #ctc-pm-signin { background: #345D7E; color: #FFFFFF; border: 0; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 600; flex: none; }
+  #ctc-pm-reload, #ctc-pm-busy-reload, #ctc-pm-disabled-exit { background: none; border: 0; color: #1B6097; font-size: 13px; padding: 0 8px; height: 32px; border-radius: 6px; flex: none; }
+  #ctc-pm-signin, #ctc-pm-busy-take { background: #345D7E; color: #FFFFFF; border: 0; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 600; flex: none; }
+
+  /* Inbound toast: top centre, below the pill's top-row snap point (top is
+     set by script), above NetSuite and the dock. */
+  .ctc-toast { position: fixed; top: 80px; left: 50%; z-index: 2147483001; box-sizing: border-box;
+    width: 380px; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 16px;
+    border-radius: 16px; color: #FFFFFF; background: linear-gradient(180deg, #1A2B47 0%, #0F1B30 100%);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 24px rgba(15,27,48,0.26);
+    font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    opacity: 0; transform: translate(-50%, -8px);
+    transition: opacity 200ms cubic-bezier(0.23, 1, 0.32, 1), transform 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .ctc-toast.open { opacity: 1; transform: translate(-50%, 0); }
+  .ctc-toast.closing { opacity: 0; transform: translate(-50%, 0); transition: opacity 150ms ease-out; }
+  .ctc-toast-text { flex: 1; min-width: 0; }
+  .ctc-toast-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; line-height: 16px; color: rgba(255,255,255,0.72); }
+  .ctc-toast-dot { width: 8px; height: 8px; border-radius: 50%; background: #14B981; flex: none; animation: ctc-toast-ring 1.6s ease-out infinite; }
+  .ctc-toast-name { margin-top: 4px; font-size: 16px; font-weight: 600; line-height: 22px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ctc-toast-sub { margin-top: 2px; font-size: 13px; line-height: 18px; color: rgba(255,255,255,0.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ctc-toast-sub:empty { display: none; }
+  .ctc-toast-actions { display: flex; gap: 10px; flex: none; }
+  .ctc-toast-btn { width: 44px; height: 44px; border: 0; border-radius: 999px; padding: 0; color: #FFFFFF;
+    display: inline-flex; align-items: center; justify-content: center; transition: transform 100ms ease-out, filter 100ms ease-out; }
+  .ctc-toast-btn svg { width: 20px; height: 20px; }
+  .ctc-toast-btn:hover { filter: brightness(1.06); }
+  .ctc-toast-btn:active { transform: scale(0.96); }
+  .ctc-toast-btn.decline { background: #EE6E5C; box-shadow: 0 4px 12px rgba(238,110,92,0.40); }
+  .ctc-toast-btn.decline svg { transform: rotate(135deg); }
+  .ctc-toast-btn.answer { background: #14B981; box-shadow: 0 4px 12px rgba(20,185,129,0.36); }
+  @keyframes ctc-toast-ring {
+    0% { box-shadow: 0 0 0 0 rgba(20,185,129,0.55); }
+    100% { box-shadow: 0 0 0 8px rgba(20,185,129,0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ctc-toast-dot { animation: none; }
+    .ctc-toast, .ctc-toast.open, .ctc-toast.closing { transform: translate(-50%, 0); }
+    .ctc-toast-btn:active { transform: none; }
+  }
+  .ctc-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 </style>
 </head>
 <body>
@@ -187,11 +242,36 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     <span class="dot" aria-hidden="true"></span>
     <div class="text">
       <div class="title">Your phone is open in another tab</div>
-      <div class="sub">Use that tab for calls, or close it and reload this one.</div>
+      <div class="sub">Use that tab for calls, or move the phone to this tab.</div>
     </div>
     <button type="button" id="ctc-pm-busy-reload">Reload</button>
+    <button type="button" id="ctc-pm-busy-take">Use phone here</button>
+  </div>
+  <div class="ctc-pm-banner" id="ctc-pm-disabled" role="status" hidden>
+    <span class="dot" aria-hidden="true"></span>
+    <div class="text">
+      <div class="title">The phone is not enabled for your user. Ask your administrator.</div>
+    </div>
+    <button type="button" id="ctc-pm-disabled-exit">Exit phone mode</button>
   </div>
 </div>
+
+<div id="ctc-toast" class="ctc-toast" role="alertdialog" aria-labelledby="ctc-toast-label" aria-describedby="ctc-toast-name ctc-toast-sub" hidden>
+  <div class="ctc-toast-text">
+    <div class="ctc-toast-label" id="ctc-toast-label"><span class="ctc-toast-dot" aria-hidden="true"></span>Incoming call</div>
+    <div class="ctc-toast-name" id="ctc-toast-name"></div>
+    <div class="ctc-toast-sub" id="ctc-toast-sub"></div>
+  </div>
+  <div class="ctc-toast-actions">
+    <button type="button" class="ctc-toast-btn decline" id="ctc-toast-decline" aria-label="Decline" title="Decline">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${HANDSET_PATH}"/></svg>
+    </button>
+    <button type="button" class="ctc-toast-btn answer" id="ctc-toast-answer" aria-label="Answer" title="Answer">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${HANDSET_PATH}"/></svg>
+    </button>
+  </div>
+</div>
+<div id="ctc-toast-live" class="ctc-sr" aria-live="assertive" aria-atomic="true"></div>
 <script>
 (function () {
   'use strict';
@@ -203,15 +283,24 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   // Shell API for the dock. Set before the dock scripts below load: the dock
   // picks shell mode when it finds it on the top window. call(ctx) opens the
   // dialer on Dial with the record loaded; it never dials by itself.
+  // unlockAudio(): call it inside a click / key handler ("Turn on phone").
+  // takeover(): "Use phone here" in a shell that waits for the phone.
+  // phoneState(): { lock, audioUnlocked, notify } for the dock.
   window.__ctcShell = {
     version: 1,
     context: null,
     call: function (ctx) {
       if (window.__ctcDock && typeof window.__ctcDock.call === 'function') window.__ctcDock.call(ctx || null);
     },
-    exit: function () {}
+    exit: function () {},
+    unlockAudio: function () { unlockAudio('dock'); },
+    takeover: function () { return takeover(); },
+    phoneState: function () { return { lock: lockState, audioUnlocked: audioUnlocked, notify: notifyState() }; }
   };
-  var ACTIVE = { incoming: 1, dialing: 1, ringing: 1, connected: 1 };
+  var ACTIVE = { incoming: 1, dialing: 1, ringing: 1, connected: 1, reconnecting: 1 };
+  var SEARCH = String(location.search || '');
+  var DEBUG = /[?&]debug=1(&|$)/.test(SEARCH);
+  var wantTakeover = new RegExp('[?&]' + CFG.takeoverParam + '=1(&|$)').test(SEARCH);
 
   var nsFrame = document.getElementById('ctc-ns-frame');
   var phoneFrame = document.getElementById('ctc-phone-frame');
@@ -219,10 +308,14 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   var bannerSub = document.getElementById('ctc-pm-banner-sub');
 
   var busy = document.getElementById('ctc-pm-busy');
+  var disabledBanner = document.getElementById('ctc-pm-disabled');
 
   var lastGoodPath = CFG.framePath;
   var phase = 'offline';
   var phoneStarted = false;
+  // True from the session banner until the NetSuite frame loads a normal
+  // (non-login) page again, i.e. the rep signed in again.
+  var sessionLost = false;
 
   // ---- Event log (console only) ----
   function logEvent(event, detail) {
@@ -256,11 +349,22 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     }
   };
 
+  // ---- Page title (the toast flashes it while ringing) ----
+  var realTitle = document.title;
+  var flashTimer = null;
+  var flashOn = false;
+  var flashLabel = '';
+  function setRealTitle(t) {
+    realTitle = t;
+    if (!flashTimer) document.title = t;
+  }
+
   // ---- Session banner ----
   function bannerText() {
     bannerSub.textContent = ACTIVE[phase] ? 'Your call is still connected.' : 'Sign in again to keep working.';
   }
   function showBanner() {
+    sessionLost = true;
     bannerText();
     if (banner.hidden) {
       banner.hidden = false;
@@ -270,15 +374,30 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   document.getElementById('ctc-pm-signin').addEventListener('click', function () {
     window.open(CFG.signInUrl, '_blank');
   });
+  // The phone frame kept the old session. Restart it, unless a call is live
+  // (the call does not need the NetSuite session until it is logged; the
+  // softphone renews its own token and rebuilds after the call).
+  function restartPhone(reason) {
+    if (!phoneStarted) return;
+    if (ACTIVE[phase]) {
+      logEvent('phone restart skipped', reason + ', call live');
+      return;
+    }
+    logEvent('phone restart', reason);
+    phoneFrame.src = phoneUrl();
+  }
+  // The first normal page after the session banner means the rep signed in
+  // again: hide the banner and restart the phone. The Reload button only
+  // reloads the NetSuite frame; a login page there shows the banner again.
+  function sessionBack() {
+    if (!sessionLost) return;
+    sessionLost = false;
+    banner.hidden = true;
+    restartPhone('signed in again');
+  }
   document.getElementById('ctc-pm-reload').addEventListener('click', function () {
     banner.hidden = true;
     nsFrame.src = lastGoodPath;
-    // The phone frame kept the old session. Restart it too, unless a call is
-    // live (the call does not need the NetSuite session until it is logged).
-    if (phoneStarted && !ACTIVE[phase]) {
-      logEvent('phone restart', 'after sign-in');
-      phoneFrame.src = phoneFrame.src;
-    }
   });
 
   // ---- Frame watcher ----
@@ -318,11 +437,12 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
       return;
     }
     lastGoodPath = path;
+    sessionBack();
     if (CFG.shellBase) {
       var sep = CFG.shellBase.indexOf('?') === -1 ? '?' : '&';
-      try { history.replaceState(null, '', CFG.shellBase + sep + 'u=' + encodeURIComponent(path)); } catch (e) { /* ignore */ }
+      try { history.replaceState(null, '', CFG.shellBase + sep + 'u=' + encodeURIComponent(path) + (DEBUG ? '&debug=1' : '')); } catch (e) { /* ignore */ }
     }
-    if (title) document.title = title;
+    if (title) setRealTitle(title);
     logEvent('frame load', path);
     syncContext(win);
     try {
@@ -376,15 +496,20 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     logEvent('navigation api missing', 'NetSuite menu clicks will leave phone mode');
   }
 
-  // ---- Screen-pop (inbound) ----
-  // After Answer on a matched caller the phone frame asks to open the record
-  // in the NetSuite frame. Accepted only from #ctc-phone-frame, same origin,
-  // and only an entity record path with a numeric id.
+  // ---- Messages from the phone frame ----
+  // Accepted only from #ctc-phone-frame, same origin.
+  //   OPEN_RECORD_MESSAGE: screen-pop after Answer on a matched caller; only
+  //     an entity record path with a numeric id.
+  //   PHONE_MOVED_MESSAGE: the anchor handed the phone to another tab.
+  //   PHONE_DISABLED_MESSAGE: the RESTlet refuses tokens for this user.
   var RECORD_PATH = /^[/]app[/]common[/]entity[/](custjob|contact)[.]nl[?]id=[0-9]+$/;
   window.addEventListener('message', function (ev) {
     var m = ev && ev.data;
-    if (!m || m.v !== 1 || m.type !== CFG.openRecordType) return;
+    if (!m || m.v !== 1) return;
+    if (m.type !== CFG.openRecordType && m.type !== CFG.phoneMovedType && m.type !== CFG.phoneDisabledType) return;
     if (ev.origin !== location.origin || ev.source !== phoneFrame.contentWindow) return;
+    if (m.type === CFG.phoneMovedType) { phoneMoved(); return; }
+    if (m.type === CFG.phoneDisabledType) { phoneDisabled(); return; }
     if (typeof m.path !== 'string' || !RECORD_PATH.test(m.path)) {
       logEvent('screen-pop refused', tail(m.path));
       return;
@@ -413,17 +538,303 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     setGuard(!!ACTIVE[phase]);
     if (!banner.hidden) bannerText();
   }
+
+  // ---- Bus ----
+  // Requests from the shell carry origin + a fresh nonce (bus contract).
+  function makeNonce() {
+    var out = '';
+    try {
+      var b = new Uint8Array(12);
+      window.crypto.getRandomValues(b);
+      for (var i = 0; i < b.length; i++) out += ('0' + b[i].toString(16)).slice(-2);
+    } catch (e) {
+      out = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+    return out;
+  }
+  var bus = null;
+  function busRequest(action) {
+    if (!bus) return '';
+    var m = { v: 1, type: 'request', action: action, origin: CFG.requestOrigin, nonce: makeNonce() };
+    bus.postMessage(m);
+    return m.nonce;
+  }
+  function onSnapshot(snap) {
+    setPhase(snap.phase);
+    takeoverReply(snap);
+    toastFromSnapshot(snap);
+  }
   if (typeof BroadcastChannel === 'function') {
-    var bus = new BroadcastChannel('ctc-bus');
+    bus = new BroadcastChannel(CFG.busChannel);
     bus.onmessage = function (ev) {
       var m = ev && ev.data;
       if (!m || m.v !== 1) return;
-      if (m.type === 'snapshot' && m.snap) setPhase(m.snap.phase);
+      if (m.type === 'snapshot' && m.snap) {
+        onSnapshot(m.snap);
+      } else if (m.type === 'request' && m.action === CFG.requestUnlock && m.origin === CFG.requestOrigin) {
+        // Only a gesture in this tab counts (transient activation now).
+        if (hasTransientActivation()) unlockAudio('bus request');
+      }
     };
     bus.postMessage({ v: 1, type: 'hello' });
   } else {
     logEvent('bus unavailable', 'no BroadcastChannel');
   }
+
+  // ---- Audio + notification unlock ----
+  // Browsers may block the ringtone (autoplay) and the notification prompt
+  // until the rep interacts with this top-level page. audioUnlocked: the tab
+  // had a gesture (sticky activation, a click / key in the shell). Clicks in
+  // the NetSuite frame give the shell sticky activation too; a 2 s poll
+  // notices it. Each unlock asks the phone frame to resume its audio.
+  // unlockAudio() (dock "Turn on phone", bus 'unlockAudio' with transient
+  // activation) also asks for Notification permission, once.
+  function hasActivation() {
+    try { return !!(navigator.userActivation && navigator.userActivation.hasBeenActive); } catch (e) { return false; }
+  }
+  function hasTransientActivation() {
+    try { return navigator.userActivation ? !!navigator.userActivation.isActive : true; } catch (e) { return true; }
+  }
+  function notifyState() {
+    if (typeof Notification !== 'function') return 'unsupported';
+    var p = Notification.permission;
+    return (p === 'granted' || p === 'denied') ? p : 'default';
+  }
+  var audioUnlocked = hasActivation();
+  var notifyAsked = false;
+  function postToPhone(msg) {
+    if (!phoneStarted) return;
+    try {
+      if (phoneFrame.contentWindow) phoneFrame.contentWindow.postMessage(msg, location.origin);
+    } catch (e) { /* phone frame not ready */ }
+  }
+  function sendShellState() {
+    postToPhone({ v: 1, type: CFG.shellStateType, audioUnlocked: audioUnlocked, notify: notifyState() });
+  }
+  function markUnlocked(reason) {
+    var changed = !audioUnlocked;
+    audioUnlocked = true;
+    postToPhone({ v: 1, type: CFG.unlockAudioType });
+    if (changed) {
+      logEvent('audio unlocked', reason);
+      sendShellState();
+    }
+  }
+  function unlockAudio(reason) {
+    markUnlocked(reason || 'unlock');
+    if (notifyAsked || notifyState() !== 'default') { sendShellState(); return; }
+    notifyAsked = true;
+    var done = function () {
+      logEvent('notification permission', notifyState());
+      sendShellState();
+    };
+    try {
+      var p = Notification.requestPermission(done);
+      if (p && typeof p.then === 'function') p.then(done, done);
+    } catch (e) {
+      logEvent('notification permission error', e && e.message);
+    }
+  }
+  function onShellGesture() {
+    if (!audioUnlocked) markUnlocked('shell gesture');
+  }
+  document.addEventListener('pointerdown', onShellGesture, true);
+  document.addEventListener('keydown', onShellGesture, true);
+  var activationPoll = null;
+  if (!audioUnlocked) {
+    activationPoll = setInterval(function () {
+      if (audioUnlocked || hasActivation()) {
+        clearInterval(activationPoll);
+        activationPoll = null;
+        if (!audioUnlocked) markUnlocked('page activation');
+      }
+    }, 2000);
+  }
+  try {
+    if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+      navigator.permissions.query({ name: 'notifications' }).then(function (st) {
+        st.onchange = sendShellState;
+      }).catch(function () { /* not supported */ });
+    }
+  } catch (e) { /* permissions API missing */ }
+  // A (re)loaded phone frame starts with defaults: tell it the shell state.
+  phoneFrame.addEventListener('load', function () { sendShellState(); });
+
+  // ---- Inbound toast ----
+  // Phase 'incoming' shows a toast over any NetSuite page. Answer / Decline
+  // send the bus requests; the toast closes on answer, decline, or when the
+  // phase leaves 'incoming' (caller hung up). Focus moves to Answer only
+  // when the rep is not typing somewhere (shell focused, nothing focused).
+  // Away (tab hidden or window unfocused): a system notification (when
+  // allowed) and a flashing title, until the phase leaves 'incoming'.
+  var toast = document.getElementById('ctc-toast');
+  var toastName = document.getElementById('ctc-toast-name');
+  var toastSub = document.getElementById('ctc-toast-sub');
+  var toastLive = document.getElementById('ctc-toast-live');
+  var toastAnswer = document.getElementById('ctc-toast-answer');
+  var toastDecline = document.getElementById('ctc-toast-decline');
+  var PILL_SIZE = 52;
+  var EDGE = 16;
+  var TOAST_GAP = 12;
+  var toastOpen = false;
+  var toastCloseTimer = null;
+  var toastInfo = { title: '', sub: '', key: '' };
+  var toastDismissedKey = '';
+  var notif = null;
+  var notifKey = '';
+
+  // Below the dock pill's top-row snap points (the dock keeps them 8 px
+  // under the NetSuite header).
+  function toastTop() {
+    var top = EDGE;
+    try {
+      var doc = nsFrame.contentDocument;
+      var header = doc && doc.querySelector && doc.querySelector('#ns_navigation, #ns-header-menu-main, .ns-navigation, #div__header');
+      if (header) {
+        var r = header.getBoundingClientRect();
+        if (r.bottom > 0 && r.bottom < window.innerHeight / 2) top = Math.max(top, r.bottom + 8);
+      }
+    } catch (e) { /* frame not readable */ }
+    return top + PILL_SIZE + TOAST_GAP;
+  }
+  function callerInfo(snap) {
+    var c = snap.caller || {};
+    var number = String(c.number || snap.number || '');
+    var name = String(c.name || '');
+    var contact = String(snap.contactName || '');
+    var sub = [];
+    if (name && number) sub.push(number);
+    if (contact && contact !== name) sub.push(contact);
+    return {
+      title: name || number || 'Unknown caller',
+      sub: sub.join(' \\u00b7 '),
+      key: String(snap.callSid || '') || ('n:' + number)
+    };
+  }
+  function focusAnswer(force) {
+    if (!toastOpen) return;
+    if (!force) {
+      var ae = document.activeElement;
+      var idle = !ae || ae === document.body || ae === document.documentElement || toast.contains(ae);
+      if (!document.hasFocus() || !idle) return;
+    }
+    try { toastAnswer.focus({ preventScroll: true }); } catch (e) { toastAnswer.focus(); }
+  }
+  function showToast(snap) {
+    var info = callerInfo(snap);
+    if (info.key === toastDismissedKey) return;
+    toastInfo = info;
+    toastName.textContent = info.title;
+    toastSub.textContent = info.sub;
+    if (toastOpen) return;
+    toastOpen = true;
+    if (toastCloseTimer) { clearTimeout(toastCloseTimer); toastCloseTimer = null; }
+    toast.style.top = toastTop() + 'px';
+    toast.classList.remove('closing');
+    toast.hidden = false;
+    void toast.offsetWidth; // start the enter transition from the hidden state
+    toast.classList.add('open');
+    toastLive.textContent = 'Incoming call from ' + info.title;
+    logEvent('toast shown', info.key);
+    focusAnswer(false);
+  }
+  function hideToast(reason) {
+    if (!toastOpen) return;
+    toastOpen = false;
+    toast.classList.remove('open');
+    toast.classList.add('closing');
+    toastLive.textContent = '';
+    logEvent('toast closed', reason);
+    toastCloseTimer = setTimeout(function () {
+      toastCloseTimer = null;
+      toast.hidden = true;
+      toast.classList.remove('closing');
+    }, 150);
+  }
+  function startTitleFlash(label) {
+    flashLabel = label;
+    if (flashTimer) return;
+    flashOn = true;
+    document.title = 'Ringing \\u00b7 ' + flashLabel;
+    flashTimer = setInterval(function () {
+      flashOn = !flashOn;
+      document.title = flashOn ? 'Ringing \\u00b7 ' + flashLabel : realTitle;
+    }, 1000);
+  }
+  function stopTitleFlash() {
+    if (!flashTimer) return;
+    clearInterval(flashTimer);
+    flashTimer = null;
+    document.title = realTitle;
+  }
+  function closeNotification() {
+    if (!notif) return;
+    try { notif.close(); } catch (e) { /* already closed */ }
+    notif = null;
+    notifKey = '';
+  }
+  function showNotification() {
+    if (notifyState() !== 'granted') return;
+    var key = toastInfo.key + '|' + toastInfo.title;
+    if (notif && notifKey === key) return;
+    try {
+      // Same tag (the call SID): replaces this call's earlier notification,
+      // also one shown by another shell tab.
+      var n = new Notification('Incoming call', {
+        body: toastInfo.title + (toastInfo.sub ? '\\n' + toastInfo.sub : ''),
+        tag: toastInfo.key,
+        requireInteraction: true
+      });
+      n.onclick = function () {
+        try { window.focus(); } catch (e) { /* focus refused */ }
+        focusAnswer(true);
+        closeNotification();
+      };
+      notif = n;
+      notifKey = key;
+    } catch (e) {
+      logEvent('notification error', e && e.message);
+    }
+  }
+  function isAway() {
+    return !!document.hidden || !document.hasFocus();
+  }
+  function ringAttention() {
+    if (!toastOpen) return;
+    if (!isAway()) { stopTitleFlash(); return; }
+    startTitleFlash(toastInfo.title);
+    showNotification();
+  }
+  function stopAttention() {
+    stopTitleFlash();
+    closeNotification();
+  }
+  function toastFromSnapshot(snap) {
+    if (snap.phase === CFG.phaseIncoming) {
+      showToast(snap);
+      ringAttention();
+      return;
+    }
+    toastDismissedKey = '';
+    hideToast('phase ' + snap.phase);
+    stopAttention();
+  }
+  toastAnswer.addEventListener('click', function () {
+    markUnlocked('answer');
+    busRequest(CFG.requestAnswer);
+    toastDismissedKey = toastInfo.key;
+    hideToast('answer');
+    stopAttention();
+  });
+  toastDecline.addEventListener('click', function () {
+    busRequest(CFG.requestDecline);
+    toastDismissedKey = toastInfo.key;
+    hideToast('decline');
+    stopAttention();
+  });
+  document.addEventListener('visibilitychange', ringAttention);
+  window.addEventListener('blur', ringAttention);
+  window.addEventListener('focus', ringAttention);
 
   // ---- Exit phone mode ----
   // The tab lands on the frame's page outside the shell. The flag stops the
@@ -437,34 +848,166 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     window.location.href = currentFramePath();
   }
   window.__ctcShell.exit = exitPhoneMode;
+  document.getElementById('ctc-pm-disabled-exit').addEventListener('click', exitPhoneMode);
 
   // ---- Phone frame: one per browser (Web Lock) ----
+  // lockState: 'none' (no Web Locks API, or not asked yet) | 'held' (this tab
+  // runs the phone) | 'moving' (handed off; waiting for the other tab to
+  // steal the lock) | 'waiting' (busy banner; a normal request is queued so
+  // this tab takes over when the holder closes, crashes or is discarded) |
+  // 'stealing' ("Use phone here" in progress) | 'disabled' (the phone is not
+  // enabled for this user; lock released).
+  // After the anchor reports 'moved' this shell keeps the lock until the
+  // new tab steals it: releasing first would let this tab's own queued
+  // request win the free lock. No steal within MOVE_FALLBACK_MS: the phone
+  // starts here again.
+  var lockState = 'none';
+  var releaseLock = null;
+  var waitAbort = null;
+  var moveFallbackTimer = null;
+  var MOVE_FALLBACK_MS = 10000;
+  var TAKEOVER_WAIT_MS = 3000;
+  var takeoverNonce = '';
+  var takeoverTimer = null;
+
+  function phoneUrl() {
+    if (!DEBUG) return CFG.softphoneUrl;
+    return CFG.softphoneUrl + (CFG.softphoneUrl.indexOf('?') === -1 ? '?' : '&') + 'debug=1';
+  }
   function startPhone(reason) {
     if (!CFG.softphoneUrl) { logEvent('phone not started', 'no softphone URL'); return; }
     phoneStarted = true;
-    phoneFrame.src = CFG.softphoneUrl;
+    phoneFrame.src = phoneUrl();
     logEvent('phone start', reason);
   }
-  if (navigator.locks && typeof navigator.locks.request === 'function') {
-    navigator.locks.request(CFG.lockName, { ifAvailable: true }, function (lock) {
+  function stopPhone(reason) {
+    phoneStarted = false;
+    phoneFrame.src = 'about:blank';
+    logEvent('phone stop', reason);
+  }
+  function gotLock(mode) {
+    lockState = 'held';
+    busy.hidden = true;
+    endTakeover();
+    startPhone(mode === 'first' ? 'lock held' : mode === 'steal' ? 'took the phone' : 'lock freed');
+    // Keep the lock until this page goes away, the phone moves, or the
+    // phone is not enabled for this user.
+    return new Promise(function (resolve) { releaseLock = resolve; });
+  }
+  function becomeWaiting(reason) {
+    lockState = 'waiting';
+    busy.hidden = false;
+    logEvent('phone busy', reason);
+    requestLock('wait');
+    if (wantTakeover) {
+      wantTakeover = false;
+      takeover();
+    }
+  }
+  // mode: 'first' (ifAvailable) | 'wait' (queued) | 'steal'.
+  function requestLock(mode) {
+    var granted = false;
+    var opts = mode === 'first' ? { ifAvailable: true } : mode === 'steal' ? { steal: true } : {};
+    if (mode === 'wait' && typeof AbortController === 'function') {
+      waitAbort = new AbortController();
+      opts.signal = waitAbort.signal;
+    }
+    navigator.locks.request(CFG.lockName, opts, function (lock) {
       if (!lock) {
-        busy.hidden = false;
-        logEvent('phone busy', 'another tab holds ' + CFG.lockName);
+        becomeWaiting('another tab holds ' + CFG.lockName);
         return;
       }
-      startPhone('lock held');
-      // Keep the lock until this page goes away.
-      return new Promise(function () {});
+      granted = true;
+      if (mode === 'wait') waitAbort = null;
+      return gotLock(mode);
     }).catch(function (e) {
+      if (granted) { lockLost(e && e.name); return; }   // another tab stole it
+      if (e && e.name === 'AbortError') return;          // our own cancel of a queued wait
       logEvent('lock error', e && e.message);
-      startPhone('lock error');
+      if (mode === 'first') startPhone('lock error');
+      else if (mode === 'steal' && lockState === 'stealing') becomeWaiting('steal failed');
     });
+  }
+  // Another tab took the phone (steal): stop ours and wait in turn.
+  function lockLost(reason) {
+    releaseLock = null;
+    if (moveFallbackTimer) { clearTimeout(moveFallbackTimer); moveFallbackTimer = null; }
+    if (lockState === 'disabled') return;
+    logEvent('phone taken by another tab', reason);
+    stopPhone('lock lost');
+    setPhase(CFG.phaseMoved);
+    becomeWaiting('lock lost');
+  }
+  // Our anchor handed the phone over (bus 'takeover' from a waiting tab).
+  function phoneMoved() {
+    if (lockState !== 'held') return;
+    lockState = 'moving';
+    stopPhone('moved to another tab');
+    busy.hidden = false;
+    moveFallbackTimer = setTimeout(function () {
+      moveFallbackTimer = null;
+      if (lockState !== 'moving') return;
+      logEvent('takeover abandoned', 'no tab took the phone');
+      lockState = 'held';
+      busy.hidden = true;
+      startPhone('takeover abandoned');
+    }, MOVE_FALLBACK_MS);
+  }
+  // The RESTlet refuses tokens for this user: release the lock, stop the
+  // phone, and say so calmly. Exit phone mode stays available.
+  function phoneDisabled() {
+    if (lockState === 'disabled') return;
+    logEvent('phone not enabled', 'not_a_phone_user');
+    if (waitAbort) { try { waitAbort.abort(); } catch (e) { /* done */ } waitAbort = null; }
+    endTakeover();
+    lockState = 'disabled';
+    stopPhone('not enabled');
+    if (releaseLock) { releaseLock(); releaseLock = null; }
+    busy.hidden = true;
+    disabledBanner.hidden = false;
+  }
+  // "Use phone here": ask the current anchor to let go, then steal the lock.
+  function takeover() {
+    if (lockState !== 'waiting' || takeoverNonce) return false;
+    takeoverNonce = busRequest(CFG.requestTakeover);
+    if (!takeoverNonce) { stealLock('no bus'); return true; }
+    logEvent('takeover asked', takeoverNonce);
+    takeoverTimer = setTimeout(function () { stealLock('no anchor reply'); }, TAKEOVER_WAIT_MS);
+    return true;
+  }
+  function endTakeover() {
+    if (takeoverTimer) clearTimeout(takeoverTimer);
+    takeoverTimer = null;
+    takeoverNonce = '';
+  }
+  function takeoverReply(snap) {
+    if (!takeoverNonce) return;
+    if (snap.phase === CFG.phaseMoved) { stealLock('anchor moved'); return; }
+    var r = snap.refused;
+    if (r && r.nonce === takeoverNonce) {
+      logEvent('takeover refused', r.reason);
+      endTakeover();
+    }
+  }
+  function stealLock(reason) {
+    endTakeover();
+    if (lockState !== 'waiting') return;
+    if (waitAbort) { try { waitAbort.abort(); } catch (e) { /* done */ } waitAbort = null; }
+    lockState = 'stealing';
+    logEvent('takeover', reason);
+    requestLock('steal');
+  }
+  if (navigator.locks && typeof navigator.locks.request === 'function') {
+    requestLock('first');
   } else {
     logEvent('lock unavailable', 'no Web Locks API');
     startPhone('no lock');
   }
   document.getElementById('ctc-pm-busy-reload').addEventListener('click', function () {
     window.location.reload();
+  });
+  document.getElementById('ctc-pm-busy-take').addEventListener('click', function () {
+    takeover();
   });
 
   logEvent('shell start', CFG.framePath);

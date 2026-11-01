@@ -17,6 +17,15 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
     // MISSED / TOO_SHORT / NO_ANSWER are written only by call
     // reconciliation (lib/ctc_call_reconcile) for calls the browser did
     // not log. They are terminal: the call is never polled for a transcript.
+    //
+    // Voicemail has no status of its own. Reconciliation logs a voicemail
+    // as LOGGED with custevent_ctc_voicemail = T (the lasting marker), so
+    // the one transcript path (poller Phase C) transcribes it and ends it
+    // at TRANSCRIBED / NO_TRANSCRIPT like any call. The recording sits on
+    // the caller's (parent) call; Phase C finds it directly (Phone Call
+    // stores the parent SID) or through fetchParentCallRecording (Phone
+    // Call stores the client child SID). The recording is deleted only
+    // after the transcript is extracted, as for calls.
     const CALL_STATUS = {
         LOGGED:        'Logged',
         PROCESSING:    'Processing',
@@ -66,6 +75,10 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
     // the whole batch until NetSuite's 1-hour scheduled-script ceiling kicks
     // in. One slow call can starve the other 49 in the batch.
     const HTTPS_TIMEOUT_MS = 30000;
+
+    const VOICEMAIL_TITLE_PREFIX = 'Voicemail: ';
+
+    const isChecked = (v) => v === true || v === 'T';
 
     const isRecordingTerminal = (recording) => {
         return !!(recording && RECORDING_TERMINAL_STATUSES.indexOf(recording.status) !== -1);
@@ -410,6 +423,11 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         if (!title) {
             const firstClause = (analysis.summary || '').split(/[.!?]/)[0] || '';
             title = firstClause.substring(0, 60) || `Call — ${recording.sid}`;
+        }
+        // A voicemail keeps its marker in the title: 'Voicemail: <AI title>'.
+        if (isChecked(phoneCallRec.getValue({ fieldId: 'custevent_ctc_voicemail' })) &&
+            title.indexOf(VOICEMAIL_TITLE_PREFIX) !== 0) {
+            title = (VOICEMAIL_TITLE_PREFIX + title).substring(0, 80);
         }
 
         phoneCallRec.setValue({ fieldId: 'title', value: title });

@@ -22,6 +22,13 @@ define(['N/search'], (search) => {
     const DEFAULT_NOANSWER_MESSAGE = 'Sorry, no one is available to take ' +
         'your call. Please try again later. Goodbye.';
     const DEFAULT_RECORDING_NOTICE = 'This call may be recorded for quality and training.';
+    // Voicemail (2026-11-01). With voicemail on, the no-answer message is
+    // the greeting before the beep, so its default asks for a message.
+    const DEFAULT_VOICEMAIL_GREETING = 'Sorry, no one is available. ' +
+        'Please leave a message after the tone.';
+    const DEFAULT_VOICEMAIL_MAX_SECONDS = 120;
+    const MIN_VOICEMAIL_MAX_SECONDS = 30;
+    const MAX_VOICEMAIL_MAX_SECONDS = 300;
 
     /**
      * Inbound ring time in whole seconds. Blank or not a number gives the
@@ -33,10 +40,57 @@ define(['N/search'], (search) => {
         return Math.min(Math.max(n, MIN_RING_SECONDS), MAX_RING_SECONDS);
     };
 
-    /** No-answer message; blank gives the default message. */
-    const parseNoAnswerMessage = (raw) => {
+    /**
+     * Default no-answer message for the voicemail setting: the voicemail
+     * greeting when voicemail is on, else the try-again-later message.
+     */
+    const defaultNoAnswerMessage = (voicemailOn) =>
+        (voicemailOn ? DEFAULT_VOICEMAIL_GREETING : DEFAULT_NOANSWER_MESSAGE);
+
+    /**
+     * True when the text is blank or one of the two built-in defaults.
+     * The wizard shows the default in the text box, so a save can store a
+     * default verbatim; it must still follow the voicemail setting.
+     */
+    const isDefaultNoAnswerMessage = (raw) => {
         const s = raw == null ? '' : String(raw).trim();
-        return s || DEFAULT_NOANSWER_MESSAGE;
+        return !s || s === DEFAULT_NOANSWER_MESSAGE || s === DEFAULT_VOICEMAIL_GREETING;
+    };
+
+    /**
+     * No-answer message. Blank (or a built-in default) gives the default
+     * for the voicemail setting; other text is used as it is.
+     */
+    const parseNoAnswerMessage = (raw, voicemailOn) => {
+        if (isDefaultNoAnswerMessage(raw)) return defaultNoAnswerMessage(voicemailOn === true);
+        return String(raw).trim();
+    };
+
+    /**
+     * Voicemail on/off. The XML default is checked. Only an explicit
+     * false / 'F' is off; blank or null reads as on. Note: N/search can
+     * return false for a checkbox an older config record never stored,
+     * so an existing install may read off until the wizard saves it.
+     */
+    const parseVoicemailOn = (raw) => {
+        if (raw === false || raw === 'F') return false;
+        return true;
+    };
+
+    /**
+     * Longest voicemail in whole seconds. Blank or not a number gives 120;
+     * other values are clamped to 30-300.
+     */
+    const parseVoicemailMaxSeconds = (raw) => {
+        const n = parseInt(raw, 10);
+        if (isNaN(n)) return DEFAULT_VOICEMAIL_MAX_SECONDS;
+        return Math.min(Math.max(n, MIN_VOICEMAIL_MAX_SECONDS), MAX_VOICEMAIL_MAX_SECONDS);
+    };
+
+    /** Employee internal id as a string of digits, or ''. */
+    const parseEmployeeId = (raw) => {
+        const s = raw == null ? '' : String(raw).trim();
+        return /^[0-9]{1,10}$/.test(s) ? s : '';
     };
 
     /** Recording notice; blank gives the default notice. */
@@ -54,7 +108,8 @@ define(['N/search'], (search) => {
      *     id, accountSid, apiKeySid, apiSecretId,
      *     twimlAppSid, phoneNumber, intelServiceSid, active, inboundEnabled,
      *     ringSeconds, noAnswerMessage, studioFlowSid, routingPublishedAt,
-     *     recordInbound, recordingNoticeOn, recordingNotice, reconWatermark
+     *     recordInbound, recordingNoticeOn, recordingNotice, reconWatermark,
+     *     voicemailOn, voicemailMaxSeconds, fallbackOwnerId
      * }
      *
      * `id` is the config record's internal id (for record.submitFields).
@@ -69,6 +124,14 @@ define(['N/search'], (search) => {
      * checkboxes as-is (the XML default is checked for new records; an
      * unset value reads false). `recordingNotice` defaults to a built-in
      * notice when blank.
+     *
+     * Voicemail: `voicemailOn` (default true; blank / null reads true)
+     * sends unanswered and unrouted inbound callers to a Studio
+     * record-voicemail widget after the no-answer message.
+     * `voicemailMaxSeconds` defaults to 120, clamped to 30-300.
+     * `noAnswerMessage` defaults to the voicemail greeting when voicemail
+     * is on. `fallbackOwnerId` is the employee who owns Phone Calls for
+     * unrouted numbers and for inactive reps ('' when not set).
      *
      * Call reconciliation (lib/ctc_call_reconcile): `reconWatermark` is the
      * ISO 8601 UTC time before which every Twilio browser call has a Phone
@@ -105,7 +168,10 @@ define(['N/search'], (search) => {
                 'custrecord_ctc_record_inbound',
                 'custrecord_ctc_recording_notice_on',
                 'custrecord_ctc_recording_notice',
-                'custrecord_ctc_recon_watermark'
+                'custrecord_ctc_recon_watermark',
+                'custrecord_ctc_voicemail_on',
+                'custrecord_ctc_voicemail_max_seconds',
+                'custrecord_ctc_fallback_owner'
             ]
         }).run().getRange({ start: 0, end: 1 });
 
@@ -114,6 +180,7 @@ define(['N/search'], (search) => {
         }
 
         const r = results[0];
+        const voicemailOn = parseVoicemailOn(r.getValue('custrecord_ctc_voicemail_on'));
         return {
             id:                r.id,
             accountSid:        r.getValue('custrecord_ctc_account_sid'),
@@ -127,13 +194,16 @@ define(['N/search'], (search) => {
             inboundEnabled:    r.getValue('custrecord_ctc_inbound_enabled') === true
                             || r.getValue('custrecord_ctc_inbound_enabled') === 'T',
             ringSeconds:       parseRingSeconds(r.getValue('custrecord_ctc_ring_seconds')),
-            noAnswerMessage:   parseNoAnswerMessage(r.getValue('custrecord_ctc_noanswer_message')),
+            noAnswerMessage:   parseNoAnswerMessage(r.getValue('custrecord_ctc_noanswer_message'), voicemailOn),
             studioFlowSid:     r.getValue('custrecord_ctc_studio_flow_sid') || '',
             routingPublishedAt: r.getValue('custrecord_ctc_routing_published_at') || '',
             recordInbound:     isChecked(r.getValue('custrecord_ctc_record_inbound')),
             recordingNoticeOn: isChecked(r.getValue('custrecord_ctc_recording_notice_on')),
             recordingNotice:   parseRecordingNotice(r.getValue('custrecord_ctc_recording_notice')),
-            reconWatermark:    r.getValue('custrecord_ctc_recon_watermark') || ''
+            reconWatermark:    r.getValue('custrecord_ctc_recon_watermark') || '',
+            voicemailOn:       voicemailOn,
+            voicemailMaxSeconds: parseVoicemailMaxSeconds(r.getValue('custrecord_ctc_voicemail_max_seconds')),
+            fallbackOwnerId:   parseEmployeeId(r.getValue('custrecord_ctc_fallback_owner'))
         };
     };
 
@@ -143,6 +213,12 @@ define(['N/search'], (search) => {
         MIN_RING_SECONDS,
         MAX_RING_SECONDS,
         DEFAULT_NOANSWER_MESSAGE,
-        DEFAULT_RECORDING_NOTICE
+        DEFAULT_RECORDING_NOTICE,
+        DEFAULT_VOICEMAIL_GREETING,
+        DEFAULT_VOICEMAIL_MAX_SECONDS,
+        MIN_VOICEMAIL_MAX_SECONDS,
+        MAX_VOICEMAIL_MAX_SECONDS,
+        defaultNoAnswerMessage,
+        isDefaultNoAnswerMessage
     };
 });

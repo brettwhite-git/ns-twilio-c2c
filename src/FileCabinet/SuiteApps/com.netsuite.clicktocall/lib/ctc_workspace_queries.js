@@ -10,7 +10,7 @@
  * both surfaces.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
+define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcTime) => {
 
     // NetSuite N/search returns SELECT field values inconsistently:
     //   - JOINED columns:    array `[{ value, text }]`
@@ -144,6 +144,22 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
     };
 
     /**
+     * Newest first inside each day, by effective time ('HH:MM'; blank
+     * last). The search already sorts by startdate DESC, so the days stay
+     * in search order; ties keep search order.
+     * @param {Array<{date: string, timeOfDay: string}>} rows
+     * @returns {Array<Object>}
+     */
+    const sortWithinDay = (rows) => rows
+        .map((r, i) => ({ r: r, i: i }))
+        .sort((a, b) => {
+            if (a.r.date !== b.r.date) return a.i - b.i;
+            if (a.r.timeOfDay !== b.r.timeOfDay) return a.r.timeOfDay < b.r.timeOfDay ? 1 : -1;
+            return a.i - b.i;
+        })
+        .map((x) => x.r);
+
+    /**
      * Load recent Phone Call rows assigned to a user, with optional filters.
      *
      * @param {{
@@ -215,7 +231,8 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             if (filters.status) searchFilters.push('AND', ['custevent_ctc_call_status', 'is', filters.status]);
 
             // `createddate` is the second sort key so calls on the same day
-            // come newest first (startdate has no time part).
+            // come newest first (startdate has no time part). The rows are
+            // then re-ordered inside each day by their effective time.
             const results = search.create({
                 type: search.Type.PHONE_CALL,
                 filters: searchFilters,
@@ -223,6 +240,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                     { name: 'startdate', sort: search.Sort.DESC },
                     { name: 'createddate', sort: search.Sort.DESC },
                     'starttime',
+                    'custevent_ctc_call_started',
                     'company',
                     'contact',
                     'phone',
@@ -244,10 +262,13 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
                 return {
                     id: r.id,
                     date: r.getValue('startdate') || '',
-                    // 'HH:MM' (24 h). Phone Calls logged by the softphone are not
-                    // timed events, so `starttime` is usually blank; the record's
-                    // creation time is the call time in that case.
-                    timeOfDay: parseTimeOfDay(r.getValue('starttime')) ||
+                    // 'HH:MM' (24 h), from the effective call time:
+                    // custevent_ctc_call_started (ISO UTC, shown in the user's
+                    // time zone), else `starttime` (Phone Calls are not timed
+                    // events, so usually blank), else the record's creation
+                    // time (late for reconciled calls).
+                    timeOfDay: parseTimeOfDay(ctcTime.localTimeOfIso(r.getValue('custevent_ctc_call_started'))) ||
+                               parseTimeOfDay(r.getValue('starttime')) ||
                                parseTimeOfDay(r.getValue('createddate')),
                     companyId: extractId(r.getValue('company')),
                     companyName: extractText(r.getText ? r.getText('company') : r.getValue('company')),
@@ -269,7 +290,7 @@ define(['N/search', 'N/query', 'N/log'], (search, query, log) => {
             // customer for unique companyIds. Same pattern loadTaskGroups uses.
             enrichRowsWithEntityType(rows);
 
-            return { rows: rows, total: rows.length };
+            return { rows: sortWithinDay(rows), total: rows.length };
         } catch (e) {
             log.error({ title: 'CTC loadHistoryRows Failed', details: e.message || e });
             return { error: 'History fetch failed', rows: [], total: 0 };

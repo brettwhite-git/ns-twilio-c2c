@@ -18,7 +18,8 @@
  *
  * Admin gate: every action re-checks the calling role at the top of
  * the handler. Role 3 (Administrator) is portable across customer
- * accounts; custom roles vary per install.
+ * accounts; custom roles vary per install. Then POST only: any other
+ * method gets `{ ok: false, error: 'method_not_allowed' }`.
  */
 // SAFE audit 2026-05-21 — N/log MUST be in the import list. Pre-import,
 // the script used `log` as an implicit global; that works at NetSuite
@@ -59,6 +60,19 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                          ' action=' + action
             });
             response.write(JSON.stringify({ ok: false, error: 'forbidden' }));
+            return;
+        }
+
+        // POST only (2026-11-01). Several actions write config, publish
+        // Twilio routing or create records; a GET (link, image, prefetch)
+        // must never run them. The SPA (W/services/wizardApi.ts) only
+        // sends core.Ajax.post.
+        if (String(request.method || '').toUpperCase() !== 'POST') {
+            log.audit({
+                title: 'CTC Wizard API — method not allowed',
+                details: 'method=' + request.method + ' action=' + action
+            });
+            response.write(JSON.stringify({ ok: false, error: 'method_not_allowed' }));
             return;
         }
 
@@ -1141,11 +1155,86 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         }
     };
 
+    /* -- Voicemail + fallback owner (Inbound calls page) ---------------- */
+
+    /**
+     * Employees the Inbound calls page offers as the fallback owner:
+     * active employees with NetSuite access, plus the current fallback
+     * owner (even when inactive, so the page can show it). [{ id, name }].
+     * A query failure gives [] (the page still loads).
+     */
+    const listFallbackOwners = (currentId) => {
+        try {
+            const params = [];
+            let sql = "SELECT id, entityid, firstname, lastname FROM employee " +
+                      "WHERE (isinactive = 'F' AND giveaccess = 'T')";
+            if (currentId) {
+                sql += ' OR id = ?';
+                params.push(Number(currentId));
+            }
+            sql += ' ORDER BY lastname, firstname';
+            const rows = query.runSuiteQL({ query: sql, params: params }).asMappedResults();
+            return rows.slice(0, 1000).map((r) => ({
+                id: String(r.id),
+                name: ((r.firstname || '') + ' ' + (r.lastname || '')).trim() || r.entityid || String(r.id)
+            }));
+        } catch (e) {
+            log.error({ title: 'CTC Wizard — list fallback owners failed', details: errText(e) });
+            return [];
+        }
+    };
+
+    /** True when `id` is an active employee. */
+    const isActiveEmployeeId = (id) => {
+        try {
+            const res = search.lookupFields({ type: search.Type.EMPLOYEE, id: id, columns: ['isinactive'] });
+            const inactive = res && res.isinactive;
+            return !!res && !(inactive === true || inactive === 'T');
+        } catch (e) {
+            return false;
+        }
+    };
+
+    /**
+     * Validate the voicemail fields of wizardSaveInbound. Returns
+     * { values: { voicemailOn, voicemailMaxSeconds, fallbackOwnerId } } or
+     * { error, message }. fallbackOwnerId '' / null clears it; otherwise
+     * it must be an active employee's internal id.
+     */
+    const validateVoicemailPayload = (p) => {
+        const minVm = config.MIN_VOICEMAIL_MAX_SECONDS || 30;
+        const maxVm = config.MAX_VOICEMAIL_MAX_SECONDS || 300;
+        if (typeof p.voicemailOn !== 'boolean') {
+            return { error: 'invalid_voicemail_on', message: 'voicemailOn must be true or false.' };
+        }
+        if (typeof p.voicemailMaxSeconds !== 'number' || !Number.isInteger(p.voicemailMaxSeconds) ||
+            p.voicemailMaxSeconds < minVm || p.voicemailMaxSeconds > maxVm) {
+            return { error: 'invalid_voicemail_max_seconds',
+                     message: 'Voicemail length must be a whole number of seconds from ' +
+                              minVm + ' to ' + maxVm + '.' };
+        }
+        const raw = p.fallbackOwnerId == null ? '' : String(p.fallbackOwnerId).trim();
+        if (raw && !/^[0-9]{1,10}$/.test(raw)) {
+            return { error: 'invalid_fallback_owner', message: 'The fallback owner must be an employee.' };
+        }
+        if (raw && !isActiveEmployeeId(raw)) {
+            return { error: 'invalid_fallback_owner',
+                     message: 'The fallback owner must be an active employee.' };
+        }
+        return { values: { voicemailOn: p.voicemailOn,
+                           voicemailMaxSeconds: p.voicemailMaxSeconds,
+                           fallbackOwnerId: raw } };
+    };
+
+    /* -- end voicemail + fallback owner --------------------------------- */
+
     /**
      * wizardLoadInbound {} →
      *   { inboundEnabled, ringSeconds, noAnswerMessage, flowSid,
      *     publishedAt, routes: [{ phoneSid, phoneNumber, employeeId, employeeName }],
-     *     recordInbound, recordingNoticeOn, recordingNotice }
+     *     recordInbound, recordingNoticeOn, recordingNotice,
+     *     voicemailOn, voicemailMaxSeconds, fallbackOwnerId,
+     *     employees: [{ id, name }] }
      */
     const wizardLoadInbound = () => {
         const cfg = loadConfigOrError();
@@ -1168,7 +1257,12 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             routes: routes,
             recordInbound: cfg.recordInbound === true,
             recordingNoticeOn: cfg.recordingNoticeOn === true,
-            recordingNotice: cfg.recordingNotice || config.DEFAULT_RECORDING_NOTICE || ''
+            recordingNotice: cfg.recordingNotice || config.DEFAULT_RECORDING_NOTICE || '',
+            // Voicemail + fallback owner
+            voicemailOn: cfg.voicemailOn !== false,
+            voicemailMaxSeconds: cfg.voicemailMaxSeconds || config.DEFAULT_VOICEMAIL_MAX_SECONDS || 120,
+            fallbackOwnerId: cfg.fallbackOwnerId || '',
+            employees: listFallbackOwners(cfg.fallbackOwnerId || '')
         };
         if (routesError) result.routesError = routesError;
         return result;
@@ -1229,9 +1323,15 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                      message: 'The recording notice must be ' +
                               MAX_RECORDING_NOTICE_LENGTH + ' characters or fewer.' };
         }
+        const vm = validateVoicemailPayload(p);
+        if (vm.error) return vm;
         return { values: { inboundEnabled: p.inboundEnabled,
                            ringSeconds: p.ringSeconds,
-                           noAnswerMessage: message,
+                           // A built-in default is stored blank so it follows the voicemail setting.
+                           noAnswerMessage: config.isDefaultNoAnswerMessage(message) ? '' : message,
+                           voicemailOn: vm.values.voicemailOn,
+                           voicemailMaxSeconds: vm.values.voicemailMaxSeconds,
+                           fallbackOwnerId: vm.values.fallbackOwnerId,
                            recordInbound: p.recordInbound,
                            recordingNoticeOn: p.recordingNoticeOn,
                            recordingNotice: notice } };
@@ -1239,12 +1339,16 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
 
     /**
      * wizardSaveInbound { inboundEnabled, ringSeconds, noAnswerMessage,
-     *                     recordInbound, recordingNoticeOn, recordingNotice } →
+     *                     recordInbound, recordingNoticeOn, recordingNotice,
+     *                     voicemailOn, voicemailMaxSeconds, fallbackOwnerId } →
      *   { settings: { inboundEnabled, ringSeconds, noAnswerMessage,
-     *                 recordInbound, recordingNoticeOn, recordingNotice },
+     *                 recordInbound, recordingNoticeOn, recordingNotice,
+     *                 voicemailOn, voicemailMaxSeconds, fallbackOwnerId },
      *     publish: PublishResult }
      * A blank message or notice is stored blank; settings then reports the
-     * default text that callers will hear.
+     * default text that callers will hear. A no-answer message equal to a
+     * built-in default is stored blank too, so it follows the voicemail
+     * setting (voicemail greeting vs try-again-later message).
      */
     const wizardSaveInbound = (payload) => {
         const v = validateInboundPayload(payload);
@@ -1262,7 +1366,10 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 custrecord_ctc_noanswer_message: v.values.noAnswerMessage,
                 custrecord_ctc_record_inbound: v.values.recordInbound,
                 custrecord_ctc_recording_notice_on: v.values.recordingNoticeOn,
-                custrecord_ctc_recording_notice: v.values.recordingNotice
+                custrecord_ctc_recording_notice: v.values.recordingNotice,
+                custrecord_ctc_voicemail_on: v.values.voicemailOn,
+                custrecord_ctc_voicemail_max_seconds: v.values.voicemailMaxSeconds,
+                custrecord_ctc_fallback_owner: v.values.fallbackOwnerId
             }
         });
 
@@ -1273,7 +1380,10 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                      ' messageLength=' + v.values.noAnswerMessage.length +
                      ' recordInbound=' + v.values.recordInbound +
                      ' recordingNoticeOn=' + v.values.recordingNoticeOn +
-                     ' noticeLength=' + v.values.recordingNotice.length
+                     ' noticeLength=' + v.values.recordingNotice.length +
+                     ' voicemailOn=' + v.values.voicemailOn +
+                     ' voicemailMaxSeconds=' + v.values.voicemailMaxSeconds +
+                     ' fallbackOwner=' + (v.values.fallbackOwnerId || 'none')
         });
 
         let publish;
@@ -1289,11 +1399,14 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 inboundEnabled: v.values.inboundEnabled,
                 ringSeconds: v.values.ringSeconds,
                 noAnswerMessage: v.values.noAnswerMessage ||
-                                 config.DEFAULT_NOANSWER_MESSAGE || '',
+                                 config.defaultNoAnswerMessage(v.values.voicemailOn),
                 recordInbound: v.values.recordInbound,
                 recordingNoticeOn: v.values.recordingNoticeOn,
                 recordingNotice: v.values.recordingNotice ||
-                                 config.DEFAULT_RECORDING_NOTICE || ''
+                                 config.DEFAULT_RECORDING_NOTICE || '',
+                voicemailOn: v.values.voicemailOn,
+                voicemailMaxSeconds: v.values.voicemailMaxSeconds,
+                fallbackOwnerId: v.values.fallbackOwnerId
             },
             publish: publish
         };

@@ -1,6 +1,6 @@
 <customrecordtype scriptid="customrecord_ctc_rep_presence">
     <recordname>CTC Rep Phone Presence</recordname>
-    <description>One row per rep: whether the rep's browser phone can receive calls right now. Written only by the token RESTlet's phoneHeartbeat action (the softphone sends it on every registration change, on token refresh and every 5 minutes). Read by the Setup Wizard (Health and Inbound calls pages). Hidden from admin UI via allowuiaccess=F.</description>
+    <description>One row per rep: whether the rep's browser phone can receive calls right now. Written only by the token RESTlet's phoneHeartbeat action (the softphone sends it on every registration change, on token refresh, after a token failure and every 5 minutes, at most one per 2 seconds). Read by the Setup Wizard (Health and Inbound calls pages). Hidden from admin UI via allowuiaccess=F.</description>
     <allowuiaccess>F</allowuiaccess>
     <includeinsearchmenu>F</includeinsearchmenu>
     <includename>F</includename>
@@ -72,6 +72,21 @@
             <description>ISO 8601 UTC time when Can Receive Calls last changed value (or the row was created).</description>
             <fieldtype>CLOBTEXT</fieldtype>
             <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_last_error">
+            <label>Last Error</label>
+            <description>Last phone error the softphone reported, e.g. "token: HTTP 401 at 01:02Z" or "register: 31204 at 01:02Z" (200 characters max). Kept until the next error. Diagnostics only.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_rp_identity_match">
+            <label>Identity Matches User</label>
+            <description>True when the Twilio identity in the phone's access token equals the session user who sent the heartbeat. Diagnostics only; the employee always comes from the session.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultvalue>F</defaultvalue>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
     </customrecordcustomfields>

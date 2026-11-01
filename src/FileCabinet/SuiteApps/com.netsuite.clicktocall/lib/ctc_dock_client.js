@@ -13,13 +13,17 @@
  *             script). Pill + dialer panel (ctc_dock_dialer.js).
  *   frame   - a NetSuite page inside the shell. Draws nothing. The record's
  *             Call button goes to top.__ctcShell.call(ctx).
- *   outside - a normal NetSuite tab. Chip only: mirrors a phone held by
- *             another tab (Web Lock 'ctc-phone-anchor'), or offers
- *             "Open phone", which moves this tab into the shell.
+ *   outside - a normal NetSuite tab. Another tab holds the phone (Web Lock
+ *             'ctc-phone-anchor'): the same pill + dialer panel as the
+ *             shell, as a remote control (bus requests; the audio stays in
+ *             the phone tab). No tab holds it: an "Open phone" chip, which
+ *             moves this tab into the shell. Nothing at all for a user the
+ *             phone is not enabled for (localStorage NOT_ENABLED_KEY).
  *
  * The pill sits on one of eight edge points; the point is shared by every
  * tab through localStorage. In the shell the dialer panel registers through
- * window.__ctcDock.host.registerPanel() and opens on the pill's point, one
+ * window.__ctcDock.host.registerPanel() (shell and outside modes; outside it
+ * shows only while another tab holds the phone) and opens on the pill's point, one
  * fixed size for every view (PANEL_W x PANEL_H, the Search view's full
  * size). Pill and panel are one unit: dragging the panel's header snaps it
  * to one of the same eight points, and the pill comes back there. On the
@@ -32,6 +36,14 @@
 
     var LOCK_NAME = 'ctc-phone-anchor';  // PHONE_LOCK_NAME in lib/ctc_dock.js
     var EXIT_KEY = 'ctc-phone-exit';     // EXIT_KEY in lib/ctc_dock.js
+    var TAKEOVER_PARAM = 'takeover';     // TAKEOVER_PARAM in lib/ctc_dock.js
+    // localStorage: '1' while the phone is not enabled for this user
+    // (snapshot error.kind 'not_enabled'); NOT_ENABLED_AT_KEY holds the epoch
+    // ms it was set. Expires after NOT_ENABLED_TTL_MS; cleared when a token
+    // works. While set, outside tabs draw nothing and never auto-enter.
+    var NOT_ENABLED_KEY = 'ctc-phone-not-enabled';
+    var NOT_ENABLED_AT_KEY = 'ctc-phone-not-enabled-at';
+    var NOT_ENABLED_TTL_MS = 24 * 60 * 60 * 1000;
 
     var script = document.currentScript;
     var attr = function (name, fallback) {
@@ -76,16 +88,45 @@
     // the shell.
     if (mode === 'outside' && window.opener && window.opener !== window) return;
 
-    // Address of this page inside the shell.
-    function shellHref() {
+    // Address of this page inside the shell. takeover: the shell asks the
+    // tab that holds the phone to hand it over ("Use phone here").
+    function shellHref(takeover) {
         var sep = cfg.shellUrl.indexOf('?') === -1 ? '?' : '&';
-        return cfg.shellUrl + sep + 'u=' + encodeURIComponent(location.pathname + location.search);
+        return cfg.shellUrl + sep + 'u=' + encodeURIComponent(location.pathname + location.search)
+            + (takeover ? '&' + TAKEOVER_PARAM + '=1' : '');
     }
 
-    function goShell() {
+    function goShell(takeover) {
         if (!cfg.shellUrl) return;
         try { window.sessionStorage.removeItem(EXIT_KEY); } catch (e) { /* storage blocked */ }
-        window.top.location.href = shellHref();
+        window.top.location.href = shellHref(takeover === true);
+    }
+
+    // --- Phone not enabled for this user (outside tabs, dashboard loader) ---
+    function notEnabledFlag() {
+        try {
+            var ls = window.localStorage;
+            if (ls.getItem(NOT_ENABLED_KEY) !== '1') return false;
+            var at = Number(ls.getItem(NOT_ENABLED_AT_KEY));
+            if (at > 0 && Date.now() - at < NOT_ENABLED_TTL_MS) return true;
+            ls.removeItem(NOT_ENABLED_KEY);
+            ls.removeItem(NOT_ENABLED_AT_KEY);
+        } catch (e) { /* storage blocked */ }
+        return false;
+    }
+
+    function setNotEnabledFlag(on) {
+        try {
+            var ls = window.localStorage;
+            if (on) {
+                if (ls.getItem(NOT_ENABLED_KEY) === '1' && notEnabledFlag()) return;
+                ls.setItem(NOT_ENABLED_KEY, '1');
+                ls.setItem(NOT_ENABLED_AT_KEY, String(Date.now()));
+            } else if (ls.getItem(NOT_ENABLED_KEY) !== null) {
+                ls.removeItem(NOT_ENABLED_KEY);
+                ls.removeItem(NOT_ENABLED_AT_KEY);
+            }
+        } catch (e) { /* storage blocked */ }
     }
 
     // --- Frame mode: silent. The shell draws the one pill. ---
@@ -140,7 +181,12 @@
     // this long) a silent bus means "starting", not "offline".
     var SHELL_BOOT_MS = 15000;
     var PING_INTERVAL_MS = 15000;
-    var ACTIVE = { dialing: true, ringing: true, connected: true };
+    // Live call phases the pill treats as "on a call" (incoming has its own view).
+    var ACTIVE = { dialing: true, ringing: true, connected: true, reconnecting: true };
+    // Talking: Mute and the keypad work.
+    var TALKING = { connected: true, reconnecting: true };
+    var MISSED_DOT = '#D9553F';
+    var AMBER = '#F4C76A';
     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
 
     var ICON_PHONE = '<path d="M2 5.5C2 3.6 3.6 2 5.5 2h1.3c.9 0 1.7.6 1.9 1.5l1 4c.2.8-.1 1.6-.8 2.1l-1.5 1.1a12 12 0 0 0 5.9 5.9l1.1-1.5c.5-.7 1.3-1 2.1-.8l4 1c.9.2 1.5 1 1.5 1.9v1.3c0 1.9-1.6 3.5-3.5 3.5A16.5 16.5 0 0 1 2 5.5z"></path>';
@@ -178,22 +224,30 @@
         '.v-grip{display:grid;grid-template-columns:3px 3px;gap:2px;flex-shrink:0}',
         '.v-grip i{width:3px;height:3px;border-radius:999px;background:rgba(255,255,255,0.28)}',
         '.v-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:var(--dot,#94A6BF)}',
-        '.vchip[data-stage="dialing"] .v-dot,.vchip[data-stage="ringing"] .v-dot{box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
+        '.vchip[data-stage="dialing"] .v-dot,.vchip[data-stage="ringing"] .v-dot,.vchip[data-stage="reconnecting"] .v-dot{box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
+        /* missed calls: coral count badge on the dot (vertical pill only;
+           the horizontal pill says "N missed") */
+        '.v-dot{position:relative}',
+        '.v-count{position:absolute;top:-4px;left:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:' + MISSED_DOT + ';color:#FFFFFF;font-size:9px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px #1A2B47}',
+        '.dock:not(.vert) .v-count{display:none}',
         '.vchip[data-stage="connected"] .v-dot{box-shadow:0 0 0 3px rgba(20,185,129,0.20)}',
         '.vchip[data-muted="true"] .v-dot{background:#F4C76A;box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
         '.vchip[data-stage="starting"] .v-dot{animation:ctc-breathe 1.2s ease-in-out infinite alternate}',
         '@keyframes ctc-breathe{from{opacity:0.4}to{opacity:1}}',
-        /* incoming: a soft ring that grows out of the dot and fades (ease-out).
+        /* incoming: a soft sky ring that grows out of the dot and fades
+           (ease-out), so ringing reads apart from a green connected call.
            Only the dot moves; reduced motion keeps a still halo. */
-        '.vchip[data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px rgba(20,185,129,0.30);animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-ring{0%{box-shadow:0 0 0 0 rgba(20,185,129,0.55)}70%,100%{box-shadow:0 0 0 7px rgba(20,185,129,0)}}',
+        '.vchip[data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px rgba(116,192,252,0.30);animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-ring{0%{box-shadow:0 0 0 0 rgba(116,192,252,0.55)}70%,100%{box-shadow:0 0 0 7px rgba(116,192,252,0)}}',
         /* each shape shows only its own words / timer */
         '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
         '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
+        /* the moved pill's one line is fixed copy, never a name: show it whole */
+        '.vchip[data-stage="moved"] .h-words{max-width:none}',
         '.h-l1,.h-l2{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.h-l1{font-size:13px;font-weight:600;line-height:16px;color:#FFFFFF}',
         '.h-l2{font-size:11px;line-height:14px;color:#94A6BF}',
-        '.h-l2.muted{color:#F4C76A}',
+        '.h-l2.muted,.h-l1.amber,.h-l2.amber{color:#F4C76A}',
         '.h-time{flex-shrink:0;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:13px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap;color:#FFFFFF}',
         '.v-time{display:flex;flex-direction:column;align-items:center;font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;font-size:13px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1;color:#FFFFFF}',
         '.v-sep{font-size:7px;color:#94A6BF}',
@@ -224,6 +278,19 @@
         '.vchip.light .h-l1{color:#161513}',
         '.vchip.light .h-l2{color:#5C5955}',
         '.vchip.light.err .h-l1{color:#9A2A23}',
+        /* small menu on the pill (phase moved: "Use phone here") */
+        '.v-menu{position:absolute;left:0;bottom:calc(100% + 8px);min-width:168px;padding:4px;border-radius:12px;background:#1A2B47;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26);transform-origin:bottom left;transition:opacity 150ms cubic-bezier(0.23,1,0.32,1),transform 150ms cubic-bezier(0.23,1,0.32,1)}',
+        '.v-menu.closed{opacity:0;transform:scale(0.97)}',
+        '.dock[data-col="c"] .v-menu{left:50%;translate:-50% 0;transform-origin:bottom center}',
+        '.dock[data-col="r"] .v-menu{left:auto;right:0;transform-origin:bottom right}',
+        '.dock[data-row="t"] .v-menu{bottom:auto;top:calc(100% + 8px);transform-origin:top left}',
+        '.dock[data-row="t"][data-col="r"] .v-menu{transform-origin:top right}',
+        '.dock[data-row="m"] .v-menu{bottom:auto;top:50%;translate:0 -50%;left:calc(100% + 8px);transform-origin:left center}',
+        '.dock[data-row="m"][data-col="r"] .v-menu{left:auto;right:calc(100% + 8px);transform-origin:right center}',
+        '.v-menu-item{display:block;width:100%;padding:9px 12px;border-radius:8px;background:transparent;text-align:left;font-size:13px;font-weight:500;color:#FFFFFF;white-space:nowrap}',
+        '.v-menu-item:hover{background:rgba(255,255,255,0.08)}',
+        /* screen-reader-only live regions */
+        '.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}',
 
         /* card */
         '.card{width:300px;border-radius:14px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 16px 40px rgba(15,27,48,0.28);transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1)}',
@@ -254,7 +321,7 @@
         '.card.dl{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out}',
         '.card.dl.settling{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out,translate ' + SETTLE + '}',
         '.card.dl.lifted{scale:' + (1 + LIFT) + ';box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 24px 56px rgba(15,27,48,0.36)}',
-        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button{transition:opacity 200ms linear}.card.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot{animation:none}}'
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot{animation:none}}'
     ].join('\n');
 
     var HTML = ''
@@ -262,7 +329,7 @@
         +   '<div class="vchip navy">'
         +     '<button type="button" class="v-body">'
         +       '<span class="v-grip" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
-        +       '<span class="v-dot" aria-hidden="true"></span>'
+        +       '<span class="v-dot" aria-hidden="true"><span class="v-count" hidden></span></span>'
         +       '<span class="h-words" aria-hidden="true"><span class="h-l1"></span><span class="h-l2"></span></span>'
         +       '<span class="h-time" aria-hidden="true"></span>'
         +       '<span class="v-time" aria-hidden="true"><span class="v-mm"></span><span class="v-sep">·</span><span class="v-ss"></span></span>'
@@ -278,6 +345,9 @@
         +       '<svg class="v-ico ico-offline" width="16" height="16" viewBox="0 0 24 24" fill="#345D7E" aria-hidden="true">' + ICON_PHONE + '</svg>'
         +       '<svg class="v-ico ico-retry" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9A2A23" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_RETRY + '</svg>'
         +     '</button>'
+        +   '</div>'
+        +   '<div class="v-menu closed" role="menu" aria-label="Phone" hidden>'
+        +     '<button type="button" class="v-menu-item v-use-here" role="menuitem">Use phone here</button>'
         +   '</div>'
         +   '<div class="card navy closed" role="region" aria-label="Current call">'
         +     '<button type="button" class="card-top" aria-label="Collapse call card">'
@@ -296,7 +366,10 @@
         +       '</button>'
         +     '</div>'
         +   '</div>'
-        + '</div>';
+        + '</div>'
+        // Live regions stay outside .dock: a hidden dock must still speak.
+        + '<div class="sr sr-assertive" role="alert" aria-live="assertive" aria-atomic="true"></div>'
+        + '<div class="sr sr-polite" role="status" aria-live="polite" aria-atomic="true"></div>';
 
     // --- State ---
     var snap = null; // null until the anchor answers (or the hello times out)
@@ -323,6 +396,13 @@
     // Outside mode: does another tab hold the phone? 'pending' until the
     // first lock query answers; null when the browser has no Web Locks.
     var lockHeld = mode === 'outside' ? 'pending' : false;
+    // What a click on the pill does beyond opening: 'unlock' (Turn on
+    // phone) | 'menu' (phase moved) | ''. pressAction keeps the value seen
+    // at pointerdown / keydown: the shell's own gesture listener may unlock
+    // audio (and a new snapshot re-render the pill) before the click lands.
+    var pillAction = '';
+    var pressAction = null;
+    var menuOpen = false;
     var bus = new BroadcastChannel(cfg.bus);
 
     // --- DOM ---
@@ -355,6 +435,11 @@
     var pillLabel = $('.pill-label');
     var muteBtn = $('.mute');
     var endBtn = $('.key.end');
+    var vCount = $('.v-count');
+    var menuEl = $('.v-menu');
+    var useHereItem = $('.v-use-here');
+    var srAssertive = $('.sr-assertive');
+    var srPolite = $('.sr-polite');
 
     // --- Helpers ---
     function readCorner() {
@@ -385,6 +470,129 @@
         return false;
     }
 
+    // Outside mode with the dialer loaded and the phone in another tab: the
+    // shell's pill + panel as a remote control (requests over the bus).
+    function remote() {
+        return mode === 'outside' && !!panel && phoneElsewhere();
+    }
+
+    function errorKind() {
+        var e = snap && snap.error;
+        return e && typeof e === 'object' ? String(e.kind || '') : '';
+    }
+
+    function missedCount() {
+        var m = snap && snap.missedUnseen;
+        return m && typeof m.count === 'number' && m.count > 0 ? Math.floor(m.count) : 0;
+    }
+
+    function shellLock() {
+        try {
+            var s = window.__ctcShell;
+            return s && typeof s.phoneState === 'function' ? String((s.phoneState() || {}).lock || '') : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    // The phone is not enabled for this user: no pill anywhere.
+    function notEnabled() {
+        if (errorKind() === 'not_enabled') return true;
+        if (mode === 'shell') return shellLock() === 'disabled';
+        return notEnabledFlag();
+    }
+
+    // Remember not_enabled for this browser (dashboard auto-enter, outside
+    // pills); forget it as soon as a snapshot shows a working token.
+    function trackNotEnabled() {
+        if (!snap) return;
+        if (errorKind() === 'not_enabled' || (mode === 'shell' && shellLock() === 'disabled')) setNotEnabledFlag(true);
+        else if (snap.phase === 'ready' || snap.phase === 'incoming' || ACTIVE[snap.phase]) setNotEnabledFlag(false);
+    }
+
+    // "Use phone here": only when no call is live. Shell: ask the tab that
+    // holds the phone to hand it over. Outside: open this page in the shell
+    // with takeover=1 (the shell asks for the phone when it finds it busy).
+    function useHere() {
+        if (isActive() || (snap && snap.phase === 'incoming')) return false;
+        if (mode === 'shell') {
+            var s = shellObject();
+            return !!(s && typeof s.takeover === 'function' && s.takeover() !== false);
+        }
+        if (!cfg.shellUrl) return false;
+        goShell(true);
+        return true;
+    }
+
+    // "Turn on phone" / "Get call alerts": from the click itself. In the
+    // shell the direct call; elsewhere the bus request (the shell acts on it
+    // only with a gesture in its own tab).
+    function unlock() {
+        var s = mode === 'shell' ? shellObject() : null;
+        if (s && typeof s.unlockAudio === 'function') s.unlockAudio();
+        else send('unlockAudio');
+    }
+
+    // Shell only: reload the phone frame (the anchor starts again). Never
+    // during a call. Returns false when there is nothing to reload.
+    function reloadPhone() {
+        if (mode !== 'shell' || isActive() || (snap && snap.phase === 'incoming')) return false;
+        var f = document.getElementById('ctc-phone-frame');
+        try {
+            if (!f || !f.contentWindow || !f.getAttribute('src') || f.getAttribute('src') === 'about:blank') return false;
+            f.contentWindow.location.reload();
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    // Session ended: load NetSuite again so it asks for the sign-in. In the
+    // shell, the NetSuite frame (the shell shows its sign-in banner there).
+    function signIn() {
+        if (mode === 'shell') {
+            var f = document.getElementById('ctc-ns-frame');
+            try { f.contentWindow.location.reload(); return; } catch (e) { /* fall through */ }
+        }
+        window.location.reload();
+    }
+
+    // Live regions: the same text twice in a row still speaks (a trailing
+    // no-break space makes it a change).
+    function say(region, text) {
+        region.textContent = region.textContent === text ? text + ' ' : text;
+    }
+
+    function whoOf(c) {
+        c = c || {};
+        return c.name || formatPhone(c.number) || c.number || '';
+    }
+
+    // Phase changes, spoken. Nothing on the first snapshot (page load).
+    function announce(prev, next) {
+        if (!prev || !next) return;
+        var a = prev.phase, b = next.phase;
+        if (b === 'incoming' && a !== 'incoming') {
+            // The shell's inbound toast has its own assertive region.
+            if (mode !== 'shell') say(srAssertive, 'Incoming call from ' + (whoOf(next.caller) || whoOf({ number: next.number }) || 'unknown caller'));
+            return;
+        }
+        if (b === 'connected' && a !== 'connected') { say(srPolite, 'Call connected'); return; }
+        if (b === 'reconnecting' && a !== 'reconnecting') { say(srPolite, 'Reconnecting'); return; }
+        var wasLive = !!ACTIVE[a] || a === 'incoming';
+        var live = !!ACTIVE[b] || b === 'incoming';
+        if (!wasLive || live) return;
+        var pm = prev.missedUnseen && prev.missedUnseen.count || 0;
+        var nm = next.missedUnseen && next.missedUnseen.count || 0;
+        var missed = nm > pm || (a === 'incoming' && next.lastLog && next.lastLog.status === 'missed');
+        if (missed) {
+            var who = whoOf(next.missedUnseen && next.missedUnseen.last) || whoOf(prev.caller) || whoOf({ number: prev.number }) || 'unknown caller';
+            say(srPolite, 'Missed call from ' + who);
+        } else {
+            say(srPolite, 'Call ended');
+        }
+    }
+
     function initials(name) {
         var parts = String(name || '').replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/);
         if (!parts[0]) return '?';
@@ -413,8 +621,30 @@
         return '+' + cc + ' (' + r.slice(0, 3) + ') ' + r.slice(3, 6) + '-' + r.slice(6);
     }
 
+    // Bus contract (lib/ctc_dock.js): every request carries origin 'dock'
+    // and a fresh nonce; the anchor drops requests without them.
+    function makeNonce() {
+        var out = '';
+        try {
+            var b = new Uint8Array(12);
+            window.crypto.getRandomValues(b);
+            for (var i = 0; i < b.length; i++) out += ('0' + b[i].toString(16)).slice(-2);
+        } catch (e) {
+            out = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        }
+        return out;
+    }
+
+    function requestMessage(action, extra) {
+        var m = { v: 1, type: 'request', action: action };
+        if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) m[k] = extra[k];
+        m.origin = 'dock';
+        m.nonce = makeNonce();
+        return m;
+    }
+
     function send(action) {
-        bus.postMessage({ v: 1, type: 'request', action: action });
+        bus.postMessage(requestMessage(action));
     }
 
     // --- Render ---
@@ -425,8 +655,10 @@
         ready: { dot: '#94A6BF', label: 'Phone ready' }, // aria-label only: the ready pill has no text
         dialing: { dot: '#F4C76A', label: 'Calling…' },
         ringing: { dot: '#F4C76A', label: 'Ringing…' },
-        incoming: { dot: '#14B981', label: 'Incoming call' },
-        connected: { dot: '#14B981', label: 'Connected' }
+        incoming: { dot: '#74C0FC', label: 'Incoming call' }, // sky: ringing reads apart from talking
+        connected: { dot: '#14B981', label: 'Connected' },
+        reconnecting: { dot: AMBER, label: 'Reconnecting…' },
+        moved: { dot: '#8B8780', label: 'Phone moved to another tab' }
     };
     // Ready, but Twilio cannot ring this phone (snap.canReceive === false:
     // inbound is on and the anchor is re-registering). Quiet: amber dot and
@@ -437,11 +669,13 @@
     function render() {
         // The panel follows every snapshot first, so nothing below can leave
         // it on a stale view.
+        trackNotEnabled();
         if (panel && snap) panel.render(snap);
 
         var wasHidden = dockEl.hidden;
         if (mode === 'outside') renderOutside();
         else if (!snap) dockEl.hidden = true;
+        else if (notEnabled()) hideDock();
         else {
             renderChip(snap.phase, false);
             renderCard();
@@ -474,12 +708,21 @@
         enterTimer = window.setTimeout(function () { entering = false; }, ENTER_MS);
     }
 
+    // No pill (not_enabled): the panel closes and the menu with it.
+    function hideDock() {
+        setMenu(false);
+        if (expanded || (panel && !panel.el.hidden)) setExpanded(false, false);
+        if (timerId) { window.clearInterval(timerId); timerId = null; }
+        dockEl.hidden = true;
+    }
+
     function renderOutside() {
+        if (notEnabled()) { hideDock(); return; }
         if (lockHeld === 'pending') { dockEl.hidden = true; return; }
         if (!phoneElsewhere()) {
-            if (!cfg.shellUrl) { dockEl.hidden = true; return; }
+            if (!cfg.shellUrl) { hideDock(); return; }
             // "Open phone" (offline style): this tab moves into phone mode.
-            expanded = false;
+            setMenu(false);
             dockEl.hidden = false;
             dockEl.style.setProperty('--dot', PHASE_VIEW.offline.dot);
             renderPill({ stage: 'offline', dot: true, light: true, main: 'offline', label: 'Open phone.' + ARROWS_HINT, title: 'Open phone', l1: 'Open phone' });
@@ -488,14 +731,21 @@
             setExpanded(false, false);
             return;
         }
-        // Another tab holds the phone: mirror its call.
+        if (panel) {
+            // Remote control: the shell's pill + panel; the anchor in the
+            // phone tab does the work and plays the audio.
+            renderChip(snap ? snap.phase : 'starting', false);
+            setExpanded(expanded, false);
+            return;
+        }
+        // No dialer on this page: mirror the other tab's call (card only).
         renderChip(snap ? snap.phase : 'starting', true);
         if (snap) renderCard();
         if (!isActive()) expanded = false;
         setExpanded(expanded, false);
     }
 
-    // mirror: outside mode, the phone runs in another tab.
+    // mirror: outside mode with no dialer, the phone runs in another tab.
     function renderChip(phaseIn, mirror) {
         var phase = PHASE_VIEW[phaseIn] ? phaseIn : 'offline';
         var view = PHASE_VIEW[phase];
@@ -506,6 +756,7 @@
         var idleLabel = mirror ? 'Phone open in another tab' : view.label;
 
         if (!active && !panel) expanded = false;
+        if (phase !== 'moved') setMenu(false);
 
         dockEl.hidden = false;
         dockEl.style.setProperty('--dot', view.dot);
@@ -531,6 +782,30 @@
             if (timerId) { window.clearInterval(timerId); timerId = null; }
             return;
         }
+        // Idle states that replace the plain pill: phase moved, errors,
+        // Turn on phone, missed calls (see idleView).
+        var idle = active || mirror ? null : idleView(phase, view);
+        if (idle) {
+            dockEl.style.setProperty('--dot', idle.dot);
+            renderPill({
+                stage: phase,
+                dot: true,
+                light: !!idle.light,
+                err: !!idle.err,
+                main: idle.main || null,
+                action: idle.action || '',
+                label: idle.label + '.' + ARROWS_HINT,
+                title: idle.label,
+                l1: idle.l1,
+                l2: idle.l2 || '',
+                l1Amber: !!idle.amber,
+                count: idle.count || 0
+            });
+            setOrient();
+            tick();
+            if (timerId) { window.clearInterval(timerId); timerId = null; }
+            return;
+        }
         // Tooltip text. Ready: dot + green phone button only, no label.
         var chipText = active ? name : (!mirror && phase === 'ready' ? '' : idleLabel);
         var label = active
@@ -543,14 +818,15 @@
             light: light,
             err: phase === 'error',
             timer: active && !!snap.startedAt,
-            mute: phase === 'connected',
+            mute: !!TALKING[phase],
             muted: !!(snap && snap.muted),
             main: active ? 'end' : mirror ? null : phase === 'ready' ? 'call' : phase === 'offline' ? 'offline' : phase === 'error' ? 'retry' : null,
             label: label,
             title: chipText || idleLabel,
             l1: words.l1,
             l2: words.l2,
-            l2Muted: words.l2Muted
+            l2Muted: words.l2Muted,
+            l2Amber: words.l2Amber
         });
         setOrient();
 
@@ -558,6 +834,30 @@
         var running = !!(snap && snap.startedAt);
         if (running && !timerId) timerId = window.setInterval(tick, 1000);
         if (!running && timerId) { window.clearInterval(timerId); timerId = null; }
+    }
+
+    // The pill between calls when something needs the rep (null: the plain
+    // pill). Shell and remote tabs only. Order: phase moved, an error kind,
+    // Turn on phone (shell tab, audio still locked), missed calls.
+    //   { dot, l1, l2, label (title / aria), main, action, light, err, amber, count }
+    function idleView(phase, view) {
+        if (phase === 'moved') {
+            return { dot: view.dot, light: true, l1: 'Phone moved to another tab', label: 'Phone moved to another tab. Open menu', action: 'menu' };
+        }
+        var kind = errorKind();
+        if (kind === 'mic') return { dot: '#EE6E5C', light: true, err: true, main: 'retry', l1: 'Microphone blocked', label: 'Microphone blocked. Open phone' };
+        if (kind === 'twilio') return { dot: '#EE6E5C', light: true, err: true, main: 'retry', l1: 'Phone error', label: 'Phone error. Open phone' };
+        if (kind === 'session') return { dot: AMBER, amber: true, l1: 'Signing in…', label: 'Signing in. Open phone' };
+        if (kind === 'network') return { dot: AMBER, amber: true, l1: 'Reconnecting…', label: 'Reconnecting. Open phone' };
+        if (phase !== 'ready') return null;
+        if (mode === 'shell' && snap && snap.audioUnlocked === false) {
+            return { dot: view.dot, main: 'call', action: 'unlock', l1: 'Turn on phone', label: 'Turn on phone' };
+        }
+        var n = missedCount();
+        if (n > 0) {
+            return { dot: MISSED_DOT, main: 'call', l1: n + ' missed', count: n, label: n + (n === 1 ? ' missed call' : ' missed calls') + '. Open phone' };
+        }
+        return null;
     }
 
     function callName() {
@@ -579,9 +879,11 @@
         var name = active ? snap.entityName || snap.contactName || number || 'Call' : '';
         if (mirror) return { l1: 'Phone open in another tab', l2: name };
         if (phase === 'offline') return { l1: 'Phone offline', l2: 'Open phone mode' };
-        if (phase === 'error') return { l1: 'Phone error', l2: 'Tap to reconnect' };
+        if (phase === 'error') return { l1: 'Phone error', l2: 'Click to reconnect' };
         if (phase === 'starting') return { l1: 'Starting phone', l2: '' };
         if (phase === 'dialing' || phase === 'ringing') return { l1: name, l2: 'Calling…' };
+        // Reconnecting: the call, timer and Mute stay; the second line says so.
+        if (phase === 'reconnecting') return { l1: name, l2: 'Reconnecting…', l2Amber: true };
         if (phase === 'connected') {
             if (snap.muted) return { l1: name, l2: 'Muted', l2Muted: true };
             var sub = snap.contactName || number;
@@ -612,7 +914,11 @@
         hL2.textContent = o.l2 || '';
         hL2.hidden = !o.l2;
         hL2.classList.toggle('muted', !!o.l2Muted);
+        hL1.classList.toggle('amber', !!o.l1Amber);
+        hL2.classList.toggle('amber', !!o.l2Amber);
         hWords.hidden = !o.l1 && !o.l2;
+        vCount.hidden = !o.count;
+        vCount.textContent = o.count ? (o.count > 9 ? '9+' : String(o.count)) : '';
         vTime.hidden = !o.timer;
         hTime.hidden = !o.timer;
         vMute.hidden = !o.mute;
@@ -633,6 +939,45 @@
             vBody.setAttribute('aria-label', o.label);
             vBody.removeAttribute('aria-hidden');
         }
+        pillAction = o.action || '';
+        syncExpandedAria();
+    }
+
+    // aria-expanded (and aria-haspopup for the menu) on the control that
+    // opens something: the body when it is in the tab order, else the main
+    // button. Nothing when the click navigates or only turns the phone on.
+    function syncExpandedAria() {
+        vBody.removeAttribute('aria-expanded');
+        vBody.removeAttribute('aria-haspopup');
+        vMain.removeAttribute('aria-expanded');
+        vMain.removeAttribute('aria-haspopup');
+        var opener = vBody.tabIndex === 0 ? vBody : vMain;
+        if (pillAction === 'menu') {
+            opener.setAttribute('aria-haspopup', 'menu');
+            opener.setAttribute('aria-expanded', menuOpen ? 'true' : 'false');
+            return;
+        }
+        if (pillAction === 'unlock') return;
+        if (opener === vMain && (vMain.classList.contains('end') || vMain.classList.contains('answer'))) return;
+        var opens = (mode !== 'outside' || phoneElsewhere()) && (!!panel || isActive());
+        if (opens) opener.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    }
+
+    // The small pill menu (phase moved): opens with a 150 ms fade + scale
+    // 0.97 -> 1 from the pill (fade only under reduced motion), closes at once.
+    function setMenu(open) {
+        if (!open && !menuOpen && menuEl.hidden) return;
+        menuOpen = !!open;
+        if (open) {
+            menuEl.hidden = false;
+            void menuEl.offsetWidth; // commit the closed state so the transition runs
+            menuEl.classList.remove('closed');
+            useHereItem.focus();
+        } else {
+            menuEl.classList.add('closed');
+            menuEl.hidden = true;
+        }
+        syncExpandedAria();
     }
 
     // The pill's long axis follows its content: width when horizontal,
@@ -695,7 +1040,7 @@
         whoSub.hidden = !sub;
         cardTime.hidden = !snap.startedAt;
         pillLabel.textContent = PHASE_VIEW[phase].label;
-        muteBtn.disabled = phase !== 'connected';
+        muteBtn.disabled = !TALKING[phase];
         muteBtn.setAttribute('aria-pressed', snap.muted ? 'true' : 'false');
         muteBtn.setAttribute('aria-label', snap.muted ? 'Unmute' : 'Mute');
         muteBtn.querySelector('svg').innerHTML = snap.muted ? ICON_MIC_OFF : ICON_MIC;
@@ -712,13 +1057,20 @@
     }
 
     function setExpanded(next, animate) {
+        var opening = next && !expanded;
         expanded = next;
         vchipEl.hidden = next;
-        if (next) pillFit.size = 0; // reappears at its own size, no ease
+        if (next) {
+            pillFit.size = 0; // reappears at its own size, no ease
+            setMenu(false);
+        }
+        syncExpandedAria();
         if (panel) {
             cardEl.hidden = true;
             setPanelOpen(next, animate);
             place(false);
+            // Opening the phone shows the missed calls: reset the count.
+            if (opening && missedCount() > 0) send('markMissedSeen');
             return;
         }
         var wasOpen = !cardEl.hidden;
@@ -858,6 +1210,8 @@
         pos.y = xy.y;
         var col = corner.charAt(1);
         var row = corner.charAt(0);
+        dockEl.setAttribute('data-row', row);
+        dockEl.setAttribute('data-col', col);
         cardEl.style.transformOrigin = (col === 'r' ? 'right ' : col === 'l' ? 'left ' : 'center ') + (row === 'b' ? 'bottom' : row === 't' ? 'top' : 'center');
         if (glide) {
             dockEl.style.transition = 'transform ' + SETTLE;
@@ -1008,6 +1362,7 @@
         try { d.el.releasePointerCapture(e.pointerId); } catch (err) { /* already released */ }
         if (!d.moved) return;
         suppressClick = true;
+        pressAction = null;
         dockEl.classList.remove('lifted');
 
         var fl = flick(d.samples, e);
@@ -1156,16 +1511,48 @@
         }
         // Outside mode, idle, phone in another tab: nothing to open here.
     }
-    vBody.addEventListener('click', openFromPill);
+    // The pill's own action as it was when the press began (see pressAction).
+    function takePillAction() {
+        var a = pressAction !== null ? pressAction : pillAction;
+        pressAction = null;
+        return a;
+    }
+    function runPillAction(a) {
+        if (a === 'unlock') { unlock(); return true; }
+        if (a === 'menu') { setMenu(!menuOpen); return true; }
+        return false;
+    }
+    function onPillClick() {
+        if (!runPillAction(takePillAction())) openFromPill();
+    }
+    vchipEl.addEventListener('pointerdown', function () { pressAction = pillAction; }, true);
+    vchipEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') pressAction = pillAction;
+    }, true);
+    vBody.addEventListener('click', onPillClick);
     // The pill's padding and gaps act like its body.
     vchipEl.addEventListener('click', function (e) {
-        if (!(e.target.closest && e.target.closest('button'))) openFromPill();
+        if (!(e.target.closest && e.target.closest('button'))) onPillClick();
     });
     vMain.addEventListener('click', function () {
+        var a = takePillAction();
         if (vMain.classList.contains('end')) send('hangup');
         else if (vMain.classList.contains('answer')) send('answer');
-        else openFromPill();
+        else if (!runPillAction(a)) openFromPill();
     });
+    useHereItem.addEventListener('click', function () {
+        setMenu(false);
+        useHere();
+    });
+    menuEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') { e.stopPropagation(); setMenu(false); focusPill(); }
+    });
+    // A press anywhere else closes the menu.
+    document.addEventListener('pointerdown', function (e) {
+        if (!menuOpen) return;
+        var path = typeof e.composedPath === 'function' ? e.composedPath() : [];
+        if (path.indexOf(menuEl) === -1 && path.indexOf(vchipEl) === -1) setMenu(false);
+    }, true);
     vDecline.addEventListener('click', function () { send('decline'); });
     vMute.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
     cardTop.addEventListener('click', function () {
@@ -1185,7 +1572,9 @@
         if (!m || m.v !== 1 || m.type !== 'snapshot' || !m.snap) return;
         window.clearTimeout(helloTimer);
         gotSnapshot = true;
+        var prev = snap;
         snap = m.snap;
+        announce(prev, snap);
         render();
     };
 
@@ -1229,7 +1618,7 @@
     // Dashboard (portlet loader): move into phone mode by itself, once, when
     // no tab holds the phone and the rep did not leave phone mode in this tab.
     function maybeAutoEnter() {
-        if (!cfg.autoEnter || !cfg.shellUrl || lockHeld !== false || exitFlagSet()) return;
+        if (!cfg.autoEnter || !cfg.shellUrl || lockHeld !== false || exitFlagSet() || notEnabledFlag()) return;
         window.top.location.replace(shellHref());
     }
 
@@ -1262,7 +1651,7 @@
          * @param {{entityId?: string, entityName?: string, entityType?: string, phone?: string}|null} [ctx]
          */
         call: function (ctx) {
-            if (mode === 'outside') { goShell(); return; }
+            if (mode === 'outside' && !remote()) { goShell(); return; }
             if (!panel) {
                 if (isActive()) { setExpanded(true, true); cardTop.focus(); }
                 return;
@@ -1284,9 +1673,18 @@
             if (expanded) placePanel();
         },
 
-        // Extension surface for ctc_dock_dialer.js. Not a public API.
-        host: mode !== 'shell' ? null : {
+        // Extension surface for ctc_dock_dialer.js (shell and outside modes).
+        // Not a public API.
+        host: {
             cfg: cfg,
+            mode: mode,
+            // Outside mode with the phone in another tab: the panel is a
+            // remote control (no audio here; "Use phone here" replaces Exit).
+            isRemote: function () { return remote(); },
+            useHere: useHere,
+            unlockAudio: unlock,
+            reloadPhone: reloadPhone,
+            signIn: signIn,
             css: function (text) {
                 var st = document.createElement('style');
                 st.textContent = text;
@@ -1294,9 +1692,9 @@
             },
             getSnap: function () { return snap; },
             send: function (action, extra) {
-                var m = { v: 1, type: 'request', action: action };
-                if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) m[k] = extra[k];
+                var m = requestMessage(action, extra);
                 bus.postMessage(m);
+                return m.nonce;
             },
             collapse: function () { setExpanded(false, true); focusPill(); },
             registerPanel: function (p) {

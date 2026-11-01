@@ -1,0 +1,10 @@
+<crmcustomfield scriptid="custevent_ctc_voicemail">
+    <label>Voicemail</label>
+    <description>Checked when the Phone Call is a voicemail an inbound caller left after no one answered. Set by call reconciliation; the transcript poller transcribes the voicemail like a call.</description>
+    <fieldtype>CHECKBOX</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <defaultchecked>F</defaultchecked>
+    <searchlevel>2</searchlevel>
+</crmcustomfield>

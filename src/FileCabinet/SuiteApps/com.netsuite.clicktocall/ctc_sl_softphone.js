@@ -88,8 +88,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         const html = buildHtml({
             phone, entityId, entityName, entityType, tokenEndpoint, sdkUrl,
             contactsV2, entityInfo, entityRecordUrl,
-            entryPoint, initialTab
+            entryPoint, initialTab,
+            // debug=1 (passed on by the shell from its own URL): Twilio SDK
+            // debug logging. Default: warnings only.
+            debug: params.debug === '1'
         });
+        ctcHtml.setNoStoreHeaders(context.response);
         context.response.write(html);
     };
 
@@ -178,6 +182,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // Phase 2: initialTab is 'dial' or 'search'. Defaults to 'dial' if not provided
         // so legacy callers (and existing tests) keep their current behavior.
         const jsInitialTab = escapeJs(opts.initialTab || 'dial');
+        const jsDebug = opts.debug === true ? 'true' : 'false';
 
         const info = opts.entityInfo || {};
 
@@ -364,6 +369,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
         .status-pill.connecting { color: #F4C76A; }
         .status-pill.ringing { color: #F4C76A; }
+        .status-pill.reconnecting { color: #F4C76A; }
         .status-pill.incoming { color: #14B981; }
         .status-pill.connected { color: #14B981; }
         .status-pill.ended { color: var(--phone-text-faint); }
@@ -1652,6 +1658,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var SELECTED_PHONE_TYPE = '';
         // Iteration B Phase 2: server-decided default tab — 'dial' or 'search'.
         var INITIAL_TAB = '${jsInitialTab}';
+        // Twilio SDK log level: 1 (debug) with debug=1, else 3 (warn).
+        var DEBUG = ${jsDebug};
 
 
         var statusEl = document.getElementById('status');
@@ -1784,16 +1792,18 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         // --- Telephony Dock bus host ---
-        // This popup is the anchor: the only window with audio and call
-        // state. Dock tabs (lib/ctc_dock_client.js) mirror it over a
+        // This page is the anchor: the only window with audio and call
+        // state. Docks (lib/ctc_dock_client.js) in every tab mirror it over a
         // BroadcastChannel. They send 'hello' (asks for a snapshot) and
-        // 'request' (mute / unmute / hangup / answer / decline); only this
-        // window changes call state. Message shapes: see BUS_CHANNEL in
-        // lib/ctc_dock.js.
+        // 'request' (dial / mute / hangup / answer / decline / ...); only
+        // this window changes call state. Message shapes: see the BUS
+        // CONTRACT in lib/ctc_dock.js.
         var DOCK_PHASE_BY_PILL = {
             '': 'ready', connecting: 'dialing', ringing: 'ringing',
             incoming: '${escapeJs(ctcDock.PHASE_INCOMING)}',
-            connected: 'connected', ended: 'ready', error: 'error'
+            connected: 'connected',
+            reconnecting: '${escapeJs(ctcDock.PHASE_RECONNECTING)}',
+            ended: 'ready', error: 'error'
         };
         var dockPhase = 'starting';
         var dockContactName = '';
@@ -1806,7 +1816,21 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var callDirection = 'outbound';
         var dockCaller = null;
         var screenPopDone = false;
+        // The phone was handed to another tab (bus 'takeover'): the device
+        // is unregistered and stays so until the shell stops this frame.
+        var movedAway = false;
+        // Snapshot fields the shell owns (postMessage SHELL_STATE_MESSAGE).
+        var shellAudioUnlocked = false;
+        var shellNotify = 'unsupported';
+        var NOTIFY_STATES = { 'default': 1, granted: 1, denied: 1, unsupported: 1 };
+        // The last refused request: { action, reason, nonce, at } or null.
+        var dockRefused = null;
         var dockBus = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('${escapeJs(ctcDock.BUS_CHANNEL)}') : null;
+
+        function currentCallSid() {
+            var c = pendingInbound || activeCall;
+            return String((c && c.parameters && c.parameters.CallSid) || '');
+        }
 
         function publishDock() {
             if (!dockBus) return;
@@ -1817,6 +1841,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     phase: dockPhase,
                     direction: callDirection,
                     caller: dockCaller,
+                    callSid: currentCallSid(),
                     entityId: ENTITY_ID,
                     entityType: ENTITY_TYPE,
                     entityName: ENTITY_NAME,
@@ -1828,9 +1853,156 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     audio: dockAudio(),
                     // true / false: inbound is granted and the device is /
                     // is not registered (Twilio can ring it). null: no inbound.
-                    canReceive: incomingGranted ? !!(device && device.state === 'registered') : null
+                    // false while token fetches fail (session gone): the
+                    // dock shows the amber 'reconnecting' hint.
+                    canReceive: tokenFailing ? false
+                        : (incomingGranted ? !!(device && device.state === 'registered') : null),
+                    callWarning: callWarning,
+                    audioUnlocked: shellAudioUnlocked,
+                    notify: shellNotify,
+                    missedUnseen: missedUnseen,
+                    error: phoneError || { kind: '', code: 0, message: '' },
+                    refused: dockRefused
                 }
             });
+        }
+
+        // --- Phone errors (snapshot 'error') ---
+        // One current error: { kind, code, message }. kind from the Twilio
+        // code (errorKindForCode) or the source (token fetch = session,
+        // mic permission = mic). Cleared by kind when that source recovers.
+        var phoneError = null;
+
+        function errorKindForCode(code) {
+            var n = Number(code) || 0;
+            if (n === 20101 || n === 20104 || (n >= 31204 && n <= 31206)) return 'session';
+            if (n === 31208 || n === 31401) return 'mic';
+            if (n >= 31000 && n <= 31999) return 'network';
+            return 'twilio';
+        }
+
+        // code: the Twilio code / HTTP status (number), or a string code
+        // (not_enabled: 'not_a_phone_user').
+        function setPhoneError(kind, code, message) {
+            phoneError = {
+                kind: String(kind || 'twilio'),
+                code: typeof code === 'string' && !/^[0-9]+$/.test(code) ? code : (Number(code) || 0),
+                message: String(message || '').slice(0, 200)
+            };
+            publishDock();
+        }
+
+        // kinds: array of kinds this recovery clears; omitted = any kind.
+        function clearPhoneError(kinds) {
+            if (!phoneError) return;
+            if (kinds && kinds.indexOf(phoneError.kind) === -1) return;
+            phoneError = null;
+            publishDock();
+        }
+
+        // --- Call quality (snapshot 'callWarning') ---
+        // Twilio Call 'warning' / 'warning-cleared' names, mapped to the
+        // short list docks know. Unknown names are ignored.
+        var CALL_WARNING_MAP = {
+            'high-rtt': 'high-rtt',
+            'high-jitter': 'high-jitter',
+            'high-packet-loss': 'packet-loss',
+            'high-packets-lost-fraction': 'packet-loss',
+            'low-mos': 'low-mos',
+            'constant-audio-input-level': 'low-mic',
+            'low-bytes-received': 'no-audio',
+            'low-bytes-sent': 'no-audio',
+            'ice-connectivity-lost': 'no-audio'
+        };
+        // Most severe first.
+        var CALL_WARNING_ORDER = ['no-audio', 'low-mic', 'packet-loss', 'high-rtt', 'high-jitter', 'low-mos'];
+        var callWarnings = {};
+        var callWarning = '';
+
+        // The most severe active warning ('' when none). active: map of
+        // Twilio warning name to true.
+        function pickCallWarning(active) {
+            var mapped = {};
+            for (var name in active) {
+                if (Object.prototype.hasOwnProperty.call(active, name) && active[name]
+                        && CALL_WARNING_MAP.hasOwnProperty(name)) {
+                    mapped[CALL_WARNING_MAP[name]] = true;
+                }
+            }
+            for (var i = 0; i < CALL_WARNING_ORDER.length; i++) {
+                if (mapped[CALL_WARNING_ORDER[i]]) return CALL_WARNING_ORDER[i];
+            }
+            return '';
+        }
+
+        function noteCallWarning(name, on) {
+            name = String(name || '');
+            if (on) callWarnings[name] = true;
+            else delete callWarnings[name];
+            var next = pickCallWarning(callWarnings);
+            if (next === callWarning) return;
+            callWarning = next;
+            publishDock();
+        }
+
+        function resetCallWarnings() {
+            callWarnings = {};
+            if (!callWarning) return;
+            callWarning = '';
+            publishDock();
+        }
+
+        // --- Missed calls (snapshot 'missedUnseen') ---
+        // Inbound calls that stopped ringing unanswered since the last
+        // 'markMissedSeen'. Kept in sessionStorage: this frame shares the
+        // shell tab's storage, so a phone-frame restart keeps the count.
+        var MISSED_KEY = '${escapeJs(ctcDock.MISSED_STORAGE_KEY)}';
+
+        function emptyMissed() {
+            return { count: 0, last: null, at: null };
+        }
+
+        function loadMissed() {
+            try {
+                var v = JSON.parse(window.sessionStorage.getItem(MISSED_KEY) || 'null');
+                if (v && typeof v.count === 'number' && v.count > 0) {
+                    var last = v.last && typeof v.last === 'object' ? {
+                        name: String(v.last.name || ''),
+                        number: String(v.last.number || ''),
+                        entityId: String(v.last.entityId || ''),
+                        entityType: String(v.last.entityType || '')
+                    } : null;
+                    return { count: Math.floor(v.count), last: last, at: typeof v.at === 'number' ? v.at : null };
+                }
+            } catch (e) { /* storage blocked or bad JSON */ }
+            return emptyMissed();
+        }
+
+        function saveMissed() {
+            try { window.sessionStorage.setItem(MISSED_KEY, JSON.stringify(missedUnseen)); } catch (e) { /* storage blocked */ }
+        }
+
+        var missedUnseen = loadMissed();
+
+        function addMissedCall(caller) {
+            caller = caller || {};
+            missedUnseen = {
+                count: missedUnseen.count + 1,
+                last: {
+                    name: String(caller.name || ''),
+                    number: String(caller.number || ''),
+                    entityId: String(caller.entityId || ''),
+                    entityType: String(caller.entityType || '')
+                },
+                at: Date.now()
+            };
+            saveMissed();
+        }
+
+        function markMissedSeen() {
+            missedUnseen = emptyMissed();
+            saveMissed();
+            publishDock();
         }
 
         // Audio devices for the dock: the same lists and selection the
@@ -1892,12 +2064,71 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             publishDock();
         }
 
+        // --- Bus request gate ---
+        // BroadcastChannel cannot tell which same-origin page sent a
+        // message. These checks stop accidents and replays, not an attacker
+        // on the account origin (server-side allow-listing is the backstop):
+        //   - every request needs origin 'dock' and a fresh nonce;
+        //   - dial: only a dialable E.164 / NANP number, one per 3 s, 20 per
+        //     rolling hour on this page, never while a call is live.
+        var REQUEST_ORIGIN = '${escapeJs(ctcDock.REQUEST_ORIGIN)}';
+        var NONCE_RE = new RegExp('${escapeJs(ctcDock.REQUEST_NONCE_PATTERN)}');
+        var NONCE_MEMORY = 64;
+        var DIAL_MIN_GAP_MS = 3000;
+        var DIAL_MAX_PER_HOUR = 20;
+        var DIAL_WINDOW_MS = 60 * 60 * 1000;
+        var seenNonces = [];
+        var dialTimes = [];
+
+        // '' when the request may run, else why it is dropped.
+        function requestRefusal(m) {
+            if (!m || m.origin !== REQUEST_ORIGIN) return 'origin';
+            if (typeof m.nonce !== 'string' || !NONCE_RE.test(m.nonce)) return 'nonce';
+            if (seenNonces.indexOf(m.nonce) !== -1) return 'replay';
+            seenNonces.push(m.nonce);
+            if (seenNonces.length > NONCE_MEMORY) seenNonces.shift();
+            return '';
+        }
+
+        // A dialable number after dialableFormat: +1 NXX NXX XXXX (NANP)
+        // or + and 7-15 digits for other country codes.
+        function validDialTarget(to) {
+            var s = String(to || '');
+            if (/^[+]1/.test(s)) return /^[+]1[2-9][0-9]{2}[2-9][0-9]{6}$/.test(s);
+            return /^[+][2-9][0-9]{6,14}$/.test(s);
+        }
+
+        // '' when a dial may go out now (and counts it), else 'rate' or
+        // 'hourly-limit'.
+        function dialRateCheck(now) {
+            dialTimes = dialTimes.filter(function (t) { return now - t < DIAL_WINDOW_MS; });
+            if (dialTimes.length && now - dialTimes[dialTimes.length - 1] < DIAL_MIN_GAP_MS) return 'rate';
+            if (dialTimes.length >= DIAL_MAX_PER_HOUR) return 'hourly-limit';
+            dialTimes.push(now);
+            return '';
+        }
+
+        function refuseRequest(m, reason) {
+            console.warn('[CTC] Bus request refused: ' + (m && m.action) + ' (' + reason + ')');
+            dockRefused = {
+                action: String((m && m.action) || ''),
+                reason: reason,
+                nonce: String((m && m.nonce) || ''),
+                at: Date.now()
+            };
+            publishDock();
+        }
+
         // A dock asks to place a call. The dock already chose the entity,
         // contact, and number, so load them as a picker selection would and
-        // dial. Refused while a call is live or before the device is ready;
-        // the snapshot sent back tells the dock why.
+        // dial. Refused while a call is live or before the device is ready,
+        // for a number that is not dialable, and over the rate limits; the
+        // snapshot sent back (refused) tells the dock why.
         function dockDial(m) {
-            if (activeCall || !device || dockPhase !== 'ready') { publishDock(); return; }
+            if (activeCall || pendingInbound || !device || dockPhase !== 'ready') { refuseRequest(m, 'busy'); return; }
+            if (!validDialTarget(dialableFormat(String(m.to || '')))) { refuseRequest(m, 'invalid-number'); return; }
+            var limit = dialRateCheck(Date.now());
+            if (limit) { refuseRequest(m, limit); return; }
             ENTITY_ID = String(m.entityId || '');
             ENTITY_NAME = String(m.entityName || '');
             ENTITY_TYPE = String(m.entityType || '');
@@ -1909,38 +2140,123 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             makeCall();
         }
 
+        // "Use phone here" from a waiting shell tab. Refused while a call is
+        // live or ringing. Else: stop the registration watchdog, unregister
+        // (Twilio stops ringing this tab), publish 'moved' and tell the
+        // shell, which stops this frame once the other tab took the lock.
+        var LIVE_PHASES = { dialing: 1, ringing: 1, incoming: 1, connected: 1, reconnecting: 1 };
+        var TAKEOVER_UNREGISTER_WAIT_MS = 1500;
+
+        function dockTakeover(m) {
+            if (activeCall || pendingInbound || LIVE_PHASES[dockPhase]) { refuseRequest(m, 'call-live'); return; }
+            if (movedAway) { publishDock(); return; }
+            movedAway = true;
+            clearRegisterRetry();
+            var done = false;
+            function finish() {
+                if (done) return;
+                done = true;
+                dockPhase = '${escapeJs(ctcDock.PHASE_MOVED)}';
+                regLog('Phone moved to another tab');
+                publishDock();
+                sendHeartbeat('moved');
+                if (window.parent !== window) {
+                    try {
+                        window.parent.postMessage({ v: 1, type: '${escapeJs(ctcDock.PHONE_MOVED_MESSAGE)}' }, window.location.origin);
+                    } catch (err) { console.error('[CTC] moved message failed', err); }
+                }
+            }
+            var d = device;
+            if (d && d.state === 'registered') {
+                setTimeout(finish, TAKEOVER_UNREGISTER_WAIT_MS);
+                try {
+                    Promise.resolve(d.unregister()).then(finish, finish);
+                } catch (err) { finish(); }
+            } else {
+                finish();
+            }
+        }
+
         if (dockBus) {
             dockBus.onmessage = function (e) {
                 var m = e.data;
                 if (!m || m.v !== 1) return;
                 if (m.type === 'hello') {
                     publishDock();
-                } else if (m.type === 'request') {
-                    if (m.action === 'dial') {
-                        dockDial(m);
-                    } else if (m.action === 'digits') {
-                        if (activeCall && /^[0-9*#]$/.test(String(m.d))) appendDialDigit(String(m.d));
-                    } else if (m.action === 'hangup') {
-                        hangUp();
-                    } else if (m.action === '${escapeJs(ctcDock.REQUEST_ANSWER)}') {
-                        answerInbound();
-                    } else if (m.action === '${escapeJs(ctcDock.REQUEST_DECLINE)}') {
-                        declineInbound();
-                    } else if (m.action === 'setInput') {
-                        dockSetInput(m.id);
-                    } else if (m.action === 'setOutput') {
-                        dockSetOutput(m.id);
-                    } else if ((m.action === 'mute' || m.action === 'unmute')
-                            && activeCall && activeCall.isMuted() !== (m.action === 'mute')) {
-                        toggleMute();
-                    }
+                    return;
                 }
+                if (m.type !== 'request') return;
+                var why = requestRefusal(m);
+                if (why) {
+                    console.warn('[CTC] Bus request dropped: ' + m.action + ' (' + why + ')');
+                    return;
+                }
+                if (m.action === 'dial') {
+                    dockDial(m);
+                } else if (m.action === 'digits') {
+                    if (activeCall && /^[0-9*#]$/.test(String(m.d))) appendDialDigit(String(m.d));
+                } else if (m.action === 'hangup') {
+                    hangUp();
+                } else if (m.action === '${escapeJs(ctcDock.REQUEST_ANSWER)}') {
+                    answerInbound();
+                } else if (m.action === '${escapeJs(ctcDock.REQUEST_DECLINE)}') {
+                    declineInbound();
+                } else if (m.action === 'setInput') {
+                    dockSetInput(m.id);
+                } else if (m.action === 'setOutput') {
+                    dockSetOutput(m.id);
+                } else if (m.action === '${escapeJs(ctcDock.REQUEST_MARK_MISSED_SEEN)}') {
+                    markMissedSeen();
+                } else if (m.action === '${escapeJs(ctcDock.REQUEST_TAKEOVER)}') {
+                    dockTakeover(m);
+                } else if ((m.action === 'mute' || m.action === 'unmute')
+                        && activeCall && activeCall.isMuted() !== (m.action === 'mute')) {
+                    toggleMute();
+                }
+                // 'unlockAudio' is for the shell (a top-level gesture); the
+                // shell forwards it here as UNLOCK_AUDIO_MESSAGE.
             };
             window.addEventListener('pagehide', function () {
                 dockPhase = 'offline';
                 publishDock();
             });
         }
+
+        // --- Shell messages (postMessage, not the bus) ---
+        // Only from the shell (window.parent), same origin.
+        // SHELL_STATE_MESSAGE: { audioUnlocked, notify } for the snapshot.
+        // UNLOCK_AUDIO_MESSAGE: a gesture in the shell; resume the audio
+        // context Twilio plays the ringtone through (autoplay may have
+        // suspended it) and play one silent sample to prime it.
+        function unlockAudioHere() {
+            try {
+                var ac = (window.Twilio && Twilio.Device && Twilio.Device.audioContext) || null;
+                if (!ac) return;
+                if (ac.state === 'suspended' && typeof ac.resume === 'function') {
+                    var p = ac.resume();
+                    if (p && typeof p.catch === 'function') p.catch(function () { /* still blocked */ });
+                }
+                var src = ac.createBufferSource();
+                src.buffer = ac.createBuffer(1, 1, 22050);
+                src.connect(ac.destination);
+                src.start(0);
+            } catch (err) {
+                console.log('[CTC] Audio unlock failed: ' + (err && err.message));
+            }
+        }
+
+        window.addEventListener('message', function (ev) {
+            var m = ev && ev.data;
+            if (!m || m.v !== 1 || window.parent === window) return;
+            if (ev.origin !== window.location.origin || ev.source !== window.parent) return;
+            if (m.type === '${escapeJs(ctcDock.SHELL_STATE_MESSAGE)}') {
+                shellAudioUnlocked = m.audioUnlocked === true;
+                shellNotify = NOTIFY_STATES.hasOwnProperty(m.notify) ? String(m.notify) : 'unsupported';
+                publishDock();
+            } else if (m.type === '${escapeJs(ctcDock.UNLOCK_AUDIO_MESSAGE)}') {
+                unlockAudioHere();
+            }
+        });
 
         // --- UI helpers ---
         // setStatus(text, pillClass)
@@ -1949,7 +2265,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function setStatus(text, pillClass) {
             statusEl.textContent = text;
             statusEl.className = 'status-pill' + (pillClass ? ' ' + pillClass : '');
-            if (pillClass !== undefined && DOCK_PHASE_BY_PILL.hasOwnProperty(pillClass)) {
+            // After a takeover the phase stays 'moved' until this frame stops.
+            if (pillClass !== undefined && !movedAway && DOCK_PHASE_BY_PILL.hasOwnProperty(pillClass)) {
                 dockPhase = DOCK_PHASE_BY_PILL[pillClass];
                 publishDock();
             }
@@ -2204,6 +2521,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // --- Token fetch ---
         // quiet: a background token refresh must not touch the status text
         // (it would overwrite an active call's status).
+        // When the NetSuite session is gone the RESTlet answers with a non-OK
+        // status, an HTML login page (often after a redirect) or a JSON
+        // error. Each one rejects with a short reason ('HTTP 401',
+        // 'not JSON (redirected)', 'error: ...') for the heartbeat lastError.
         function fetchToken(quiet) {
             if (!quiet) setStatus('Fetching token\\u2026');
             return fetch(TOKEN_URL, {
@@ -2213,10 +2534,18 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             })
             .then(function (res) {
                 if (!res.ok) throw new Error('HTTP ' + res.status);
-                return res.json();
+                return res.text().then(function (text) {
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        throw new Error('not JSON' + (res.redirected ? ' (redirected)' : ''));
+                    }
+                });
             })
             .then(function (data) {
-                if (data.error) throw new Error(data.error);
+                if (!data || typeof data !== 'object') throw new Error('empty response');
+                if (data.error) throw new Error('error: ' + data.error);
+                if (!data.token) throw new Error('no token');
                 return { token: data.token, phoneNumber: data.phoneNumber };
             });
         }
@@ -2224,10 +2553,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var callerId = '';
 
         // --- Call logging ---
-        function logCallToNetSuite(callSid, duration) {
+        // startedAt: epoch ms the call connected (callStartTime), or null.
+        // The RESTlet prefers Twilio's start_time and checks this one.
+        function logCallToNetSuite(callSid, duration, startedAt) {
             logCallPayload = JSON.stringify({
                 action: 'logCall',
                 callSid: callSid,
+                startedAt: startedAt || null,
                 entityId: ENTITY_ID,
                 entityType: ENTITY_TYPE,
                 contactId: SELECTED_CONTACT_ID,
@@ -2282,9 +2614,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             });
         }
 
-        // sendBeacon fallback: if the rep closes the popup before fetch resolves,
-        // queue the logCall payload via the browser's beacon API so it survives unload.
-        window.addEventListener('beforeunload', function () {
+        // sendBeacon fallback: if the page goes away (shell closed, phone
+        // frame restarted) before the fetch resolves, queue the logCall
+        // payload via the beacon API so it survives unload. pagehide: it
+        // also fires for bfcache and mobile, and never blocks the unload.
+        window.addEventListener('pagehide', function () {
             if (logCallPending && logCallPayload && navigator.sendBeacon) {
                 var blob = new Blob([logCallPayload], { type: 'application/json' });
                 navigator.sendBeacon(TOKEN_URL, blob);
@@ -2451,13 +2785,27 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // flips ready/error in a loop. The SDK emits tokenWillExpire
         // tokenRefreshMs before expiry; we fetch a new token and updateToken().
         var TOKEN_REFRESH_MS = 60000;
-        var TOKEN_RETRY_DELAYS_MS = [5000, 15000, 30000];
+        // Token retry backoff: 5 s, 15 s, 30 s, then every 60 s. The phone
+        // never gives up while the page is open (see Token recovery).
+        var TOKEN_RETRY_DELAYS_MS = [5000, 15000, 30000, 60000];
         // Twilio codes for an expired / invalid-expiry JWT.
         var TOKEN_EXPIRY_CODES = [20104, 31204, 31205, 31206];
+        // True from the first token fetch until the refresh (with its
+        // retries) settles. Blocks register() meanwhile.
         var tokenRefreshInFlight = false;
-        // Set by an expiry error, so a refresh already in flight from
-        // tokenWillExpire still reports the Error pill if it finally fails.
-        var tokenExpired = false;
+        // The token the device runs on (expiry check on page resume).
+        var currentToken = '';
+        // True from a failed token fetch until a token arrives again.
+        var tokenFailing = false;
+        // The RESTlet answered not_a_phone_user: permanent (phoneNotEnabled).
+        var NOT_A_PHONE_USER = '${escapeJs(ctcDock.ERROR_NOT_A_PHONE_USER)}';
+        var phoneDisabled = false;
+        // A token arrived after failures during a live / ringing call: the
+        // device is rebuilt right after the call ends (afterCallSettled).
+        var sessionRebuildPending = false;
+        var tokenRetryTimer = null;
+        var tokenRetryAttempt = 0;
+        var tokenRecoveryWatchStarted = false;
         // The mic permission nudge + device list fill runs on the FIRST
         // registration only; re-registers after a token update skip it.
         var audioPrimed = false;
@@ -2513,7 +2861,23 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // one row per rep and skips a write when nothing changed in 60 s.
         // A heartbeat failure never touches calling: errors are logged only.
         var HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+        // At most one heartbeat per HEARTBEAT_MIN_GAP_MS: a burst (page
+        // load: registering, registered, token refresh) becomes one send
+        // now and one queued send that reads the latest state.
+        var HEARTBEAT_MIN_GAP_MS = 2000;
         var heartbeatStarted = false;
+        var heartbeatLastSentAt = 0;
+        var heartbeatTimer = null;
+        // The last phone error, e.g. 'token: HTTP 401 at 01:02Z'. Queued:
+        // sent with every heartbeat until one succeeds (with the session
+        // gone the heartbeat itself fails).
+        var heartbeatLastError = '';
+
+        // Remember an error for the next heartbeat. kind: 'token' | 'register'.
+        function notePhoneError(kind, detail) {
+            var at = new Date().toISOString().slice(11, 16) + 'Z';
+            heartbeatLastError = (kind + ': ' + String(detail || 'unknown') + ' at ' + at).slice(0, 200);
+        }
 
         // Short browser label, e.g. 'Chrome 130 on macOS' (80 chars max).
         function heartbeatClient() {
@@ -2546,17 +2910,40 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             return 'offline';
         }
 
+        // identity: the token's Twilio identity, for comparison only. The
+        // server stores whether it matches the session user and never uses
+        // it as the employee.
         function heartbeatBody(state) {
-            return JSON.stringify({
+            var body = {
                 action: 'phoneHeartbeat',
                 state: state,
                 canReceive: state === 'registered' && !!incomingGranted,
                 incomingGranted: !!incomingGranted,
-                client: heartbeatClient()
-            });
+                client: heartbeatClient(),
+                identity: deviceIdentity || ''
+            };
+            if (heartbeatLastError) body.lastError = heartbeatLastError;
+            return JSON.stringify(body);
         }
 
+        // Coalesced: sends now, or queues one send for the end of the gap.
+        // A queued send builds its body when it runs (the latest state wins).
         function sendHeartbeat(reason) {
+            if (heartbeatTimer) return;
+            var wait = heartbeatLastSentAt + HEARTBEAT_MIN_GAP_MS - Date.now();
+            if (wait > 0) {
+                heartbeatTimer = setTimeout(function () {
+                    heartbeatTimer = null;
+                    postHeartbeat(reason);
+                }, wait);
+                return;
+            }
+            postHeartbeat(reason);
+        }
+
+        function postHeartbeat(reason) {
+            heartbeatLastSentAt = Date.now();
+            var sentError = heartbeatLastError;
             try {
                 fetch(TOKEN_URL, {
                     method: 'POST',
@@ -2565,6 +2952,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 })
                 .then(function (res) {
                     if (!res.ok) throw new Error('HTTP ' + res.status);
+                    // A login page instead of JSON: the session is gone.
+                    return res.json().catch(function () { throw new Error('not JSON'); });
+                })
+                .then(function (data) {
+                    if (!data || data.error) throw new Error((data && data.error) || 'empty response');
+                    // Delivered: drop the queued error unless a newer one came.
+                    if (sentError && heartbeatLastError === sentError) heartbeatLastError = '';
                 })
                 .catch(function (err) {
                     console.log('[CTC] Heartbeat failed (' + reason + '): ' + (err && err.message));
@@ -2606,21 +3000,28 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         //   - on visibilitychange (visible), online and focus: try now;
         //   - every REGISTER_WATCH_MS: try when no retry timer is pending.
         // Never while a call is live or ringing, or a token refresh is in
-        // flight. One register() at a time. A token-expiry failure goes
-        // through refreshDeviceToken(true).
+        // flight. One register() at a time, raced against a 20 s timeout
+        // (REGISTER_TIMEOUT_MS): a timeout frees the slot and schedules a
+        // retry; if the device is still stuck in 'registering' at that retry
+        // it is rebuilt with a fresh token. A token-expiry failure goes
+        // through refreshDeviceToken(true). Only while the token grants
+        // incoming: an outbound-only phone never registers.
         var REGISTER_RETRY_DELAYS_MS = [2000, 5000, 15000, 30000, 60000];
         var REGISTER_WATCH_MS = 60000;
+        var REGISTER_TIMEOUT_MS = 20000;
         var registerInFlight = false;
         var registerRetryTimer = null;
         var registerAttempt = 0;
         var registrationWatchStarted = false;
+        // A register() timed out while the SDK still says 'registering'.
+        var registerStuck = false;
 
         function regLog(msg) {
             console.log('[CTC] ' + msg + ' @ ' + new Date().toISOString());
         }
 
         function registrationWatched() {
-            return !!device && incomingGranted;
+            return !!device && incomingGranted && !movedAway && !phoneDisabled;
         }
 
         function clearRegisterRetry() {
@@ -2643,20 +3044,46 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function ensureRegistered(reason) {
             if (!registrationWatched()) return;
-            if (device.state !== 'unregistered' || registerInFlight) return;
+            if (registerInFlight || device.state === 'registered') return;
             if (activeCall || pendingInbound || tokenRefreshInFlight) return;
+            if (device.state !== 'unregistered') {
+                // Still 'registering' after our register() timed out: the
+                // SDK refuses a second register() now. Start over with a
+                // fresh token and device (rebuild, as after a session loss).
+                if (registerStuck) {
+                    registerStuck = false;
+                    regLog('Registration stuck (' + reason + '); rebuilding the phone');
+                    sessionRebuildPending = true;
+                    refreshDeviceToken(false);
+                }
+                return;
+            }
             clearRegisterRetry();
             registerInFlight = true;
             var d = device;
+            var timedOut = false;
             regLog('Registering (' + reason + ')');
             var p;
             try { p = d.register(); } catch (err) { p = Promise.reject(err); }
+            var timer = setTimeout(function () {
+                if (d !== device || !registerInFlight) return;
+                timedOut = true;
+                registerInFlight = false;
+                registerStuck = d.state === 'registering';
+                regLog('Register timed out after ' + (REGISTER_TIMEOUT_MS / 1000) + ' s');
+                notePhoneError('register', 'timeout');
+                setPhoneError('network', 0, 'register timed out');
+                scheduleRegisterRetry('register timeout');
+            }, REGISTER_TIMEOUT_MS);
             Promise.resolve(p).then(function () {
-                if (d === device) registerInFlight = false;
+                clearTimeout(timer);
+                if (d === device && !timedOut) registerInFlight = false;
             }, function (err) {
-                if (d !== device) return;
+                clearTimeout(timer);
+                if (d !== device || timedOut) return;
                 registerInFlight = false;
                 regLog('Register failed: ' + (err && (err.code || err.message)));
+                notePhoneError('register', err && (err.code || err.message));
                 if (isTokenExpiryError(err)) {
                     refreshDeviceToken(true);
                     return;
@@ -2678,6 +3105,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             d.on('registered', function () {
                 if (d !== device) return;
                 registerInFlight = false;
+                registerStuck = false;
                 registerAttempt = 0;
                 clearRegisterRetry();
                 regLog('Registration state: registered');
@@ -2687,6 +3115,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             d.on('unregistered', function () {
                 if (d !== device) return;
                 registerInFlight = false;
+                registerStuck = false;
                 regLog('Registration state: unregistered');
                 publishDock();
                 sendHeartbeat('unregistered');
@@ -2725,7 +3154,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function afterCallSettled() {
             setTimeout(function () {
                 if (activeCall || pendingInbound) return;
-                if (identityRebuildPending) {
+                if (identityRebuildPending || sessionRebuildPending) {
                     refreshDeviceToken(false);
                     return;
                 }
@@ -2741,56 +3170,85 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             device = null;
             clearRegisterRetry();
             registerInFlight = false;
+            registerStuck = false;
             registerAttempt = 0;
             identityRebuildPending = false;
+            sessionRebuildPending = false;
             try { if (old) old.destroy(); } catch (err) { console.error('[CTC] destroy failed', err); }
             // The new device has its own audio helper: fill its lists again.
             audioPrimed = false;
             initDevice(token);
         }
 
+        // On: the caller (refreshDeviceToken) registers next through
+        // ensureRegistered. Off: unregister, so Twilio stops ringing it.
         function applyIncomingGrant(allow) {
             if (allow === incomingGranted) return;
             incomingGranted = allow;
-            if (!device || device.state === 'unregistered') return;
+            if (!device) return;
             console.log('[CTC] Incoming grant changed to ' + allow + '; updating registration');
-            var p = device.unregister();
-            if (!allow) return;
-            Promise.resolve(p)
-                .then(function () { return device.register(); })
-                .catch(function (err) {
-                    console.error('[CTC] Re-register failed:', err && err.message);
+            if (allow) return;
+            clearRegisterRetry();
+            if (device.state !== 'registered') return;
+            try {
+                Promise.resolve(device.unregister()).catch(function (err) {
+                    console.error('[CTC] Unregister failed:', err && err.message);
                 });
+            } catch (err) {
+                console.error('[CTC] Unregister failed:', err && err.message);
+            }
         }
 
         function isTokenExpiryError(err) {
             return !!err && TOKEN_EXPIRY_CODES.indexOf(Number(err.code)) !== -1;
         }
 
-        // expired: the token is already dead, so a final failure shows the
-        // Error pill. A pre-expiry refresh failure leaves the phase alone.
+        // --- Token recovery ---
+        // A token fetch fails when the NetSuite session is gone (logout,
+        // timeout). The phone never gives up while the page is open: it
+        // retries after TOKEN_RETRY_DELAYS_MS (5 s, 15 s, 30 s, then every
+        // 60 s) and at once on page visible, online and focus. While it
+        // fails, the snapshot says canReceive false (amber hint) and the
+        // heartbeat carries lastError. The first token after a failure
+        // rebuilds the device (fresh session and identity) when no call is
+        // live, else right after the call ends. A boot with no token at all
+        // starts the device when the token comes.
+        // expired: logged only (the token is already dead).
         function refreshDeviceToken(expired, attempt) {
+            if (phoneDisabled) return;
             attempt = attempt || 0;
-            if (!device) return;
-            if (expired) tokenExpired = true;
             if (attempt === 0) {
                 if (tokenRefreshInFlight) return;
                 tokenRefreshInFlight = true;
             }
+            tokenRetryAttempt = attempt;
             fetchToken(true)
                 .then(function (result) {
-                    if (!device) { tokenRefreshInFlight = false; return; }
+                    var recovered = tokenFailing;
+                    tokenFailing = false;
+                    tokenRetryAttempt = 0;
+                    clearPhoneError(['session']);
+                    if (!device) {
+                        // The page never had a token (boot failed).
+                        tokenRefreshInFlight = false;
+                        if (result.phoneNumber) callerId = result.phoneNumber;
+                        regLog('Token fetch recovered; starting the phone');
+                        clearError();
+                        initDevice(result.token);
+                        publishDock();
+                        return;
+                    }
                     // The NetSuite login changed user: the new token rings a
                     // different identity. Build the device again for it, now
                     // or right after the live / ringing call ends.
                     var newIdentity = tokenIdentity(result.token);
                     if (newIdentity && deviceIdentity && newIdentity !== deviceIdentity) {
                         tokenRefreshInFlight = false;
-                        tokenExpired = false;
                         if (activeCall || pendingInbound) {
                             identityRebuildPending = true;
                             regLog('Phone user changed (' + deviceIdentity + ' to ' + newIdentity
                                 + '); rebuild after this call');
+                            publishDock();
                             return;
                         }
                         if (result.phoneNumber) callerId = result.phoneNumber;
@@ -2798,53 +3256,188 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                         return;
                     }
                     identityRebuildPending = false;
+                    // Back after failed fetches (the rep signed in again):
+                    // register with the fresh session, never during a call.
+                    if (recovered || sessionRebuildPending) {
+                        if (!activeCall && !pendingInbound) {
+                            tokenRefreshInFlight = false;
+                            if (result.phoneNumber) callerId = result.phoneNumber;
+                            rebuildDevice(result.token, 'token fetch recovered');
+                            publishDock();
+                            return;
+                        }
+                        sessionRebuildPending = true;
+                        regLog('Token fetch recovered during a call; rebuild after this call');
+                    }
                     device.updateToken(result.token);
+                    currentToken = result.token;
                     tokenRefreshInFlight = false;
-                    tokenExpired = false;
                     console.log('[CTC] Token refreshed');
                     applyIncomingGrant(tokenAllowsIncoming(result.token));
                     sendHeartbeat('token refresh');
-                    if (device.state === 'unregistered') {
-                        console.log('[CTC] Re-registering device after token refresh');
-                        var p = device.register();
-                        if (p && typeof p.catch === 'function') {
-                            p.catch(function (err) {
-                                console.error('[CTC] Re-register failed:', err && err.message);
-                            });
-                        }
-                    }
+                    publishDock();
+                    // Re-register only when it dropped (and the grant asks
+                    // for it): the watchdog path, with its timeout and catch.
+                    if (device.state === 'unregistered') ensureRegistered('token refresh');
                 })
                 .catch(function (err) {
-                    console.log('[CTC] Token refresh failed (attempt ' + (attempt + 1) + '): '
-                        + (err && err.message));
-                    if (attempt < TOKEN_RETRY_DELAYS_MS.length) {
-                        setTimeout(function () {
-                            refreshDeviceToken(expired, attempt + 1);
-                        }, TOKEN_RETRY_DELAYS_MS[attempt]);
-                        return;
+                    tokenFailed(err, expired, attempt);
+                });
+        }
+
+        // Every failed fetch: note it, show the amber hint, retry later.
+        // tokenRefreshInFlight stays true until a token arrives.
+        function tokenFailed(err, expired, attempt) {
+            var detail = (err && err.message) || String(err);
+            console.log('[CTC] Token refresh failed (attempt ' + (attempt + 1)
+                + (expired ? ', token expired' : '') + '): ' + detail);
+            notePhoneError('token', detail);
+            if (detail === 'error: ' + NOT_A_PHONE_USER) {
+                phoneNotEnabled();
+                return;
+            }
+            var http = /^HTTP ([0-9]{3})/.exec(detail);
+            setPhoneError('session', http ? Number(http[1]) : 0, 'token: ' + detail);
+            if (!tokenFailing) {
+                tokenFailing = true;
+                publishDock();
+                sendHeartbeat('token failed');
+            }
+            var delay = TOKEN_RETRY_DELAYS_MS[Math.min(attempt, TOKEN_RETRY_DELAYS_MS.length - 1)];
+            clearTokenRetry();
+            tokenRetryAttempt = attempt;
+            tokenRetryTimer = setTimeout(function () {
+                tokenRetryTimer = null;
+                refreshDeviceToken(expired, attempt + 1);
+            }, delay);
+        }
+
+        // The RESTlet refuses tokens for this user (not a rep, manager or
+        // admin): permanent until the admin changes it. No more token
+        // retries, no registration; the snapshot says error kind
+        // 'not_enabled' and the shell releases the phone (PHONE_DISABLED_MESSAGE).
+        // A live call is left to end by itself.
+        function phoneNotEnabled() {
+            clearTokenRetry();
+            tokenRefreshInFlight = false;
+            if (phoneDisabled) return;
+            phoneDisabled = true;
+            regLog('Phone is not enabled for this user; stopping');
+            clearRegisterRetry();
+            if (device && !activeCall && !pendingInbound && device.state === 'registered') {
+                try {
+                    Promise.resolve(device.unregister()).catch(function () { /* already gone */ });
+                } catch (err) { /* not registered */ }
+            }
+            if (!activeCall && !pendingInbound) setStatus('Phone not enabled', 'error');
+            setPhoneError('not_enabled', NOT_A_PHONE_USER, 'Phone is not enabled for your user');
+            if (window.parent !== window) {
+                try {
+                    window.parent.postMessage({ v: 1, type: '${escapeJs(ctcDock.PHONE_DISABLED_MESSAGE)}' }, window.location.origin);
+                } catch (err) { console.error('[CTC] disabled message failed', err); }
+            }
+        }
+
+        function clearTokenRetry() {
+            if (tokenRetryTimer) {
+                clearTimeout(tokenRetryTimer);
+                tokenRetryTimer = null;
+            }
+        }
+
+        // A waiting retry runs now (page visible / online / focus).
+        function retryTokenNow(reason) {
+            if (!tokenRetryTimer) return;
+            clearTokenRetry();
+            regLog('Token retry now (' + reason + ')');
+            refreshDeviceToken(false, tokenRetryAttempt + 1);
+        }
+
+        // Page-level triggers, installed once.
+        function startTokenRecoveryWatch() {
+            if (tokenRecoveryWatchStarted) return;
+            tokenRecoveryWatchStarted = true;
+            document.addEventListener('visibilitychange', function () {
+                if (document.visibilityState === 'visible') retryTokenNow('page visible');
+            });
+            window.addEventListener('online', function () { retryTokenNow('back online'); });
+            window.addEventListener('focus', function () { retryTokenNow('window focus'); });
+        }
+
+        // Seconds-since-epoch exp of the JWT, as ms; 0 when unknown.
+        function tokenExpiresAt(token) {
+            var payload = tokenPayload(token);
+            return payload && typeof payload.exp === 'number' ? payload.exp * 1000 : 0;
+        }
+
+        // The page slept (frozen tab, laptop lid): tokenWillExpire may have
+        // been missed. Renew when the token ends within the refresh window
+        // plus 30 s, or already ended.
+        function checkTokenExpiry(reason) {
+            if (!device || !currentToken) return;
+            var exp = tokenExpiresAt(currentToken);
+            if (!exp || exp - Date.now() > TOKEN_REFRESH_MS + 30000) return;
+            regLog('Token ends soon (' + reason + '); refreshing');
+            refreshDeviceToken(exp <= Date.now());
+        }
+
+        // The device is usable: show Ready (never over a live or ringing
+        // call) and, once per device, nudge the mic permission and fill the
+        // device lists. Runs on 'registered', and at start for an
+        // outbound-only phone (no incoming grant: it never registers).
+        function deviceReady() {
+            if (!activeCall && !pendingInbound) {
+                setStatus('Ready to call', '');
+                setButtons(true, false, false);
+                setCallView('idle');
+            }
+            if (audioPrimed) return;
+            audioPrimed = true;
+            // Phase 4: explicitly request mic permission BEFORE populating
+            // the device list. macOS browsers (Chrome / Brave / Safari)
+            // return empty label strings for input devices until the user
+            // has granted microphone access via getUserMedia. Twilio's
+            // internal permission flow runs later in the call lifecycle,
+            // so without this nudge the Mic dropdown shows blank options
+            // even when the hardware is available.
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(function (stream) {
+                    // Discard the stream — we only needed the permission grant.
+                    stream.getTracks().forEach(function (t) { t.stop(); });
+                    clearPhoneError(['mic']);
+                })
+                .catch(function (err) {
+                    // Permission denied: labels will be blank, calls have no mic.
+                    if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {
+                        setPhoneError('mic', 0, 'microphone: ' + err.name);
                     }
-                    tokenRefreshInFlight = false;
-                    if (tokenExpired && !activeCall) {
-                        showError('Phone session expired. Reload the phone to reconnect.');
-                        setStatus('Error', 'error');
-                        setButtons(true, false, false);
-                    }
+                })
+                .finally(function () {
+                    populateDevices();
+                    if (typeof applyAudioDefaults === 'function') applyAudioDefaults();
                 });
         }
 
         function initDevice(token) {
             incomingGranted = tokenAllowsIncoming(token);
             deviceIdentity = tokenIdentity(token);
+            currentToken = token;
             regLog('Phone starting as identity ' + (deviceIdentity || '(unknown)')
                 + (incomingGranted ? ' with inbound' : ' (outbound only)'));
             device = new Twilio.Device(token, {
                 codecPreferences: ['opus', 'pcmu'],
-                logLevel: 1,
+                // 1 = debug (shell URL debug=1), 3 = warnings only.
+                logLevel: DEBUG ? 1 : 3,
                 tokenRefreshMs: TOKEN_REFRESH_MS,
                 // Inbound spike: one call at a time. A second inbound call
                 // while busy is not offered to this phone. The SDK's own
                 // incoming ringtone plays (default sounds).
-                allowIncomingWhileBusy: false
+                allowIncomingWhileBusy: false,
+                // Signaling fallback: try the nearest of these edges and
+                // fail over to the next; a call keeps trying to reconnect
+                // its signaling for up to 30 s (needs an edge list).
+                edge: ['ashburn', 'umatilla'],
+                maxCallSignalingTimeoutMs: 30000
             });
 
             // Fires only when the token grants incoming (config
@@ -2860,31 +3453,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
             device.on('registered', function () {
                 console.log('[CTC] Device registered');
-                // Never reset the view or status of a live or ringing call.
-                if (!activeCall && !pendingInbound) {
-                    setStatus('Ready to call', '');
-                    setButtons(true, false, false);
-                    setCallView('idle');
-                }
-                if (audioPrimed) return;
-                audioPrimed = true;
-                // Phase 4: explicitly request mic permission BEFORE populating
-                // the device list. macOS browsers (Chrome / Brave / Safari)
-                // return empty label strings for input devices until the user
-                // has granted microphone access via getUserMedia. Twilio's
-                // internal permission flow runs later in the call lifecycle,
-                // so without this nudge the Mic dropdown shows blank options
-                // even when the hardware is available.
-                navigator.mediaDevices.getUserMedia({ audio: true })
-                    .then(function (stream) {
-                        // Discard the stream — we only needed the permission grant.
-                        stream.getTracks().forEach(function (t) { t.stop(); });
-                    })
-                    .catch(function () { /* permission denied — labels will be blank */ })
-                    .finally(function () {
-                        populateDevices();
-                        if (typeof applyAudioDefaults === 'function') applyAudioDefaults();
-                    });
+                clearPhoneError(['network', 'twilio']);
+                deviceReady();
             });
 
             device.on('error', function (err) {
@@ -2895,8 +3465,18 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     refreshDeviceToken(true);
                     return;
                 }
-                console.error('[CTC] Device error:', err.message);
-                showError('Device error: ' + err.message);
+                var code = err && err.code;
+                var message = (err && err.message) || 'unknown';
+                setPhoneError(errorKindForCode(code), code, message);
+                // A device error during a live or ringing call (signaling
+                // blip, a failed register) must not end the call's view:
+                // log it and show it as the snapshot error only.
+                if (activeCall || pendingInbound) {
+                    console.warn('[CTC] Device error during a call (call kept): ' + code + ' ' + message);
+                    return;
+                }
+                console.error('[CTC] Device error:', message);
+                showError('Device error: ' + message);
                 setStatus('Error', 'error');
                 setButtons(true, false, false);
             });
@@ -2908,8 +3488,52 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
             watchRegistration(device);
             startRegistrationWatch();
-            device.register();
+            if (incomingGranted) ensureRegistered('phone start');
+            else deviceReady();
             startHeartbeat();
+            startLifecycleWatch();
+        }
+
+        // --- Page Lifecycle + mic permission (installed once) ---
+        // freeze: the browser is about to freeze this page (background tab);
+        // no timers run, so tell NetSuite now (beacon, state 'frozen').
+        // resume: back from frozen. Re-register, renew a token that ended
+        // or ends soon, and send a heartbeat.
+        // Microphone permission: 'denied' sets the mic error; any other
+        // state clears it.
+        var lifecycleWatchStarted = false;
+
+        function startLifecycleWatch() {
+            if (lifecycleWatchStarted) return;
+            lifecycleWatchStarted = true;
+            document.addEventListener('freeze', function () {
+                try {
+                    if (navigator.sendBeacon) {
+                        navigator.sendBeacon(TOKEN_URL,
+                            new Blob([heartbeatBody('frozen')], { type: 'application/json' }));
+                    }
+                } catch (err) {
+                    console.log('[CTC] Frozen beacon failed: ' + (err && err.message));
+                }
+            });
+            document.addEventListener('resume', function () {
+                regLog('Page resumed');
+                ensureRegistered('page resumed');
+                checkTokenExpiry('page resumed');
+                sendHeartbeat('resume');
+            });
+            try {
+                if (navigator.permissions && typeof navigator.permissions.query === 'function') {
+                    navigator.permissions.query({ name: 'microphone' }).then(function (st) {
+                        function apply() {
+                            if (st.state === 'denied') setPhoneError('mic', 0, 'microphone permission denied');
+                            else clearPhoneError(['mic']);
+                        }
+                        apply();
+                        st.onchange = apply;
+                    }).catch(function () { /* not supported in this browser */ });
+                }
+            } catch (err) { /* permissions API missing */ }
         }
 
         // --- Audio device change handlers ---
@@ -2945,16 +3569,44 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function wireCall(call) {
             call.on('accept', function () {
                 console.log('[CTC] Call accepted');
+                clearPhoneError(['network', 'twilio', 'mic']);
                 setStatus('Connected', 'connected');
                 setButtons(false, true, true);
                 startTimer();
             });
 
+            // Media or signaling dropped mid-call; Twilio tries to restore
+            // it (signaling for up to maxCallSignalingTimeoutMs). The call,
+            // timer and mute stay; only the phase changes.
+            call.on('reconnecting', function (err) {
+                if (call !== activeCall) return;
+                console.warn('[CTC] Call reconnecting: ' + ((err && (err.code || err.message)) || ''));
+                setStatus('Reconnecting\\u2026', 'reconnecting');
+            });
+            call.on('reconnected', function () {
+                if (call !== activeCall) return;
+                console.log('[CTC] Call reconnected');
+                resetCallWarnings();
+                setStatus('Connected', 'connected');
+            });
+
+            // Call quality warnings -> snapshot callWarning.
+            call.on('warning', function (name) {
+                if (call !== activeCall) return;
+                noteCallWarning(name, true);
+            });
+            call.on('warning-cleared', function (name) {
+                if (call !== activeCall) return;
+                noteCallWarning(name, false);
+            });
+
             call.on('disconnect', function () {
                 console.log('[CTC] Call disconnected');
+                resetCallWarnings();
                 if (pendingInbound === call) pendingInbound = null;
                 var callSid = call.parameters ? call.parameters.CallSid : '';
                 var duration = callStartTime ? Math.floor((Date.now() - callStartTime) / 1000) : 0;
+                var startedAt = callStartTime;
                 activeCall = null;
                 afterCallSettled();
                 resetTimer();
@@ -2976,12 +3628,14 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     setDockLog('skipped', 'Call too brief to log');
                     return;
                 }
-                logCallToNetSuite(callSid, duration);
+                logCallToNetSuite(callSid, duration, startedAt);
             });
 
             call.on('error', function (err) {
                 console.error('[CTC] Call error:', err.message);
                 showError('Call error: ' + err.message);
+                setPhoneError(errorKindForCode(err && err.code), err && err.code, err && err.message);
+                resetCallWarnings();
                 if (pendingInbound === call) pendingInbound = null;
                 activeCall = null;
                 afterCallSettled();
@@ -3021,6 +3675,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
                 call.on('cancel', function () {
                     console.log('[CTC] Call cancelled');
+                    resetCallWarnings();
                     activeCall = null;
                     afterCallSettled();
                     resetTimer();
@@ -3099,6 +3754,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 if (pendingInbound !== call) return;
                 console.log('[CTC] Incoming call cancelled');
                 pendingInbound = null;
+                // Unanswered: counts in snapshot missedUnseen until a dock
+                // sends markMissedSeen (inboundEnded publishes it).
+                addMissedCall(dockCaller);
                 inboundEnded('missed', 'Missed call from ' + callerLabel());
             });
             call.on('reject', function () {
@@ -4398,14 +5056,19 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             return;
         }
 
+        startTokenRecoveryWatch();
+        tokenRefreshInFlight = true;
         fetchToken()
             .then(function (result) {
+                tokenRefreshInFlight = false;
                 callerId = result.phoneNumber || '';
                 initDevice(result.token);
             })
             .catch(function (err) {
                 setStatus('Failed to initialize', 'error');
                 showError('Token fetch failed: ' + (err.message || err));
+                // Keep trying: the device starts when a token comes.
+                if (!device) tokenFailed(err, false, 0);
             });
     })();
     </script>

@@ -229,7 +229,10 @@ define(['N/https', 'N/encode', 'N/log'],
 
     /**
      * GET /Accounts/{Sid}/Calls/{CallSid}.json — fetch a specific call's
-     * canonical Twilio-side details (`from`, `to`, `status`, `duration`).
+     * canonical Twilio-side details (`from`, `to`, `status`, `duration`,
+     * `start_time` (RFC 2822 UTC; logCall's custevent_ctc_call_started),
+     * `parent_call_sid` (the outbound ownership check follows it from a
+     * child leg to the browser leg)).
      *
      * Used by ctc_rl_token's verifyCallOwnership to confirm a body-supplied
      * callSid was actually placed by the authenticated user's caller-ID
@@ -250,7 +253,9 @@ define(['N/https', 'N/encode', 'N/log'],
                     from:       result.body.from,
                     to:         result.body.to,
                     callStatus: result.body.status,
-                    duration:   result.body.duration
+                    duration:   result.body.duration,
+                    start_time: result.body.start_time || null,
+                    parent_call_sid: result.body.parent_call_sid || null
                 }
             };
         }

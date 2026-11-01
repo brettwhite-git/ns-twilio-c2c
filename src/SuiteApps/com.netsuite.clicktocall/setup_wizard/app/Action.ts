@@ -19,6 +19,7 @@ import type {
     InboundPublishError,
     InboundPublishResult,
     InboundRoute,
+    InboundEmployee,
     InboundSettings,
     PresenceRow
 } from './InitialState';
@@ -201,6 +202,7 @@ export interface InboundLoadPayload extends InboundSettings {
     flowSid: string;
     publishedAt: string;
     routes: InboundRoute[];
+    employees: InboundEmployee[];
 }
 
 interface InboundLoadStartAction {

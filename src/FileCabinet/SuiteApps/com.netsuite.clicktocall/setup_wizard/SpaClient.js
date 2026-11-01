@@ -293,6 +293,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     d.inbound.recordInbound = p.recordInbound;
                     d.inbound.recordingNoticeOn = p.recordingNoticeOn;
                     d.inbound.recordingNotice = p.recordingNotice;
+                    d.inbound.voicemailOn = p.voicemailOn;
+                    d.inbound.voicemailMaxSeconds = p.voicemailMaxSeconds;
+                    d.inbound.fallbackOwnerId = p.fallbackOwnerId;
+                    d.inbound.employees = p.employees;
                     d.inbound.flowSid = p.flowSid;
                     d.inbound.publishedAt = p.publishedAt;
                     d.inbound.routes = p.routes;
@@ -494,9 +498,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             recordInbound: true,
             recordingNoticeOn: false,
             recordingNotice: '',
+            voicemailOn: true,
+            voicemailMaxSeconds: 120,
+            fallbackOwnerId: '',
             flowSid: '',
             publishedAt: '',
             routes: [],
+            employees: [],
             saving: false,
             saveError: null,
             publishing: false,
@@ -2089,6 +2097,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 recordInbound: result.recordInbound !== false,
                 recordingNoticeOn: result.recordingNoticeOn === true,
                 recordingNotice: result.recordingNotice || '',
+                voicemailOn: result.voicemailOn !== false,
+                voicemailMaxSeconds: Number(result.voicemailMaxSeconds) || 120,
+                fallbackOwnerId: result.fallbackOwnerId ? String(result.fallbackOwnerId) : '',
+                employees: Array.isArray(result.employees)
+                    ? result.employees.map((e) => ({ id: String(e.id), name: String(e.name || '') }))
+                    : [],
                 flowSid: result.flowSid || '',
                 publishedAt: result.publishedAt || '',
                 routes: Array.isArray(result.routes) ? result.routes : []
@@ -2106,7 +2120,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             noAnswerMessage: inbound.noAnswerMessage,
             recordInbound: inbound.recordInbound,
             recordingNoticeOn: inbound.recordingNoticeOn,
-            recordingNotice: inbound.recordingNotice
+            recordingNotice: inbound.recordingNotice,
+            voicemailOn: inbound.voicemailOn,
+            voicemailMaxSeconds: inbound.voicemailMaxSeconds,
+            fallbackOwnerId: inbound.fallbackOwnerId
         };
         store.dispatch(Action.inboundSave({ phase: 'start' }));
         try {
@@ -2235,10 +2252,18 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     };
 
     const DEFAULT_NO_ANSWER_MESSAGE = 'Sorry, no one is available to take your call. Please try again later. Goodbye.';
+    const DEFAULT_VOICEMAIL_GREETING = 'Sorry, no one is available. Please leave a message after the tone.';
+    const VOICEMAIL_SECONDS = [30, 60, 120, 180, 300];
     const NO_ANSWER_MAX_LENGTH = 300;
     const DEFAULT_RECORDING_NOTICE = 'This call may be recorded for quality and training.';
     const RECORDING_NOTICE_MAX_LENGTH = 300;
     const RING_SECONDS = [10, 15, 20, 25, 30, 45, 60];
+    const voicemailLengthLabel = (seconds) => {
+        if (seconds % 60 !== 0)
+            return seconds + ' seconds';
+        const minutes = seconds / 60;
+        return minutes + (minutes === 1 ? ' minute' : ' minutes');
+    };
     const statusLine = (inbound) => {
         const last = inbound.lastPublish;
         if (last && last.skipped === 'inbound_off') {
@@ -2331,11 +2356,42 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             ]);
             const message = vstack(component__namespace.StackPanel.GapSize.XXS, [
                 jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "No-answer message" }),
-                jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.noAnswerMessage, placeholder: DEFAULT_NO_ANSWER_MESSAGE, maxLength: NO_ANSWER_MAX_LENGTH, rowCount: 3, onTextChanged: (args) => {
+                jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.noAnswerMessage, placeholder: inbound.voicemailOn ? DEFAULT_VOICEMAIL_GREETING : DEFAULT_NO_ANSWER_MESSAGE, maxLength: NO_ANSWER_MAX_LENGTH, rowCount: 3, onTextChanged: (args) => {
                         store.dispatch(Action.inboundFieldChange({
                             noAnswerMessage: ((args && args.text) || '').slice(0, NO_ANSWER_MAX_LENGTH)
                         }));
                     }, rootStyle: { width: '100%' } })
+            ]);
+            const vmOptions = VOICEMAIL_SECONDS.indexOf(inbound.voicemailMaxSeconds) >= 0
+                ? VOICEMAIL_SECONDS
+                : VOICEMAIL_SECONDS.concat([inbound.voicemailMaxSeconds]).sort((x, y) => x - y);
+            const vmDs = new core__namespace.ArrayDataSource(vmOptions.map((n) => ({ value: n, label: voicemailLengthLabel(n) })));
+            const voicemail = vstack(component__namespace.StackPanel.GapSize.S, [
+                vstack(component__namespace.StackPanel.GapSize.XXS, [
+                    jsxRuntime.jsx(component__namespace.Switch, { label: "Voicemail", value: inbound.voicemailOn, action: (args) => {
+                            store.dispatch(Action.inboundFieldChange({ voicemailOn: !!(args && args.value) }));
+                        } }),
+                    weak(inbound.voicemailOn
+                        ? 'After the no-answer message, callers can leave a voicemail. It is transcribed and logged as a Phone Call.'
+                        : 'Off: callers hear the no-answer message and the call ends.')
+                ]),
+                vstack(component__namespace.StackPanel.GapSize.XXS, [
+                    jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Longest voicemail" }),
+                    jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: vmDs, valueMember: "value", displayMember: "label", selectedValue: inbound.voicemailMaxSeconds, enabled: inbound.voicemailOn, onSelectionChanged: (args) => {
+                            const n = Number(args && args.value);
+                            if (n > 0)
+                                store.dispatch(Action.inboundFieldChange({ voicemailMaxSeconds: n }));
+                        }, rootStyle: { width: '200px' } })
+                ])
+            ]);
+            const ownerChoices = [{ value: '', label: 'Not set' }].concat(inbound.employees.map((e) => ({ value: e.id, label: e.name })));
+            const fallbackOwner = vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Unrouted calls and voicemails go to" }),
+                jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(ownerChoices), valueMember: "value", displayMember: "label", selectedValue: inbound.fallbackOwnerId, onSelectionChanged: (args) => {
+                        const v = args && args.value != null ? String(args.value) : '';
+                        store.dispatch(Action.inboundFieldChange({ fallbackOwnerId: v }));
+                    }, rootStyle: { width: '320px' } }),
+                weak('Also used when a number has no rep, or its rep is inactive. Not set: those calls are not logged.')
             ]);
             const showNotice = inbound.recordInbound && inbound.recordingNoticeOn;
             const recording = vstack(component__namespace.StackPanel.GapSize.S, [
@@ -2372,6 +2428,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     item(inboundSwitch),
                     item(ringTime),
                     item(message),
+                    item(voicemail),
+                    item(fallbackOwner),
                     item(recording),
                     item(saveButton),
                     item(inbound.saveError ? jsxRuntime.jsx(ErrorText, { message: inbound.saveError }) : false),

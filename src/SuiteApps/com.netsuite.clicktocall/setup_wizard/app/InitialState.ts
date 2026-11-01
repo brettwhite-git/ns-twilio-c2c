@@ -129,6 +129,12 @@ export interface InboundRoute {
     employeeName: string;
 }
 
+/** An employee the Inbound calls page offers as the fallback owner. */
+export interface InboundEmployee {
+    id: string;
+    name: string;
+}
+
 export interface InboundSettings {
     inboundEnabled: boolean;
     ringSeconds: number;
@@ -136,6 +142,12 @@ export interface InboundSettings {
     recordInbound: boolean;
     recordingNoticeOn: boolean;
     recordingNotice: string;
+    /** Unanswered / unrouted callers can leave a voicemail. */
+    voicemailOn: boolean;
+    /** Longest voicemail, whole seconds (30-300). */
+    voicemailMaxSeconds: number;
+    /** Employee id that owns unrouted calls and voicemails; '' = not set. */
+    fallbackOwnerId: string;
 }
 
 export interface InboundState {
@@ -151,10 +163,15 @@ export interface InboundState {
     recordInbound: boolean;
     recordingNoticeOn: boolean;
     recordingNotice: string;
+    voicemailOn: boolean;
+    voicemailMaxSeconds: number;
+    fallbackOwnerId: string;
 
     flowSid: string;
     publishedAt: string;
     routes: InboundRoute[];
+    /** Fallback-owner choices (from wizardLoadInbound). */
+    employees: InboundEmployee[];
 
     saving: boolean;
     saveError: string | null;
@@ -314,9 +331,13 @@ const initialState: AppState = {
         recordInbound: true,
         recordingNoticeOn: false,
         recordingNotice: '',
+        voicemailOn: true,
+        voicemailMaxSeconds: 120,
+        fallbackOwnerId: '',
         flowSid: '',
         publishedAt: '',
         routes: [],
+        employees: [],
         saving: false,
         saveError: null,
         publishing: false,

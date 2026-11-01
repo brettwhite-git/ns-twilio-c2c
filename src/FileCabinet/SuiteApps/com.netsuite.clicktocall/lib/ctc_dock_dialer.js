@@ -1,9 +1,11 @@
 /**
  * Telephony Dock — dialer panel (browser script, NOT a SuiteScript module).
  *
- * Loads after ctc_dock_client.js and, in the phone mode shell only, registers
- * the full softphone panel that opens out of the pill: Dial, Search, Recents,
- * the in-call screen, and audio settings. The panel sits on the left or right
+ * Loads after ctc_dock_client.js and registers the full softphone panel that
+ * opens out of the pill: Dial, Search, Recents, the in-call screen, and audio
+ * settings. In the phone mode shell it drives the phone in this tab; in a
+ * normal (outside) tab it is a remote control for the phone another tab
+ * holds (the same requests; the audio plays in that tab). The panel sits on the left or right
  * screen edge at one fixed size for every view, capped by the screen; the
  * grip in the header drags it to the other side (placement and drag live in
  * the client). Data
@@ -23,8 +25,10 @@
     var formatPhone = dock.formatPhone;
     var initials = dock.initials;
 
-    var ACTIVE = { dialing: true, ringing: true, connected: true };
+    var ACTIVE = { dialing: true, ringing: true, connected: true, reconnecting: true };
+    var TALKING = { connected: true, reconnecting: true }; // Mute and the keypad work
     var PENDING_TIMEOUT_MS = 15000;
+    var REFUSED_SHOW_MS = 4000;
     var SEARCH_DEBOUNCE_MS = 250;
     var NOTE_HIDE_MS = 10000; // 'saved' and 'skipped' notes hide by themselves
     var TYPE_LABEL = { customer: 'CUSTOMER', prospect: 'PROSPECT', lead: 'LEAD', contact: 'CONTACT' };
@@ -35,8 +39,32 @@
         ready: { dot: '#94A6BF', label: 'Ready to call' },
         dialing: { dot: '#F4C76A', label: 'Calling…' },
         ringing: { dot: '#F4C76A', label: 'Ringing…' },
-        incoming: { dot: '#14B981', label: 'Incoming call' },
-        connected: { dot: '#14B981', label: 'Connected' }
+        incoming: { dot: '#74C0FC', label: 'Incoming call' }, // sky: ringing reads apart from talking
+        connected: { dot: '#14B981', label: 'Connected' },
+        reconnecting: { dot: '#F4C76A', label: 'Reconnecting…' },
+        moved: { dot: '#8B8780', label: 'Phone moved to another tab' }
+    };
+    // Header badge for snap.error.kind between calls.
+    var ERROR_VIEW = {
+        mic: { dot: '#EE6E5C', label: 'Microphone blocked' },
+        session: { dot: '#F4C76A', label: 'Signing in…' },
+        network: { dot: '#F4C76A', label: 'Reconnecting…' },
+        twilio: { dot: '#EE6E5C', label: 'Phone error' }
+    };
+    // snap.callWarning (contract names, and the raw Twilio names) -> one line.
+    var WARN_MIC = 'We can\'t hear your microphone';
+    var WARN_NET = 'Weak connection';
+    var CALL_WARNING_TEXT = {
+        'low-mic': WARN_MIC, 'constant-audio-input-level': WARN_MIC,
+        'no-audio': WARN_NET, 'packet-loss': WARN_NET, 'high-packet-loss': WARN_NET,
+        'high-rtt': WARN_NET, 'high-jitter': WARN_NET, 'low-mos': WARN_NET, 'ice-connectivity-lost': WARN_NET
+    };
+    // snap.refused.reason -> a short muted line (shown once per nonce).
+    var REFUSED_TEXT = {
+        rate: 'Too many calls in a short time \u2014 wait a moment',
+        'hourly-limit': 'Too many calls in a short time \u2014 wait a moment',
+        'invalid-number': 'That number can\'t be dialled',
+        busy: 'Finish the current call first'
     };
     // Header badge when snap.canReceive === false in the ready phase.
     var READY_NOT_RECEIVING = { dot: '#F4C76A', label: 'Ready · reconnecting' };
@@ -62,7 +90,11 @@
         '.dl[data-side="l"].closed{transform:translateX(-12px)}',
         '.dl[data-side="t"].closed{transform:translateY(-12px)}',
         '.dl[data-side="b"].closed{transform:translateY(12px)}',
-        '.dl-head{position:relative;display:flex;align-items:center;gap:8px;padding:18px 14px 0;flex-shrink:0;cursor:grab;user-select:none;-webkit-user-select:none}',
+        '.dl-head{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:18px 14px 0;flex-shrink:0;cursor:grab;user-select:none;-webkit-user-select:none}',
+        // Call alerts line under the header buttons (notify default / denied).
+        '.dl-alerts{flex-basis:100%;display:flex;justify-content:center;min-height:24px;align-items:center}',
+        '.dl-alerts .dl-text{font-size:11.5px;padding:4px 8px}',
+        '.dl-alerts-off{font-size:11px;color:#6B7B95}',
         '.dl-head:active{cursor:grabbing}',
         '.dl-head button{cursor:pointer}',
         // The grip says the panel can be dragged (same dots as the pill grip).
@@ -84,6 +116,22 @@
         '.dl-note a:hover{text-decoration:underline}',
         '.dl-note-x{width:24px;height:24px;flex-shrink:0;margin:-4px -4px -4px 0;border-radius:6px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-note-x:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
+        '.dl-note .dl-text{flex-shrink:0;padding:4px 8px;font-size:12px}',
+        // Missed call: text + close on the first row, Call back + Open record under it.
+        '.dl-note[data-kind="missed"]{flex-wrap:wrap;row-gap:4px}',
+        '.dl-note[data-kind="missed"] .dl-note-text{order:-2;flex-basis:calc(100% - 32px)}',
+        '.dl-note[data-kind="missed"] .dl-note-x{order:-1}',
+        '.dl-note[data-kind="missed"] .dl-note-call{margin-left:-8px}',
+        // Error banner (snap.error.kind): what happened, what to do, one action.
+        '.dl-alert{flex-shrink:0;margin:10px 14px 0;padding:10px 12px;border-radius:10px;background:rgba(238,110,92,0.12);border:1px solid rgba(238,110,92,0.30);display:flex;flex-direction:column;align-items:flex-start;gap:4px;font-size:12px}',
+        '.dl-alert[data-tone="amber"]{background:rgba(244,199,106,0.10);border-color:rgba(244,199,106,0.30)}',
+        '.dl-alert-title{font-weight:600;line-height:1.4}',
+        '.dl-alert-text{color:#C9D3E1;line-height:1.45;overflow-wrap:anywhere}',
+        '.dl-alert-act{margin:2px 0 0 -8px}',
+        // Refused request: one muted line, 4 s.
+        '.dl-refused{flex-shrink:0;margin:8px 14px 0;font-size:12px;color:#94A6BF;text-align:center}',
+        // Remote control (outside tab): where the audio is.
+        '.dl-remote{flex-shrink:0;padding:0 14px 12px;background:rgba(0,0,0,0.12);font-size:11px;color:#94A6BF;text-align:center}',
         '.dl-pane{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}',
         '.dl-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
         '.dl-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:2px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
@@ -133,7 +181,7 @@
         '.dl-q::placeholder{color:#94A6BF}',
         '.dl-q:focus-visible{outline:2px solid #74C0FC;outline-offset:1px}',
         '.dl-chips{display:flex;flex-wrap:wrap;gap:6px}',
-        '.dl-chip{padding:4px 10px;border-radius:999px;font-size:11px;color:#94A6BF;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
+        '.dl-chip{display:inline-flex;align-items:center;min-height:24px;padding:4px 10px;border-radius:999px;font-size:11px;color:#94A6BF;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-chip[aria-pressed="true"]{color:#FFFFFF;background:rgba(255,255,255,0.16)}',
         '.dl-chip em{font-style:normal;margin-left:4px;opacity:0.8}',
         '.dl-sect{text-align:center;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
@@ -155,6 +203,7 @@
         '.dl-live-name{font-size:20px;font-weight:600;letter-spacing:-0.01em;text-align:center}',
         '.dl-live-sub{font-size:11.5px;color:#94A6BF}',
         '.dl-live-time{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;font-size:26px;font-weight:300;letter-spacing:0.04em;margin-top:8px;min-height:32px}',
+        '.dl-live-warn{font-size:12px;color:#F4C76A;margin-top:2px}',
         '.dl-live .dl-tiles{width:100%;margin-top:18px}',
         '.dl-live .dl-pad{width:100%;margin-top:14px}',
         '.dl-audio-top{display:flex;align-items:center;gap:8px}',
@@ -187,10 +236,15 @@
         +   '<span class="spacer"></span>'
         +   '<button type="button" class="dl-icon dl-gear" aria-label="Audio settings" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>'
         +   '<button type="button" class="dl-icon dl-close" aria-label="Collapse phone"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 9l6 6 6-6"></path></svg></button>'
+        +   '<div class="dl-alerts" hidden><button type="button" class="dl-text dl-alerts-btn" hidden>Get call alerts</button><span class="dl-alerts-off" hidden>Call alerts are off in this browser</span></div>'
         + '</div>'
-        + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span><a class="dl-note-link" href="#" target="_top">Open record →</a>'
+        + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span>'
+        +   '<button type="button" class="dl-text dl-note-call" hidden>Call back</button>'
+        +   '<a class="dl-note-link" href="#" target="_top">Open record →</a>'
         +   '<button type="button" class="dl-note-x" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 6l12 12M18 6L6 18"></path></svg></button>'
         + '</div>'
+        + '<div class="dl-alert" role="status" hidden><div class="dl-alert-title"></div><div class="dl-alert-text" hidden></div><button type="button" class="dl-text dl-alert-act" hidden></button></div>'
+        + '<div class="dl-refused" role="status" hidden></div>'
         // Idle: tabs
         + '<div class="dl-idle dl-pane">'
         +   '<div class="dl-body">'
@@ -243,6 +297,7 @@
         +     '<div class="dl-live-name"></div>'
         +     '<div class="dl-live-sub"></div>'
         +     '<div class="dl-live-time" aria-label="Call time"></div>'
+        +     '<div class="dl-live-warn" role="status" hidden></div>'
         +     '<div class="dl-tiles two dl-live-tiles" hidden>'
         +       '<div class="dl-tile"><span class="dl-k">BALANCE</span><span class="dl-v gold dl-live-bal">—</span></div>'
         +       '<div class="dl-tile"><span class="dl-k">OPEN OPPS</span><span class="dl-v mint dl-live-opps">—</span></div>'
@@ -265,8 +320,10 @@
         +     '<label class="dl-afield dl-in-row">Microphone<select class="dl-in"></select></label>'
         +     '<label class="dl-afield dl-out-row">Speaker<select class="dl-out"></select></label>'
         +     '<button type="button" class="dl-text dl-exit">Exit phone mode</button>'
+        +     '<button type="button" class="dl-text dl-exit dl-use-here" hidden>Use phone here</button>'
         +   '</div>'
-        + '</div>';
+        + '</div>'
+        + '<div class="dl-remote" hidden>Audio plays in your phone tab.</div>';
 
     var q = function (sel) { return el.querySelector(sel); };
     var qa = function (sel) { return Array.prototype.slice.call(el.querySelectorAll(sel)); };
@@ -289,7 +346,11 @@
         dtmf: q('.dl-dtmf'), mute: q('.dl-mute'), muteLabel: q('.dl-mute-label'), end: q('.dl-end'), keys: q('.dl-keys'),
         answer: q('.dl-answer'), decline: q('.dl-decline'), ringActs: qa('.dl-ring-act'), callActs: qa('.dl-call-act'),
         head: q('.dl-head'), audio: q('.dl-audio-wrap'), audioBack: q('.dl-audio-back'), audioMsg: q('.dl-audio-msg'),
-        inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit')
+        inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit:not(.dl-use-here)'),
+        useHere: q('.dl-use-here'), remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
+        alert: q('.dl-alert'), alertTitle: q('.dl-alert-title'), alertText: q('.dl-alert-text'), alertAct: q('.dl-alert-act'),
+        refused: q('.dl-refused'), liveWarn: q('.dl-live-warn'),
+        alerts: q('.dl-alerts'), alertsBtn: q('.dl-alerts-btn'), alertsOff: q('.dl-alerts-off')
     };
 
     // --- State ---
@@ -312,6 +373,15 @@
     var noteKey = null;       // key of the lastLog the note shows (null: a local note)
     var noteDismissed = null; // key of the lastLog the rep closed (or that hid itself)
     var noteTimer = null;
+    var noteRemain = 0;       // ms left on the note's auto-hide while paused
+    var noteDeadline = 0;
+    var noteHover = false;
+    var noteFocus = false;
+    var noteMissed = null;    // { name, number, entityId, entityType } the missed note calls back
+    var missedCaller = null;  // newest snap.missedUnseen.last (kept after markMissedSeen)
+    var ownNonces = {};       // nonces of requests this panel sent (refused lines)
+    var refusedTimer = null;
+    var alertRun = null;
 
     // --- Helpers ---
     function api(action, body) {
@@ -368,6 +438,16 @@
 
     function isActive() { return !!(snap && ACTIVE[snap.phase]); }
     function isIncoming() { return !!(snap && snap.phase === 'incoming'); }
+    function isRemote() { return !!(host.isRemote && host.isRemote()); }
+    function errKind() { return snap && snap.error && typeof snap.error === 'object' ? String(snap.error.kind || '') : ''; }
+
+    // Every request goes out with origin + nonce (client); keep the nonce so
+    // a refusal of our own request can be shown once.
+    function send(action, extra) {
+        var nonce = host.send(action, extra);
+        if (nonce) ownNonces[nonce] = true;
+        return nonce;
+    }
 
     // --- Tabs ---
     function setTab(next) {
@@ -533,7 +613,7 @@
             contactName: c && c.contactId ? c.name : ''
         };
         if (snap && snap.phase === 'ready') {
-            host.send('dial', req);
+            send('dial', req);
             return;
         }
         // The phone frame is still starting: keep the request and send it
@@ -717,12 +797,19 @@
         if (snap.startedAt && !liveTimer) liveTimer = window.setInterval(tickLive, 1000);
         if (!snap.startedAt && liveTimer) { window.clearInterval(liveTimer); liveTimer = null; }
 
-        ui.mute.disabled = snap.phase !== 'connected';
+        // Call quality, one amber line under the timer ('' clears it). A
+        // constant mic level is normal while muted.
+        var warn = !incoming && snap.callWarning ? CALL_WARNING_TEXT[snap.callWarning] || '' : '';
+        if (warn === WARN_MIC && snap.muted) warn = '';
+        ui.liveWarn.textContent = warn;
+        ui.liveWarn.hidden = !warn;
+
+        ui.mute.disabled = !TALKING[snap.phase];
         ui.mute.setAttribute('aria-pressed', snap.muted ? 'true' : 'false');
         ui.mute.setAttribute('aria-label', snap.muted ? 'Unmute' : 'Mute');
         ui.mute.querySelector('svg').innerHTML = snap.muted ? ICON_MIC_OFF : ICON_MIC;
         ui.muteLabel.textContent = snap.muted ? 'MUTED' : 'MUTE';
-        ui.keys.disabled = snap.phase !== 'connected';
+        ui.keys.disabled = !TALKING[snap.phase];
 
         var key = snap.entityId && snap.entityType !== 'contact' ? snap.entityId : '';
         if (key !== liveFor) {
@@ -740,10 +827,10 @@
         }
     }
 
-    ui.mute.addEventListener('click', function () { host.send(snap && snap.muted ? 'unmute' : 'mute'); });
-    ui.end.addEventListener('click', function () { host.send('hangup'); });
-    ui.answer.addEventListener('click', function () { host.send('answer'); });
-    ui.decline.addEventListener('click', function () { host.send('decline'); });
+    ui.mute.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
+    ui.end.addEventListener('click', function () { send('hangup'); });
+    ui.answer.addEventListener('click', function () { send('answer'); });
+    ui.decline.addEventListener('click', function () { send('decline'); });
     ui.keys.addEventListener('click', function () {
         var show = ui.dtmf.hidden;
         ui.dtmf.hidden = !show;
@@ -753,28 +840,66 @@
     });
     ui.dtmf.addEventListener('click', function (e) {
         var k = e.target.closest('.dl-key');
-        if (k) host.send('digits', { d: k.getAttribute('data-key') });
+        if (k) send('digits', { d: k.getAttribute('data-key') });
     });
 
     // --- Header, note ---
     // key: the lastLog this note shows; leave it out for a local note.
-    function showNote(kind, text, url, key) {
-        window.clearTimeout(noteTimer);
-        noteTimer = null;
+    function showNote(kind, text, url, key, missed) {
+        stopNoteTimer();
         noteKey = key || null;
+        noteMissed = missed || null;
         ui.note.hidden = false;
         ui.noteText.textContent = text;
         ui.noteLink.hidden = !url;
         if (url) ui.noteLink.href = url;
+        ui.noteCall.hidden = !(missed && missed.number);
         ui.note.setAttribute('data-kind', kind);
     }
 
     function hideNote() {
-        window.clearTimeout(noteTimer);
-        noteTimer = null;
+        stopNoteTimer();
         noteKey = null;
+        noteMissed = null;
         ui.note.hidden = true;
     }
+
+    // The auto-hide pauses while the note is hovered or holds focus and
+    // goes on with the time it had left.
+    function stopNoteTimer() {
+        window.clearTimeout(noteTimer);
+        noteTimer = null;
+        noteRemain = 0;
+    }
+
+    function runNoteTimer() {
+        if (!noteRemain || noteTimer || noteHover || noteFocus) return;
+        var key = noteKey;
+        noteDeadline = Date.now() + noteRemain;
+        noteTimer = window.setTimeout(function () {
+            noteTimer = null;
+            noteRemain = 0;
+            if (noteKey !== key) return;
+            noteDismissed = key;
+            hideNote();
+        }, noteRemain);
+    }
+
+    function pauseNoteTimer() {
+        if (!noteTimer) return;
+        window.clearTimeout(noteTimer);
+        noteTimer = null;
+        noteRemain = Math.max(1, noteDeadline - Date.now());
+    }
+
+    ui.note.addEventListener('mouseenter', function () { noteHover = true; pauseNoteTimer(); });
+    ui.note.addEventListener('mouseleave', function () { noteHover = false; runNoteTimer(); });
+    ui.note.addEventListener('focusin', function () { noteFocus = true; pauseNoteTimer(); });
+    ui.note.addEventListener('focusout', function (e) {
+        if (e.relatedTarget && ui.note.contains(e.relatedTarget)) return;
+        noteFocus = false;
+        runNoteTimer();
+    });
 
     function logKey(log) {
         return [log.status, log.message || '', log.recordUrl || ''].join('|');
@@ -787,16 +912,45 @@
         var key = logKey(log);
         if (key === noteDismissed) { hideNote(); return; }
         if (key === noteKey && !ui.note.hidden) return;
+        if (log.status === 'missed') { showMissed(log, key); return; }
         showNote(log.status, log.message || 'Call ended', log.recordUrl, key);
         if (log.status === 'saved' || log.status === 'skipped') {
-            noteTimer = window.setTimeout(function () {
-                noteTimer = null;
-                if (noteKey !== key) return;
-                noteDismissed = key;
-                hideNote();
-            }, NOTE_HIDE_MS);
+            noteRemain = NOTE_HIDE_MS;
+            runNoteTimer();
         }
     }
+
+    // "Missed call from <name or number>" with Call back (the normal dial
+    // path) and Open record (when the caller matched a record). The caller
+    // comes from snap.missedUnseen.last, kept here because opening the
+    // panel resets it (markMissedSeen); else the call's caller.
+    function showMissed(log, key) {
+        var c = missedCaller || (snap && snap.caller) || {};
+        var who = c.name || formatPhone(c.number) || c.number || '';
+        var url = c.entityId ? recordUrl(c.entityType, c.entityId) : (log.recordUrl || '');
+        showNote('missed', who ? 'Missed call from ' + who : (log.message || 'Missed call'), url, key, {
+            name: String(c.name || ''),
+            number: String(c.number || ''),
+            entityId: String(c.entityId || ''),
+            entityType: String(c.entityType || '')
+        });
+    }
+
+    ui.noteCall.addEventListener('click', function () {
+        var c = noteMissed;
+        if (!c || !c.number) return;
+        if (noteKey) noteDismissed = noteKey;
+        hideNote();
+        if (c.entityId) {
+            loadEntity({ entityId: c.entityId, entityName: c.name, entityType: c.entityType, phone: c.number });
+        } else {
+            clearEntity();
+            setDisplay(c.number, true);
+        }
+        setTab('dial');
+        placeCall();
+        focusPanel('call');
+    });
 
     ui.noteX.addEventListener('click', function () {
         var hadFocus = el.getRootNode().activeElement === ui.noteX;
@@ -838,7 +992,10 @@
         ui.inSel.disabled = !a || active;
         ui.outSel.disabled = !a || active;
         var shell = window.__ctcShell;
-        ui.exit.hidden = !(shell && typeof shell.exit === 'function');
+        var remote = isRemote();
+        ui.exit.hidden = remote || !(shell && typeof shell.exit === 'function');
+        // Remote control: "Use phone here" instead of Exit, only between calls.
+        ui.useHere.hidden = !remote || active || isIncoming();
     }
 
     function setAudioOpen(open) {
@@ -855,11 +1012,20 @@
         setAudioOpen(false);
         ui.gear.focus();
     });
-    ui.inSel.addEventListener('change', function () { host.send('setInput', { id: ui.inSel.value }); });
-    ui.outSel.addEventListener('change', function () { host.send('setOutput', { id: ui.outSel.value }); });
+    ui.inSel.addEventListener('change', function () { send('setInput', { id: ui.inSel.value }); });
+    ui.outSel.addEventListener('change', function () { send('setOutput', { id: ui.outSel.value }); });
     ui.exit.addEventListener('click', function () {
         var shell = window.__ctcShell;
         if (shell && typeof shell.exit === 'function') shell.exit();
+    });
+    ui.useHere.addEventListener('click', function () {
+        if (host.useHere) host.useHere();
+    });
+    ui.alertsBtn.addEventListener('click', function () {
+        if (host.unlockAudio) host.unlockAudio();
+    });
+    ui.alertAct.addEventListener('click', function () {
+        if (alertRun) alertRun();
     });
     ui.close.addEventListener('click', function () { host.collapse(); });
     el.addEventListener('keydown', function (e) {
@@ -874,6 +1040,8 @@
         if (pending && phase !== 'ready' && !ACTIVE[phase]) view = PHASE_VIEW.starting;
         // Ready, but Twilio cannot ring this phone (anchor re-registering).
         if (phase === 'ready' && snap && snap.canReceive === false) view = READY_NOT_RECEIVING;
+        // Between calls an error kind names the problem.
+        if (!ACTIVE[phase] && phase !== 'incoming' && ERROR_VIEW[errKind()]) view = ERROR_VIEW[errKind()];
         el.style.setProperty('--dl-dot', view.dot);
         el.setAttribute('data-phase', phase);
         ui.statusLabel.textContent = view.label;
@@ -882,8 +1050,15 @@
         if (pending && phase === 'ready') {
             var req = pending.req;
             pending = null;
-            host.send('dial', req);
+            send('dial', req);
         }
+
+        var m = snap && snap.missedUnseen;
+        if (m && m.count > 0 && m.last) missedCaller = m.last;
+        renderAlert();
+        renderRefused();
+        renderAlerts();
+        ui.remote.hidden = !isRemote();
 
         // Every snapshot sets all three views, so the panel can never stay on
         // Dial while the anchor is on a call.
@@ -918,6 +1093,58 @@
             }
         }
         syncCallButton();
+    }
+
+    // Error banner (snap.error.kind): one action. In a remote tab the phone
+    // cannot be reloaded from here, so Reload / Retry stay in the phone tab.
+    function renderAlert() {
+        var kind = errKind();
+        var live = isActive() || isIncoming();
+        var remote = isRemote();
+        var a = null;
+        if (kind === 'mic') {
+            a = { tone: 'red', title: 'Microphone blocked', text: 'Click the lock icon in the address bar › Allow microphone › reload', act: 'Reload', run: host.reloadPhone, phone: true };
+        } else if (kind === 'session') {
+            a = { tone: 'amber', title: 'Your NetSuite session ended. Sign in again in this tab.', text: '', act: 'Sign in', run: host.signIn };
+        } else if (kind === 'twilio') {
+            a = { tone: 'red', title: 'Phone error', text: String((snap.error && snap.error.message) || ''), act: 'Retry', run: host.reloadPhone, phone: true };
+        }
+        ui.alert.hidden = !a;
+        alertRun = null;
+        if (!a) return;
+        ui.alert.setAttribute('data-tone', a.tone);
+        ui.alertTitle.textContent = a.title;
+        ui.alertText.textContent = a.text;
+        ui.alertText.hidden = !a.text;
+        var canRun = typeof a.run === 'function' && !(a.phone && (remote || live));
+        ui.alertAct.hidden = !canRun;
+        ui.alertAct.textContent = a.act;
+        if (canRun) alertRun = a.run;
+    }
+
+    // A request of ours the anchor refused: one muted line for 4 s, once.
+    function renderRefused() {
+        var r = snap && snap.refused;
+        if (!r || !r.nonce || !ownNonces[r.nonce]) return;
+        delete ownNonces[r.nonce];
+        var text = REFUSED_TEXT[r.reason];
+        if (!text) return;
+        ui.refused.textContent = text;
+        ui.refused.hidden = false;
+        window.clearTimeout(refusedTimer);
+        refusedTimer = window.setTimeout(function () { ui.refused.hidden = true; }, REFUSED_SHOW_MS);
+    }
+
+    // Call alerts (browser notifications) line under the header. The
+    // button only in the shell tab: its click is the gesture the shell
+    // needs to ask for permission.
+    function renderAlerts() {
+        var notify = snap && snap.notify;
+        var ask = host.mode === 'shell' && notify === 'default';
+        var off = notify === 'denied';
+        ui.alertsBtn.hidden = !ask;
+        ui.alertsOff.hidden = !off;
+        ui.alerts.hidden = !ask && !off;
     }
 
     function focusPanel(what) {

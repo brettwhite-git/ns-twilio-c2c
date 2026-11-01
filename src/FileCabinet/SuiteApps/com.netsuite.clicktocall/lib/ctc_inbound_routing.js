@@ -17,6 +17,19 @@
  *   answered_n: DialCallStatus == completed → end, else → no_answer
  *   split_dialed noMatch → no_answer (say-play message)
  *
+ * Voicemail (voicemailOn, default on): no_answer is the greeting, then
+ *   no_answer ─audioComplete─▶ voicemail (record-voicemail, max length
+ *   voicemailMaxSeconds, finish on '#', beep, trim silence, transcribe
+ *   false) ─recordingComplete / noAudio─▶ voicemail_goodbye (say-play)
+ *   voicemail ─hangup─▶ end (the caller hung up after the message; Twilio
+ *   keeps the recording).
+ * Unrouted numbers (split_dialed noMatch) and a flow with no routes take
+ * the same path. Twilio attaches the voicemail recording to the caller's
+ * (parent) call. Legacy <Record> transcription stays off: Conversational
+ * Intelligence transcribes the recording like a call recording, and the
+ * poller reads it (lib/ctc_call_reconcile logs the Phone Call).
+ * With voicemail off, no_answer plays and the call ends (as before).
+ *
  * Inbound recording (recordInbound): every ring_n has `record: true`.
  * Studio's Connect Call To exposes only this boolean (no channel or trim
  * option). Twilio attaches the recording to the PARENT call (the caller's
@@ -46,6 +59,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
     // Grid for the Studio canvas.
     const COL_WIDTH = 400;
     const ROW_HEIGHT = 220;
+
+    const VOICEMAIL_GOODBYE = 'Thank you for your message. Goodbye.';
+    // Seconds of silence that end a voicemail (Studio default 5).
+    const VOICEMAIL_SILENCE_SECONDS = 5;
 
     const TRIGGER_EVENTS_WITHOUT_NEXT = [
         'incomingMessage',
@@ -147,10 +164,14 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
      * @param {Array<{phoneNumber: string, employeeId: string}>} routes
      * @param {{ringSeconds: number, noAnswerMessage: string,
      *          recordInbound?: boolean, recordingNoticeOn?: boolean,
-     *          recordingNotice?: string}} opts
+     *          recordingNotice?: string, voicemailOn?: boolean,
+     *          voicemailMaxSeconds?: number}} opts
      *   recordInbound sets `record: true` on every ring widget (default
      *   false). recordingNoticeOn adds the recording_notice say-play; it
      *   applies only when recordInbound is on and there are routes.
+     *   voicemailOn (default false here; the config default is on) adds
+     *   the voicemail + voicemail_goodbye widgets after no_answer.
+     *   voicemailMaxSeconds is clamped to 30-300 (default 120).
      */
     const buildFlowDefinition = (routes, opts) => {
         const list = Array.isArray(routes) ? routes : [];
@@ -158,7 +179,15 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
             throw new Error('too_many_routes: ' + list.length + ' routes; the limit is ' + MAX_ROUTES);
         }
         const ringSeconds = (opts && opts.ringSeconds) || config.DEFAULT_RING_SECONDS || 20;
-        const message = (opts && opts.noAnswerMessage) || config.DEFAULT_NOANSWER_MESSAGE || '';
+        const voicemailOn = !!(opts && opts.voicemailOn === true);
+        const message = (opts && opts.noAnswerMessage) ||
+            (voicemailOn ? config.DEFAULT_VOICEMAIL_GREETING : config.DEFAULT_NOANSWER_MESSAGE) || '';
+        const maxRaw = parseInt(String((opts && opts.voicemailMaxSeconds) || ''), 10);
+        const minVm = config.MIN_VOICEMAIL_MAX_SECONDS || 30;
+        const maxVm = config.MAX_VOICEMAIL_MAX_SECONDS || 300;
+        const voicemailMaxSeconds = isNaN(maxRaw)
+            ? (config.DEFAULT_VOICEMAIL_MAX_SECONDS || 120)
+            : Math.min(Math.max(maxRaw, minVm), maxVm);
         const recordCalls = !!(opts && opts.recordInbound === true);
         const notice = (opts && opts.recordingNotice) || config.DEFAULT_RECORDING_NOTICE || '';
 
@@ -255,16 +284,52 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
             });
         });
 
+        const noAnswerY = hasRoutes ? ROW_HEIGHT * (row0 + 4) : ROW_HEIGHT;
         states.push({
             name: 'no_answer',
             type: 'say-play',
-            transitions: [{ event: 'audioComplete' }],
+            transitions: [voicemailOn ? { next: 'voicemail', event: 'audioComplete' }
+                                      : { event: 'audioComplete' }],
             properties: {
-                offset: { x: 0, y: hasRoutes ? ROW_HEIGHT * (row0 + 4) : ROW_HEIGHT },
+                offset: { x: 0, y: noAnswerY },
                 loop: 1,
                 say: message
             }
         });
+
+        if (voicemailOn) {
+            // Studio Record Voicemail widget. Property names as in Studio
+            // flow JSON: play_beep is the string 'true'; trim is
+            // 'trim-silence' | 'do-not-trim'; timeout = seconds of silence.
+            states.push({
+                name: 'voicemail',
+                type: 'record-voicemail',
+                transitions: [
+                    { next: 'voicemail_goodbye', event: 'recordingComplete' },
+                    { next: 'voicemail_goodbye', event: 'noAudio' },
+                    { event: 'hangup' }
+                ],
+                properties: {
+                    offset: { x: 0, y: noAnswerY + ROW_HEIGHT },
+                    timeout: VOICEMAIL_SILENCE_SECONDS,
+                    max_length: voicemailMaxSeconds,
+                    finish_on_key: '#',
+                    play_beep: 'true',
+                    trim: 'trim-silence',
+                    transcribe: false
+                }
+            });
+            states.push({
+                name: 'voicemail_goodbye',
+                type: 'say-play',
+                transitions: [{ event: 'audioComplete' }],
+                properties: {
+                    offset: { x: 0, y: noAnswerY + ROW_HEIGHT * 2 },
+                    loop: 1,
+                    say: VOICEMAIL_GOODBYE
+                }
+            });
+        }
 
         return {
             description: 'CTC inbound routing: generated by NetSuite Click-to-Call. ' +
@@ -320,7 +385,9 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
             noAnswerMessage: cfg.noAnswerMessage,
             recordInbound: cfg.recordInbound === true,
             recordingNoticeOn: cfg.recordingNoticeOn === true,
-            recordingNotice: cfg.recordingNotice
+            recordingNotice: cfg.recordingNotice,
+            voicemailOn: cfg.voicemailOn === true,
+            voicemailMaxSeconds: cfg.voicemailMaxSeconds
         });
 
         const flow = twilio.upsertStudioFlow(cfg, cfg.studioFlowSid, definition, FLOW_FRIENDLY_NAME);

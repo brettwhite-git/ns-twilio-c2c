@@ -48,5 +48,22 @@ define([], () => {
      */
     const safeJsonEmbed = (val) => JSON.stringify(val).replace(/</g, '\\u003c');
 
-    return { escapeHtml, escapeJs, safeJsonEmbed };
+    /**
+     * Tell the browser never to cache a Suitelet page (Cache-Control
+     * no-store, Pragma no-cache). The phone mode shell and the softphone
+     * must always load fresh after a sign-in. A header the runtime refuses
+     * never breaks the page.
+     * @param {{setHeader: Function}} response - Suitelet context.response
+     */
+    const setNoStoreHeaders = (response) => {
+        [['Cache-Control', 'no-store, max-age=0'], ['Pragma', 'no-cache']].forEach((h) => {
+            try {
+                response.setHeader({ name: h[0], value: h[1] });
+            } catch (e) {
+                // Header not allowed or no setHeader: serve the page anyway.
+            }
+        });
+    };
+
+    return { escapeHtml, escapeJs, safeJsonEmbed, setNoStoreHeaders };
 });

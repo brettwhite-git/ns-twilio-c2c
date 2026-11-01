@@ -1,5 +1,6 @@
 <customrecordtype scriptid="customrecord_ctc_proposed_task">
     <recordname>CTC Proposed Task</recordname>
+    <allowuiaccess>F</allowuiaccess>
     <includename>T</includename>
     <accesstype>NONENEEDED</accesstype>
     <allowattachments>F</allowattachments>

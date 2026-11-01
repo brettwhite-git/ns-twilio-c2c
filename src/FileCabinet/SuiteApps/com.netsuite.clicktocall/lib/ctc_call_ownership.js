@@ -25,13 +25,14 @@
 define(['N/search', 'N/log', './ctc_config', './ctc_twilio_admin'],
        (search, log, ctcConfig, twilioAdmin) => {
 
+    // A Twilio `from` that is a phone number (E.164, optional +).
+    const PHONE_NUMBER_RE = /^\+?[0-9]{7,15}$/;
+
     /**
      * Look up phone numbers assigned to a user via customrecord_ctc_rep_assignment.
-     * Used by verifyCallOwnership to authorize logCall/checkTranscript on the
-     * Twilio call's `from` value. Returns an array of E.164 strings (empty if no
-     * assignments). Never throws — failed lookup falls back to "no assignments,"
-     * letting the cfg.phoneNumber fallback inside verifyCallOwnership cover the
-     * pre-rep-assignment install state.
+     * Returns an array of E.164 strings (empty if no assignments). Never
+     * throws. No longer used by verifyCallOwnership (2026-11-01: a caller
+     * ID does not prove who placed a call); kept as an export.
      */
     const getUserAssignedPhones = (userId) => {
         try {
@@ -61,16 +62,17 @@ define(['N/search', 'N/log', './ctc_config', './ctc_twilio_admin'],
      * a body-supplied (or orphan-persisted) callSid with the
      * authenticated user before allowing record mutations against it.
      *
-     * Authorization model: the Twilio call's `from` (E.164 or
-     * `client:<userId>`) must match either
-     *   (a) the WebRTC client identity `client:<userId>` — strongest
-     *       binding; CRIT-1 already enforces that the JWT identity
-     *       is the session user's ID
-     *   (b) a phone number assigned to userId via
-     *       customrecord_ctc_rep_assignment
-     *   (c) cfg.phoneNumber — the install-wide caller-ID, used as a
-     *       fallback for installs that haven't set up per-rep
-     *       assignments yet
+     * Outbound authorization model (tightened 2026-11-01): the call must
+     * come from this user's browser phone.
+     *   (a) the leg's `from` is the WebRTC client identity
+     *       `client:<userId>` (CRIT-1 ties the JWT identity to the session
+     *       user) — the browser leg the softphone reports; or
+     *   (b) the leg's `from` is a phone number (the dialed child leg of a
+     *       TwiML <Dial>, from = caller ID): its `parent_call_sid` is
+     *       fetched and the parent's `from` must be `client:<userId>`.
+     * A caller ID alone no longer proves ownership: every rep shares the
+     * config caller ID, and assigned numbers can be shared too, so any
+     * rep could claim another rep's call by its SID.
      *
      * Inbound (direction === 'inbound', spike): Twilio rang the browser
      * phone, so the callSid is the leg Twilio dialed to the client. Its
@@ -129,28 +131,47 @@ define(['N/search', 'N/log', './ctc_config', './ctc_twilio_admin'],
             return { ok: false, reason: 'NOT_CALL_OWNER', callTo: callTo };
         }
 
-        // For outbound WebRTC calls, Twilio's `from` is the calling
-        // client's JWT identity in the form `client:<identity>` — not
-        // a phone number — unless the TwiML response explicitly set
-        // `callerId="+15551234567"` on its <Dial>. We accept either
-        // path; see ctc_rl_token.js original implementation comments
-        // for the full reasoning.
+        // Outbound (a): the browser leg itself.
         if (callFrom === expectedClientIdentity) {
             return { ok: true, call: twilioResult.call };
         }
 
-        const allowedPhones = getUserAssignedPhones(userId);
-        if (cfg.phoneNumber) allowedPhones.push(cfg.phoneNumber);
-        if (allowedPhones.indexOf(callFrom) !== -1) {
-            return { ok: true, call: twilioResult.call };
+        // Outbound (b): a dialed child leg (from = caller ID). Its parent
+        // must be this user's browser leg.
+        const parentSid = String((twilioResult.call && twilioResult.call.parent_call_sid) || '');
+        if (PHONE_NUMBER_RE.test(callFrom) && /^CA[a-zA-Z0-9]{32}$/.test(parentSid)) {
+            const parentResult = twilioAdmin.getCall(cfg, parentSid);
+            if (!parentResult.ok) {
+                log.audit({
+                    title: 'CTC verifyCallOwnership — parent lookup failed',
+                    details: 'callSid=' + callSid + ' parentSid=' + parentSid +
+                             ' userId=' + userId + ' status=' + parentResult.status
+                });
+                return {
+                    ok: false,
+                    reason: parentResult.status === 404 ? 'CALL_NOT_FOUND' : 'TWILIO_LOOKUP_FAILED',
+                    twilioStatus: parentResult.status
+                };
+            }
+            const parentFrom = String((parentResult.call && parentResult.call.from) || '');
+            if (parentFrom === expectedClientIdentity) {
+                return { ok: true, call: twilioResult.call };
+            }
+            log.audit({
+                title: 'CTC verifyCallOwnership — parent caller mismatch',
+                details: 'callSid=' + callSid + ' parentSid=' + parentSid +
+                         ' userId=' + userId + ' parentFrom=' + parentFrom +
+                         ' expectedClient=' + expectedClientIdentity
+            });
+            return { ok: false, reason: 'NOT_CALL_OWNER', callFrom: callFrom };
         }
 
         log.audit({
-            title: 'CTC verifyCallOwnership — caller-ID mismatch',
+            title: 'CTC verifyCallOwnership — caller mismatch',
             details: 'callSid=' + callSid + ' userId=' + userId +
                      ' callFrom=' + callFrom +
-                     ' expectedClient=' + expectedClientIdentity +
-                     ' allowedPhones=' + allowedPhones.length
+                     ' parentSid=' + (parentSid || '-') +
+                     ' expectedClient=' + expectedClientIdentity
         });
         return { ok: false, reason: 'NOT_CALL_OWNER', callFrom: callFrom };
     };

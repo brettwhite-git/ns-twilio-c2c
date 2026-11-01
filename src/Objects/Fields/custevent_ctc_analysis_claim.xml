@@ -1,0 +1,9 @@
+<crmcustomfield scriptid="custevent_ctc_analysis_claim">
+    <label>Analysis claim</label>
+    <fieldtype>CLOBTEXT</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>HIDDEN</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>2</searchlevel>
+    <description>Written only by lib/ctc_call_claim.js: "ISO-8601 UTC claim time|claim count" while the browser or the poller analyses the call; emptied by the enrichment save. The poller releases a claim older than 30 minutes (at most 3 times).</description>
+</crmcustomfield>

@@ -5,9 +5,12 @@
  * Server contract (ctc_sl_wizard_api.js):
  *   wizardLoadInbound    {} → {ok, inboundEnabled, ringSeconds, noAnswerMessage,
  *                              recordInbound, recordingNoticeOn, recordingNotice,
+ *                              voicemailOn, voicemailMaxSeconds, fallbackOwnerId,
+ *                              employees:[{id, name}],
  *                              flowSid, publishedAt, routes:[...]}
  *   wizardSaveInbound    {inboundEnabled, ringSeconds, noAnswerMessage,
- *                         recordInbound, recordingNoticeOn, recordingNotice}
+ *                         recordInbound, recordingNoticeOn, recordingNotice,
+ *                         voicemailOn, voicemailMaxSeconds, fallbackOwnerId}
  *                          → {ok:true, settings, publish} | {ok:false, message}
  *   wizardPublishRouting {} → {ok:true, publish}
  */
@@ -17,6 +20,7 @@ import {Action} from '../Action';
 import {wizardCall} from '../../services/wizardApi';
 import type {
     AppState,
+    InboundEmployee,
     InboundPublishResult,
     InboundRoute,
     InboundSettings
@@ -43,6 +47,7 @@ export async function loadInbound(): Promise<void> {
                 flowSid?: string;
                 publishedAt?: string;
                 routes?: InboundRoute[];
+                employees?: InboundEmployee[];
             }) | null;
         if (!result || result.ok !== true) {
             store.dispatch(Action.inboundLoadFailure(
@@ -57,6 +62,12 @@ export async function loadInbound(): Promise<void> {
             recordInbound: result.recordInbound !== false,
             recordingNoticeOn: result.recordingNoticeOn === true,
             recordingNotice: result.recordingNotice || '',
+            voicemailOn: result.voicemailOn !== false,
+            voicemailMaxSeconds: Number(result.voicemailMaxSeconds) || 120,
+            fallbackOwnerId: result.fallbackOwnerId ? String(result.fallbackOwnerId) : '',
+            employees: Array.isArray(result.employees)
+                ? result.employees.map((e) => ({ id: String(e.id), name: String(e.name || '') }))
+                : [],
             flowSid: result.flowSid || '',
             publishedAt: result.publishedAt || '',
             routes: Array.isArray(result.routes) ? result.routes : []
@@ -77,7 +88,10 @@ export async function saveInbound(): Promise<void> {
         noAnswerMessage: inbound.noAnswerMessage,
         recordInbound: inbound.recordInbound,
         recordingNoticeOn: inbound.recordingNoticeOn,
-        recordingNotice: inbound.recordingNotice
+        recordingNotice: inbound.recordingNotice,
+        voicemailOn: inbound.voicemailOn,
+        voicemailMaxSeconds: inbound.voicemailMaxSeconds,
+        fallbackOwnerId: inbound.fallbackOwnerId
     };
     store.dispatch(Action.inboundSave({ phase: 'start' }));
     try {

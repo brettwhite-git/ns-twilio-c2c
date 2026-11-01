@@ -1,7 +1,8 @@
 /**
  * Inbound calls page — JSX.
  *
- * Settings (Switch, ring-time Dropdown, no-answer TextArea, recording
+ * Settings (Switch, ring-time Dropdown, no-answer TextArea, voicemail
+ * Switch + length Dropdown, fallback-owner Dropdown, recording
  * Switches + notice TextArea) plus
  * "Save & publish", a publish status line, and a read-only DataGrid of
  * the routing (number → primary rep). Form controls are JSX so the
@@ -25,10 +26,21 @@ import {buildPhoneStatusCell} from '../shared/phoneStatus';
 
 export const DEFAULT_NO_ANSWER_MESSAGE =
     'Sorry, no one is available to take your call. Please try again later. Goodbye.';
+export const DEFAULT_VOICEMAIL_GREETING =
+    'Sorry, no one is available. Please leave a message after the tone.';
+/** Voicemail length choices (seconds), inside the server's 30-300 range. */
+export const VOICEMAIL_SECONDS = [30, 60, 120, 180, 300];
 export const NO_ANSWER_MAX_LENGTH = 300;
 export const DEFAULT_RECORDING_NOTICE = 'This call may be recorded for quality and training.';
 export const RECORDING_NOTICE_MAX_LENGTH = 300;
 const RING_SECONDS = [10, 15, 20, 25, 30, 45, 60];
+
+/** '30 seconds', '1 minute', '2 minutes', '90 seconds'. */
+export const voicemailLengthLabel = (seconds: number): string => {
+    if (seconds % 60 !== 0) return seconds + ' seconds';
+    const minutes = seconds / 60;
+    return minutes + (minutes === 1 ? ' minute' : ' minutes');
+};
 
 interface CellArgs {
     cell?: { row?: { dataItem?: InboundRoute } };
@@ -165,7 +177,7 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
             <component.Text type={component.Text.Type.STRONG}>No-answer message</component.Text>,
             <component.TextArea
                 text={inbound.noAnswerMessage}
-                placeholder={DEFAULT_NO_ANSWER_MESSAGE}
+                placeholder={inbound.voicemailOn ? DEFAULT_VOICEMAIL_GREETING : DEFAULT_NO_ANSWER_MESSAGE}
                 maxLength={NO_ANSWER_MAX_LENGTH}
                 rowCount={3}
                 onTextChanged={(args: { text?: string } | undefined): void => {
@@ -175,6 +187,61 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
                 }}
                 rootStyle={{width: '100%'} as never}
             />
+        ]);
+
+        const vmOptions = VOICEMAIL_SECONDS.indexOf(inbound.voicemailMaxSeconds) >= 0
+            ? VOICEMAIL_SECONDS
+            : VOICEMAIL_SECONDS.concat([inbound.voicemailMaxSeconds]).sort((x, y) => x - y);
+        const vmDs = new core.ArrayDataSource(
+            vmOptions.map((n) => ({ value: n, label: voicemailLengthLabel(n) }))
+        );
+        const voicemail = vstack(component.StackPanel.GapSize.S, [
+            vstack(component.StackPanel.GapSize.XXS, [
+                <component.Switch
+                    label="Voicemail"
+                    value={inbound.voicemailOn}
+                    action={(args: { value?: boolean }): void => {
+                        store.dispatch(Action.inboundFieldChange({ voicemailOn: !!(args && args.value) }));
+                    }}
+                />,
+                weak(inbound.voicemailOn
+                    ? 'After the no-answer message, callers can leave a voicemail. It is transcribed and logged as a Phone Call.'
+                    : 'Off: callers hear the no-answer message and the call ends.')
+            ]),
+            vstack(component.StackPanel.GapSize.XXS, [
+                <component.Text type={component.Text.Type.STRONG}>Longest voicemail</component.Text>,
+                <component.Dropdown
+                    dataSource={vmDs as never}
+                    valueMember="value"
+                    displayMember="label"
+                    selectedValue={inbound.voicemailMaxSeconds}
+                    enabled={inbound.voicemailOn}
+                    onSelectionChanged={(args: { value?: unknown }): void => {
+                        const n = Number(args && args.value);
+                        if (n > 0) store.dispatch(Action.inboundFieldChange({ voicemailMaxSeconds: n }));
+                    }}
+                    rootStyle={{width: '200px'} as never}
+                />
+            ])
+        ]);
+
+        const ownerChoices = [{ value: '', label: 'Not set' }].concat(
+            inbound.employees.map((e) => ({ value: e.id, label: e.name }))
+        );
+        const fallbackOwner = vstack(component.StackPanel.GapSize.XXS, [
+            <component.Text type={component.Text.Type.STRONG}>Unrouted calls and voicemails go to</component.Text>,
+            <component.Dropdown
+                dataSource={new core.ArrayDataSource(ownerChoices) as never}
+                valueMember="value"
+                displayMember="label"
+                selectedValue={inbound.fallbackOwnerId}
+                onSelectionChanged={(args: { value?: unknown }): void => {
+                    const v = args && args.value != null ? String(args.value) : '';
+                    store.dispatch(Action.inboundFieldChange({ fallbackOwnerId: v }));
+                }}
+                rootStyle={{width: '320px'} as never}
+            />,
+            weak('Also used when a number has no rep, or its rep is inactive. Not set: those calls are not logged.')
         ]);
 
         const showNotice = inbound.recordInbound && inbound.recordingNoticeOn;
@@ -238,6 +305,8 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
                     item(inboundSwitch),
                     item(ringTime),
                     item(message),
+                    item(voicemail),
+                    item(fallbackOwner),
                     item(recording),
                     item(saveButton as never),
                     item(inbound.saveError ? <ErrorText message={inbound.saveError} /> : false),

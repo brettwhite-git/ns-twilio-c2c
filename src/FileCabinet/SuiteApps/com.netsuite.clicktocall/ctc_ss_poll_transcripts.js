@@ -6,11 +6,17 @@
  * Polls NetSuite for unprocessed Phone Call records (processed=false, call_sid not empty),
  * fetches transcripts via Twilio Conversational Intelligence, runs AI analysis with N/llm,
  * updates Phone Call activity records, and deletes processed recordings.
- * Last, it reconciles Twilio calls the browser never logged
- * (lib/ctc_call_reconcile: missed inbound, too short, cut off).
+ *
+ * Two deployments, picked by the script parameter custscript_ctc_poll_mode:
+ *   - 'transcripts' (customdeploy_ctc_ss_poll; also when empty): Phases
+ *     A-C (recording cleanup, orphan retry, transcript analysis).
+ *   - 'reconcile' (customdeploy_ctc_ss_poll_recon): Phase D only, Twilio
+ *     calls the browser never logged (lib/ctc_call_reconcile: missed
+ *     inbound, too short, cut off). Its own deployment gives it its own
+ *     governance budget: after Phases A-C it often had too little left.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile) => {
+define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile', './lib/ctc_call_claim'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile, callClaim) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. Use API Key SecureString path.
@@ -30,7 +36,25 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
     // governance unit is the standard ceiling — see SAFE Guide §2.
     const GOVERNANCE_THRESHOLD = 1000;
     const SCRIPT_ID = 'customscript_ctc_ss_poll';
+    // The transcripts deployment. Only that mode yields and resumes.
     const DEPLOY_ID = 'customdeploy_ctc_ss_poll';
+    const MODE_PARAM = 'custscript_ctc_poll_mode';
+    const MODE = { TRANSCRIPTS: 'transcripts', RECONCILE: 'reconcile' };
+
+    /**
+     * The deployment's poll mode, lower case. Empty or unreadable →
+     * 'transcripts' (the original deployment has always run Phases A-C).
+     * @returns {string}
+     */
+    const readMode = () => {
+        let raw = '';
+        try {
+            raw = runtime.getCurrentScript().getParameter({ name: MODE_PARAM });
+        } catch (e) {
+            raw = '';
+        }
+        return String(raw || '').trim().toLowerCase() || MODE.TRANSCRIPTS;
+    };
 
     // Sprint 2 review #12 — lifted to module scope. Pre-fix this
     // was redeclared on every execute() invocation. TERMINAL_STATUSES
@@ -369,6 +393,7 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
 
     const updatePhoneCallRecord = (recordId, recording, config, transcriptText, analysis) => {
         const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: recordId, isDynamic: true });
+        callClaim.clearClaimOnRecord(phoneCall);
         utils.writePhoneCallEnrichmentFields(phoneCall, {
             recording: recording,
             accountSid: config.accountSid,
@@ -383,6 +408,7 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
     const OUTCOME = {
         PROCESSED: 'processed',          // enriched, status Transcribed
         PENDING: 'pending',              // Twilio may still deliver; poll again
+        ALREADY_DONE: 'alreadyDone',     // the browser analysed or is analysing it
         NO_TRANSCRIPT: 'noTranscript',   // Twilio never will; close the call
         TRANSIENT: 'transient'           // Twilio unreachable; status untouched
     };
@@ -439,6 +465,15 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             return utils.transcriptWaitExpired(recording) ? OUTCOME.NO_TRANSCRIPT : OUTCOME.PENDING;
         }
 
+        // Claim the call before the LLM so the browser's checkTranscript
+        // does not analyse it too (lib/ctc_call_claim). After the claim,
+        // an error reaches execute()'s catch, which writes Failed +
+        // processed F: that releases the claim for the next cycle.
+        const claim = callClaim.claimForAnalysis(call.recordId);
+        if (!claim.ok) {
+            return claim.reason === 'claim_failed' ? OUTCOME.TRANSIENT : OUTCOME.ALREADY_DONE;
+        }
+
         const sentences = utils.fetchSentences(transcript.sid, ctx.authHeader);
         const transcriptText = utils.formatTranscript(sentences, { inbound: !!call.inbound });
 
@@ -469,7 +504,10 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         return OUTCOME.PROCESSED;
     };
 
-    const execute = () => {
+    /**
+     * 'transcripts' mode: Phases A-C.
+     */
+    const runTranscripts = () => {
         // Sprint 2 review #7 — counters for all three passes, exposed
         // in the final audit message so admins can see when retry
         // passes are doing work or stuck.
@@ -477,19 +515,19 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         let skipped = 0;        // still waiting on Twilio — polled again next cycle
         let noTranscript = 0;   // closed this cycle: Twilio will never transcribe
         let transient = 0;      // Twilio unreachable — retried next cycle
-        let alreadyDone = 0;    // terminal at lookup (another path finished it)
+        let alreadyDone = 0;    // terminal at lookup, or claimed / finished by the browser
         let errors = 0;
         let cleanupResolved = 0;
         let cleanupTransient = 0;
         let orphanResolved = 0;
         let orphanFailed = 0;
         let orphanRejected = 0;
-        let config = null;
-        let authHeader = null;
+        let staleReleased = 0;
+        let staleGaveUp = 0;
 
         try {
-            config = loadConfig();
-            authHeader = buildSecureAuthHeader(config);
+            const config = loadConfig();
+            const authHeader = buildSecureAuthHeader(config);
             const hasLlmQuota = llmAnalysis.hasQuota();
 
             if (!hasLlmQuota) {
@@ -556,6 +594,25 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             }
 
             // ─────────────────────────────────────────────────────
+            // Phase C0 — stale analysis claims (lib/ctc_call_claim).
+            // A claim over 30 min old with no AI summary goes back to
+            // Logged + processed F, so the search below retries it in
+            // this run. Own try/catch: never blocks Phase C. Bounded
+            // (≤ 20 rows, one search + ≤ 20 submitFields ≈ 50 units), so
+            // no yield check: Phase C's own check follows.
+            // ─────────────────────────────────────────────────────
+            try {
+                const nowMs = Date.now();
+                for (const claimed of callClaim.findClaimedCalls()) {
+                    const res = callClaim.releaseStaleClaim(claimed, nowMs);
+                    if (res === 'released') staleReleased++;
+                    else if (res === 'gaveUp') staleGaveUp++;
+                }
+            } catch (e) {
+                log.error({ title: 'CTC Stale Claim Pass Error', details: (e && e.message) || String(e) });
+            }
+
+            // ─────────────────────────────────────────────────────
             // Phase C — main unprocessed-call processing
             // (U1 race-window guard + U2 governance yield)
             // ─────────────────────────────────────────────────────
@@ -611,6 +668,8 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                     const outcome = checkCall(call, ctx);
                     if (outcome === OUTCOME.PROCESSED) {
                         processed++;
+                    } else if (outcome === OUTCOME.ALREADY_DONE) {
+                        alreadyDone++;
                     } else if (outcome === OUTCOME.TRANSIENT) {
                         transient++;
                     } else if (outcome === OUTCOME.NO_TRANSCRIPT) {
@@ -633,41 +692,58 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             log.error({ title: 'CTC Poll Execute Error', details: e.message || e });
         }
 
-        // ─────────────────────────────────────────────────────
-        // Phase D — Twilio call reconciliation. Runs last, with its own
-        // governance budget (see lib/ctc_call_reconcile) and its own
-        // try/catch: a failure here never touches the passes above.
-        // ─────────────────────────────────────────────────────
-        let recon = null;
-        let reconCrashed = false;
-        if (config && authHeader) {
-            try {
-                recon = callReconcile.reconcileCalls({ config, authHeader });
-            } catch (e) {
-                reconCrashed = true;
-                log.error({ title: 'CTC Reconcile Error', details: (e && e.message) || String(e) });
-            }
-        }
-        const rc = recon || {};
-        const rcCreated = rc.created || {};
-        const reconSummary = `recon(seen=${rc.seen || 0}, existing=${rc.existing || 0}, ` +
-            `created(missed=${rcCreated.missed || 0}, tooShort=${rcCreated.tooShort || 0}, ` +
-            `noAnswer=${rcCreated.noAnswer || 0}, logged=${rcCreated.logged || 0}), ` +
-            `skipped=${rc.skipped || 0}, errors=${(rc.errors || 0) + (reconCrashed ? 1 : 0)}, ` +
-            `complete=${rc.complete === true}${rc.stopped ? `, stopped=${rc.stopped}` : ''})`;
-
-        // Sprint 2 review #7 — audit summary now includes ALL three
+        // Sprint 2 review #7 — audit summary includes ALL three
         // passes. Admins see at a glance whether retry passes did
-        // work this cycle, vs only the main loop. Pre-fix, the
-        // summary only reported the main loop's counters, masking
-        // silent retry failures.
+        // work this cycle, vs only the main loop.
         log.audit({
             title: 'CTC Poll Complete',
             details: `main(processed=${processed}, skipped=${skipped}, noTranscript=${noTranscript}, ` +
                      `transient=${transient}, alreadyDone=${alreadyDone}, errors=${errors}) ` +
                      `cleanup(resolved=${cleanupResolved}, transient=${cleanupTransient}) ` +
                      `orphan(resolved=${orphanResolved}, failed=${orphanFailed}, rejected=${orphanRejected}) ` +
-                     reconSummary
+                     `stale(released=${staleReleased}, gaveUp=${staleGaveUp})`
+        });
+    };
+
+    /**
+     * 'reconcile' mode: Phase D only — Twilio call reconciliation, with
+     * its own governance budget (see lib/ctc_call_reconcile). It does not
+     * yield or resume: the next 15-minute run continues from the
+     * watermark.
+     */
+    const runReconcile = () => {
+        let recon = null;
+        let reconCrashed = false;
+        try {
+            const config = loadConfig();
+            const authHeader = buildSecureAuthHeader(config);
+            if (config && authHeader) {
+                recon = callReconcile.reconcileCalls({ config, authHeader });
+            }
+        } catch (e) {
+            reconCrashed = true;
+            log.error({ title: 'CTC Reconcile Error', details: (e && e.message) || String(e) });
+        }
+        const rc = recon || {};
+        const rcCreated = rc.created || {};
+        log.audit({
+            title: 'CTC Poll Complete',
+            details: `recon(seen=${rc.seen || 0}, existing=${rc.existing || 0}, ` +
+                `created(missed=${rcCreated.missed || 0}, tooShort=${rcCreated.tooShort || 0}, ` +
+                `noAnswer=${rcCreated.noAnswer || 0}, logged=${rcCreated.logged || 0}, ` +
+                `voicemail=${rcCreated.voicemail || 0}), deferred=${rc.deferred || 0}, ` +
+                `skipped=${rc.skipped || 0}, errors=${(rc.errors || 0) + (reconCrashed ? 1 : 0)}, ` +
+                `complete=${rc.complete === true}${rc.stopped ? `, stopped=${rc.stopped}` : ''})`
+        });
+    };
+
+    const execute = () => {
+        const mode = readMode();
+        if (mode === MODE.TRANSCRIPTS) return runTranscripts();
+        if (mode === MODE.RECONCILE) return runReconcile();
+        log.error({
+            title: 'CTC Poll — unknown mode',
+            details: `${MODE_PARAM}=${mode}; expected ${MODE.TRANSCRIPTS} or ${MODE.RECONCILE}. Nothing done.`
         });
     };
 

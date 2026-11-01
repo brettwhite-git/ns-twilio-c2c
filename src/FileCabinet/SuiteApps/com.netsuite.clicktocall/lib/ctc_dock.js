@@ -24,38 +24,144 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '14';
+    const DOCK_ASSET_VERSION = '16';
 
+    // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
-    // shell's #ctc-phone-frame) and every dock. Message shapes (all carry v: 1):
-    //   dock → anchor: { type: 'hello' }
-    //                  { type: 'request', action: 'mute' | 'unmute' | 'hangup' }
-    //                  { type: 'request', action: 'digits', d }
-    //                  { type: 'request', action: 'dial', to, entityId, entityName, entityType, contactId, contactName }
-    //                  { type: 'request', action: 'setInput' | 'setOutput', id }  (refused during a call)
-    //                  { type: 'request', action: 'answer' | 'decline' }  (only while phase is 'incoming')
-    //   anchor → docks: { type: 'snapshot', snap: { phase, direction, caller, entityId, entityType,
-    //                     entityName, contactName, number, startedAt, muted, lastLog, audio,
-    //                     canReceive } }
-    // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'incoming' | 'connected' | 'error'
+    // shell's #ctc-phone-frame), the shell page itself and every dock, in
+    // every tab of this browser profile. Every message carries v: 1.
+    //
+    // ---- dock → anchor ----
+    //   { type: 'hello' }   asks for a snapshot (no origin / nonce needed)
+    //   { type: 'request', action, origin: 'dock', nonce, ...fields }
+    //     origin: always the string 'dock'.
+    //     nonce: a fresh random string per request, 8-64 chars of [A-Za-z0-9_-]
+    //       (use REQUEST_NONCE_PATTERN). The anchor drops a request without
+    //       both, or with a nonce it saw before (replay). A refused request
+    //       comes back as snap.refused with the same nonce (see below).
+    //   Actions:
+    //     'mute' | 'unmute' | 'hangup'
+    //     'digits'      { d }  one of 0-9 * #, only during a call (DTMF)
+    //     'dial'        { to, entityId, entityName, entityType, contactId, contactName }
+    //                   Refused ('busy') unless phase is 'ready'; refused
+    //                   ('invalid-number') unless to is a dialable E.164 / NANP
+    //                   number (+1NXXNXXXXXX, or + and 7-15 digits outside +1;
+    //                   10 / 11 digit NANP input is accepted and made +1);
+    //                   rate-limited per anchor page: one dial per 3 s
+    //                   ('rate'), 20 per rolling hour ('hourly-limit').
+    //     'setInput' | 'setOutput'  { id }  (refused during a call)
+    //     'answer' | 'decline'      (only while phase is 'incoming')
+    //     'markMissedSeen'          resets snap.missedUnseen to count 0
+    //     'takeover'                "Use phone here": see Multi-tab below
+    //     'unlockAudio'             handled by the SHELL, not the anchor: send
+    //                               it from a user gesture (click / key) in a
+    //                               top-level page of the shell tab (the dock in
+    //                               shell mode or the toast). The shell acts only
+    //                               while it has transient user activation, so
+    //                               a request from another tab does nothing.
+    //                               In the shell page prefer the direct call
+    //                               window.__ctcShell.unlockAudio() inside the
+    //                               click handler (same effect, no bus hop).
+    //                               Effect: resumes the phone frame's audio
+    //                               (ringtone may be blocked by autoplay until a
+    //                               gesture) and asks for Notification
+    //                               permission once (snap.notify).
+    //   BroadcastChannel cannot authenticate a sender: any same-origin page
+    //   can post these. origin / nonce / rate limits only stop accidents and
+    //   replays; server-side allow-listing of dialled numbers is the backstop
+    //   (future work).
+    //
+    // ---- anchor → docks ----
+    //   { type: 'snapshot', snap: { phase, direction, caller, callSid, entityId, entityType,
+    //     entityName, contactName, number, startedAt, muted, lastLog, audio, canReceive,
+    //     callWarning, audioUnlocked, notify, missedUnseen, error, refused } }
+    //   Sent on every state change and as the answer to 'hello'.
+    // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'incoming'
+    //        | 'connected' | 'reconnecting' | 'error' | 'moved'
     //   incoming: Twilio rings this phone (inbound). Docks show Answer / Decline.
+    //   reconnecting: a live call lost its media / signaling path and Twilio is
+    //     trying to restore it (Call 'reconnecting'). The call, timer and mute
+    //     state are kept; the phase goes back to 'connected' on 'reconnected'
+    //     (or the call ends). Treat it as a live call (End stays available).
+    //   moved: this anchor handed the phone to another tab ('takeover'); it is
+    //     unregistered and its frame is stopped next. The new tab's anchor
+    //     publishes its own snapshots ('starting' → 'ready') soon after.
+    //   Live phases (a call exists): dialing, ringing, incoming, connected, reconnecting.
     // direction: 'outbound' | 'inbound' (the current or last call)
     // caller: null | { number, name, entityId, entityType } for an inbound call; name and the
     //   entity fill in after the anchor's lookupCaller answer (a second snapshot).
+    // callSid: '' | the Twilio CallSid of the ringing or live call ('' until Twilio gives one).
     // lastLog: null | { status: 'saved' | 'skipped' | 'error' | 'missed', message, recordUrl }
     //   missed: an inbound call that stopped ringing before Answer ("Missed call from …").
     // canReceive: null (the token does not grant inbound) | true (Twilio can ring this phone:
     //   the device is registered) | false (inbound is on but the device is not registered;
     //   the anchor's watchdog is re-registering). A new snapshot goes out on every
     //   registration change. In the ready phase, false shows an amber dot ("reconnecting").
-    //
-    // Anchor → shell (not the bus): after Answer on a matched caller the anchor
-    // asks the shell to open the record in the NetSuite frame (screen-pop):
-    //   window.parent.postMessage({ v: 1, type: OPEN_RECORD_MESSAGE, path }, origin)
-    // The shell accepts it only from #ctc-phone-frame, same origin, and only an
-    // entity record path (/app/common/entity/custjob.nl|contact.nl?id=<digits>).
     // audio: null (no device yet) | { inputs: [{ id, label }], outputs: [{ id, label }],
     //        input, output, outputSupported }
+    // callWarning: '' | 'no-audio' | 'low-mic' | 'packet-loss' | 'high-rtt' | 'high-jitter'
+    //   | 'low-mos'. Call quality during a live call (Twilio Call 'warning' /
+    //   'warning-cleared'); the most severe active one, in that order. Cleared
+    //   on 'reconnected' and when the call ends. 'low-mic' = the mic sends a
+    //   constant level (often a hardware-muted mic); ignore it while muted.
+    // audioUnlocked: true once the shell tab had a user gesture (sticky
+    //   activation, a click in the shell, or 'unlockAudio'). false: the
+    //   ringtone may be silent (autoplay) — show "Turn on phone", which must
+    //   call window.__ctcShell.unlockAudio() / send 'unlockAudio' from the click.
+    // notify: 'default' | 'granted' | 'denied' | 'unsupported' — the shell
+    //   tab's Notification permission. Asked only from 'unlockAudio'.
+    // missedUnseen: { count, last, at } — inbound calls that stopped ringing
+    //   unanswered since the last 'markMissedSeen'. last: null | { name, number,
+    //   entityId, entityType } of the newest one; at: null | epoch ms of it.
+    //   Kept in the shell tab's sessionStorage (MISSED_STORAGE_KEY), so a
+    //   phone-frame restart keeps it; another tab starts at 0.
+    // error: { kind, code, message } — kind '' (no error) | 'mic' | 'session'
+    //   | 'network' | 'twilio' | 'not_enabled'. session: token fetch fails (NetSuite session
+    //   gone) or Twilio 20101 / 20104 / 31204-31206; mic: microphone permission
+    //   denied or Twilio 31208 / 31401; network: other Twilio 31xxx (signaling,
+    //   media) and register time-outs; twilio: any other Twilio code. code:
+    //   the Twilio code, the HTTP status for session, else 0; for not_enabled
+    //   the string ERROR_NOT_A_PHONE_USER ('not_a_phone_user'). message: short
+    //   diagnostic text (not UI copy). Cleared on recovery (token back,
+    //   registered, call accepted, permission granted). A device error during
+    //   a live call sets error but keeps the call and its phase.
+    //   not_enabled: the RESTlet refuses tokens for this user (not a rep,
+    //   manager or admin). Permanent: phase 'error', no token retries, no
+    //   registration; the shell releases the Web Lock, stops the phone frame
+    //   and shows "The phone is not enabled for your user. Ask your
+    //   administrator." with Exit phone mode. Docks should not auto-enter
+    //   phone mode for this user (dock loader; the shell tab's sessionStorage
+    //   has no flag for it yet) and should not offer Call.
+    // refused: null | { action, reason, nonce, at } — the last request the
+    //   anchor refused. reason: 'busy' | 'invalid-number' | 'rate'
+    //   | 'hourly-limit' | 'call-live' (takeover during a call). Match nonce to
+    //   your own request. Requests without origin / nonce are dropped silently.
+    //
+    // ---- Multi-tab ("Use phone here") ----
+    //   One shell holds the Web Lock PHONE_LOCK_NAME and runs the anchor. A
+    //   second shell tab waits (busy banner) and queues a normal lock request,
+    //   so it takes over by itself when the first tab closes / crashes / is
+    //   discarded. window.__ctcShell.takeover() (or the banner's "Use phone
+    //   here") in a waiting shell sends 'takeover'. The anchor refuses during a
+    //   live call (refused.reason 'call-live'); else it unregisters, publishes
+    //   phase 'moved' and tells its shell (PHONE_MOVED_MESSAGE). The waiting
+    //   shell then takes the lock with { steal: true } (also after 3 s with no
+    //   answer from any anchor) and starts its phone; the old shell stops its
+    //   phone frame and waits (busy banner) in turn. An outside (normal) tab
+    //   cannot hold the phone: its "Use phone here" opens the shell in the
+    //   same tab with u=<its path>; the shell then calls takeover() itself
+    //   when it finds the phone busy (a dock action; see TAKEOVER_PARAM).
+    //
+    // ---- anchor ↔ shell (window.postMessage, same origin; not the bus) ----
+    //   anchor → shell: { v: 1, type: OPEN_RECORD_MESSAGE, path } after Answer on a
+    //     matched caller (screen-pop). Accepted only from #ctc-phone-frame, same
+    //     origin, and only an entity record path (/app/common/entity/custjob.nl|contact.nl?id=<digits>).
+    //   anchor → shell: { v: 1, type: PHONE_MOVED_MESSAGE } after a takeover.
+    //   anchor → shell: { v: 1, type: PHONE_DISABLED_MESSAGE } on not_a_phone_user.
+    //   shell → anchor: { v: 1, type: SHELL_STATE_MESSAGE, audioUnlocked, notify }
+    //     on phone-frame load and on change; the anchor copies both into snap.
+    //   shell → anchor: { v: 1, type: UNLOCK_AUDIO_MESSAGE } from a gesture.
+    //   The anchor accepts these only from window.parent, same origin.
     //
     // Dock modes (ctc_dock_client.js picks one at load):
     //   shell   - top page is the shell (window.__ctcShell set before the dock
@@ -78,6 +184,29 @@ define(['./ctc_html'], (ctcHtml) => {
     const REQUEST_DECLINE = 'decline';
     // postMessage type the anchor sends the shell for the screen-pop.
     const OPEN_RECORD_MESSAGE = 'ctc-open-record';
+
+    // Phases added for call resilience and multi-tab.
+    const PHASE_RECONNECTING = 'reconnecting';
+    const PHASE_MOVED = 'moved';
+    // Requests added: audio unlock (shell), missed-call reset, takeover.
+    const REQUEST_UNLOCK_AUDIO = 'unlockAudio';
+    const REQUEST_MARK_MISSED_SEEN = 'markMissedSeen';
+    const REQUEST_TAKEOVER = 'takeover';
+    // Every request carries origin: REQUEST_ORIGIN and a nonce matching this.
+    const REQUEST_ORIGIN = 'dock';
+    const REQUEST_NONCE_PATTERN = '^[A-Za-z0-9_-]{8,64}$';
+    // postMessage types between the anchor and its shell (see the contract).
+    const PHONE_MOVED_MESSAGE = 'ctc-phone-moved';
+    const SHELL_STATE_MESSAGE = 'ctc-shell-state';
+    const UNLOCK_AUDIO_MESSAGE = 'ctc-unlock-audio';
+    const PHONE_DISABLED_MESSAGE = 'ctc-phone-disabled';
+    // RESTlet error (and snap.error.code) for a user who may not use the phone.
+    const ERROR_NOT_A_PHONE_USER = 'not_a_phone_user';
+    // sessionStorage key (shell tab) for snap.missedUnseen.
+    const MISSED_STORAGE_KEY = 'ctc-missed-unseen';
+    // Shell URL parameter: takeover=1 makes a shell that finds the phone
+    // busy ask for it at once ("Use phone here" from an outside tab).
+    const TAKEOVER_PARAM = 'takeover';
 
     // Web Lock the shell holds for its whole life while it runs the phone.
     const PHONE_LOCK_NAME = 'ctc-phone-anchor';
@@ -167,6 +296,20 @@ define(['./ctc_html'], (ctcHtml) => {
         REQUEST_ANSWER,
         REQUEST_DECLINE,
         OPEN_RECORD_MESSAGE,
+        PHASE_RECONNECTING,
+        PHASE_MOVED,
+        REQUEST_UNLOCK_AUDIO,
+        REQUEST_MARK_MISSED_SEEN,
+        REQUEST_TAKEOVER,
+        REQUEST_ORIGIN,
+        REQUEST_NONCE_PATTERN,
+        PHONE_MOVED_MESSAGE,
+        SHELL_STATE_MESSAGE,
+        UNLOCK_AUDIO_MESSAGE,
+        PHONE_DISABLED_MESSAGE,
+        ERROR_NOT_A_PHONE_USER,
+        MISSED_STORAGE_KEY,
+        TAKEOVER_PARAM,
         PHONE_LOCK_NAME,
         EXIT_KEY,
         dockAttributes,

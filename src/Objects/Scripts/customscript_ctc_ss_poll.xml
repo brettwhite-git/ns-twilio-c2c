@@ -5,8 +5,26 @@
     <notifyemails></notifyemails>
     <notifyowner>T</notifyowner>
     <isinactive>F</isinactive>
+    <scriptcustomfields>
+        <scriptcustomfield scriptid="custscript_ctc_poll_mode">
+            <accesslevel>2</accesslevel>
+            <applyformatting>F</applyformatting>
+            <checkspelling>F</checkspelling>
+            <description>transcripts (default, also when empty) or reconcile. Any other text logs an error and does nothing.</description>
+            <displaytype>NORMAL</displaytype>
+            <fieldtype>TEXT</fieldtype>
+            <help>transcripts: recording cleanup, orphan retry and transcript analysis (Phases A to C). reconcile: Twilio call reconciliation only (Phase D). Empty = transcripts.</help>
+            <isformula>F</isformula>
+            <ismandatory>F</ismandatory>
+            <label>Poll mode (transcripts, reconcile)</label>
+            <maxlength>20</maxlength>
+            <searchlevel>2</searchlevel>
+            <storevalue>T</storevalue>
+        </scriptcustomfield>
+    </scriptcustomfields>
     <scriptdeployments>
         <scriptdeployment scriptid="customdeploy_ctc_ss_poll">
+            <custscript_ctc_poll_mode>transcripts</custscript_ctc_poll_mode>
             <title>CTC Poll Transcripts</title>
             <isdeployed>T</isdeployed>
             <status>SCHEDULED</status>
@@ -15,6 +33,21 @@
                     <everyxdays>1</everyxdays>
                     <startdate>2024-01-01</startdate>
                     <starttime>00:00:00Z</starttime>
+                    <repeat>PT15M</repeat>
+                    <enddate>2099-12-31</enddate>
+                </daily>
+            </recurrence>
+        </scriptdeployment>
+        <scriptdeployment scriptid="customdeploy_ctc_ss_poll_recon">
+            <custscript_ctc_poll_mode>reconcile</custscript_ctc_poll_mode>
+            <title>CTC Poll Reconcile Calls</title>
+            <isdeployed>T</isdeployed>
+            <status>SCHEDULED</status>
+            <recurrence>
+                <daily>
+                    <everyxdays>1</everyxdays>
+                    <startdate>2024-01-01</startdate>
+                    <starttime>00:07:00Z</starttime>
                     <repeat>PT15M</repeat>
                     <enddate>2099-12-31</enddate>
                 </daily>

@@ -26,6 +26,29 @@
  * browser fast path has finished), after a batch check per page and a
  * second check right before the create. A SID is handled once per run.
  *
+ * Voicemail (2026-11-01). The Studio flow records a voicemail on the
+ * caller's (parent) call after an unanswered ring or for an unrouted
+ * number (lib/ctc_inbound_routing). Two cases:
+ *   - client child leg not answered: its parent call is read (it must have
+ *     ended at least 5 min ago, else the leg waits for the next run) and
+ *     the parent's recordings are listed. A voicemail recording makes the
+ *     Phone Call a voicemail, else it is 'Missed'.
+ *   - PSTN parent leg with no client child leg (caller hung up during the
+ *     notice, or the number has no route): Twilio direction 'inbound', no
+ *     parent, `to` is a number whose VoiceUrl is our Studio flow. 'Missed',
+ *     or a voicemail when the parent has a voicemail recording. Deduped on
+ *     the parent SID and every child SID.
+ * A voicemail Phone Call: status 'Logged' (processed F) with
+ * custevent_ctc_voicemail T, title 'Voicemail from <name or number>'. The
+ * transcript poller (Phase C) then transcribes it like any logged call and
+ * ends it at 'Transcribed' / 'No transcript'; the checkbox stays as the
+ * voicemail marker. One transcript path, no new status for the poller.
+ *
+ * Owner: the client identity (child legs) or the number's primary rep
+ * (parent legs). An inactive / unknown rep, or a number with no route,
+ * gives the config fallback owner (custrecord_ctc_fallback_owner); with no
+ * active fallback owner the call is skipped (as before).
+ *
  * Watermark (config custrecord_ctc_recon_watermark, ISO UTC): every
  * browser call that ended before it is reconciled. It moves only after a
  * complete run (all pages read, no governance stop), to the settle cutoff
@@ -34,8 +57,8 @@
  * back (also the first-run lookback).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcript_utils', './ctc_workspace_queries'],
-       (query, record, search, runtime, log, utils, workspaceQueries) => {
+define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './ctc_transcript_utils', './ctc_workspace_queries', './ctc_time', './ctc_inbound_routing'],
+       (query, record, search, runtime, format, log, utils, workspaceQueries, ctcTime, inboundRouting) => {
 
     const TWILIO_HOST = 'https://api.twilio.com';
     const PAGE_SIZE = 100;
@@ -52,7 +75,12 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
     // Governance. Per page: 1 https.get (10) + 1 SuiteQL (10). Per created
     // call: re-check SuiteQL (10) + employee lookupFields (1) + 1 https.get
     // for the child / parent leg (10) + lookupCallerByPhone (3 SuiteQL, 30)
-    // + record.create/save (15) = about 70 units. The pass starts only with
+    // + record.create/save (15) = about 70 units. A missed inbound call or
+    // a PSTN parent leg adds one recordings GET (10) and maybe the parent
+    // call GET (10). Once per run, at the first create: the time zone
+    // (ctc_time, config.load, 10, or 20 with the company fallback); at the
+    // first PSTN parent leg: the flow's numbers (https.get, 10) and the
+    // routes (search, 10). The pass starts only with
     // START_MIN_UNITS left, stops before the next page or call when fewer
     // than STOP_UNITS are left, and uses at most MAX_UNITS per run.
     const START_MIN_UNITS = 2000;
@@ -64,11 +92,15 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
     const CALL_SID_PATTERN = /^CA[A-Za-z0-9]{32}$/;
     const PHONE_PATTERN = /^\+?[0-9]{7,15}$/;
     const REP_ID_PATTERN = /^[0-9]{1,10}$/;
+    const FLOW_SID_PATTERN = /^FW[0-9a-f]{32}$/;
+    const NUMBERS_PAGE_SIZE = 100;
+    // Recording states that never give a voicemail to transcribe.
+    const DEAD_RECORDING_STATUSES = ['absent', 'deleted', 'failed'];
 
     /**
      * Browser leg of a Twilio call, or null for every other leg.
      * @param {Object} call - Twilio Call resource
-     * @returns {{direction: string, identity: string}|null}
+     * @returns {{direction: string, identity: string, parent?: boolean}|null}
      */
     const classifyLeg = (call) => {
         const to = String((call && call.to) || '');
@@ -76,6 +108,23 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
         if (to.indexOf(CLIENT_PREFIX) === 0) return { direction: 'inbound', identity: to.slice(CLIENT_PREFIX.length) };
         if (from.indexOf(CLIENT_PREFIX) === 0) return { direction: 'outbound', identity: from.slice(CLIENT_PREFIX.length) };
         return null;
+    };
+
+    /**
+     * True for a caller's PSTN leg into one of our numbers: Twilio
+     * direction 'inbound', no parent, `from` not a client, `to` a phone
+     * number. (A TwiML App client call is also direction 'inbound', but
+     * its `from` is 'client:...'.) Whether `to` is on our Studio flow is
+     * checked separately.
+     * @param {Object} call - Twilio Call resource
+     * @returns {boolean}
+     */
+    const isPstnInboundParent = (call) => {
+        if (!call || call.direction !== 'inbound' || call.parent_call_sid) return false;
+        const from = String(call.from || '');
+        const to = String(call.to || '');
+        if (from.indexOf(CLIENT_PREFIX) === 0 || /^(client|sip):/i.test(to)) return false;
+        return !!inboundRouting.toE164(to);
     };
 
     const durationOf = (call) => {
@@ -118,6 +167,27 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
         return PHONE_PATTERN.test(s) ? s : '';
     };
 
+    /**
+     * A number from Twilio's display form (`to_formatted`, e.g.
+     * '(555) 123-4567' or '+44 20 7946 0000'), as E.164-like digits. Twilio
+     * shows North American numbers without +1: 10 digits get '+1'.
+     * Client / SIP addresses give ''.
+     */
+    const phoneFromFormatted = (value) => {
+        const s = String(value || '').trim();
+        if (!s || /^(client|sip):/i.test(s)) return '';
+        const digits = s.replace(/[^0-9]/g, '');
+        if (s.charAt(0) === '+') return phoneOf('+' + digits);
+        if (digits.length === 10) return phoneOf('+1' + digits);
+        if (digits.length === 11 && digits.charAt(0) === '1') return phoneOf('+' + digits);
+        return phoneOf(digits);
+    };
+
+    /** The dialed number of one leg: `to`, else `to_formatted`. */
+    const dialedOf = (call) => phoneOf(call && call.to) || phoneFromFormatted(call && call.to_formatted);
+
+    const digitsOf = (value) => String(value || '').replace(/[^0-9]/g, '');
+
     /** '+15551234567' → '(555) 123-4567'; other numbers as they are. */
     const formatNumber = (number) => {
         const m = String(number || '').match(/^\+1([0-9]{3})([0-9]{3})([0-9]{4})$/);
@@ -129,10 +199,17 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
         return String(value || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim().slice(0, 120);
     };
 
-    const titleFor = (direction, status, label) => {
-        if (status === utils.CALL_STATUS.MISSED) return `Missed call from ${label}`;
-        if (status === utils.CALL_STATUS.NO_ANSWER) return `No answer: ${label}`;
-        return direction === 'inbound' ? `Inbound call from ${label}` : `Call to ${label}`;
+    /**
+     * Phone Call title. label: matched name, else the formatted number, else
+     * ''. An outbound call with no number never reached a phone: 'Call did
+     * not connect'. A voicemail: 'Voicemail from <label>'.
+     */
+    const titleFor = (direction, status, label, voicemail) => {
+        if (status === utils.CALL_STATUS.NO_ANSWER) return label ? `No answer: ${label}` : 'Call did not connect';
+        const who = label || 'unknown';
+        if (voicemail) return `Voicemail from ${who}`;
+        if (status === utils.CALL_STATUS.MISSED) return `Missed call from ${who}`;
+        return direction === 'inbound' ? `Inbound call from ${who}` : `Call to ${who}`;
     };
 
     /**
@@ -191,6 +268,8 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
      * @property {number} startUnits
      * @property {Object<string, boolean>} handled
      * @property {Object<string, boolean>} activeReps
+     * @property {string} fallbackOwnerId
+     * @property {Object|null} flow - our flow's numbers + routes (loaded once)
      * @property {Object} stats
      * @property {string} stopped
      * @property {number|null} earliestFailedEndMs
@@ -221,6 +300,95 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
     };
 
     /**
+     * Owner of a reconciled Phone Call: `repId` when it is an active
+     * employee, else the fallback owner when that is an active employee,
+     * else '' (skip).
+     */
+    const resolveOwner = (repId, ctx) => {
+        if (repId && REP_ID_PATTERN.test(repId) && isActiveEmployee(repId, ctx)) return repId;
+        const fallback = ctx.fallbackOwnerId;
+        if (fallback && REP_ID_PATTERN.test(fallback) && isActiveEmployee(fallback, ctx)) return fallback;
+        return '';
+    };
+
+    /**
+     * Our Studio flow's numbers (E.164 → true: IncomingPhoneNumbers whose
+     * voice_url is the flow) and routes (E.164 → primary rep id). Loaded
+     * once per run, at the first PSTN parent leg. { transient: true } when
+     * Twilio or the routes could not be read (those legs wait for the next
+     * run). No published flow → no numbers.
+     * @param {ReconCtx} ctx
+     */
+    const flowNumbers = (ctx) => {
+        if (ctx.flow) return ctx.flow;
+        const flowSid = String(ctx.config.studioFlowSid || '');
+        /** @type {{numbers: Object<string, boolean>, routes: Object<string, string>, transient?: boolean}} */
+        const flow = { numbers: {}, routes: {} };
+        ctx.flow = flow;
+        if (!FLOW_SID_PATTERN.test(flowSid)) return flow;
+
+        const url = `${utils.TWILIO_API_BASE}/${ctx.config.accountSid}/IncomingPhoneNumbers.json?PageSize=${NUMBERS_PAGE_SIZE}`;
+        const body = utils.getTwilioJson(url, ctx.authHeader, 'CTC Recon Flow Numbers');
+        if (utils.isTransientError(body)) {
+            flow.transient = true;
+            return flow;
+        }
+        const list = (body && Array.isArray(body.incoming_phone_numbers)) ? body.incoming_phone_numbers : [];
+        if (body && body.next_page_uri) {
+            log.audit({ title: 'CTC Recon flow numbers — first page only', details: `listed=${list.length}` });
+        }
+        list.forEach((n) => {
+            const voiceUrl = String((n && n.voice_url) || '');
+            const e164 = inboundRouting.toE164(n && n.phone_number);
+            if (e164 && voiceUrl.indexOf(`/Flows/${flowSid}`) !== -1) flow.numbers[e164] = true;
+        });
+        try {
+            inboundRouting.loadRoutes().forEach((r) => { flow.routes[r.phoneNumber] = String(r.employeeId); });
+        } catch (e) {
+            log.error({ title: 'CTC Recon routes not read', details: (e && e.message) || String(e) });
+            flow.transient = true;
+        }
+        return flow;
+    };
+
+    /**
+     * The voicemail among a call's recordings: owned by `parentSid`, not
+     * a <Dial> recording, not absent / deleted / failed, and not a
+     * finished 0 s recording. null when there is none.
+     */
+    const pickVoicemail = (recordings, parentSid) => {
+        const list = Array.isArray(recordings) ? recordings : [];
+        return list.find((r) => {
+            if (!r || !r.sid || r.call_sid !== parentSid) return false;
+            if (r.source === 'DialVerb') return false;
+            if (DEAD_RECORDING_STATUSES.indexOf(r.status) !== -1) return false;
+            return !(r.status === 'completed' && durationOf(r) <= 0);
+        }) || null;
+    };
+
+    /**
+     * Voicemail of an unanswered client child leg, read from its parent.
+     * Returns { transient: true } (Twilio not readable), { deferred: true }
+     * (the parent call is still live or ended less than 5 min ago: the
+     * voicemail may not be finished), or { recording, parent } where
+     * recording is null when there is no voicemail.
+     */
+    const childVoicemail = (parentSid, pageBySid, ctx) => {
+        let parent = pageBySid[parentSid];
+        if (!parent) {
+            parent = utils.fetchCall(ctx.config.accountSid, parentSid, ctx.authHeader);
+            if (utils.isTransientError(parent)) return { transient: true };
+        }
+        if (!parent) return { recording: null, parent: null };
+        if (TERMINAL_CALL_STATUSES.indexOf(parent.status) === -1) return { deferred: true };
+        const parentEnd = utils.parseTwilioDate(parent.end_time);
+        if (parentEnd !== null && parentEnd > ctx.cutoffMs) return { deferred: true };
+        const recordings = utils.fetchRecordingsForCall(ctx.config.accountSid, parentSid, ctx.authHeader);
+        if (utils.isTransientError(recordings)) return { transient: true };
+        return { recording: pickVoicemail(recordings, parentSid), parent: parent };
+    };
+
+    /**
      * Child legs of an outbound browser call (the <Dial> to the number):
      * GET Calls.json?ParentCallSid=<sid>. Returns an array or
      * TRANSIENT_ERROR. A 404 / other 4xx gives [].
@@ -242,6 +410,29 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
     };
 
     /**
+     * The number an outbound browser call dialed. In order: the picked
+     * child leg, any other child leg (`to`, else `to_formatted`), then the
+     * parent leg's own `to` / `to_formatted` (a TwiML App client call may
+     * carry the dialed number there, or the app's number, or nothing). A
+     * parent `to` equal to our caller ID or a child's `from` is our own
+     * Twilio number, not the callee. '' when none is found.
+     */
+    const outboundNumber = (call, child, children, ctx) => {
+        const legs = (child ? [child] : []).concat(children.filter((c) => c !== child));
+        for (const c of legs) {
+            const n = dialedOf(c);
+            if (n) return n;
+        }
+        const own = {};
+        [ctx.config.phoneNumber].concat(children.map((c) => c.from)).forEach((v) => {
+            const d = digitsOf(v).slice(-10);
+            if (d.length >= 7) own[d] = true;
+        });
+        const parentNumber = dialedOf(call);
+        return parentNumber && !own[digitsOf(parentNumber).slice(-10)] ? parentNumber : '';
+    };
+
+    /**
      * Facts the Phone Call needs, or { transient: true } when Twilio could
      * not be read (the call is retried next run).
      * @param {{call: Object, leg: {direction: string}}} cand
@@ -255,30 +446,56 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
             // Studio sets caller_id to the caller, so the leg's `from` is
             // the caller's number. Else read it from the parent call.
             let number = phoneOf(call.from);
+            const duration = durationOf(call);
+            const status = mapStatus('inbound', call.status, duration);
+            // Not answered: the caller may have left a voicemail on the parent.
+            let voicemail = null;
+            let parent = null;
+            if (status === utils.CALL_STATUS.MISSED && parentSid) {
+                const vm = childVoicemail(parentSid, pageBySid, ctx);
+                if (vm.transient) return { transient: true };
+                if (vm.deferred) return { deferred: true };
+                voicemail = vm.recording;
+                parent = vm.parent;
+            }
             if (!number && parentSid) {
-                let parent = pageBySid[parentSid];
+                if (!parent) parent = pageBySid[parentSid];
                 if (!parent) {
                     parent = utils.fetchCall(ctx.config.accountSid, parentSid, ctx.authHeader);
                     if (utils.isTransientError(parent)) return { transient: true };
                 }
                 number = phoneOf(parent && parent.from);
             }
-            const duration = durationOf(call);
             return {
                 number: number,
-                duration: duration,
-                status: mapStatus('inbound', call.status, duration),
+                duration: voicemail ? durationOf(voicemail) : duration,
+                status: voicemail ? utils.CALL_STATUS.LOGGED : status,
+                voicemail: !!voicemail,
                 relatedSids: parentSid ? [parentSid] : []
             };
         }
 
-        const children = fetchChildLegs(call.sid, ctx);
-        if (utils.isTransientError(children)) return { transient: true };
+        const fetched = fetchChildLegs(call.sid, ctx);
+        if (utils.isTransientError(fetched)) return { transient: true };
+        // Child legs listed on this page count too (the child query may miss them).
+        const children = fetched.slice();
+        Object.keys(pageBySid).forEach((s) => {
+            const c = pageBySid[s];
+            if (c && c.parent_call_sid === call.sid && !children.some((k) => k.sid === c.sid)) children.push(c);
+        });
         const child = pickChild(children);
         const duration = child ? durationOf(child) : 0;
         const legStatus = call.status !== 'completed' ? call.status : (child ? child.status : 'no-child');
+        const number = outboundNumber(call, child, children, ctx);
+        if (!number) {
+            log.audit({
+                title: 'CTC Recon outbound number not found',
+                details: `callSid=${call.sid} status=${call.status} children=${children.length} ` +
+                         `to=${String(call.to || '')} to_formatted=${String(call.to_formatted || '')}`
+            });
+        }
         return {
-            number: phoneOf(child && child.to),
+            number: number,
             duration: duration,
             status: mapStatus('outbound', legStatus, duration),
             relatedSids: children.map((c) => String(c.sid || ''))
@@ -302,46 +519,26 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
         if (contactId) phoneCall.setValue({ fieldId: 'contact', value: contactId });
     };
 
-    const createPhoneCall = (cand, repId, details) => {
-        const call = cand.call;
-        const inbound = cand.leg.direction === 'inbound';
-        let match = null;
-        if (details.number) {
-            const res = workspaceQueries.lookupCallerByPhone({ userId: repId, phone: details.number });
-            match = (res && res.match) || null;
-        }
-        const label = cleanName(match && match.name) || formatNumber(details.number) || 'unknown';
-        const status = details.status;
-
-        const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
-        phoneCall.setValue({ fieldId: 'title', value: titleFor(cand.leg.direction, status, label) });
-        phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
-        phoneCall.setValue({ fieldId: 'assigned', value: parseInt(repId, 10) });
-        if (details.number) phoneCall.setValue({ fieldId: 'phone', value: details.number });
-        phoneCall.setValue({ fieldId: 'custevent_ctc_call_sid', value: call.sid });
-        phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: details.duration });
-        phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: status !== utils.CALL_STATUS.LOGGED });
-        phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: status });
-        if (inbound) phoneCall.setValue({ fieldId: 'custevent_ctc_inbound', value: true });
-
+    /**
+     * Phone Call date and call start from Twilio start_time (RFC 2822 UTC).
+     * custevent_ctc_call_started = the start as ISO-8601 UTC (the row time
+     * every list shows). startdate (DATE) = the local date of the start in
+     * the user's (or company) time zone: format.parse of the date part of
+     * N/format's DATETIME text. starttime / endtime are NOT set: on a Phone
+     * Call they need Reserve Time (timedevent), which would put missed calls
+     * on the rep's calendar. Never blocks the create.
+     */
+    const setCallTimes = (phoneCall, call) => {
         const startMs = utils.parseTwilioDate(call.start_time);
-        if (startMs !== null) {
-            try {
-                const start = new Date(startMs);
-                phoneCall.setValue({ fieldId: 'startdate', value: start });
-                phoneCall.setValue({ fieldId: 'starttime', value: start });
-            } catch (e) {
-                log.error({ title: 'CTC Recon start time not set', details: `${call.sid}: ${(e && e.message) || e}` });
-            }
+        if (startMs === null) return;
+        phoneCall.setValue({ fieldId: 'custevent_ctc_call_started', value: ctcTime.isoUtc(startMs) });
+        try {
+            const start = ctcTime.localParts(startMs, ctcTime.userTimezone());
+            if (!start) throw new Error('no date in formatted start');
+            phoneCall.setValue({ fieldId: 'startdate', value: format.parse({ value: start.date, type: format.Type.DATE }) });
+        } catch (e) {
+            log.error({ title: 'CTC Recon start date not set', details: `${call.sid}: ${(e && e.message) || e}` });
         }
-        if (match) linkEntity(phoneCall, match);
-
-        const recordId = phoneCall.save();
-        log.audit({
-            title: 'CTC Recon Phone Call created',
-            details: `callSid=${call.sid} phoneCall=${recordId} status=${status} rep=${repId} direction=${cand.leg.direction}`
-        });
-        return status;
     };
 
     const STAT_KEY = {
@@ -351,6 +548,42 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
         'Logged': 'logged'
     };
 
+    /** Creates the Phone Call; returns its stats key under stats.created. */
+    const createPhoneCall = (cand, repId, details) => {
+        const call = cand.call;
+        const inbound = cand.leg.direction === 'inbound';
+        let match = null;
+        if (details.number) {
+            const res = workspaceQueries.lookupCallerByPhone({ userId: repId, phone: details.number });
+            match = (res && res.match) || null;
+        }
+        const label = cleanName(match && match.name) || formatNumber(details.number);
+        const status = details.status;
+
+        const phoneCall = record.create({ type: record.Type.PHONE_CALL, isDynamic: true });
+        phoneCall.setValue({ fieldId: 'title', value: titleFor(cand.leg.direction, status, label, details.voicemail === true) });
+        phoneCall.setValue({ fieldId: 'status', value: 'COMPLETE' });
+        phoneCall.setValue({ fieldId: 'assigned', value: parseInt(repId, 10) });
+        if (details.number) phoneCall.setValue({ fieldId: 'phone', value: details.number });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_call_sid', value: call.sid });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_duration', value: details.duration });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: status !== utils.CALL_STATUS.LOGGED });
+        phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: status });
+        if (inbound) phoneCall.setValue({ fieldId: 'custevent_ctc_inbound', value: true });
+        if (details.voicemail === true) phoneCall.setValue({ fieldId: 'custevent_ctc_voicemail', value: true });
+
+        setCallTimes(phoneCall, call);
+        if (match) linkEntity(phoneCall, match);
+
+        const recordId = phoneCall.save();
+        log.audit({
+            title: 'CTC Recon Phone Call created',
+            details: `callSid=${call.sid} phoneCall=${recordId} status=${status} rep=${repId} ` +
+                     `direction=${cand.leg.direction} voicemail=${details.voicemail === true}`
+        });
+        return details.voicemail === true ? 'voicemail' : STAT_KEY[status];
+    };
+
     const markFailed = (cand, ctx) => {
         ctx.stats.errors++;
         if (ctx.earliestFailedEndMs === null || cand.endMs < ctx.earliestFailedEndMs) {
@@ -358,33 +591,108 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
         }
     };
 
+    /** Not decided yet (voicemail may still be running): hold the watermark. */
+    const markDeferred = (cand, ctx) => {
+        ctx.stats.deferred++;
+        if (ctx.earliestFailedEndMs === null || cand.endMs < ctx.earliestFailedEndMs) {
+            ctx.earliestFailedEndMs = cand.endMs;
+        }
+    };
+
     /**
-     * One eligible browser leg that the page check did not find logged.
+     * Second check right before the create (the browser fast path may have
+     * logged the call since the page check), then the create.
+     */
+    const createUnlessLogged = (cand, ownerId, details, ctx) => {
+        const sids = [cand.call.sid].concat(details.relatedSids);
+        if (anyLogged(sids, findLoggedSids(sids))) {
+            ctx.stats.existing++;
+            return;
+        }
+        ctx.stats.created[createPhoneCall(cand, ownerId, details)]++;
+    };
+
+    /**
+     * A caller's PSTN leg into our flow (see isPstnInboundParent) that the
+     * page check did not find logged. A client child leg means the call
+     * rang a rep: that child leg is reconciled on its own, so nothing here.
+     * Else 'Missed', or a voicemail when the parent has a voicemail
+     * recording. Owner: the number's primary rep, else the fallback owner.
      * @param {{call: Object, leg: {direction: string, identity: string}, endMs: number}} cand
      * @param {Object<string, Object>} pageBySid
      * @param {ReconCtx} ctx
      */
+    const reconcileParentOne = (cand, pageBySid, ctx) => {
+        const call = cand.call;
+        const toNumber = inboundRouting.toE164(call.to);
+        const routedRep = (ctx.flow && ctx.flow.routes[toNumber]) || '';
+        const ownerId = resolveOwner(routedRep, ctx);
+        if (!ownerId) {
+            log.audit({ title: 'CTC Recon skip — no owner for inbound call',
+                        details: `callSid=${call.sid} to=${toNumber} routedRep=${routedRep || 'none'}` });
+            ctx.stats.skipped++;
+            return;
+        }
+        const fetched = fetchChildLegs(call.sid, ctx);
+        if (utils.isTransientError(fetched)) {
+            markFailed(cand, ctx);
+            return;
+        }
+        const children = fetched.slice();
+        Object.keys(pageBySid).forEach((s) => {
+            const c = pageBySid[s];
+            if (c && c.parent_call_sid === call.sid && !children.some((k) => k.sid === c.sid)) children.push(c);
+        });
+        if (children.some((c) => String(c.to || '').indexOf(CLIENT_PREFIX) === 0)) return;
+
+        const recordings = utils.fetchRecordingsForCall(ctx.config.accountSid, call.sid, ctx.authHeader);
+        if (utils.isTransientError(recordings)) {
+            markFailed(cand, ctx);
+            return;
+        }
+        const voicemail = pickVoicemail(recordings, call.sid);
+        createUnlessLogged(cand, ownerId, {
+            number: phoneOf(call.from),
+            duration: voicemail ? durationOf(voicemail) : 0,
+            status: voicemail ? utils.CALL_STATUS.LOGGED : utils.CALL_STATUS.MISSED,
+            voicemail: !!voicemail,
+            relatedSids: children.map((c) => String(c.sid || ''))
+        }, ctx);
+    };
+
+    /**
+     * One eligible leg that the page check did not find logged.
+     * @param {{call: Object, leg: {direction: string, identity: string, parent?: boolean}, endMs: number}} cand
+     * @param {Object<string, Object>} pageBySid
+     * @param {ReconCtx} ctx
+     */
     const reconcileOne = (cand, pageBySid, ctx) => {
+        if (cand.leg.parent) {
+            reconcileParentOne(cand, pageBySid, ctx);
+            return;
+        }
         const repId = cand.leg.identity;
-        if (!REP_ID_PATTERN.test(repId) || !isActiveEmployee(repId, ctx)) {
+        // A non-numeric identity is not one of our phones: skip. An
+        // inactive or unknown employee falls back to the fallback owner.
+        const ownerId = REP_ID_PATTERN.test(repId) ? resolveOwner(repId, ctx) : '';
+        if (!ownerId) {
             log.audit({ title: 'CTC Recon skip — not an active employee', details: `callSid=${cand.call.sid} identity=${repId}` });
             ctx.stats.skipped++;
             return;
+        }
+        if (ownerId !== repId) {
+            log.audit({ title: 'CTC Recon fallback owner', details: `callSid=${cand.call.sid} identity=${repId} owner=${ownerId}` });
         }
         const details = gatherDetails(cand, pageBySid, ctx);
         if (details.transient) {
             markFailed(cand, ctx);
             return;
         }
-        // Second check right before the create: the browser fast path may
-        // have logged the call since the page check.
-        const logged = findLoggedSids([cand.call.sid].concat(details.relatedSids));
-        if (anyLogged([cand.call.sid].concat(details.relatedSids), logged)) {
-            ctx.stats.existing++;
+        if (details.deferred) {
+            markDeferred(cand, ctx);
             return;
         }
-        const status = createPhoneCall(cand, repId, details);
-        ctx.stats.created[STAT_KEY[status]]++;
+        createUnlessLogged(cand, ownerId, details, ctx);
     };
 
     /**
@@ -396,32 +704,51 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
     const processPage = (calls, ctx) => {
         const pageBySid = {};
         const childrenByParent = {};
+        const hasClientChild = {};
         calls.forEach((c) => {
             if (!c || !c.sid) return;
             pageBySid[c.sid] = c;
             if (c.parent_call_sid) {
                 (childrenByParent[c.parent_call_sid] = childrenByParent[c.parent_call_sid] || []).push(String(c.sid));
+                if (String(c.to || '').indexOf(CLIENT_PREFIX) === 0) hasClientChild[c.parent_call_sid] = true;
             }
         });
 
         const candidates = [];
         calls.forEach((c) => {
-            const leg = classifyLeg(c);
-            if (!leg) return;
-            const sid = String(c.sid || '');
+            const sid = String((c && c.sid) || '');
+            let leg = classifyLeg(c);
+            // A caller's leg into our flow with no client child on this page
+            // is a candidate too (checked against the flow numbers below).
+            const pstnParent = !leg && isPstnInboundParent(c) && !hasClientChild[sid];
+            if (!leg && !pstnParent) return;
             if (!CALL_SID_PATTERN.test(sid) || ctx.handled[sid]) return;
             if (TERMINAL_CALL_STATUSES.indexOf(c.status) === -1) return;
             const endMs = utils.parseTwilioDate(c.end_time);
+            if (endMs !== null && (endMs < ctx.windowStartMs || endMs > ctx.cutoffMs)) return;
+            if (pstnParent) {
+                const flow = flowNumbers(ctx);
+                if (flow.transient) {
+                    // Flow numbers not readable: hold the watermark, retry next run.
+                    ctx.handled[sid] = true;
+                    if (endMs !== null) markFailed({ endMs: endMs }, ctx);
+                    else ctx.stats.errors++;
+                    return;
+                }
+                if (!flow.numbers[inboundRouting.toE164(c.to)]) return;
+                leg = { direction: 'inbound', identity: '', parent: true };
+            }
             if (endMs === null) {
                 log.error({ title: 'CTC Recon end time unreadable', details: `${sid}: ${c.end_time}` });
                 ctx.handled[sid] = true;
                 ctx.stats.errors++;
                 return;
             }
-            if (endMs < ctx.windowStartMs || endMs > ctx.cutoffMs) return;
-            const related = leg.direction === 'inbound'
-                ? (c.parent_call_sid ? [String(c.parent_call_sid)] : [])
-                : (childrenByParent[sid] || []);
+            const related = leg.parent
+                ? (childrenByParent[sid] || [])
+                : leg.direction === 'inbound'
+                    ? (c.parent_call_sid ? [String(c.parent_call_sid)] : [])
+                    : (childrenByParent[sid] || []);
             candidates.push({ call: c, leg: leg, endMs: endMs, related: related });
         });
         if (!candidates.length) return;
@@ -458,11 +785,11 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
         }
     };
 
-    const writeWatermark = (config, ms) => {
+    const writeWatermark = (cfg, ms) => {
         const iso = new Date(ms).toISOString();
         record.submitFields({
             type: 'customrecord_ctc_config',
-            id: config.id,
+            id: cfg.id,
             values: { custrecord_ctc_recon_watermark: iso },
             options: { enableSourcing: false, ignoreMandatoryFields: true }
         });
@@ -479,17 +806,17 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
      * window date is still listed.
      *
      * @param {{config: Object, authHeader: *, nowMs?: number}} opts
-     * @returns {{seen: number, existing: number, skipped: number, errors: number,
-     *            created: {missed: number, tooShort: number, noAnswer: number, logged: number},
+     * @returns {{seen: number, existing: number, skipped: number, errors: number, deferred: number,
+     *            created: {missed: number, tooShort: number, noAnswer: number, logged: number, voicemail: number},
      *            pages: number, complete: boolean, stopped: string, watermark: string}}
      */
     const reconcileCalls = (opts) => {
-        const config = opts.config;
+        const cfg = opts.config;
         const nowMs = typeof opts.nowMs === 'number' ? opts.nowMs : Date.now();
         const stats = {
-            seen: 0, existing: 0, skipped: 0, errors: 0,
-            created: { missed: 0, tooShort: 0, noAnswer: 0, logged: 0 },
-            pages: 0, complete: false, stopped: '', watermark: String(config.reconWatermark || '')
+            seen: 0, existing: 0, skipped: 0, errors: 0, deferred: 0,
+            created: { missed: 0, tooShort: 0, noAnswer: 0, logged: 0, voicemail: 0 },
+            pages: 0, complete: false, stopped: '', watermark: String(cfg.reconWatermark || '')
         };
 
         const startUnits = remainingUnits();
@@ -498,23 +825,25 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
             return stats;
         }
 
-        const oldMs = parseWatermark(config.reconWatermark);
+        const oldMs = parseWatermark(cfg.reconWatermark);
         const floorMs = nowMs - MAX_LOOKBACK_MS;
         /** @type {ReconCtx} */
         const ctx = {
-            config: config,
+            config: cfg,
             authHeader: opts.authHeader,
             windowStartMs: Math.max(oldMs === null ? floorMs : oldMs - OVERLAP_MS, floorMs),
             cutoffMs: nowMs - SETTLE_MS,
             startUnits: startUnits,
             handled: {},
             activeReps: {},
+            fallbackOwnerId: String(cfg.fallbackOwnerId || ''),
+            flow: null,
             stats: stats,
             stopped: '',
             earliestFailedEndMs: null
         };
 
-        let url = `${utils.TWILIO_API_BASE}/${config.accountSid}/Calls.json` +
+        let url = `${utils.TWILIO_API_BASE}/${cfg.accountSid}/Calls.json` +
                   `?EndTime%3E=${isoDate(ctx.windowStartMs)}&PageSize=${PAGE_SIZE}`;
         /** @type {Object<string, boolean>} */
         const fetched = {};
@@ -538,7 +867,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
             processPage(Array.isArray(body.calls) ? body.calls : [], ctx);
             if (ctx.stopped) break;
             const next = body.next_page_uri;
-            url = next ? nextPageUrl(next, config.accountSid) : '';
+            url = next ? nextPageUrl(next, cfg.accountSid) : '';
             if (next && !url) {
                 log.error({ title: 'CTC Recon next page not followed', details: String(next) });
                 stats.errors++;
@@ -553,7 +882,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
             if (ctx.earliestFailedEndMs !== null) newMs = Math.min(newMs, ctx.earliestFailedEndMs);
             if (oldMs === null || newMs > oldMs) {
                 try {
-                    stats.watermark = writeWatermark(config, newMs);
+                    stats.watermark = writeWatermark(cfg, newMs);
                 } catch (e) {
                     log.error({ title: 'CTC Recon watermark write failed', details: (e && e.message) || String(e) });
                     stats.errors++;
@@ -566,10 +895,13 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/log', './ctc_transcri
     return {
         reconcileCalls,
         classifyLeg,
+        isPstnInboundParent,
+        pickVoicemail,
         mapStatus,
         findLoggedSids,
         nextPageUrl,
         formatNumber,
+        phoneFromFormatted,
         START_MIN_UNITS,
         STOP_UNITS,
         MAX_UNITS,
