@@ -332,6 +332,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      *   userId?: string|number,
      *   tab?: string,
      *   phoneCallId?: string|number,
+     *   bookCustomerIds?: Array<string>,
      *   limit?: number
      * }} [params]
      * @returns {{groups: Array<{call: Object, tasks: Array<Object>}>, totalTasks: number, error?: string}}
@@ -364,31 +365,18 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             if (p.phoneCallId) {
                 filterParts.push([['custrecord_ctc_pt_phone_call', 'anyof', String(p.phoneCallId)]]);
             } else {
-                // Two-step query: NetSuite search doesn't support the 3-hop join
-                // (proposed_task → phone_call → company → salesteam). So first
-                // resolve the rep's book customer-id set via SuiteQL (primary OR
-                // Sales Team member), look up all phone calls on those customers,
-                // then filter proposed_tasks where phone_call is in that set.
-                const bookCustomerIds = getBookCustomerIds({ userId: userId });
+                // NetSuite search can't do the 3-hop join (proposed_task →
+                // phone_call → company → salesteam), so the rep's book (primary
+                // OR Sales Team member) comes from SuiteQL (or the caller,
+                // which already has it), then one join filters the tasks by
+                // their call's company. Before 2026-11-02 this listed the
+                // book's first 1000 calls (no date, no sort) and filtered on
+                // those ids: a rep with more calls lost follow-ups.
+                const bookCustomerIds = Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: userId });
                 if (!bookCustomerIds.length) {
                     return { groups: [], totalTasks: 0 };
                 }
-                const myCallIds = [];
-                try {
-                    const callResults = search.create({
-                        type: search.Type.PHONE_CALL,
-                        filters: [['company', 'anyof', bookCustomerIds]],
-                        columns: ['internalid']
-                    }).run().getRange({ start: 0, end: 1000 });
-                    callResults.forEach((r) => myCallIds.push(r.id));
-                } catch (e) {
-                    log.error({ title: 'CTC loadTaskGroups call lookup failed', details: e.message || e });
-                }
-                if (!myCallIds.length) {
-                    // No accessible calls → no tasks
-                    return { groups: [], totalTasks: 0 };
-                }
-                filterParts.push([['custrecord_ctc_pt_phone_call', 'anyof', myCallIds]]);
+                filterParts.push([['custrecord_ctc_pt_phone_call.company', 'anyof', bookCustomerIds]]);
             }
 
             const filters = [];

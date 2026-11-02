@@ -330,7 +330,7 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
         const rangeRows = history.rows || [];
         const listRows = wq.filterCallRows(rangeRows, { direction: state.dir, search: state.q });
 
-        const tasks = wq.loadTaskGroups({ userId: userId, tab: 'pending', limit: TASK_LIMIT });
+        const tasks = wq.loadTaskGroups({ userId: userId, bookCustomerIds: book, tab: 'pending', limit: TASK_LIMIT });
         const pendingByCall = {};
         (tasks.groups || []).forEach((g) => { pendingByCall[g.call.id] = (g.tasks || []).length; });
 
@@ -354,6 +354,9 @@ define(['N/runtime', 'N/url', 'N/format', 'N/log', './lib/ctc_html', './lib/ctc_
             userName: user.name || '',
             repPhone: formatPhone(repPhone(userId)),
             historyError: !!history.error,
+            // The range hit the row limit: the newest HISTORY_LIMIT calls
+            // only, so the numbers undercount (say so, never silently).
+            truncated: rangeRows.length >= HISTORY_LIMIT,
             rangeRows: rangeRows,
             listRows: listRows,
             missedRows: wq.filterCallRows(rangeRows, { direction: 'missed' }),
@@ -603,6 +606,7 @@ ${customForm}
 ${tabs}
 </header>
 ${buildKpis(m)}
+${m.truncated ? '<p class="rc-truncated" role="status">Showing your newest ' + HISTORY_LIMIT + ' calls in this range; the numbers count only those. Pick a shorter range to see everything.</p>' : ''}
 <div id="rc-content" class="rc-content">${content}</div>
 ${skeleton()}
 </main>
@@ -649,6 +653,7 @@ ${skeleton()}
   .rc-tabs a:hover { color: var(--ink); }
   .rc-tabs a[aria-current="page"] { color: var(--ink); font-weight: 600; box-shadow: inset 0 -2px 0 var(--ink); }
   .rc-tab-count { font-size: 12px; font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .rc-truncated { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--mid-bg); color: var(--mid-fg); font-size: 13px; }
   .rc-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line-soft); background: var(--panel); overflow: hidden; }
   .rc-kpi { padding: 16px 20px; display: flex; flex-direction: column; gap: 4px; box-shadow: inset 1px 0 0 var(--line-soft); }
   .rc-kpi-label, .rc-kpi-unit, .rc-kpi-delta { font-size: 12px; color: var(--muted); }

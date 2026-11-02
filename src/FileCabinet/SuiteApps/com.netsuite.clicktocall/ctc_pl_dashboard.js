@@ -170,13 +170,15 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             reportingUrl = '';
         }
 
-        const historyResult = workspaceQueries.loadHistoryRows({ userId, todayOnly: true, limit: 5 });
+        // The rep's book once (SuiteQL), shared by the three loads below.
+        const bookCustomerIds = workspaceQueries.getBookCustomerIds({ userId });
+        const historyResult = workspaceQueries.loadHistoryRows({ userId, bookCustomerIds, todayOnly: true, limit: 5 });
         // Missed calls + voicemails today (status 'Missed' OR voicemail T).
         // `total` is the full count for the tab badge.
         const missedResult  = workspaceQueries.loadHistoryRows({
-            userId, todayOnly: true, limit: MISSED_LIMIT, missedOnly: true, countTotal: true
+            userId, bookCustomerIds, todayOnly: true, limit: MISSED_LIMIT, missedOnly: true, countTotal: true
         }) || {};
-        const tasksResult   = workspaceQueries.loadTaskGroups({ userId, tab: 'pending', limit: TASK_LIMIT });
+        const tasksResult   = workspaceQueries.loadTaskGroups({ userId, bookCustomerIds, tab: 'pending', limit: TASK_LIMIT });
         const stats         = workspaceQueries.computeStats(historyResult.rows || []);
 
         portlet.html = ctcFonts.buildFigtreeStyle() + buildHtml({
