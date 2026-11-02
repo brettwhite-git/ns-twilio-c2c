@@ -170,12 +170,21 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      *   limit?: number,
      *   bookCustomerIds?: Array<string>,
      *   missedOnly?: boolean,
-     *   countTotal?: boolean
+     *   countTotal?: boolean,
+     *   ownerIds?: Array<string>,
+     *   dateFilter?: Array
      * }} [params]
      * `missedOnly` keeps only missed calls and voicemails (status 'Missed'
      * OR custevent_ctc_voicemail T). `countTotal` makes `total` the number
      * of matching calls, not only the rows returned (runPaged count, only
      * when the limit may have cut the list).
+     * `ownerIds` (Reporting Central team view) scopes by the Phone Call's
+     * `assigned` employee instead of the book (logCall and reconciliation
+     * set `assigned` to the rep who took the call); rows then carry
+     * `ownerId` / `ownerName`. An empty array returns no rows. Without it
+     * the scope is the user's book, as before.
+     * `dateFilter` (Reporting Central, lib/ctc_rc_scope.js) is one N/search
+     * filter expression on `startdate`, used instead of `dateRange`.
      * @returns {{rows: Array<Object>, total: number, error?: string}} `{error}` on failure
      */
     const loadHistoryRows = (params) => {
@@ -184,6 +193,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             const filters = p.filters || {};
             const limit = parseInt(String(p.limit || ''), 10) || 30;
             const userId = p.userId;
+            const byOwner = Array.isArray(p.ownerIds);
 
             // Scope to calls whose customer is in the rep's book (primary OR
             // Sales Team member). `assigned` on Phone Call is unreliable (not
@@ -197,16 +207,17 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             // a translation pass.
             // `bookCustomerIds` lets a caller that already resolved the book
             // (Reporting Central runs several range queries) skip the lookup.
-            const bookCustomerIds = Array.isArray(p.bookCustomerIds)
-                ? p.bookCustomerIds
-                : getBookCustomerIds({ userId: userId });
-            if (!bookCustomerIds.length) {
-                // No accessible customers → no rows. Short-circuit; the
-                // N/search `anyof` operator rejects empty arrays anyway.
+            // Team view: `ownerIds` replaces the book (see the JSDoc).
+            const scopeIds = byOwner
+                ? p.ownerIds
+                : (Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: userId }));
+            if (!scopeIds.length) {
+                // No accessible customers (or no team) → no rows. Short-circuit;
+                // the N/search `anyof` operator rejects empty arrays anyway.
                 return { rows: [], total: 0 };
             }
             const searchFilters = [
-                ['company', 'anyof', bookCustomerIds],
+                [byOwner ? 'assigned' : 'company', 'anyof', scopeIds],
                 'AND',
                 ['custevent_ctc_call_sid', 'isnotempty', '']
             ];
@@ -221,7 +232,9 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             // so Recents came back empty. `last30days` uses `daysago30` the
             // same way (`lastthirtydays` is not a NetSuite date keyword).
             const dateRange = p.dateRange;
-            if (dateRange === 'yesterday') {
+            if (Array.isArray(p.dateFilter)) {
+                searchFilters.push('AND', p.dateFilter);
+            } else if (dateRange === 'yesterday') {
                 searchFilters.push('AND', ['startdate', 'on', 'yesterday']);
             } else if (dateRange === 'thisweek') {
                 searchFilters.push('AND', ['startdate', 'within', 'thisweek']);
@@ -265,7 +278,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     'custevent_ctc_call_status',
                     'custevent_ctc_inbound',
                     'custevent_ctc_voicemail'
-                ]
+                ].concat(byOwner ? ['assigned'] : [])
             });
             const results = historySearch.run().getRange({ start: 0, end: limit });
 
@@ -308,6 +321,13 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     entityType: ''
                 };
             });
+            // Team view: who took each call (Phone Call `assigned`).
+            if (byOwner) {
+                results.forEach((r, i) => {
+                    rows[i].ownerId = extractId(r.getValue('assigned'));
+                    rows[i].ownerName = extractText(r.getText ? r.getText('assigned') : r.getValue('assigned'));
+                });
+            }
 
             // Stage isn't joinable from phonecall.company (NetSuite rejects
             // {name:'stage', join:'company'} with "An nlobjSearchColumn contains
@@ -326,6 +346,27 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
     };
 
     /**
+     * The scope filter for proposed tasks: the source call's `assigned`
+     * employee in `ownerIds` (Reporting Central team / member view), else
+     * the source call's company in the rep's book. NetSuite search can't do
+     * the 3-hop join (proposed_task → phone_call → company → salesteam), so
+     * the book (primary OR Sales Team member) comes from SuiteQL (or the
+     * caller, which already has it), then one join filters the tasks by
+     * their call's company. Before 2026-11-02 this listed the book's first
+     * 1000 calls (no date, no sort) and filtered on those ids: a rep with
+     * more calls lost follow-ups.
+     * @param {{userId?: (string|number), ownerIds?: Array<string>, bookCustomerIds?: Array<string>}} p
+     * @returns {Array|null} a filter expression, or null when nothing is in scope
+     */
+    const proposedTaskScope = (p) => {
+        if (Array.isArray(p.ownerIds)) {
+            return p.ownerIds.length ? ['custrecord_ctc_pt_phone_call.assigned', 'anyof', p.ownerIds] : null;
+        }
+        const book = Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: p.userId });
+        return book.length ? ['custrecord_ctc_pt_phone_call.company', 'anyof', book] : null;
+    };
+
+    /**
      * Load proposed_task rows for a user, grouped by source phone call.
      *
      * @param {{
@@ -333,8 +374,13 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      *   tab?: string,
      *   phoneCallId?: string|number,
      *   bookCustomerIds?: Array<string>,
+     *   ownerIds?: Array<string>,
      *   limit?: number
      * }} [params]
+     * `ownerIds` (Reporting Central team view) keeps tasks whose source
+     * call's `assigned` employee is in the list, instead of the book; each
+     * group.call then carries `ownerId` / `ownerName`. An empty array
+     * returns no groups.
      * @returns {{groups: Array<{call: Object, tasks: Array<Object>}>, totalTasks: number, error?: string}}
      */
     const loadTaskGroups = (params) => {
@@ -343,6 +389,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             const tab = p.tab || 'pending';
             const limit = parseInt(String(p.limit || ''), 10) || 50;
             const userId = p.userId;
+            const byOwner = Array.isArray(p.ownerIds);
 
             const filterParts = [];
             if (tab === 'pending') {
@@ -365,18 +412,9 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             if (p.phoneCallId) {
                 filterParts.push([['custrecord_ctc_pt_phone_call', 'anyof', String(p.phoneCallId)]]);
             } else {
-                // NetSuite search can't do the 3-hop join (proposed_task →
-                // phone_call → company → salesteam), so the rep's book (primary
-                // OR Sales Team member) comes from SuiteQL (or the caller,
-                // which already has it), then one join filters the tasks by
-                // their call's company. Before 2026-11-02 this listed the
-                // book's first 1000 calls (no date, no sort) and filtered on
-                // those ids: a rep with more calls lost follow-ups.
-                const bookCustomerIds = Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: userId });
-                if (!bookCustomerIds.length) {
-                    return { groups: [], totalTasks: 0 };
-                }
-                filterParts.push([['custrecord_ctc_pt_phone_call.company', 'anyof', bookCustomerIds]]);
+                const scope = proposedTaskScope({ userId: userId, ownerIds: p.ownerIds, bookCustomerIds: p.bookCustomerIds });
+                if (!scope) return { groups: [], totalTasks: 0 };
+                filterParts.push([scope]);
             }
 
             const filters = [];
@@ -405,7 +443,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     search.createColumn({ name: 'custevent_ctc_voicemail', join: 'custrecord_ctc_pt_phone_call' }),
                     search.createColumn({ name: 'startdate', join: 'custrecord_ctc_pt_phone_call' }),
                     search.createColumn({ name: 'company', join: 'custrecord_ctc_pt_phone_call' })
-                ]
+                ].concat(byOwner ? [search.createColumn({ name: 'assigned', join: 'custrecord_ctc_pt_phone_call' })] : [])
             });
             const results = taskSearch.run().getRange({ start: 0, end: limit });
             // totalTasks is every pending task, not only the rows returned.
@@ -447,6 +485,10 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                         },
                         tasks: []
                     };
+                    if (byOwner) {
+                        groupsByCallId[callId].call.ownerId = extractId(r.getValue({ name: 'assigned', join: 'custrecord_ctc_pt_phone_call' }));
+                        groupsByCallId[callId].call.ownerName = joinedText(r, 'assigned');
+                    }
                 }
 
                 // Same getText handling for local SELECT fields
@@ -485,6 +527,170 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         }
     };
 
+    // Reporting Central Follow-ups: the most rows one search page returns.
+    const FOLLOW_UP_LIMIT = 1000;
+    const PT_CALL = 'custrecord_ctc_pt_phone_call';
+    const PT_TASK = 'custrecord_ctc_pt_created_task';
+
+    const PT_STATUS = 'formulatext: {custrecord_ctc_pt_status}';
+
+    /**
+     * Open follow-ups, whatever their date: Pending, or Approved with the
+     * Task not completed (the follow-up's flag off and the Task's status Not
+     * started / In progress). One formula condition: NetSuite refuses
+     * nested AND / OR groups past a small depth ("Maximum parentheses depth
+     * exceeded", seen live 2026-11-02).
+     * @returns {Array<*>} a filter expression
+     */
+    const OPEN_FOLLOW_UP_FORMULA = "formulatext: CASE" +
+        " WHEN {custrecord_ctc_pt_status} = 'Pending' THEN 'Y'" +
+        " WHEN {custrecord_ctc_pt_status} = 'Approved' AND {custrecord_ctc_pt_task_completed} = 'F'" +
+        " AND {" + PT_TASK + ".status} IN ('Not Started', 'In Progress') THEN 'Y'" +
+        " ELSE 'N' END";
+    const openFollowUpFilter = () => [OPEN_FOLLOW_UP_FORMULA, 'is', 'Y'];
+
+    /**
+     * Done follow-ups in a range. `range` is a `startdate` filter expression
+     * (lib/ctc_rc_scope.js searchDateFilter); only its operator and values
+     * are used. Done = dismissed (Rejected), or Approved with the
+     * follow-up's flag on or the Task's status Completed. The date is when
+     * it was done:
+     *   - dismissed: the review date (custrecord_ctc_pt_reviewed_date);
+     *   - completed: custrecord_ctc_pt_task_completed_date (set by
+     *     Reporting Central's Mark complete), else the Task's own
+     *     `completeddate` (completed in NetSuite);
+     *   - when the record holds none of these, the source call's date.
+     * Two flat formula conditions (see openFollowUpFilter for why).
+     * @param {Array} range
+     * @returns {Array<*>} a filter expression
+     */
+    const DONE_FOLLOW_UP_FORMULA = "formulatext: CASE" +
+        " WHEN {custrecord_ctc_pt_status} = 'Rejected' THEN 'Y'" +
+        " WHEN {custrecord_ctc_pt_status} = 'Approved' AND ({custrecord_ctc_pt_task_completed} = 'T'" +
+        " OR {" + PT_TASK + ".status} = 'Completed') THEN 'Y'" +
+        " ELSE 'N' END";
+    const DONE_DATE_FORMULA = "formuladate: CASE WHEN {custrecord_ctc_pt_status} = 'Rejected'" +
+        " THEN NVL({custrecord_ctc_pt_reviewed_date}, {" + PT_CALL + ".startdate})" +
+        " ELSE NVL({custrecord_ctc_pt_task_completed_date}, NVL({" + PT_TASK + ".completeddate}, {" + PT_CALL + ".startdate})) END";
+    const doneFollowUpFilter = (range) => [
+        [DONE_FOLLOW_UP_FORMULA, 'is', 'Y'], 'AND', [DONE_DATE_FORMULA].concat(range.slice(1))
+    ];
+
+    /**
+     * Reporting Central Follow-ups, in two searches (10 units each), newest
+     * first (created DESC, internal id DESC), up to FOLLOW_UP_LIMIT rows each:
+     *   - open (To review, My tasks): every one in scope, whatever the
+     *     range: open work never drops out of the page;
+     *   - done (completed, dismissed): only those done in the range
+     *     (`dateFilter`, the calls list's `startdate` expression; see
+     *     doneFollowUpFilter). Without `dateFilter`: none.
+     * Scope = proposedTaskScope (the book, or `ownerIds`). The Task an
+     * approval created comes along (status, due date, priority, assignee,
+     * completed date).
+     * @param {{userId?: (string|number), ownerIds?: Array<string>, bookCustomerIds?: Array<string>,
+     *   dateFilter?: Array, limit?: number}} params
+     * @returns {{rows: Array<Object>, truncated: boolean, openTruncated: boolean, doneTruncated: boolean, error?: string}}
+     */
+    const loadFollowUpRows = (params) => {
+        try {
+            const p = params || {};
+            const limit = Math.min(FOLLOW_UP_LIMIT, parseInt(String(p.limit || ''), 10) || FOLLOW_UP_LIMIT);
+            const none = { rows: [], truncated: false, openTruncated: false, doneTruncated: false };
+            const scope = proposedTaskScope(p);
+            if (!scope) return none;
+            const hasRange = Array.isArray(p.dateFilter) && p.dateFilter.length > 2;
+            const open = runFollowUpSearch([scope, 'AND', openFollowUpFilter()], limit, 0);
+            const done = hasRange ? runFollowUpSearch([scope, 'AND', doneFollowUpFilter(p.dateFilter)], limit, open.length) : [];
+            return {
+                rows: open.concat(done),
+                truncated: open.length >= limit || done.length >= limit,
+                openTruncated: open.length >= limit,
+                doneTruncated: done.length >= limit
+            };
+        } catch (e) {
+            log.error({ title: 'CTC loadFollowUpRows Failed', details: (e && e.message) || String(e) });
+            return { error: 'Follow-ups fetch failed', rows: [], truncated: false, openTruncated: false, doneTruncated: false };
+        }
+    };
+
+    /**
+     * One follow-up search → rows (loadFollowUpRows).
+     * @param {Array<*>} filters
+     * @param {number} limit
+     * @param {number} rankFrom - the first row's rank
+     * @returns {Array<Object>}
+     */
+    const runFollowUpSearch = (filters, limit, rankFrom) => {
+        const callCol = (name) => search.createColumn({ name: name, join: PT_CALL });
+        const taskCol = (name) => search.createColumn({ name: name, join: PT_TASK });
+        const results = search.create({
+            type: 'customrecord_ctc_proposed_task',
+            filters: filters,
+            columns: [
+                { name: 'created', sort: search.Sort.DESC },
+                { name: 'internalid', sort: search.Sort.DESC },
+                PT_CALL, 'custrecord_ctc_pt_text', 'custrecord_ctc_pt_status', 'custrecord_ctc_pt_proposed_due',
+                'custrecord_ctc_pt_reviewer', 'custrecord_ctc_pt_reviewed_date', PT_TASK,
+                'custrecord_ctc_pt_task_completed', 'custrecord_ctc_pt_task_completed_date',
+                callCol('title'), callCol('startdate'), callCol('company'), callCol('assigned'),
+                callCol('custevent_ctc_duration'), callCol('custevent_ctc_voicemail'), callCol('custevent_ctc_inbound'),
+                taskCol('status'), taskCol('duedate'), taskCol('priority'), taskCol('assigned'), taskCol('completeddate')
+            ]
+        }).run().getRange({ start: 0, end: limit });
+
+        const text = (r, col) => {
+            if (r.getText) {
+                const t = r.getText(col);
+                if (t) return String(t);
+            }
+            return extractText(r.getValue(col));
+        };
+        const value = (r, col) => {
+            const v = r.getValue(col);
+            return v == null ? '' : v;
+        };
+        const checked = (v) => v === true || v === 'T';
+        const rows = results.map((r, rank) => {
+            const c = (name) => ({ name: name, join: PT_CALL });
+            const t = (name) => ({ name: name, join: PT_TASK });
+            const createdTaskId = extractId(value(r, PT_TASK));
+            return {
+                id: String(r.id),
+                rank: rankFrom + rank,
+                text: String(value(r, 'custrecord_ctc_pt_text')),
+                status: text(r, 'custrecord_ctc_pt_status'),
+                proposedDue: String(value(r, 'custrecord_ctc_pt_proposed_due')),
+                created: String(value(r, 'created')),
+                reviewerId: extractId(value(r, 'custrecord_ctc_pt_reviewer')),
+                reviewerName: text(r, 'custrecord_ctc_pt_reviewer'),
+                reviewedDate: String(value(r, 'custrecord_ctc_pt_reviewed_date')),
+                taskCompleted: checked(value(r, 'custrecord_ctc_pt_task_completed')),
+                completedDate: String(value(r, 'custrecord_ctc_pt_task_completed_date')) ||
+                    (createdTaskId ? String(value(r, t('completeddate'))) : ''),
+                createdTaskId: createdTaskId,
+                taskStatus: createdTaskId ? String(extractId(value(r, t('status'))) || '') : '',
+                taskStatusText: createdTaskId ? text(r, t('status')) : '',
+                taskDue: createdTaskId ? String(value(r, t('duedate'))) : '',
+                taskPriority: createdTaskId ? String(extractId(value(r, t('priority'))) || '') : '',
+                taskAssigneeId: createdTaskId ? extractId(value(r, t('assigned'))) : '',
+                taskAssigneeName: createdTaskId ? text(r, t('assigned')) : '',
+                call: {
+                    id: extractId(value(r, PT_CALL)),
+                    title: String(value(r, c('title'))),
+                    date: String(value(r, c('startdate'))),
+                    companyId: extractId(value(r, c('company'))),
+                    companyName: text(r, c('company')),
+                    ownerId: extractId(value(r, c('assigned'))),
+                    ownerName: text(r, c('assigned')),
+                    duration: parseInt(value(r, c('custevent_ctc_duration')), 10) || 0,
+                    voicemail: checked(value(r, c('custevent_ctc_voicemail'))),
+                    direction: checked(value(r, c('custevent_ctc_inbound'))) ? 'inbound' : 'outbound'
+                }
+            };
+        });
+        return rows;
+    };
+
     /**
      * Compute headline stats from a set of history rows.
      * @param {Array<Object>} rows
@@ -507,8 +713,10 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
     // ─── Reporting Central ──────────────────────────────────────────────────
 
     // NetSuite search date keyword for the period before each Reporting Central
-    // range (only where one compares fairly).
-    const REPORT_PREVIOUS_RANGE = { today: 'yesterday', thisweek: 'lastweektodate' };
+    // range (only where one compares fairly). Ranges with no keyword for the
+    // period before (yesterday, last7, last30) get explicit dates from
+    // lib/ctc_rc_scope.js; custom has none.
+    const REPORT_PREVIOUS_RANGE = { today: 'yesterday', thisweek: 'lastweektodate', lastweek: 'weekbeforelast', thismonth: 'lastmonthtodate' };
 
     /**
      * Satisfaction band for a 1-10 score: 'high' (7+), 'mid' (5-6), 'low'
@@ -516,10 +724,12 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      * @param {*} n
      * @returns {'high'|'mid'|'low'|'none'}
      */
+    // Same bands as ctcHtml.satBand (Low 1-3, Moderate 4-6, High 7-10), so
+    // the portlet and Reporting Central never disagree on a score.
     const satClass = (n) => {
         if (typeof n !== 'number' || !n) return 'none';
         if (n >= 7) return 'high';
-        if (n >= 5) return 'mid';
+        if (n >= 4) return 'mid';
         return 'low';
     };
 
@@ -546,10 +756,11 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
 
     /**
      * Filter history rows by direction and a search text. Pure: no queries.
-     * direction: 'all' | 'outbound' | 'inbound' | 'missed'. 'missed' =
-     * isMissedCall; 'outbound' / 'inbound' = the other calls in that
-     * direction (an unanswered outbound call is outbound). The three
-     * directions split the rows with no overlap.
+     * direction: 'all' | 'outbound' | 'inbound' | 'missed' | 'connected'.
+     * 'missed' = isMissedCall; 'outbound' / 'inbound' = the other calls in
+     * that direction (an unanswered outbound call is outbound). Those three
+     * split the rows with no overlap. 'connected' = not missed, with talk
+     * time, not a voicemail (Reporting Central's Connected tab).
      * The search matches company or contact name (case-insensitive), or the
      * phone digits when the text holds 3 or more digits.
      * @param {Array<Object>} rows
@@ -563,6 +774,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         const digits = text.replace(/[^0-9]/g, '');
         return (rows || []).filter((r) => {
             if (dir === 'missed' && !isMissedCall(r)) return false;
+            if (dir === 'connected' && (isMissedCall(r) || isUnconnected(r))) return false;
             if ((dir === 'outbound' || dir === 'inbound') &&
                 (isMissedCall(r) || (r.direction || 'outbound') !== dir)) return false;
             if (!text) return true;
@@ -599,22 +811,28 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
     /**
      * Count CTC calls in the rep's book for a NetSuite date keyword (for
      * "vs previous period"). Returns null on failure so callers omit the delta.
-     * @param {{userId?: string|number, bookCustomerIds?: Array<string>, dateKeyword: string}} params
+     * `dateFilter` (an N/search `startdate` expression) replaces the keyword;
+     * `ownerIds` scopes by the Phone Call's `assigned` employee instead of
+     * the book (as loadHistoryRows).
+     * @param {{userId?: string|number, bookCustomerIds?: Array<string>, ownerIds?: Array<string>,
+     *   dateKeyword?: string, dateFilter?: Array}} params
      * @returns {number|null}
      */
     const countCalls = (params) => {
         try {
             const p = params || { dateKeyword: '' };
-            if (!p.dateKeyword) return null;
-            const ids = Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: p.userId });
+            if (!p.dateKeyword && !Array.isArray(p.dateFilter)) return null;
+            const byOwner = Array.isArray(p.ownerIds);
+            const ids = byOwner ? p.ownerIds
+                : (Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: p.userId }));
             if (!ids.length) return 0;
             const op = (p.dateKeyword === 'today' || p.dateKeyword === 'yesterday') ? 'on' : 'within';
             return search.create({
                 type: search.Type.PHONE_CALL,
                 filters: [
-                    ['company', 'anyof', ids], 'AND',
+                    [byOwner ? 'assigned' : 'company', 'anyof', ids], 'AND',
                     ['custevent_ctc_call_sid', 'isnotempty', ''], 'AND',
-                    ['startdate', op, p.dateKeyword]
+                    Array.isArray(p.dateFilter) ? p.dateFilter : ['startdate', op, p.dateKeyword]
                 ],
                 columns: ['internalid']
             }).runPaged({ pageSize: 1000 }).count;
@@ -1224,6 +1442,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         extractText,
         loadHistoryRows,
         loadTaskGroups,
+        loadFollowUpRows,
+        FOLLOW_UP_LIMIT,
         computeStats,
         // Phase 2 — softphone Search tab
         getSuggestedContacts,

@@ -93,10 +93,10 @@ define([], () => {
     // Call status (custevent_ctc_call_status) -> what a call row shows when
     // there is no AI brief. ONE rule set for the Sales Rep Central portlet
     // (briefOf / lenIsDash / dirKind on the server; shipped as JSON to its
-    // client rebuilder) and Reporting Central (unansweredRule).
+    // client rebuilder) and Reporting Central (unansweredRule, outcomeOf).
     //   text  placeholder text (muted grey unless `chip`)
-    //   chip  status chip modifier (portlet ctc-pl-status-<chip>,
-    //         Reporting Central rc-status-<chip>)
+    //   chip  status chip modifier (portlet ctc-pl-status-<chip>; Reporting
+    //         Central's outcome tone: 'missed' -> missed, else quiet)
     //   len   'dash' = Length is always "—"; 'dashZero' = "—" when 0 s
     //   dir   'missed' = a missed call (portlet isMissedCall)
     // A status not listed here shows "—".
@@ -126,5 +126,80 @@ define([], () => {
         return null;
     };
 
-    return { escapeHtml, escapeJs, safeJsonEmbed, setNoStoreHeaders, formatPhone, FORMAT_PHONE_JS, CALL_STATUS_RULES, unansweredRule };
+    // A call that ended with "No transcript" and lasted less than this was
+    // too short for Twilio to transcribe.
+    const SHORT_CALL_SECONDS = 30;
+
+    // Outcome chip colours (Reporting Central Calls table, compact rows).
+    const OUTCOME_TONES = {
+        ready:     { bg: '#E8F0F8', fg: '#1F3550' },
+        followup:  { bg: '#FFF3D6', fg: '#8A5A00' },
+        voicemail: { bg: '#FCE9E7', fg: '#9A3A2C' },
+        missed:    { bg: '#FCE9E7', fg: '#9A3A2C' },
+        quiet:     { bg: '#F1EFEA', fg: '#5C5955' }
+    };
+
+    /**
+     * What happened on a call, as one chip (Reporting Central). In order:
+     * a voicemail reads "Voicemail"; an unanswered call reads the shared
+     * unansweredRule words ("Missed call" coral / "No answer" quiet);
+     * pending proposed tasks read "Follow-up suggested"; then the status:
+     * Logged / Processing → "Processing…", Too short (or No transcript
+     * under SHORT_CALL_SECONDS) → "Too short", Transcribed or an AI brief →
+     * "Summary ready", No transcript → "No transcript", Failed →
+     * "Summary failed"; anything else "—".
+     * @param {{voicemail?: boolean, callStatus?: string, direction?: string, duration?: number, brief?: string}} row
+     * @param {number} [pending] - pending follow-ups from this call
+     * @returns {{text: string, tone: string}} tone: a key of OUTCOME_TONES
+     */
+    const outcomeOf = (row, pending) => {
+        const r = row || {};
+        if (r.voicemail === true) return { text: 'Voicemail', tone: 'voicemail' };
+        const unanswered = unansweredRule(r);
+        if (unanswered) return { text: unanswered.text, tone: unanswered.chip === 'missed' ? 'missed' : 'quiet' };
+        if (pending > 0) return { text: 'Follow-up suggested', tone: 'followup' };
+        const s = String(r.callStatus || '');
+        if (s === 'Logged' || s === 'Processing') return { text: 'Processing…', tone: 'quiet' };
+        if (s === 'Too short' || (s === 'No transcript' && Number(r.duration) < SHORT_CALL_SECONDS)) return { text: 'Too short', tone: 'quiet' };
+        if (s === 'Transcribed' || r.brief) return { text: 'Summary ready', tone: 'ready' };
+        if (s === 'No transcript') return { text: 'No transcript', tone: 'quiet' };
+        if (s === 'Failed') return { text: 'Summary failed', tone: 'quiet' };
+        return { text: '—', tone: 'quiet' };
+    };
+
+    // Satisfaction bands: 1-3 Low, 4-6 Moderate, 7-10 High; no score (or
+    // a voicemail, which is never scored) reads "Not scored".
+    const SAT_BANDS = {
+        high: { label: 'High', fg: '#0E6B45', dot: '#5DBB8A' },
+        mid:  { label: 'Moderate', fg: '#8A5A00', dot: '#E9A62A' },
+        low:  { label: 'Low', fg: '#9A2A23', dot: '#E7837A' },
+        none: { label: 'Not scored', fg: '#8B8780', dot: '#D9D5CF' }
+    };
+
+    /**
+     * A satisfaction score as dot + text: "8 High", "4 Moderate", "2 Low",
+     * "Not scored".
+     * @param {*} n - 1-10, or null / 0 for no score
+     * @returns {{band: string, text: string, fg: string, dot: string}} band: a key of SAT_BANDS
+     */
+    const satBand = (n) => {
+        const v = typeof n === 'number' && n > 0 ? Math.round(n) : 0;
+        const band = !v ? 'none' : (v <= 3 ? 'low' : (v <= 6 ? 'mid' : 'high'));
+        const b = SAT_BANDS[band];
+        return { band: band, text: v ? v + ' ' + b.label : b.label, fg: b.fg, dot: b.dot };
+    };
+
+    // One line instead of the summary and transcript for a call with no
+    // conversation (status -> text). Shared by the Phone Call record panel
+    // (ctc_ue_transcript_viewer.js) and Reporting Central's call detail.
+    const UNANSWERED_NOTE = {
+        'Missed':    'The caller did not reach anyone and left no voicemail.',
+        'No answer': 'The person you called did not pick up.',
+        'Too short': 'The call lasted under 3 seconds, so there is nothing to summarize.'
+    };
+
+    return {
+        escapeHtml, escapeJs, safeJsonEmbed, setNoStoreHeaders, formatPhone, FORMAT_PHONE_JS, CALL_STATUS_RULES, unansweredRule,
+        SHORT_CALL_SECONDS, OUTCOME_TONES, outcomeOf, SAT_BANDS, satBand, UNANSWERED_NOTE
+    };
 });

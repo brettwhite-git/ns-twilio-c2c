@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -34,14 +34,19 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
 
         // Actions open to any internal user: the dashboard portlet and
         // Reporting Central (managers, admins) call these and scope the
-        // data to the session user's book; the proposed-task actions have
-        // their own owner / sales-rep checks.
+        // data to the session user's book; getCallDetail uses Reporting
+        // Central's own scope (the book, or a manager's team); the
+        // follow-up actions share one access rule (isAuthorizedForProposedTask).
         if (body.action === 'searchEntities')       return searchEntities(body);
         if (body.action === 'getWorkspaceHistory')  return getWorkspaceHistory(body);
         if (body.action === 'getWorkspaceTasks')    return getWorkspaceTasks(body);
-        if (body.action === 'approveProposedTask')  return approveProposedTask(body);
-        if (body.action === 'bulkApproveProposedTasks') return bulkApproveProposedTasks(body);
-        if (body.action === 'rejectProposedTask')   return rejectProposedTask(body);
+        if (body.action === 'getCallDetail')        return getCallDetail(body);
+        if (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(FOLLOW_UP_ACTIONS, body.action)) {
+            // The manager rule reads the team once per request, never from
+            // an earlier request (a supervisor change applies at once).
+            rcScope.clearTeamCache();
+            return FOLLOW_UP_ACTIONS[body.action](body);
+        }
 
         // Phone actions act for the session user: only phone users
         // (isPhoneUser). Decided once per request, never cached across
@@ -112,7 +117,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         const user = runtime.getCurrentUser();
         if (String(user.role) === ADMINISTRATOR_ROLE_ID) return { ok: true, config: config };
         const userId = parseInt(user.id, 10);
-        if (!(userId > 0)) return { ok: false, reason: 'no_user' };
+        // Any non-zero id: the account owner's employee id is -5.
+        if (!userId) return { ok: false, reason: 'no_user' };
 
         try {
             if (hasActiveAssignment(['custrecord_ctc_ra_employee', 'anyof', String(userId)])) {
@@ -1018,6 +1024,169 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         });
     };
 
+    // --- Reporting Central call detail ---
+
+    // Transcript lines sent to the detail panel (the record has the rest).
+    const CALL_DETAIL_LINES = 6;
+    const CALL_DETAIL_COLUMNS = [
+        'title', 'company', 'contact', 'phone', 'startdate', 'assigned',
+        'custevent_ctc_call_sid', 'custevent_ctc_call_started', 'custevent_ctc_duration',
+        'custevent_ctc_call_status', 'custevent_ctc_inbound', 'custevent_ctc_voicemail',
+        'custevent_ctc_satisfaction', 'custevent_ctc_tone_keywords', 'custevent_ctc_ai_summary',
+        'custevent_ctc_transcript', 'custevent_ctc_recording_url'
+    ];
+    // Select fields come back as [{ value, text }] (the lookupFields shape).
+    const CALL_DETAIL_SELECTS = ['company', 'contact', 'assigned'];
+
+    /**
+     * The Phone Call's detail fields in the lookupFields shape. record.load,
+     * not lookupFields: the long-text fields (transcript, summary) failed
+     * through lookupFields live (2026-11-02), and the record panel already
+     * reads them this way.
+     * @param {string} callId
+     * @returns {Object}
+     */
+    const readCallDetailFields = (callId) => {
+        const rec = record.load({ type: record.Type.PHONE_CALL, id: callId });
+        const f = {};
+        CALL_DETAIL_COLUMNS.forEach((id) => {
+            const value = rec.getValue({ fieldId: id });
+            if (CALL_DETAIL_SELECTS.indexOf(id) !== -1) {
+                f[id] = value ? [{ value: String(value), text: String(rec.getText({ fieldId: id }) || '') }] : [];
+            } else if (id === 'startdate' && value instanceof Date) {
+                f[id] = rec.getText({ fieldId: id }) || '';
+            } else {
+                f[id] = value;
+            }
+        });
+        return f;
+    };
+
+    // Statuses that already say how an unanswered call ended.
+    const UNANSWERED_STATUSES = ['Missed', 'No answer', 'Too short'];
+
+    // lookupFields gives select fields as [{ value, text }].
+    const selectValue = (v) => (Array.isArray(v) ? (v.length ? String(v[0].value || '') : '') : String(v || ''));
+    const selectText = (v) => (Array.isArray(v) ? (v.length ? String(v[0].text || '') : '') : String(v || ''));
+
+    /**
+     * Transcript line → { speaker: 'rep' | 'customer' | '', text } from the
+     * stored "[REP] …" / "[CUSTOMER] …" form (formatTranscript).
+     * @param {string} line
+     * @returns {{speaker: string, text: string}}
+     */
+    const transcriptLine = (line) => {
+        const m = String(line).match(/^\[(REP|CUSTOMER)\]\s*/);
+        if (!m) return { speaker: '', text: String(line) };
+        return { speaker: m[1] === 'REP' ? 'rep' : 'customer', text: String(line).slice(m[0].length) };
+    };
+
+    /**
+     * getCallDetail — one Phone Call for Reporting Central's call detail.
+     * Open to any internal user (like Reporting Central's list) and scoped
+     * exactly as that list (lib/ctc_rc_scope.js resolveOwnerScope with the
+     * page's `owner`): a CTC call (custevent_ctc_call_sid set) that is
+     *   - own calls (reps; a manager's "me"): its company is in the session
+     *     user's book (primary sales rep OR Sales Team member);
+     *   - team / member (managers): its `assigned` employee is in the
+     *     resolved team / member.
+     * Anything else, and a call that does not exist, answers
+     * { error: 'not_found' }, so the answer never tells whether a call
+     * exists. The team is read fresh for each request.
+     * `status` is the effective status: a call with no talk time and no
+     * reconciled status reads 'Missed' (inbound) or 'No answer'
+     * (outbound), the list's rule (ctcHtml.unansweredRule). A voicemail is
+     * never scored (satisfaction null).
+     * Cost: lookupFields (1) + team SuiteQL (10) + book SuiteQL (10, own
+     * calls only) + pending task search (10) + the tasks' stage lookup
+     * (10, only when the call has tasks) = 21-41 units.
+     *
+     * @param {Object} body
+     * @param {string|number} body.callId - Phone Call internal id
+     * @param {string} [body.owner] - the page's owner param ('team' | 'me' | <employee id>)
+     * @returns {Object} { call, tasks } or { error }
+     */
+    const getCallDetail = (body) => {
+        try {
+            const callId = String(body.callId == null ? '' : body.callId).trim();
+            if (!/^[0-9]{1,12}$/.test(callId)) return { error: 'callId required' };
+            const user = runtime.getCurrentUser();
+            const userId = user.id;
+
+            let f;
+            try {
+                f = readCallDetailFields(callId);
+            } catch (e) {
+                // No such record (or not readable): the same answer as out of scope.
+                log.audit({ title: 'CTC getCallDetail read failed', details: 'callId=' + callId + ' ' + ((e && e.message) || String(e)) });
+                return { error: 'not_found' };
+            }
+            if (!f.custevent_ctc_call_sid) return { error: 'not_found' };
+            const companyId = selectValue(f.company);
+            const ownerId = selectValue(f.assigned);
+
+            rcScope.clearTeamCache();
+            const scope = rcScope.resolveOwnerScope({
+                userId: userId, role: user.role, owner: typeof body.owner === 'string' ? body.owner : ''
+            });
+            if (scope.ownerIds) {
+                if (!ownerId || scope.ownerIds.indexOf(ownerId) === -1) return { error: 'not_found' };
+            } else {
+                if (!companyId) return { error: 'not_found' };
+                const book = workspaceQueries.getBookCustomerIds({ userId: userId });
+                if (book.indexOf(companyId) === -1) return { error: 'not_found' };
+            }
+
+            const voicemail = isChecked(f.custevent_ctc_voicemail);
+            const direction = isChecked(f.custevent_ctc_inbound) ? 'inbound' : 'outbound';
+            const duration = parseInt(f.custevent_ctc_duration, 10) || 0;
+            let status = String(f.custevent_ctc_call_status || '');
+            if (!voicemail && duration <= 0 && UNANSWERED_STATUSES.indexOf(status) === -1) {
+                status = direction === 'inbound' ? 'Missed' : 'No answer';
+            }
+            const lines = String(f.custevent_ctc_transcript || '').split(/\n|<br\s*\/?>/).filter((l) => l.trim());
+
+            const tasks = workspaceQueries.loadTaskGroups({ userId: userId, phoneCallId: callId, tab: 'pending' });
+            const pending = [];
+            (tasks.groups || []).forEach((g) => (g.tasks || []).forEach((t) => {
+                pending.push({ id: String(t.id), text: t.text || '', proposedDue: t.proposedDue || '' });
+            }));
+
+            const out = {
+                call: {
+                    id: callId,
+                    title: String(f.title || ''),
+                    companyId: companyId,
+                    companyName: selectText(f.company),
+                    contactName: selectText(f.contact),
+                    ownerId: ownerId,
+                    ownerName: selectText(f.assigned),
+                    phone: String(f.phone || ''),
+                    date: String(f.startdate || ''),
+                    startedAt: String(f.custevent_ctc_call_started || ''),
+                    direction: direction,
+                    duration: duration,
+                    status: status,
+                    voicemail: voicemail,
+                    satisfaction: voicemail ? null : (parseInt(f.custevent_ctc_satisfaction, 10) || null),
+                    toneKeywords: String(f.custevent_ctc_tone_keywords || ''),
+                    summary: String(f.custevent_ctc_ai_summary || ''),
+                    transcriptLines: lines.slice(0, CALL_DETAIL_LINES).map(transcriptLine),
+                    transcriptLineCount: lines.length,
+                    recordingUrl: String(f.custevent_ctc_recording_url || ''),
+                    recordUrl: '/app/crm/calendar/call.nl?id=' + callId
+                },
+                tasks: pending
+            };
+            // The panel says so instead of "None from this call."
+            if (tasks.error) out.tasksError = true;
+            return out;
+        } catch (e) {
+            log.error({ title: 'CTC getCallDetail Failed', details: (e && e.message) || String(e) });
+            return { error: 'Call detail failed' };
+        }
+    };
+
     /**
      * softphoneSuggested — Iteration B Phase 2.
      * Returns the current user's top owned Customer / Prospect / Lead
@@ -1185,11 +1354,14 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      *
      * @param {Object} body
      * @param {string} body.taskId           - proposed_task internal ID
-     * @param {Object} [body.edits]          - optional rep edits before approval
+     * @param {Object} [body.edits]          - optional edits before approval (readApproveEdits)
      * @param {string} [body.edits.text]
-     * @param {string} [body.edits.due]      - YYYY-MM-DD
-     * @param {string} [body.edits.assignee] - employee internal ID
-     * @returns {Object} { ok: true, nativeTaskId } or { error }
+     * @param {string} [body.edits.dueDate]  - YYYY-MM-DD (older name: due)
+     * @param {string} [body.edits.assigneeId] - employee internal ID (older name: assignee);
+     *                                         the call owner, the customer's sales rep, or the approver's team
+     * @param {string} [body.edits.priority] - HIGH | MEDIUM | LOW
+     * @returns {Object} { ok: true, nativeTaskId } or { error } (forbidden, already_actioned,
+     *                   invalid_text, invalid_due, invalid_assignee, invalid_priority)
      */
     /**
      * Parse YYYY-MM-DD into a local-tz Date (avoids `new Date('2026-05-16')` parsing as UTC
@@ -1247,16 +1419,118 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         return '';
     };
 
-    const isAuthorizedForProposedTask = (sourceCallId, userId) => {
-        // Admin role ID in NetSuite is 3
+    const isAdministrator = () => {
         try {
-            const roleId = String(runtime.getCurrentUser().role);
-            if (roleId === '3') return true;
+            // Administrator role id is 3.
+            return String(runtime.getCurrentUser().role) === '3';
         } catch (e) {
-            // continue with salesrep check
+            return false;
         }
+    };
+
+    /**
+     * The source call's owner: the Phone Call's `assigned` employee (the
+     * owner Reporting Central's team view scopes by), or ''.
+     * @param {string|number} sourceCallId
+     * @returns {string}
+     */
+    const getCallOwnerForCall = (sourceCallId) => {
+        if (!sourceCallId) return '';
+        try {
+            const f = search.lookupFields({ type: search.Type.PHONE_CALL, id: sourceCallId, columns: ['assigned'] });
+            return selectValue(f && f.assigned);
+        } catch (e) {
+            log.error({ title: 'CTC call owner lookup failed', details: (e && e.message) || String(e) });
+            return '';
+        }
+    };
+
+    /**
+     * The user's team as Reporting Central reads it (lib/ctc_rc_scope.js
+     * loadTeam: the active employees they supervise; for an Administrator
+     * every active phone user). Cached for the request (post() clears it).
+     * @param {string|number} userId
+     * @param {boolean} asAdmin
+     * @returns {Array<string>} employee ids
+     */
+    const teamIdsOf = (userId, asAdmin) =>
+        rcScope.loadTeam({ userId: parseInt(String(userId), 10), isAdmin: asAdmin }).map((m) => m.id);
+
+    /**
+     * The one access rule for follow-up actions (approve, dismiss, bulk
+     * approve, complete):
+     *   - an Administrator;
+     *   - the sales rep of the source call's customer (customer.salesrep);
+     *   - a manager, for a call owned (Phone Call `assigned`) by an active
+     *     employee they supervise (Reporting Central's team).
+     * Never anyone else: a manager outside their team is refused.
+     * Cost: 2 lookups (1 unit each); the manager rule adds 1 lookup and the
+     * team SuiteQL (10 units, once per request).
+     * @param {string|number} sourceCallId
+     * @param {string|number} userId
+     * @returns {boolean}
+     */
+    const isAuthorizedForProposedTask = (sourceCallId, userId) => {
+        if (isAdministrator()) return true;
         const srepId = getCustomerSalesRepForCall(sourceCallId);
-        return srepId !== '' && srepId === String(userId);
+        if (srepId !== '' && srepId === String(userId)) return true;
+        const ownerId = getCallOwnerForCall(sourceCallId);
+        return ownerId !== '' && ownerId !== String(userId) && teamIdsOf(userId, false).indexOf(ownerId) !== -1;
+    };
+
+    const PRIORITIES = ['HIGH', 'MEDIUM', 'LOW'];
+    const MAX_TASK_TEXT = 4000;
+
+    /**
+     * Read and validate the edits sent with an approval. Every field is
+     * optional; empty means "keep". `due` / `assignee` are older names for
+     * `dueDate` / `assigneeId`.
+     *   text       - trimmed, at most 4000 characters (else invalid_text)
+     *   dueDate    - a real YYYY-MM-DD date (else invalid_due)
+     *   assigneeId - an employee id (digits; else invalid_assignee); who may
+     *                be chosen is checked by isAllowedAssignee
+     *   priority   - HIGH | MEDIUM | LOW, any case (else invalid_priority)
+     * @param {*} raw - body.edits
+     * @returns {{edits?: {text: string, due: (Date|null), assigneeId: string, priority: string}, error?: string}}
+     */
+    const readApproveEdits = (raw) => {
+        const e = raw && typeof raw === 'object' ? raw : {};
+        const blank = (v) => v == null || String(v).trim() === '';
+        const out = { text: '', due: null, assigneeId: '', priority: '' };
+        if (!blank(e.text)) {
+            out.text = String(e.text).trim();
+            if (out.text.length > MAX_TASK_TEXT) return { error: 'invalid_text' };
+        }
+        const due = !blank(e.dueDate) ? e.dueDate : e.due;
+        if (!blank(due)) {
+            const iso = rcScope.isoDate(String(due).trim());
+            if (!iso) return { error: 'invalid_due' };
+            out.due = parseDateLocal(iso);
+        }
+        const who = !blank(e.assigneeId) ? e.assigneeId : e.assignee;
+        if (!blank(who)) {
+            out.assigneeId = String(who).trim();
+            if (!/^[0-9]{1,12}$/.test(out.assigneeId)) return { error: 'invalid_assignee' };
+        }
+        if (!blank(e.priority)) {
+            out.priority = String(e.priority).trim().toUpperCase();
+            if (PRIORITIES.indexOf(out.priority) === -1) return { error: 'invalid_priority' };
+        }
+        return { edits: out };
+    };
+
+    /**
+     * Who an approver may give the Task to: the source call's owner, the
+     * customer's sales rep (the default), or someone in the approver's team
+     * (lib/ctc_rc_scope.js: the people they supervise; for an Administrator
+     * every active phone user).
+     * @param {string} assigneeId
+     * @param {{userId: (string|number), callOwnerId: string, salesRepId: string}} ctx
+     * @returns {boolean}
+     */
+    const isAllowedAssignee = (assigneeId, ctx) => {
+        if (assigneeId === ctx.callOwnerId || assigneeId === ctx.salesRepId) return true;
+        return teamIdsOf(ctx.userId, isAdministrator()).indexOf(assigneeId) !== -1;
     };
 
     const approveProposedTask = (body) => {
@@ -1295,11 +1569,14 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 return { error: 'forbidden' };
             }
 
-            // Apply edits if any (mutate proposed_task so audit trail captures the text the rep approved)
-            const edits = body.edits || {};
-            const editsText = (edits.text != null && String(edits.text).trim()) || '';
-            const editsDue = parseDateLocal(edits.due);
-            const editsAssignee = (edits.assignee != null && String(edits.assignee).trim()) || '';
+            // Edits (validated before anything is written); applied to the
+            // proposed_task too, so the audit trail has what was approved.
+            const read = readApproveEdits(body.edits);
+            if (read.error) return { error: read.error };
+            const editsText = read.edits.text;
+            const editsDue = read.edits.due;
+            const editsAssignee = read.edits.assigneeId;
+            const editsPriority = read.edits.priority;
 
             const finalText = editsText || pt.getValue({ fieldId: 'custrecord_ctc_pt_text' });
             const finalDueValue = editsDue || pt.getValue({ fieldId: 'custrecord_ctc_pt_proposed_due' });
@@ -1311,6 +1588,11 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             // it's a free-text name guess and was producing wrong assignments (e.g. Kathryn Glass
             // instead of the customer's actual salesrep).
             const customerSalesRepId = getCustomerSalesRepForCall(sourceCallId);
+            if (editsAssignee && !isAllowedAssignee(editsAssignee, {
+                userId: userId, salesRepId: customerSalesRepId, callOwnerId: getCallOwnerForCall(sourceCallId)
+            })) {
+                return { error: 'invalid_assignee' };
+            }
             const finalAssignee = editsAssignee || customerSalesRepId || userId;
 
             if (editsText)     pt.setValue({ fieldId: 'custrecord_ctc_pt_text', value: finalText });
@@ -1346,6 +1628,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             if (sourceContact) task.setValue({ fieldId: 'contact', value: sourceContact });
             if (finalAssignee) task.setValue({ fieldId: 'assigned', value: finalAssignee });
             if (finalDueValue) task.setValue({ fieldId: 'duedate', value: finalDueValue });
+            if (editsPriority) task.setValue({ fieldId: 'priority', value: editsPriority });
             const nativeTaskId = task.save({ ignoreMandatoryFields: true });
 
             // Mark proposed_task approved + link to materialized Task
@@ -1367,26 +1650,33 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     /**
      * bulkApproveProposedTasks — approve multiple proposed_tasks in one round-trip.
      * Reuses approveProposedTask per-task so ownership + idempotency + SDF-correct
-     * field writes all apply uniformly. Per-task failures don't abort the batch.
+     * field writes + edit validation all apply uniformly. Per-task failures don't
+     * abort the batch.
      *
      * @param {Object} body
-     * @param {Array<string>} body.taskIds — proposed_task IDs to approve (max 25 per batch)
+     * @param {Array<{taskId: string, edits?: Object}>} [body.items] — each task with its own
+     *        edits (Reporting Central sends each task's assigneeId: its call's owner);
+     *        wins over taskIds
+     * @param {Array<string>} [body.taskIds] — proposed_task IDs to approve without edits
+     *        (max 25 per batch either way)
      * @returns {Object} { ok, approved, failed, results } or { error }
      */
     const bulkApproveProposedTasks = (body) => {
         try {
-            const taskIds = Array.isArray(body.taskIds) ? body.taskIds : [];
-            if (!taskIds.length) return { error: 'taskIds required' };
+            const items = Array.isArray(body.items)
+                ? body.items.filter((i) => i && typeof i === 'object' && i.taskId).map((i) => ({ taskId: i.taskId, edits: i.edits }))
+                : (Array.isArray(body.taskIds) ? body.taskIds : []).map((id) => ({ taskId: id }));
+            if (!items.length) return { error: 'taskIds required' };
             // Cap to stay well under RESTlet governance — each approve costs roughly
             // 30 units (load + Task create + save).
-            if (taskIds.length > 25) return { error: 'batch_too_large', limit: 25 };
+            if (items.length > 25) return { error: 'batch_too_large', limit: 25 };
 
-            const results = taskIds.map((id) => {
+            const results = items.map((item) => {
                 try {
-                    const r = approveProposedTask({ taskId: id });
-                    return Object.assign({ taskId: id }, r);
+                    const r = approveProposedTask({ taskId: item.taskId, edits: item.edits });
+                    return Object.assign({ taskId: item.taskId }, r);
                 } catch (e) {
-                    return { taskId: id, error: (e && e.message) || String(e) };
+                    return { taskId: item.taskId, error: (e && e.message) || String(e) };
                 }
             });
             const approved = results.filter((r) => r.ok).length;
@@ -1441,6 +1731,53 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             log.error({ title: 'CTC rejectProposedTask Failed', details: (e && e.message) || String(e) });
             return { error: 'Rejection failed' };
         }
+    };
+
+    /**
+     * completeFollowUpTask — mark the NetSuite Task an approved follow-up
+     * created as Completed (Reporting Central "Mark complete"), and flag the
+     * proposed_task completed (+ date). Same access rule as approve.
+     *
+     * @param {Object} body
+     * @param {string} body.taskId - proposed_task internal ID
+     * @returns {Object} { ok: true, nativeTaskId } or { error } (taskId required, not_a_task,
+     *                   already_actioned, forbidden, Complete failed)
+     */
+    const completeFollowUpTask = (body) => {
+        try {
+            if (!body.taskId) return { error: 'taskId required' };
+            const userId = runtime.getCurrentUser().id;
+            const pt = record.load({ type: 'customrecord_ctc_proposed_task', id: body.taskId, isDynamic: false });
+            const statusText = pt.getText ? pt.getText({ fieldId: 'custrecord_ctc_pt_status' }) : '';
+            const nativeTaskId = selectValue(pt.getValue({ fieldId: 'custrecord_ctc_pt_created_task' }));
+            if (statusText !== 'Approved' || !nativeTaskId) return { error: 'not_a_task' };
+            if (isChecked(pt.getValue({ fieldId: 'custrecord_ctc_pt_task_completed' }))) return { error: 'already_actioned' };
+            if (!isAuthorizedForProposedTask(pt.getValue({ fieldId: 'custrecord_ctc_pt_phone_call' }), userId)) {
+                return { error: 'forbidden' };
+            }
+            record.submitFields({
+                type: record.Type.TASK,
+                id: nativeTaskId,
+                values: { status: 'COMPLETE' },
+                options: { ignoreMandatoryFields: true }
+            });
+            pt.setValue({ fieldId: 'custrecord_ctc_pt_task_completed', value: true });
+            pt.setValue({ fieldId: 'custrecord_ctc_pt_task_completed_date', value: new Date() });
+            pt.save({ ignoreMandatoryFields: true });
+            return { ok: true, nativeTaskId: nativeTaskId };
+        } catch (e) {
+            log.error({ title: 'CTC completeFollowUpTask Failed', details: (e && e.message) || String(e) });
+            return { error: 'Complete failed' };
+        }
+    };
+
+    // Follow-up actions (open to any internal user; each checks
+    // isAuthorizedForProposedTask per task).
+    const FOLLOW_UP_ACTIONS = {
+        approveProposedTask: approveProposedTask,
+        bulkApproveProposedTasks: bulkApproveProposedTasks,
+        rejectProposedTask: rejectProposedTask,
+        completeFollowUpTask: completeFollowUpTask
     };
 
     return { post };

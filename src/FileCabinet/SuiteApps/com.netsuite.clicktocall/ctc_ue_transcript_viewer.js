@@ -86,12 +86,9 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
     const VOICEMAIL_STYLE = { bg: '#E8F3FC', fg: '#1B6097', label: 'Voicemail' };
 
     // Calls with no conversation to analyse: the panel shows the pill and
-    // one line instead of the summary, metrics and transcript.
-    const UNANSWERED_NOTE = {
-        'Missed':    'The caller did not reach anyone and left no voicemail.',
-        'No answer': 'The person you called did not pick up.',
-        'Too short': 'The call lasted under 3 seconds, so there is nothing to summarize.'
-    };
+    // one line instead of the summary, metrics and transcript. The words
+    // live in lib/ctc_html.js (Reporting Central's call detail uses them too).
+    const UNANSWERED_NOTE = ctcHtml.UNANSWERED_NOTE;
 
     const pill = (style) =>
         `<span class="ctc-status-pill" style="background:${style.bg};color:${style.fg}">${escapeHtml(style.label)}</span>`;

@@ -517,7 +517,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                     "bf=cell(el('span','ctc-pl-brief'+(r.brief||bc?'':' ctc-pl-brief-muted'),bc?null:bt));bf.title=r.brief||'';" +
                     "if(bc){bf.appendChild(el('span','ctc-pl-status ctc-pl-status-'+bc,bt))}}row.appendChild(bf);" +
                     "var sa=r.satisfaction;var sp=cell(el('span','ctc-pl-sat'));" +
-                    "sp.appendChild(el('span','ctc-pl-pill '+(!sa?'ctc-pl-sat-none':sa>=7?'ctc-pl-sat-hi':sa>=5?'ctc-pl-sat-mid':'ctc-pl-sat-low'),sa?String(sa):'—'));row.appendChild(sp);" +
+                    "sp.appendChild(el('span','ctc-pl-pill '+(!sa?'ctc-pl-sat-none':sa>=7?'ctc-pl-sat-hi':sa>=4?'ctc-pl-sat-mid':'ctc-pl-sat-low'),sa?String(sa):'—'));row.appendChild(sp);" +
                     // Length dash — mirrors server lenIsDash.
                     "var du=dsec(r);var ld=!!ru&&(ru.len==='dash'||(ru.len==='dashZero'&&du===0));" +
                     "row.appendChild(cell(el('span','ctc-pl-dur',ld?'—':Math.floor(du/60)+':'+pad(du%60))));" +
