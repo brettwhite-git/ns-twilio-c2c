@@ -440,7 +440,7 @@
     // first lock query answers; null when the browser has no Web Locks.
     var lockHeld = mode === 'outside' ? 'pending' : false;
     // What a click on the pill does beyond opening: 'unlock' (Turn on
-    // phone) | 'menu' (phase moved) | ''. pressAction keeps the value seen
+    // phone) | 'menu' (phase moved) | 'signin' (signed out) | ''. pressAction keeps the value seen
     // at pointerdown / keydown: the shell's own gesture listener may unlock
     // audio (and a new snapshot re-render the pill) before the click lands.
     var pillAction = '';
@@ -906,7 +906,8 @@
         var kind = errorKind();
         if (kind === 'mic') return { dot: '#EE6E5C', light: true, err: true, main: 'retry', l1: 'Microphone blocked', label: 'Microphone blocked. Open phone' };
         if (kind === 'twilio') return { dot: '#EE6E5C', light: true, err: true, main: 'retry', l1: 'Phone error', label: 'Phone error. Open phone' };
-        if (kind === 'session') return { dot: AMBER, amber: true, l1: 'Signing in…', label: 'Signing in. Open phone' };
+        if (kind === 'signed_out') return { dot: AMBER, amber: true, action: 'signin', l1: 'Sign in to NetSuite', label: 'Signed out of NetSuite. Sign in' };
+        if (kind === 'session') return { dot: AMBER, amber: true, l1: 'Reconnecting…', label: 'Reconnecting. Open phone' };
         if (kind === 'network') return { dot: AMBER, amber: true, l1: 'Reconnecting…', label: 'Reconnecting. Open phone' };
         if (phase !== 'ready') return null;
         if (mode === 'shell' && snap && snap.audioUnlocked === false) {
@@ -1018,7 +1019,7 @@
             opener.setAttribute('aria-expanded', menuOpen ? 'true' : 'false');
             return;
         }
-        if (pillAction === 'unlock') return;
+        if (pillAction === 'unlock' || pillAction === 'signin') return;
         if (opener === vMain && vMain.classList.contains('end')) return;
         var opens = (mode !== 'outside' || phoneElsewhere()) && (!!panel || isActive());
         if (opens) opener.setAttribute('aria-expanded', expanded ? 'true' : 'false');
@@ -1783,6 +1784,7 @@
     }
     function runPillAction(a) {
         if (a === 'unlock') { unlock(); return true; }
+        if (a === 'signin') { signIn(); return true; }
         if (a === 'menu') { setMenu(!menuOpen); return true; }
         return false;
     }

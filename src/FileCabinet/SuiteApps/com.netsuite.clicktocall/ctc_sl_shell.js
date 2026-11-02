@@ -143,6 +143,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             busChannel: ctcDock.BUS_CHANNEL,
             phaseIncoming: ctcDock.PHASE_INCOMING,
             phaseMoved: ctcDock.PHASE_MOVED,
+            errorSignedOut: ctcDock.ERROR_SIGNED_OUT,
             requestOrigin: ctcDock.REQUEST_ORIGIN,
             requestTakeover: ctcDock.REQUEST_TAKEOVER,
             requestUnlock: ctcDock.REQUEST_UNLOCK_AUDIO,
@@ -305,7 +306,12 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   function bannerText() {
     bannerSub.textContent = ACTIVE[phase] ? 'Your call is still connected.' : 'Sign in again to keep working.';
   }
-  function showBanner() {
+  // fromPhone: the phone reported 'signed_out' (else the NetSuite frame
+  // landed on a login page). A banner from the phone hides by itself when
+  // the phone recovers.
+  var bannerFromPhone = false;
+  function showBanner(fromPhone) {
+    if (!sessionLost || !fromPhone) bannerFromPhone = !!fromPhone;
     sessionLost = true;
     bannerText();
     if (banner.hidden) {
@@ -331,10 +337,25 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   // The first normal page after the session banner means the rep signed in
   // again: hide the banner and restart the phone. The Reload button only
   // reloads the NetSuite frame; a login page there shows the banner again.
+  // The phone's latest snapshot: error kind and canReceive. The phone
+  // recovers by itself after a new sign-in (token retry), so a restart is
+  // needed only when it has not (a restart is a few seconds with no ringing).
+  // Before the first snapshot nothing is known: restart.
+  var phoneSeen = false;
+  var phoneErrKind = '';
+  var phoneCanReceive = null;
+  function phoneRecovered() {
+    return phoneSeen && phoneErrKind !== 'session' && phoneErrKind !== CFG.errorSignedOut && phoneCanReceive !== false;
+  }
   function sessionBack() {
     if (!sessionLost) return;
     sessionLost = false;
     banner.hidden = true;
+    closeSignedOutNotice();
+    if (phoneRecovered()) {
+      logEvent('phone restart skipped', 'signed in again, phone already recovered');
+      return;
+    }
     restartPhone('signed in again');
   }
   document.getElementById('ctc-pm-reload').addEventListener('click', function () {
@@ -505,6 +526,53 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     setPhase(snap.phase);
     takeoverReply(snap);
     ringFromSnapshot(snap);
+    sessionFromSnapshot(snap);
+  }
+
+  // ---- Signed out (phone error kind signed_out) ----
+  // The phone found the NetSuite session gone: show the session banner and,
+  // when the rep is away, one system notification. Both go away when the
+  // phone recovers (the rep signed in, in any tab).
+  var signedOutNotif = null;
+  function closeSignedOutNotice() {
+    if (!signedOutNotif) return;
+    try { signedOutNotif.close(); } catch (e) { /* already closed */ }
+    signedOutNotif = null;
+  }
+  function showSignedOutNotice() {
+    if (signedOutNotif || notifyState() !== 'granted') return;
+    try {
+      var n = new Notification('Signed out of NetSuite', {
+        body: 'Sign in again to keep receiving calls.',
+        tag: 'ctc-signed-out',
+        requireInteraction: true
+      });
+      n.onclick = function () {
+        try { window.focus(); } catch (e) { /* focus refused */ }
+        closeSignedOutNotice();
+      };
+      signedOutNotif = n;
+    } catch (e) {
+      logEvent('notification error', e && e.message);
+    }
+  }
+  function sessionFromSnapshot(snap) {
+    phoneSeen = true;
+    phoneErrKind = (snap.error && snap.error.kind) || '';
+    phoneCanReceive = snap.canReceive;
+    if (phoneErrKind === CFG.errorSignedOut) {
+      if (!sessionLost) logEvent('phone signed out', '');
+      showBanner(true);
+      if (isAway()) showSignedOutNotice();
+      return;
+    }
+    closeSignedOutNotice();
+    if (sessionLost && bannerFromPhone && phoneRecovered()) {
+      sessionLost = false;
+      bannerFromPhone = false;
+      banner.hidden = true;
+      logEvent('banner hidden', 'phone signed in again');
+    }
   }
   if (typeof BroadcastChannel === 'function') {
     bus = new BroadcastChannel(CFG.busChannel);

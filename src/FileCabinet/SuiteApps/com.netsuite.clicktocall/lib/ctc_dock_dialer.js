@@ -1235,8 +1235,10 @@
         var a = null;
         if (kind === 'mic') {
             a = { tone: 'red', title: 'Microphone blocked', text: 'Click the lock icon in the address bar › Allow microphone › reload', act: 'Reload', run: host.reloadPhone, phone: true };
-        } else if (kind === 'session') {
+        } else if (kind === 'signed_out') {
             a = { tone: 'amber', title: 'Your NetSuite session ended. Sign in again in this tab.', text: '', act: 'Sign in', run: host.signIn };
+        } else if (kind === 'session') {
+            a = { tone: 'amber', title: 'Reconnecting the phone…', text: '', act: '', run: null };
         } else if (kind === 'twilio') {
             a = { tone: 'red', title: 'Phone error', text: String((snap.error && snap.error.message) || ''), act: 'Retry', run: host.reloadPhone, phone: true };
         }

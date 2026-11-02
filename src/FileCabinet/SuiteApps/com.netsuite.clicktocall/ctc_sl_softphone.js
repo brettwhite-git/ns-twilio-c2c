@@ -3226,7 +3226,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     var recovered = tokenFailing;
                     tokenFailing = false;
                     tokenRetryAttempt = 0;
-                    clearPhoneError(['session']);
+                    clearPhoneError(['session', 'signed_out']);
                     if (!device) {
                         // The page never had a token (boot failed).
                         tokenRefreshInFlight = false;
@@ -3296,7 +3296,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 return;
             }
             var http = /^HTTP ([0-9]{3})/.exec(detail);
-            setPhoneError('session', http ? Number(http[1]) : 0, 'token: ' + detail);
+            // NetSuite said no (401 / 403, or its login page instead of
+            // JSON): the rep is signed out and must sign in again. Other
+            // failures (offline, a server error) stay 'session'.
+            setPhoneError(isSignedOutDetail(detail) ? 'signed_out' : 'session',
+                http ? Number(http[1]) : 0, 'token: ' + detail);
             if (!tokenFailing) {
                 tokenFailing = true;
                 publishDock();
@@ -3357,10 +3361,56 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             if (tokenRecoveryWatchStarted) return;
             tokenRecoveryWatchStarted = true;
             document.addEventListener('visibilitychange', function () {
-                if (document.visibilityState === 'visible') retryTokenNow('page visible');
+                if (document.visibilityState === 'visible') {
+                    retryTokenNow('page visible');
+                    pingSession('page visible');
+                }
             });
-            window.addEventListener('online', function () { retryTokenNow('back online'); });
+            window.addEventListener('online', function () {
+                retryTokenNow('back online');
+                pingSession('back online');
+            });
             window.addEventListener('focus', function () { retryTokenNow('window focus'); });
+            setInterval(function () { pingSession('interval'); }, SESSION_PING_MS);
+        }
+
+        // 'HTTP 401' / 'HTTP 403' / 'not JSON…' (a login page): signed out.
+        function isSignedOutDetail(detail) {
+            return /^HTTP 40[13]/.test(detail) || /^not JSON/.test(detail);
+        }
+
+        // --- Session watch ---
+        // A token lasts an hour, so the token fetch alone finds a lost
+        // NetSuite session (logout, idle timeout, a network change) up to an
+        // hour late. Every SESSION_PING_MS, and at once when the page comes
+        // back online or visible, the phone sends 'sessionPing' (no queries).
+        // A 401 / 403 or a login page starts the token recovery loop, which
+        // sets error kind 'signed_out' (the dock asks the rep to sign in)
+        // and recovers by itself after the rep signs in. Offline or other
+        // failures do nothing here.
+        var SESSION_PING_MS = 60 * 1000;
+        var sessionPingInFlight = false;
+        function pingSession(reason) {
+            if (phoneDisabled || tokenFailing || tokenRefreshInFlight || sessionPingInFlight) return;
+            sessionPingInFlight = true;
+            fetch(TOKEN_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'sessionPing' })
+            })
+            .then(function (res) {
+                if (!res.ok) return 'HTTP ' + res.status;
+                return res.json().then(function () { return ''; }, function () { return 'not JSON'; });
+            })
+            .then(function (detail) {
+                sessionPingInFlight = false;
+                if (!detail || !isSignedOutDetail(detail)) return;
+                regLog('Session lost (' + reason + ': ' + detail + '); checking the token');
+                refreshDeviceToken(false);
+            })
+            .catch(function () {
+                sessionPingInFlight = false; // offline: the online event pings again
+            });
         }
 
         // Seconds-since-epoch exp of the JWT, as ms; 0 when unknown.

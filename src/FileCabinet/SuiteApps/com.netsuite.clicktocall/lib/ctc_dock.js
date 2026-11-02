@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '21';
+    const DOCK_ASSET_VERSION = '22';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -118,8 +118,11 @@ define(['./ctc_html'], (ctcHtml) => {
     //   Kept in the shell tab's sessionStorage (MISSED_STORAGE_KEY), so a
     //   phone-frame restart keeps it; another tab starts at 0.
     // error: { kind, code, message } — kind '' (no error) | 'mic' | 'session'
-    //   | 'network' | 'twilio' | 'not_enabled'. session: token fetch fails (NetSuite session
-    //   gone) or Twilio 20101 / 20104 / 31204-31206; mic: microphone permission
+    //   | 'signed_out' | 'network' | 'twilio' | 'not_enabled'. signed_out:
+    //   NetSuite answered 401 / 403 or its login page (token fetch, or the
+    //   60 s 'sessionPing'): the rep must sign in again; the phone recovers by
+    //   itself after that (ERROR_SIGNED_OUT). session: other token fetch
+    //   failures (offline, server error) or Twilio 20101 / 20104 / 31204-31206; mic: microphone permission
     //   denied or Twilio 31208 / 31401; network: other Twilio 31xxx (signaling,
     //   media) and register time-outs; twilio: any other Twilio code. code:
     //   the Twilio code, the HTTP status for session, else 0; for not_enabled
@@ -207,6 +210,8 @@ define(['./ctc_html'], (ctcHtml) => {
     const PHONE_DISABLED_MESSAGE = 'ctc-phone-disabled';
     // RESTlet error (and snap.error.code) for a user who may not use the phone.
     const ERROR_NOT_A_PHONE_USER = 'not_a_phone_user';
+    // snap.error.kind when NetSuite signed the rep out (bus contract above).
+    const ERROR_SIGNED_OUT = 'signed_out';
     // sessionStorage key (shell tab) for snap.missedUnseen.
     const MISSED_STORAGE_KEY = 'ctc-missed-unseen';
     // Shell URL parameter: takeover=1 makes a shell that finds the phone
@@ -313,6 +318,7 @@ define(['./ctc_html'], (ctcHtml) => {
         UNLOCK_AUDIO_MESSAGE,
         PHONE_DISABLED_MESSAGE,
         ERROR_NOT_A_PHONE_USER,
+        ERROR_SIGNED_OUT,
         MISSED_STORAGE_KEY,
         TAKEOVER_PARAM,
         PHONE_LOCK_NAME,

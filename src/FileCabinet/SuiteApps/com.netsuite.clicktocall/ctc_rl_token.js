@@ -27,6 +27,11 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     const post = (requestBody) => {
         const body = requestBody || {};
 
+        // Session check for the phone (no queries, no gate): NetSuite itself
+        // answers 401 SESSION_TIMED_OUT before this runs when the session
+        // is gone, so reaching here means the session is alive.
+        if (body.action === 'sessionPing')          return { ok: true };
+
         // Actions open to any internal user: the dashboard portlet and
         // Reporting Central (managers, admins) call these and scope the
         // data to the session user's book; the proposed-task actions have
