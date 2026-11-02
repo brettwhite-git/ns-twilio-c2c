@@ -172,7 +172,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      *   missedOnly?: boolean,
      *   countTotal?: boolean,
      *   ownerIds?: Array<string>,
-     *   dateFilter?: Array
+     *   dateFilter?: Array,
+     *   skipEntityType?: boolean
      * }} [params]
      * `missedOnly` keeps only missed calls and voicemails (status 'Missed'
      * OR custevent_ctc_voicemail T). `countTotal` makes `total` the number
@@ -185,6 +186,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      * the scope is the user's book, as before.
      * `dateFilter` (Reporting Central, lib/ctc_rc_scope.js) is one N/search
      * filter expression on `startdate`, used instead of `dateRange`.
+     * `skipEntityType` (Reporting Central, which never shows the stage)
+     * skips the stage lookup: one customer search less; `entityType` stays ''.
      * @returns {{rows: Array<Object>, total: number, error?: string}} `{error}` on failure
      */
     const loadHistoryRows = (params) => {
@@ -333,7 +336,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             // {name:'stage', join:'company'} with "An nlobjSearchColumn contains
             // an invalid column"). Do a second-pass batched lookup against
             // customer for unique companyIds. Same pattern loadTaskGroups uses.
-            enrichRowsWithEntityType(rows);
+            if (!p.skipEntityType) enrichRowsWithEntityType(rows);
 
             const total = (p.countTotal && results.length >= limit && historySearch.runPaged)
                 ? historySearch.runPaged({ pageSize: 1000 }).count
@@ -375,8 +378,15 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      *   phoneCallId?: string|number,
      *   bookCustomerIds?: Array<string>,
      *   ownerIds?: Array<string>,
-     *   limit?: number
+     *   limit?: number,
+     *   skipEntityType?: boolean,
+     *   skipCount?: boolean
      * }} [params]
+     * `skipEntityType` skips the stage lookup (each group.call keeps
+     * `entityType` undefined): one customer search less. `skipCount` skips
+     * the runPaged count when the limit is reached: `totalTasks` is then
+     * the number of tasks returned. Reporting Central and getCallDetail
+     * pass them (they never read either).
      * `ownerIds` (Reporting Central team view) keeps tasks whose source
      * call's `assigned` employee is in the list, instead of the book; each
      * group.call then carries `ownerId` / `ownerName`. An empty array
@@ -448,7 +458,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             const results = taskSearch.run().getRange({ start: 0, end: limit });
             // totalTasks is every pending task, not only the rows returned.
             // Count only when the limit may have cut the list.
-            const totalTasks = results.length < limit ? results.length : taskSearch.runPaged({ pageSize: 1000 }).count;
+            const totalTasks = (results.length < limit || p.skipCount) ? results.length : taskSearch.runPaged({ pageSize: 1000 }).count;
 
             // For joined SELECT columns, getValue returns the internal ID and getText
             // returns the display text. Use getText for display fields, getValue for IDs.
@@ -518,7 +528,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             // Second-pass batched stage lookup so each group.call gets a Lead /
             // Prospect / Customer label. NetSuite doesn't support the 3-hop join
             // proposed_task → phone_call → company → stage in a single search.
-            enrichRowsWithEntityType(groups.map((g) => g.call));
+            if (!p.skipEntityType) enrichRowsWithEntityType(groups.map((g) => g.call));
 
             return { groups: groups, totalTasks: totalTasks };
         } catch (e) {

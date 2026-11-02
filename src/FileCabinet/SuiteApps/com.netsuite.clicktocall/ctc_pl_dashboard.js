@@ -56,7 +56,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         open: 'M14 3h7v7M21 3l-9 9M19 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5',
         approve: 'M5 12l5 5L20 7',
         dismiss: 'M6 6l12 12M18 6L6 18',
-        followUp: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9'
+        followUp: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
+        report: 'M3 20h18M7 16v-5M12 16V6M17 16v-8'
     };
 
     const strokeSvg = (d, size, width, cls, aria) => '<svg' + (cls ? ' class="' + cls + '"' : '') +
@@ -791,7 +792,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const refreshOnclick = buildRefreshOnclick(restletUrl, shellUrl);
         const subs = buildKpiSubs(rows, missedTotal);
 
-        // ── Header: title, period, Reporting Central, Call ──────────────────
+        // ── Header: period, Reporting Central, Call ──────────────────
         const reportBase = reportingUrl
             ? reportingUrl + (reportingUrl.indexOf('?') >= 0 ? '&' : '?') + 'range='
             : '';
@@ -799,10 +800,13 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             ? reportingUrl + (reportingUrl.indexOf('?') >= 0 ? '&' : '?') + 'tab=followups&range='
             : '';
         const reportHtml = reportBase
-            ? '<a class="ctc-pl-report" id="ctc-pl-report" href="' + escapeHtml(reportBase + 'today') + '" data-base="' + escapeHtml(reportBase) + '">' +
+            ? // uir-no-link: NetSuite's portlet link colour rule skips it.
+            '<a class="ctc-pl-report ctc-pl-press uir-no-link" id="ctc-pl-report" href="' + escapeHtml(reportBase + 'today') + '" data-base="' + escapeHtml(reportBase) + '">' +
+                strokeSvg(PATH.report, 14, '2') +
                 '<span class="ctc-pl-report-long">Reporting Central</span><span class="ctc-pl-report-short">Reporting</span>' +
-                strokeSvg(PATH.outbound, 13, '2') +
-              '</a>'
+              '</a>' +
+              // A hairline between the two actions.
+              '<span class="ctc-pl-head-divider" aria-hidden="true"></span>'
             : '';
         const callButtonHtml = placeCallOnclick
             ? '<button class="ctc-pl-call-btn" type="button" title="Open the phone" onclick="' + escapeHtml(placeCallOnclick) + '">' + callSvg(13) + 'Call</button>'
@@ -882,15 +886,18 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
 /* Header */
 .ctc-pl-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; padding: 18px 22px 14px; }
-.ctc-pl-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.2; color: #161513; }
 .ctc-pl-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: #F4F2EE; }
 .ctc-pl-chip { height: 28px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; font-size: 12.5px; font-weight: 500; color: #5C5955; }
 .ctc-pl-chip:hover:not(:disabled) { color: #161513; }
 .ctc-pl-chip.ctc-pl-chip-active { background: #FFFFFF; box-shadow: 0 1px 2px rgba(22,21,19,0.10); color: #161513; }
 .ctc-pl-spacer { flex: 1; }
-.ctc-pl-report { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 500; white-space: nowrap; }
+/* Header actions: one button family (32 px, 8 px radius, 12.5 px / 600); Call is the one dark action. */
+.ctc-pl-root a.ctc-pl-report { height: 32px; padding: 0 12px 0 10px; border-radius: 8px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #DCD9D3; color: #161513; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; white-space: nowrap; transition: transform 140ms ease-out, background-color 120ms ease; }
+.ctc-pl-root a.ctc-pl-report:hover { background: #F6F5F2; color: #161513; }
+.ctc-pl-report svg { color: #5C5955; display: block; }
+.ctc-pl-head-divider { width: 1px; height: 20px; background: #DCD9D3; }
 .ctc-pl-report-short { display: none; }
-.ctc-pl-call-btn { height: 32px; padding: 0 12px 0 10px; border: 0; border-radius: 8px; background: #0F1B30; color: #FFFFFF; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+.ctc-pl-call-btn { height: 32px; padding: 0 12px 0 10px; transition: transform 140ms ease-out, background-color 120ms ease; border: 0; border-radius: 8px; background: #0F1B30; color: #FFFFFF; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
 .ctc-pl-call-btn:hover:not(:disabled) { background: #1B2A44; }
 .ctc-pl-call-btn svg { color: #14B981; display: block; }
 
@@ -1032,7 +1039,6 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 @container ctcpl (max-width: 560px) {
     .ctc-pl-head { padding: 16px 16px 12px; gap: 10px; }
     .ctc-pl-seg { order: 10; }
-    .ctc-pl-report { font-size: 12.5px; gap: 4px; }
     .ctc-pl-report-long { display: none; }
     .ctc-pl-report-short { display: inline; }
     .ctc-pl-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 16px; }
@@ -1083,7 +1089,6 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
 <div class="ctc-pl-root${noFollowUps ? ' ctc-pl-no-fu' : ''}${allTasksShown ? ' ctc-pl-fu-all' : ''}${missedTotal ? '' : ' ctc-pl-no-missed'}" id="ctc-pl-root" data-range="today" data-fu-total="${fuCount}">
     <div class="ctc-pl-head">
-        <h2 class="ctc-pl-title">Sales Rep Central</h2>
         ${buildChipsHtml(restletUrl)}
         <span class="ctc-pl-spacer"></span>
         ${reportHtml}

@@ -7,8 +7,13 @@
  * app bar (back, title, Overview · Calls · Follow-ups, the user), the page
  * header (title, scope line, Time range / Owner selects, date chip, custom
  * dates), CSS tokens and shared styles, and the shared client script
- * (loading state, select navigation, custom range). Tab content lives in
- * lib/ctc_rc_calls.js and lib/ctc_rc_followups.js.
+ * (busy state, select navigation, custom range). Tab content lives in
+ * lib/ctc_rc_calls.js, lib/ctc_rc_overview.js and lib/ctc_rc_followups.js.
+ *
+ * Busy state: a click on a data-nav link or form, or a select change, never
+ * swaps the content. The old page stays as it is until the next one paints
+ * (the browser's paint holding); body.rc-busy dims #rc-content only after
+ * 200 ms, and an app-bar tab turns current at once.
  */
 define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcScope) => {
 
@@ -32,7 +37,7 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
     const FTABS = ['review', 'tasks', 'done'];
     const DUES = ['overdue', 'week'];
     // owner 'team' is the managers' default; reps never carry owner.
-    const DEFAULTS = { range: rcScope.DEFAULT_RANGE, tab: 'calls', dir: 'all', owner: 'team', ftab: 'review', due: '' };
+    const DEFAULTS = { range: rcScope.DEFAULT_RANGE, tab: 'overview', dir: 'all', owner: 'team', ftab: 'review', due: '' };
     const RANGE_OPTIONS = {
         today: 'Today', yesterday: 'Yesterday', last7: 'Last 7 days', thisweek: 'This week', lastweek: 'Last week',
         last30: 'Last 30 days', thismonth: 'This month', custom: 'Custom range…'
@@ -44,7 +49,7 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
 
     /**
      * Validate every query parameter against a whitelist. Unknown or bad
-     * values fall back to the defaults (range last7, tab calls, dir all).
+     * values fall back to the defaults (range last7, tab overview, dir all).
      * `owner` keeps only 'team', 'me' or digits; lib/ctc_rc_scope.js decides
      * whether the user may use it. `tab=missed` (older links) becomes the
      * Calls tab with dir=missed. `call` (a Phone Call id to open) and `fu`
@@ -280,12 +285,6 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
             '</form>';
     };
 
-    const skeleton = () => {
-        const widths = ['70%', '55%', '80%', '45%', '65%', '50%'];
-        return '<div class="rc-card rc-skel" id="rc-loading" hidden aria-busy="true" aria-label="Loading">' +
-            widths.map((w) => '<div class="rc-skel-row"><span style="width:40px"></span><span style="width:' + w + '"></span></div>').join('') + '</div>';
-    };
-
     /**
      * The whole page.
      * @param {{m: Object, body: string, css: string, cfg: Object, scripts: Array<string>, fit?: boolean}} p
@@ -304,7 +303,7 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Reporting Central</title>
-${ctcFonts.buildFigtreeStyle()}
+${ctcFonts.buildFigtreeStyle({ preload: true })}
 <style>${shellCss()}${p.css || ''}</style>
 </head>
 <body${p.fit ? ' class="rc-fit"' : ''}>
@@ -313,7 +312,6 @@ ${buildAppBar(m)}
 ${buildPageHeader(m)}
 ${buildCustomForm(m)}
 ${p.body}
-${skeleton()}
 </main>
 <script>window.CTC_RC = ${safeJsonEmbed(p.cfg || {})};</script>
 <script>${SHELL_CLIENT_JS}</script>
@@ -336,6 +334,9 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
     --mono: ${ctcFonts.MONO_STACK};
   }
   * { box-sizing: border-box; }
+  /* The scrollbar's room is kept when a page does not scroll (Overview vs
+     the fit tabs), so the centred layout never moves sideways. */
+  html { scrollbar-gutter: stable; }
   [hidden] { display: none !important; }
   body { margin: 0; background: #FFFFFF; color: var(--ink); font-family: var(--font); -webkit-font-smoothing: antialiased; }
   a { color: var(--link); }
@@ -404,9 +405,9 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   .rc-state-title { font-size: 13.5px; font-weight: 500; }
   .rc-state-sub { font-size: 12px; color: var(--muted); }
   .rc-state .rc-btn { height: 30px; font-size: 12px; }
-  .rc-skel { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
-  .rc-skel-row { display: flex; gap: 10px; align-items: center; }
-  .rc-skel-row span { height: 10px; border-radius: 4px; background: var(--line-soft); }
+  /* Busy (the next page is loading): no layout change; the content dims
+     only when the load takes longer than 200 ms. */
+  body.rc-busy #rc-content { opacity: 0.55; transition: opacity 150ms ease-out 200ms; }
   @media (max-width: 720px) {
     .rc-bar-in, .rc-page { padding-left: 16px; padding-right: 16px; }
     .rc-who { display: none; }
@@ -414,6 +415,7 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   }
   @media (prefers-reduced-motion: reduce) {
     .rc-btn:active { transform: none; }
+    body.rc-busy #rc-content { transition: opacity 0s linear 200ms; }
   }
 `;
 
@@ -424,20 +426,31 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   function byId(id) { return document.getElementById(id); }
   function closest(el, sel) { return el && el.closest ? el.closest(sel) : null; }
 
+  // Busy: the content stays; CSS dims it after a delay (body.rc-busy).
   function setLoading(on) {
-    var content = byId('rc-content'), skel = byId('rc-loading');
-    if (!content || !skel) return;
-    content.hidden = on;
-    skel.hidden = !on;
+    if (on) document.body.classList.add('rc-busy');
+    else document.body.classList.remove('rc-busy');
+  }
+  // The app-bar tab the server marked current (put back on pageshow).
+  var homeTab = document.querySelector('.rc-nav a[aria-current]');
+  function markTab(a) {
+    Array.prototype.forEach.call(document.querySelectorAll('.rc-nav a[aria-current]'), function (x) {
+      if (x !== a) x.removeAttribute('aria-current');
+    });
+    if (a) a.setAttribute('aria-current', 'page');
   }
   document.addEventListener('click', function (e) {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    if (closest(e.target, 'a[data-nav]')) setLoading(true);
+    var a = closest(e.target, 'a[data-nav]');
+    if (!a) return;
+    if (closest(a, '.rc-nav')) markTab(a);
+    setLoading(true);
   });
   Array.prototype.forEach.call(document.querySelectorAll('form[data-nav]'), function (f) {
     f.addEventListener('submit', function () { setLoading(true); });
   });
-  window.addEventListener('pageshow', function () { setLoading(false); });
+  // Back / forward cache: the page comes back as it was left.
+  window.addEventListener('pageshow', function () { setLoading(false); markTab(homeTab); });
 
   var controls = byId('rc-controls'), custom = byId('rc-custom'), chip = byId('rc-date-chip');
   function showCustom(on) {
@@ -454,7 +467,10 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
     if (!t || t.tagName !== 'SELECT') return;
     if (t.name === 'range' && t.value === 'custom') { showCustom(true); return; }
     setLoading(true);
-    controls.submit();
+    // requestSubmit fires the submit event (Follow-ups sends a held
+    // approve / dismiss first); submit() does not.
+    if (controls.requestSubmit) controls.requestSubmit();
+    else controls.submit();
   });
   if (chip) chip.addEventListener('click', function () { showCustom(!!(custom && custom.hidden)); });
 })();

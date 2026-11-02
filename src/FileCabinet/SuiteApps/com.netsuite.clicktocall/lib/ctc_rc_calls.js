@@ -6,8 +6,9 @@
  * Reporting Central calls content: the Calls tab (one list card with its
  * own toolbar: All · Connected · Missed · Outbound with counts, search,
  * Export CSV; the call table; the compact list and the call detail panel
- * opened without a reload), the CSV export, and the KPI strip (used by the
- * Follow-ups tab until phase D moves it to Overview). The page shell is
+ * opened without a reload) and the CSV export. Its row pieces (direction
+ * icon, outcome chip, satisfaction, owner) also serve the Overview's
+ * recent calls (lib/ctc_rc_overview.js). The page shell is
  * lib/ctc_rc_shell.js. The detail data comes from the ctc_rl_token RESTlet
  * action getCallDetail (CALLS_CLIENT_JS).
  */
@@ -127,22 +128,37 @@ define(['N/format', './ctc_html', './ctc_workspace_queries', './ctc_rc_shell'], 
 
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-    /**
-     * Short date for the line under the time: "Oct 30", with the year when
-     * it is not `thisYear` ("Oct 30, 2025"). The row date is a NetSuite date
-     * string in the user's format; one that cannot be parsed is shown as is.
-     * @param {string} nsDate
-     * @param {number} thisYear
-     * @returns {string}
-     */
-    const shortDate = (nsDate, thisYear) => {
+    // format.parse per distinct date string (a list has few distinct
+    // dates). The date format is a user preference and module state
+    // outlives a request: ctc_sl_reporting clears this per request.
+    let parsedDates = {};
+    const clearDateMemo = () => { parsedDates = {}; };
+    const parseNsDate = (nsDate) => {
+        const key = String(nsDate);
+        if (Object.prototype.hasOwnProperty.call(parsedDates, key)) return parsedDates[key];
         let d = null;
         try {
             d = format.parse({ value: nsDate, type: format.Type.DATE });
         } catch (e) {
             d = null;
         }
-        if (!(d instanceof Date) || isNaN(d.getTime())) return String(nsDate || '');
+        if (!(d instanceof Date) || isNaN(d.getTime())) d = null;
+        parsedDates[key] = d;
+        return d;
+    };
+
+    /**
+     * Short date for the line under the time: "Oct 30", with the year when
+     * it is not `thisYear` ("Oct 30, 2025"). The row date is a NetSuite date
+     * string in the user's format; one that cannot be parsed is shown as is.
+     * Memoized by the date string (clearDateMemo).
+     * @param {string} nsDate
+     * @param {number} thisYear
+     * @returns {string}
+     */
+    const shortDate = (nsDate, thisYear) => {
+        const d = parseNsDate(nsDate);
+        if (!d) return String(nsDate || '');
         const y = d.getFullYear();
         return MONTHS[d.getMonth()] + ' ' + d.getDate() + (y !== thisYear ? ', ' + y : '');
     };
@@ -190,45 +206,6 @@ define(['N/format', './ctc_html', './ctc_workspace_queries', './ctc_rc_shell'], 
             lines.push(cells.map(csvCell).join(','));
         });
         return lines.join('\r\n') + '\r\n';
-    };
-
-    // ─── KPIs (Follow-ups tab; phase D moves the strip to Overview) ────────
-
-    const kpiCell = (k) =>
-        '<div class="rc-kpi"><span class="rc-kpi-label">' + escapeHtml(k.label) + '</span>' +
-        '<span class="rc-kpi-main"><span class="rc-kpi-value"' + (k.attr || '') + '>' + escapeHtml(k.value) + '</span>' +
-        '<span class="rc-kpi-unit">' + escapeHtml(k.unit || '') + '</span></span>' +
-        '<span class="rc-kpi-delta' + (k.tone ? ' rc-' + k.tone : '') + '">' + (k.delta ? escapeHtml(k.delta) : '&nbsp;') + '</span></div>';
-
-    /**
-     * The KPI strip. The calls delta compares with `m.range.previous`
-     * (lib/ctc_rc_scope.js) when the page counted it.
-     * @param {Object} m - view model
-     * @returns {string}
-     */
-    const buildKpis = (m) => {
-        const k = m.kpis;
-        const none = m.historyError;
-        let callsDelta = '', callsTone = '';
-        if (!none && typeof m.previousCount === 'number' && m.range && m.range.previous) {
-            const diff = k.calls - m.previousCount;
-            const label = m.range.previous.label;
-            callsDelta = diff === 0 ? 'Same as ' + label.replace(/^vs /, '') : (diff > 0 ? '+' : '−') + Math.abs(diff) + ' ' + label;
-            callsTone = diff > 0 ? 'good' : '';
-        }
-        const avg = k.avgTalkSeconds;
-        const cells = [
-            { label: 'Calls', value: none ? '—' : String(k.calls), delta: callsDelta, tone: callsTone },
-            { label: 'Connected', value: none || k.connectedPct === null ? '—' : String(k.connectedPct), unit: none || k.connectedPct === null ? '' : '%',
-                delta: none || !k.calls ? '' : k.connected + ' of ' + k.calls },
-            { label: 'Talk time', value: none ? '—' : String(k.talkMinutes), unit: none ? '' : 'min',
-                delta: none || avg === null ? '' : 'Avg ' + (avg < 60 ? avg + ' s' : formatLength(avg)) },
-            { label: 'Satisfaction', value: none || k.satAvg === null ? '—' : k.satAvg.toFixed(1), unit: none || k.satAvg === null ? '' : '/10',
-                delta: none ? '' : (k.satCount ? k.satCount + ' scored' : 'None scored') },
-            { label: 'Follow-ups', value: m.tasksError ? '—' : String(m.followupCount), unit: m.tasksError ? '' : 'open',
-                attr: m.tasksError ? '' : ' data-followup-count="kpi"' }
-        ];
-        return '<section class="rc-kpis" aria-label="Summary">' + cells.map(kpiCell).join('') + '</section>';
     };
 
     // ─── Calls tab: pieces ─────────────────────────────────────────────────
@@ -440,7 +417,8 @@ define(['N/format', './ctc_html', './ctc_workspace_queries', './ctc_rc_shell'], 
                 box = stateBox('No calls match', 'Try a different name or number, or show all calls.',
                     '<a class="rc-btn rc-btn-quiet" data-nav href="' + escapeHtml(buildUrl(m.base, s, { dir: 'all', q: '' })) + '">Clear filters</a>');
             } else box = stateBox(EMPTY_CALLS[s.range], 'Calls you make from NetSuite show up here.');
-            return '<section class="rc-card rc-list">' + listBar(m) + box + '</section>';
+            // Fills the fit region like the list, so the card keeps one size across filters.
+            return '<section class="rc-card rc-list rc-fill">' + listBar(m) + box + '</section>';
         }
         const label = 'Calls';
         return '<div class="rc-split rc-fill' + (m.selectedId ? ' rc-drilled' : '') + '" id="rc-split" data-selected="' + escapeHtml(m.selectedId) + '">' +
@@ -467,12 +445,6 @@ define(['N/format', './ctc_html', './ctc_workspace_queries', './ctc_rc_shell'], 
     const CALLS_CSS = `
   :root { --sel-bg: #EEF3F9; --cur-bg: #F4F7FB; --cur-bar: #9DB4CF; --customer: #6B4C8A; --amber-hover: #E9A62A; --amber-ink: #2B1F00;
     --navy-hover: #2B4566; --ftabs: #EDEBE7; --count-bg: #E5E2DD; --head-bg: #FAFAF8; }
-  .rc-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--line-soft); background: var(--panel); overflow: hidden; }
-  .rc-kpi { padding: 16px 20px; display: flex; flex-direction: column; gap: 4px; box-shadow: inset 1px 0 0 var(--line-soft); }
-  .rc-kpi-label, .rc-kpi-unit, .rc-kpi-delta { font-size: 12px; color: var(--muted); }
-  .rc-kpi-main { display: flex; align-items: baseline; gap: 6px; }
-  .rc-kpi-value { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-  .rc-kpi-delta.rc-good { color: var(--good-fg); }
   .rc-spacer { flex: 1; }
   /* List card + its toolbar */
   .rc-list { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -1214,10 +1186,10 @@ ${SAT_CSS}
 
     return {
         CALL_TABS, EMPTY_CALLS, ICON, ARROW, SEARCH_ICON,
-        formatLength, formatPhone, afterCall, shortDate, directionKey,
+        formatLength, formatPhone, afterCall, shortDate, clearDateMemo, directionKey,
         csvCell, toCsv, tabCounts,
-        iconBtn, ownerCell, detailSkeleton,
-        buildKpis, buildCallsTab,
+        iconBtn, dirChip, outcomeChip, satCell, ownerCell, detailSkeleton,
+        buildCallsTab,
         CALLS_CSS, CALLS_CLIENT_JS
     };
 });

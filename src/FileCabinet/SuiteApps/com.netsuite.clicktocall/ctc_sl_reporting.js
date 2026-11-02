@@ -7,16 +7,18 @@
  * scope. Server-rendered raw HTML (not N/ui/serverWidget): tabs and list
  * filters are links; Time range / Owner, search and custom dates are GET
  * forms; Export CSV is a link with csv=1 (calls, or follow-ups on the
- * Follow-ups tab). Client scripts handle the loading state, the selects,
- * the Calls tab's call detail (opened without a reload; data from the
- * RESTlet action getCallDetail; `call=<id>` deep-links a call) and the
- * Follow-ups tab's detail, bulk bar and undo (`fu=<id>` deep-links a
- * follow-up; ctc_rl_token RESTlet actions).
+ * Follow-ups tab). The Overview (KPI strip, "Needs you", the calls chart,
+ * outcomes, recent calls) is links only, with no client script of its
+ * own. Client scripts handle the busy state (no content swap), the selects, the Calls
+ * tab's call detail (opened without a reload; data from the RESTlet action
+ * getCallDetail; `call=<id>` deep-links a call) and the Follow-ups tab's
+ * detail, bulk bar and undo (`fu=<id>` deep-links a follow-up;
+ * ctc_rl_token RESTlet actions).
  *
  * Modules: lib/ctc_rc_scope.js (range + owner), lib/ctc_rc_shell.js (URL
  * state, app bar, page header, shared CSS / client script),
- * lib/ctc_rc_calls.js (Calls tab, call detail, CSV, KPIs),
- * lib/ctc_rc_followups.js.
+ * lib/ctc_rc_overview.js (Overview), lib/ctc_rc_calls.js (Calls tab, call
+ * detail, CSV), lib/ctc_rc_followups.js.
  *
  * Scope: a rep sees their own book (lib/ctc_workspace_queries.js
  * getBookCustomerIds: customers where the rep is primary sales rep or on
@@ -24,12 +26,14 @@
  * employee) also sees the team or one member: calls whose Phone Call
  * `assigned` employee is in the team. The range filters calls by their
  * date. On Follow-ups, open work (To review, My tasks) ignores the range;
- * Done is filtered by when each was done (wq.loadFollowUpRows).
+ * Done is filtered by when each was done (wq.loadFollowUpRows). The
+ * Overview reads the range's calls, the previous period's count and the
+ * open follow-ups (any date).
  */
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/runtime', 'N/url', 'N/log', './lib/ctc_html', './lib/ctc_config', './lib/ctc_workspace_queries', './lib/ctc_dock',
-    './lib/ctc_rc_scope', './lib/ctc_rc_shell', './lib/ctc_rc_calls', './lib/ctc_rc_followups'],
-    (runtime, url, log, ctcHtml, ctcConfig, wq, ctcDock, rcScope, rcShell, rcCalls, rcFollowups) => {
+    './lib/ctc_rc_scope', './lib/ctc_rc_shell', './lib/ctc_rc_calls', './lib/ctc_rc_followups', './lib/ctc_rc_overview'],
+    (runtime, url, log, ctcHtml, ctcConfig, wq, ctcDock, rcScope, rcShell, rcCalls, rcFollowups, rcOverview) => {
 
     const HISTORY_LIMIT = 1000;
     const TASK_LIMIT = 100;
@@ -63,6 +67,9 @@ define(['N/runtime', 'N/url', 'N/log', './lib/ctc_html', './lib/ctc_config', './
         // Module state can outlive a request on the same server: read the
         // team fresh every time (a stale empty team was seen live).
         rcScope.clearTeamCache();
+        // Same for the date memos: the date format is a user preference.
+        rcCalls.clearDateMemo();
+        rcFollowups.clearIsoMemo();
         const state = rcShell.parseParams(context.request && context.request.parameters);
         const user = runtime.getCurrentUser();
         const userId = user.id;
@@ -88,16 +95,6 @@ define(['N/runtime', 'N/url', 'N/log', './lib/ctc_html', './lib/ctc_config', './
         };
         const cfg = { restletUrl: resolveScript('customscript_ctc_rl_token', 'customdeploy_ctc_rl_token') };
 
-        if (state.tab === 'overview' && !state.csv) {
-            context.response.write(rcShell.buildPage({
-                m: m,
-                body: '<div id="rc-content" class="rc-content"><div class="rc-card">' + rcShell.stateBox('Overview is coming') + '</div></div>',
-                css: '',
-                cfg: cfg
-            }));
-            return;
-        }
-
         // Own calls: the book (unchanged). Team / member: Phone Call
         // `assigned` in ownerIds (the book is not read).
         const scope = owner.ownerIds
@@ -107,18 +104,26 @@ define(['N/runtime', 'N/url', 'N/log', './lib/ctc_html', './lib/ctc_config', './
         m.teamView = owner.mode === 'team';
         m.thisYear = new Date().getFullYear();
 
+        if (state.tab === 'overview' && !state.csv) {
+            renderOverview(context, { m: m, cfg: cfg, scope: scope, dateFilter: dateFilter, user: user });
+            return;
+        }
         if (state.tab === 'followups') {
             renderFollowups(context, { m: m, cfg: cfg, scope: scope, dateFilter: dateFilter, user: user });
             return;
         }
 
+        // Reporting Central never shows the stage (entityType): skip that
+        // lookup; Calls reads only the task groups, not their count.
         const history = wq.loadHistoryRows(Object.assign({
-            userId: userId, limit: HISTORY_LIMIT, dateFilter: dateFilter
+            userId: userId, limit: HISTORY_LIMIT, dateFilter: dateFilter, skipEntityType: true
         }, scope));
         const rangeRows = history.rows || [];
         const listRows = wq.filterCallRows(rangeRows, { direction: state.dir, search: state.q });
 
-        const tasks = wq.loadTaskGroups(Object.assign({ userId: userId, tab: 'pending', limit: TASK_LIMIT }, scope));
+        const tasks = wq.loadTaskGroups(Object.assign({
+            userId: userId, tab: 'pending', limit: TASK_LIMIT, skipEntityType: true, skipCount: true
+        }, scope));
         const pendingByCall = {};
         (tasks.groups || []).forEach((g) => { pendingByCall[g.call.id] = (g.tasks || []).length; });
 
@@ -132,8 +137,6 @@ define(['N/runtime', 'N/url', 'N/log', './lib/ctc_html', './lib/ctc_config', './
 
         Object.assign(m, {
             historyError: !!history.error,
-            // The range hit the row limit: the newest HISTORY_LIMIT calls
-            // only, so the numbers undercount (say so, never silently).
             truncated: rangeRows.length >= HISTORY_LIMIT,
             rangeRows: rangeRows,
             listRows: listRows,
@@ -154,6 +157,48 @@ define(['N/runtime', 'N/url', 'N/log', './lib/ctc_html', './lib/ctc_config', './
             notes: ctcHtml.UNANSWERED_NOTE
         });
         context.response.write(buildHtml(m, cfg));
+    };
+
+    // The range hit the row limit: the newest HISTORY_LIMIT calls only, so
+    // the numbers undercount (say so, never silently).
+    const truncatedNotice = () => '<p class="rc-truncated" role="status">Showing your newest ' + HISTORY_LIMIT +
+        ' calls in this range; the numbers count only those. Pick a shorter range to see everything.</p>';
+
+    /**
+     * The Overview: the range's calls (one loadHistoryRows), the previous
+     * period's count (one countCalls; none for custom or after a history
+     * error) and the open follow-ups (one loadFollowUpRows, no date filter:
+     * open work ignores the range). Models and HTML: lib/ctc_rc_overview.js.
+     * @param {Object} context
+     * @param {{m: Object, cfg: Object, scope: Object, dateFilter: Array, user: Object}} p
+     */
+    const renderOverview = (context, p) => {
+        const m = p.m;
+        const userId = p.user.id;
+        const history = wq.loadHistoryRows(Object.assign({
+            userId: userId, limit: HISTORY_LIMIT, dateFilter: p.dateFilter, skipEntityType: true
+        }, p.scope));
+        const rows = history.rows || [];
+        const previous = m.range.previous;
+        const previousCount = previous && !history.error
+            ? wq.countCalls(Object.assign({ userId: userId, dateFilter: rcScope.searchDateFilter(previous.filter, rcScope.toNsDate) }, p.scope))
+            : null;
+        const fu = wq.loadFollowUpRows(Object.assign({ userId: userId }, p.scope)) || {};
+        Object.assign(m, {
+            historyError: !!history.error,
+            tasksError: !!fu.error,
+            truncated: !history.error && rows.length >= HISTORY_LIMIT
+        });
+        m.ov = rcOverview.buildModel({
+            rows: rows, previousCount: previousCount, fuRows: fu.rows || [], historyError: m.historyError, tasksError: m.tasksError,
+            range: m.range, todayIso: m.todayIso, thisYear: m.thisYear
+        });
+        context.response.write(rcShell.buildPage({
+            m: m,
+            body: (m.truncated ? truncatedNotice() : '') + '<div id="rc-content" class="rc-content">' + rcOverview.buildOverviewTab(m) + '</div>',
+            css: rcCalls.CALLS_CSS + rcOverview.OVERVIEW_CSS,
+            cfg: p.cfg
+        }));
     };
 
     /**
@@ -209,17 +254,16 @@ define(['N/runtime', 'N/url', 'N/log', './lib/ctc_html', './lib/ctc_config', './
      * @returns {string}
      */
     const buildHtml = (m, cfg) => {
-        const body = (m.truncated ? '<p class="rc-truncated" role="status">Showing your newest ' + HISTORY_LIMIT +
-                ' calls in this range; the numbers count only those. Pick a shorter range to see everything.</p>' : '') +
+        const body = (m.truncated ? truncatedNotice() : '') +
             '<div id="rc-content" class="rc-content">' + rcCalls.buildCallsTab(m) + '</div>';
         return rcShell.buildPage({
             m: m,
             body: body,
             css: rcCalls.CALLS_CSS,
             cfg: cfg,
-            // With a list: the page fits the window; the list region
-            // scrolls inside.
-            fit: !m.historyError && m.listRows.length > 0,
+            // The page fits the window; the list region scrolls inside.
+            // An empty list keeps fit mode (its card fills the region).
+            fit: !m.historyError,
             scripts: [rcCalls.CALLS_CLIENT_JS]
         });
     };

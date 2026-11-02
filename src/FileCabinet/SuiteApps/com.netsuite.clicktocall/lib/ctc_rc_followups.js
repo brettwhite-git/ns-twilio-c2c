@@ -46,19 +46,28 @@ define(['N/format', './ctc_html', './ctc_rc_shell', './ctc_rc_calls', './ctc_rc_
 
     // ─── Rows → items (pure) ───────────────────────────────────────────────
 
-    /** A NetSuite date string (user format) → 'YYYY-MM-DD', '' when it cannot be read. */
+    // nsToIso results per date string. The date format is a user
+    // preference and module state outlives a request: ctc_sl_reporting
+    // clears this per request (clearIsoMemo).
+    let isoDates = {};
+    const clearIsoMemo = () => { isoDates = {}; };
+
+    /** A NetSuite date string (user format) → 'YYYY-MM-DD', '' when it cannot be read. Memoized. */
     const nsToIso = (nsDate) => {
         const v = String(nsDate || '').trim().split(' ')[0];
         if (!v) return '';
+        if (Object.prototype.hasOwnProperty.call(isoDates, v)) return isoDates[v];
         let d = null;
         try {
             d = format.parse({ value: v, type: format.Type.DATE });
         } catch (e) {
             d = null;
         }
-        if (!(d instanceof Date) || isNaN(d.getTime())) return '';
         const pad = (n) => (n < 10 ? '0' : '') + n;
-        return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        const iso = (!(d instanceof Date) || isNaN(d.getTime())) ? ''
+            : d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        isoDates[v] = iso;
+        return iso;
     };
 
     // The date part of a NetSuite date or date-time string, short ("Nov 2").
@@ -1386,7 +1395,7 @@ define(['N/format', './ctc_html', './ctc_rc_shell', './ctc_rc_calls', './ctc_rc_
 
     return {
         TASK_URL, HOLD_MS, FTAB_LIST, QUICK, EMPTY, CSV_HEADERS,
-        nsToIso, stageOf, dueChip, toItem, buildModel, toCsv,
+        nsToIso, clearIsoMemo, stageOf, dueChip, toItem, buildModel, toCsv,
         buildFollowupsTab, clientConfig, scopeLine,
         FOLLOWUPS_CSS, FOLLOWUPS_CLIENT_JS
     };

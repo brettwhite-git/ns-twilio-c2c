@@ -1098,8 +1098,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      * (outbound), the list's rule (ctcHtml.unansweredRule). A voicemail is
      * never scored (satisfaction null).
      * Cost: lookupFields (1) + team SuiteQL (10) + book SuiteQL (10, own
-     * calls only) + pending task search (10) + the tasks' stage lookup
-     * (10, only when the call has tasks) = 21-41 units.
+     * calls only) + pending task search (10) = 21-31 units (no stage
+     * lookup: skipEntityType).
      *
      * @param {Object} body
      * @param {string|number} body.callId - Phone Call internal id
@@ -1146,7 +1146,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             }
             const lines = String(f.custevent_ctc_transcript || '').split(/\n|<br\s*\/?>/).filter((l) => l.trim());
 
-            const tasks = workspaceQueries.loadTaskGroups({ userId: userId, phoneCallId: callId, tab: 'pending' });
+            // The panel never shows the stage: skip that lookup.
+            const tasks = workspaceQueries.loadTaskGroups({ userId: userId, phoneCallId: callId, tab: 'pending', skipEntityType: true });
             const pending = [];
             (tasks.groups || []).forEach((g) => (g.tasks || []).forEach((t) => {
                 pending.push({ id: String(t.id), text: t.text || '', proposedDue: t.proposedDue || '' });
