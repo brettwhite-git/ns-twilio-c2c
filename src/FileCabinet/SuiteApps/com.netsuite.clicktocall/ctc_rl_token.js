@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -167,11 +167,38 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 incomingAllow: config.inboundEnabled === true
             });
 
-            return { token: token, phoneNumber: config.phoneNumber };
+            return { token: token, phoneNumber: resolveCallerId(identity, config) };
         } catch (e) {
             log.error({ title: 'CTC Token Generation Failed', details: e.message || e });
             return { error: 'Token generation failed' };
         }
+    };
+
+    /**
+     * Outbound caller ID for the session rep: the number whose inbound
+     * calls ring this rep (lib/ctc_inbound_routing.loadRoutes: the number's
+     * primary rep, else its first assigned rep), else the config default
+     * caller ID. A rep who does not ring for any number (e.g. a secondary
+     * on a shared number) uses the default. A failed lookup is logged and
+     * falls back; it never fails the token. Cost: one search (10 units).
+     * @param {string} userId - session user id (never from the request)
+     * @param {Object} config - loaded CTC config
+     * @returns {string}
+     */
+    const resolveCallerId = (userId, config) => {
+        try {
+            // The number that rings this rep (inbound routing's rule: the
+            // number's primary rep, else its first assigned rep), so a
+            // callback reaches the same rep.
+            const mine = inboundRouting.loadRoutes().filter((r) => String(r.employeeId) === String(userId))[0];
+            if (mine && mine.phoneNumber) return String(mine.phoneNumber);
+        } catch (e) {
+            log.error({
+                title: 'CTC caller ID lookup failed — using the default caller ID',
+                details: 'userId=' + userId + ' ' + ((e && e.message) || String(e))
+            });
+        }
+        return config.phoneNumber;
     };
 
     /**

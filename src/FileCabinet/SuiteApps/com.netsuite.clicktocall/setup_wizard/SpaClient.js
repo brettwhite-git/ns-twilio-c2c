@@ -832,8 +832,14 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    function isConfigActive(state) {
+        const snap = state.console.snapshot;
+        return !!snap && snap.active === true;
+    }
     function determineLandingStep(snap) {
         const has = (v) => !!(v && String(v).trim().length > 0);
+        if (snap.active === true)
+            return 'console';
         if (!has(snap.accountSid) || !has(snap.apiKeySid))
             return 2;
         if (!has(snap.apiSecretId))
@@ -843,7 +849,36 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         return 'console';
     }
     const TOTAL_STEPS$1 = 5;
+    const STEP2_FIELDS = ['accountSid', 'apiKeySid', 'apiSecretId'];
+    const STEP3_FIELDS = ['twimlAppSid', 'phoneNumber', 'intelServiceSid'];
+    function prefillFromSnapshot(state) {
+        const snap = state.console.snapshot;
+        if (!snap)
+            return;
+        const saved = (v) => (typeof v === 'string' ? v.trim() : '');
+        STEP2_FIELDS.forEach((field) => {
+            const v = saved(snap[field]);
+            if (v && !state.step2[field]) {
+                store.dispatch(Action.step2FieldChange(field, v));
+            }
+        });
+        STEP3_FIELDS.forEach((field) => {
+            const v = saved(snap[field]);
+            if (v && !state.step3[field]) {
+                store.dispatch(Action.step3FieldChange(field, v));
+            }
+        });
+    }
     function goToStep(stepNum) {
+        const state = store.getState();
+        if (isConfigActive(state))
+            return;
+        if (state.mode === 'console' || state.mountRouting) {
+            prefillFromSnapshot(state);
+            if (state.step5.activated) {
+                store.dispatch(Action.step5FieldChange('activated', false));
+            }
+        }
         const clamped = Math.max(1, Math.min(TOTAL_STEPS$1, stepNum));
         store.dispatch(Action.setMode('stepper'));
         store.dispatch(Action.setCurrentStep(clamped));
@@ -1470,6 +1505,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 const payload = await wizardCall('wizardActivate', {});
                 const resp = payload;
                 if (resp && resp.activated) {
+                    const snap = store.getState().console.snapshot;
+                    store.dispatch(Action.consoleLoadSuccess({
+                        snapshot: { ...(snap || {}), active: true }
+                    }));
                     store.dispatch(Action.step5FieldChange('activated', true));
                     store.dispatch(Action.step5FieldChange('activateError', null));
                 }
@@ -3400,18 +3439,21 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const state = store.getState();
         const assignments = state.console.assignments;
         const assignmentBadge = assignments ? String(assignments.length) : undefined;
+        const canRerun = !isConfigActive(state);
         const navItems = [
             { value: 'overview', label: 'Overview', icon: core__namespace.SystemIcon.CARD_VIEW },
             { value: 'phones', label: 'Phones & reps', icon: core__namespace.SystemIcon.CALL,
                 badge: assignmentBadge },
             { value: 'inbound', label: 'Inbound calls', icon: core__namespace.SystemIcon.CALL },
             { value: 'voice', label: 'Voice config', icon: core__namespace.SystemIcon.SETTINGS },
-            { value: 'credentials', label: 'Credentials', icon: core__namespace.SystemIcon.LOCK },
-            { value: 're-run', label: 'Re-run wizard', icon: core__namespace.SystemIcon.REFRESH,
-                separatorTop: true,
-                action: () => { goToStep(1); } }
+            { value: 'credentials', label: 'Credentials', icon: core__namespace.SystemIcon.LOCK }
         ];
-        const selectedVal = state.mode === 'stepper' ? 're-run' : state.selectedSection;
+        if (canRerun) {
+            navItems.push({ value: 're-run', label: 'Re-run wizard', icon: core__namespace.SystemIcon.REFRESH,
+                separatorTop: true,
+                action: () => { goToStep(1); } });
+        }
+        const selectedVal = state.mode === 'stepper' && canRerun ? 're-run' : state.selectedSection;
         const drawer = new component__namespace.NavigationDrawer({
             items: navItems,
             selectedValue: selectedVal,

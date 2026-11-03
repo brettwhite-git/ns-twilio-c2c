@@ -20,7 +20,7 @@ import {Action} from '../Action';
 import {loadConsole} from './console';
 import {loadPhonesData} from './phones';
 import {loadPrereqs} from './prereqs';
-import type {SectionName} from '../InitialState';
+import type {AppState, SectionName, Step2State, Step3State} from '../InitialState';
 
 // ─────────────────────────────────────────────────────────────────────
 // determineLandingStep — pure helper
@@ -32,6 +32,22 @@ interface SnapshotForRouting {
     apiSecretId?: string;
     twimlAppSid?: string;
     phoneNumber?: string;
+    active?: boolean;
+}
+
+/** The wizardSnapshot config shape cached in state.console.snapshot. */
+interface ConfigSnapshot extends SnapshotForRouting {
+    intelServiceSid?: string;
+}
+
+/**
+ * True while Click-to-Call is active (console.snapshot.active === true).
+ * While active the stepper is closed: the rail hides "Re-run wizard" and
+ * goToStep is a no-op. Deactivate (Overview) reopens it.
+ */
+export function isConfigActive(state: AppState): boolean {
+    const snap = state.console.snapshot as ConfigSnapshot | null;
+    return !!snap && snap.active === true;
 }
 
 /**
@@ -45,6 +61,9 @@ export function determineLandingStep(snap: SnapshotForRouting): number | 'consol
     const has = (v: string | undefined | null): boolean =>
         !!(v && String(v).trim().length > 0);
 
+    // An active config never lands in the stepper (stepper only after
+    // a Deactivate).
+    if (snap.active === true) return 'console';
     if (!has(snap.accountSid) || !has(snap.apiKeySid)) return 2;
     if (!has(snap.apiSecretId)) return 2;
     if (!has(snap.twimlAppSid) || !has(snap.phoneNumber)) return 3;
@@ -62,11 +81,60 @@ export function determineLandingStep(snap: SnapshotForRouting): number | 'consol
 
 const TOTAL_STEPS = 5;
 
+const STEP2_FIELDS: Array<keyof Step2State> = ['accountSid', 'apiKeySid', 'apiSecretId'];
+const STEP3_FIELDS: Array<'twimlAppSid' | 'phoneNumber' | 'intelServiceSid'> =
+    ['twimlAppSid', 'phoneNumber', 'intelServiceSid'];
+
+/**
+ * Copy saved config values from console.snapshot into the Step 2 / 3
+ * form fields that are still empty. Never overwrites a typed value.
+ * apiSecretId is the custsecret_ script id (a pointer), never the
+ * secret value; the snapshot does not carry the value.
+ * Step 4 needs nothing here: loadStep4Lists loads saved assignments.
+ */
+function prefillFromSnapshot(state: AppState): void {
+    const snap = state.console.snapshot as ConfigSnapshot | null;
+    if (!snap) return;
+    const saved = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+    STEP2_FIELDS.forEach((field) => {
+        const v = saved(snap[field]);
+        if (v && !state.step2[field]) {
+            store.dispatch(Action.step2FieldChange(field, v));
+        }
+    });
+    STEP3_FIELDS.forEach((field) => {
+        const v = saved(snap[field]);
+        if (v && !(state.step3 as Step3State)[field]) {
+            store.dispatch(Action.step3FieldChange(field, v));
+        }
+    });
+}
+
 /**
  * Advance to (or jump to) a specific step. Flips MODE back to 'stepper'
  * and fires the step-specific data loader.
  */
 export function goToStep(stepNum: number): void {
+    const state = store.getState() as AppState;
+
+    // Stepper only after a reset: while the config is active this is a
+    // no-op and the admin stays where they are (the console). The Step 5
+    // activation flow is not affected: it reaches Step 5 while still
+    // inactive, activates in place, and leaves with goToConsole.
+    if (isConfigActive(state)) return;
+
+    // Entering the stepper (from the console after a Deactivate, or the
+    // mount landing): pre-fill saved values the admin has not typed.
+    if (state.mode === 'console' || state.mountRouting) {
+        prefillFromSnapshot(state);
+        // A Step 5 activation earlier this session must not carry over:
+        // the Stepper and Step 5 would show the success view at once.
+        if (state.step5.activated) {
+            store.dispatch(Action.step5FieldChange('activated', false));
+        }
+    }
+
     const clamped = Math.max(1, Math.min(TOTAL_STEPS, stepNum));
     store.dispatch(Action.setMode('stepper'));
     store.dispatch(Action.setCurrentStep(clamped));

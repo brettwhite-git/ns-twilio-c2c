@@ -101,6 +101,13 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
                 failedChecks?: PreflightCheck[];
             } | null;
             if (resp && resp.activated) {
+                // Mark the cached snapshot active at once so the rail drops
+                // "Re-run wizard" without a reload (goToConsole reloads it).
+                const snap = (store.getState() as AppState).console.snapshot as
+                    Record<string, unknown> | null;
+                store.dispatch(Action.consoleLoadSuccess({
+                    snapshot: { ...(snap || {}), active: true }
+                }));
                 store.dispatch(Action.step5FieldChange('activated', true));
                 store.dispatch(Action.step5FieldChange('activateError', null));
             } else {
