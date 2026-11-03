@@ -568,20 +568,25 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
 
         const ctx = { auth: auth, zs: zs, ze: ze, domain: domain, zb: '' };
 
-        // Reuse the deployed build when the code did not change.
+        // Code unchanged: reuse the live build's function versions (no
+        // upload), but still make a NEW build. Twilio refuses to deploy the
+        // build an environment already serves ("Environment already has
+        // requested deployment", seen live 2026-11-03), and new variable
+        // values (the notice text) only reach callers with a new deployment.
+        let versions = [];
         if (zs === cfg.outFnService && SID.build.test(cfg.outFnBuild || '') && cfg.outFnHash === codeHash()) {
-            const st = buildStatus(auth, zs, cfg.outFnBuild);
-            if (st.ok && st.status === 'completed') {
+            const cur = twilio.httpGetJson(SERVERLESS_SERVICES + '/' + zs + '/Builds/' + cfg.outFnBuild, auth);
+            const fv = (cur.ok && cur.body && cur.body.function_versions) || [];
+            const sids = fv.map((v) => String((v && v.sid) || '')).filter((sid) => SID.version.test(sid));
+            if (sids.length === FUNCTIONS.length) {
+                versions = sids;
                 rec.add('upload', 'skipped', 'Code unchanged');
-                rec.add('build', 'skipped', 'Using the current build');
-                ctx.zb = cfg.outFnBuild;
-                return finishPublish(cfg, ctx, rec);
             }
         }
+        const reused = versions.length > 0;
 
         // upload one version per function
-        const versions = [];
-        for (let i = 0; i < FUNCTIONS.length; i++) {
+        for (let i = 0; !reused && i < FUNCTIONS.length; i++) {
             const def = FUNCTIONS[i];
             const mp = buildMultipart(
                 [{ name: 'Path', value: def.path }, { name: 'Visibility', value: 'protected' }],
@@ -595,7 +600,7 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
             }
             versions.push(up.body.sid);
         }
-        rec.add('upload', 'ok', versions.length + ' files');
+        if (!reused) rec.add('upload', 'ok', versions.length + ' files');
 
         // build
         const built = twilio.httpPostBody(SERVERLESS_SERVICES + '/' + zs + '/Builds', auth,
