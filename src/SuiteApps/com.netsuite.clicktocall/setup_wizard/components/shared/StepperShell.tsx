@@ -38,7 +38,13 @@ export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
                     itemGap={component.StackPanel.GapSize.XXS}
                 >
                     <component.StackPanel.Item>
-                        <component.Heading level={2}>
+                        <component.Heading
+                            level={2}
+                            rootAttributes={{
+                                'data-ctc-page-heading': '',
+                                'aria-label': 'Click-to-Call Setup Wizard: ' + subtitle
+                            }}
+                        >
                             Click-to-Call Setup Wizard
                         </component.Heading>
                     </component.StackPanel.Item>
@@ -76,7 +82,7 @@ export const StepperShell = (props: StepperShellProps): core.VDom.Node => {
                 columnGap={component.GridPanel.GapSize.NONE}
             >
                 <component.GridPanel.Item>
-                    <NavRail />
+                    <NavRail tick={props.tick} />
                 </component.GridPanel.Item>
                 <component.GridPanel.Item>{paddedContent}</component.GridPanel.Item>
             </component.GridPanel>

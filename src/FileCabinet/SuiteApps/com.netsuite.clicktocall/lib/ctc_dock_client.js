@@ -909,6 +909,8 @@
         if (kind === 'signed_out') return { dot: AMBER, amber: true, action: 'signin', l1: 'Sign in to NetSuite', label: 'Signed out of NetSuite. Sign in' };
         if (kind === 'session') return { dot: AMBER, amber: true, l1: 'Reconnecting…', label: 'Reconnecting. Open phone' };
         if (kind === 'network') return { dot: AMBER, amber: true, l1: 'Reconnecting…', label: 'Reconnecting. Open phone' };
+        // Paused by the admin: a quiet offline-style pill, no Call.
+        if (kind === 'paused') return { dot: PHASE_VIEW.offline.dot, light: true, l1: 'Calling paused', label: 'Calling is paused by your administrator' };
         if (phase !== 'ready') return null;
         if (mode === 'shell' && snap && snap.audioUnlocked === false) {
             return { dot: view.dot, main: 'call', action: 'unlock', l1: 'Turn on phone', label: 'Turn on phone' };

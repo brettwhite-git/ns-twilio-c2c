@@ -21,6 +21,7 @@ import {loadPresence} from '../../app/effects/presence';
 import type {AppState, InboundRoute, InboundState, PresenceRow} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import {ErrorText} from '../shared/ErrorText';
+import {friendlyError} from '../shared/friendlyError';
 import {formatPhone} from '../shared/formatPhone';
 import {buildPhoneStatusCell} from '../shared/phoneStatus';
 
@@ -34,6 +35,8 @@ export const NO_ANSWER_MAX_LENGTH = 300;
 export const DEFAULT_RECORDING_NOTICE = 'This call may be recorded for quality and training.';
 export const RECORDING_NOTICE_MAX_LENGTH = 300;
 const RING_SECONDS = [10, 15, 20, 25, 30, 45, 60];
+export const OFF_STILL_ROUTED_WARNING =
+    '⚠ Numbers still point at the flow; callers hear the no-answer message.';
 
 /** '30 seconds', '1 minute', '2 minutes', '90 seconds'. */
 export const voicemailLengthLabel = (seconds: number): string => {
@@ -45,6 +48,17 @@ export const voicemailLengthLabel = (seconds: number): string => {
 interface CellArgs {
     cell?: { row?: { dataItem?: InboundRoute } };
 }
+
+/**
+ * The failure line of the last publish this session, or '' when it
+ * succeeded / was skipped. A partial publish says so; the per-number
+ * errors follow it.
+ */
+export const publishFailureText = (inbound: InboundState): string => {
+    const last = inbound.lastPublish;
+    if (!last || last.ok || last.skipped) return '';
+    return last.message || 'Routing was not published. Publish again.';
+};
 
 /** "Published <local date time> · N numbers" / "Not published yet" / inbound off. */
 export const statusLine = (inbound: InboundState): string => {
@@ -153,8 +167,13 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
                     store.dispatch(Action.inboundFieldChange({ inboundEnabled: !!(args && args.value) }));
                 }}
             />,
-            !inbound.inboundEnabled &&
+            !inbound.inboundEnabled && !inbound.flowSid &&
                 weak('Off: phones do not ring; callers hear the no-answer message.'),
+            // Inbound off does not un-point the numbers (decision 2026-11-03): say so.
+            !inbound.inboundEnabled && !!inbound.flowSid &&
+                <component.Text type={component.Text.Type.STRONG} size={component.Text.Size.S}>
+                    {OFF_STILL_ROUTED_WARNING}
+                </component.Text>,
             weak('Open phones pick up a change within an hour, or at once after a reload.')
         ]);
 
@@ -294,6 +313,7 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
         } as never);
 
         const errors = (inbound.lastPublish && inbound.lastPublish.errors) || [];
+        const failure = publishFailureText(inbound);
 
         return (
             <component.StackPanel
@@ -309,13 +329,14 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
                     item(fallbackOwner),
                     item(recording),
                     item(saveButton as never),
-                    item(inbound.saveError ? <ErrorText message={inbound.saveError} /> : false),
+                    item(inbound.saveError ? <ErrorText message={friendlyError(inbound.saveError)} /> : false),
                     item(vstack(component.StackPanel.GapSize.XXS, [
                         <component.Text type={component.Text.Type.WEAK}>
                             {statusLine(inbound)}
                         </component.Text>,
+                        failure && <ErrorText message={failure} />,
                         ...errors.map((e) => (
-                            <ErrorText message={formatPhone(e.phoneNumber) + ': ' + e.message} />
+                            <ErrorText message={(e.phoneNumber ? formatPhone(e.phoneNumber) + ': ' : '') + e.message} />
                         ))
                     ]))
                 ].filter(Boolean) as never}
@@ -344,7 +365,7 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
             table as core.VDom.Node,
             weak('The primary rep on Phones & reps is the one who rings.'),
             new component.Button({
-                label: 'Publish again',
+                label: inbound.publishing ? 'Publishing…' : 'Publish again',
                 enabled: !busy,
                 action: (): void => { publishRouting(); }
             } as never) as never
@@ -375,7 +396,7 @@ export default class InboundPage extends PureComponent<PageTickProps, unknown> {
         if (!inbound.loaded) {
             return vstack(component.StackPanel.GapSize.L, [
                 description,
-                <ErrorText message={inbound.loadError || 'Could not load inbound settings'} />,
+                <ErrorText message={friendlyError(inbound.loadError || 'Could not load inbound settings')} />,
                 new component.Button({
                     label: 'Retry',
                     startIcon: core.SystemIcon.REFRESH,

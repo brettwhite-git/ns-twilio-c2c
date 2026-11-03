@@ -55,8 +55,10 @@
         mic: { dot: '#EE6E5C', label: 'Microphone blocked' },
         session: { dot: '#F4C76A', label: 'Signing in…' },
         network: { dot: '#F4C76A', label: 'Reconnecting…' },
-        twilio: { dot: '#EE6E5C', label: 'Phone error' }
+        twilio: { dot: '#EE6E5C', label: 'Phone error' },
+        paused: { dot: '#8B8780', label: 'Calling paused' }
     };
+    var PAUSED_TEXT = 'Calling is paused by your administrator';
     // snap.callWarning (contract names, and the raw Twilio names) -> one line.
     var WARN_MIC = 'We can\'t hear your microphone';
     var WARN_NET = 'Weak connection';
@@ -70,7 +72,8 @@
         rate: 'Too many calls in a short time \u2014 wait a moment',
         'hourly-limit': 'Too many calls in a short time \u2014 wait a moment',
         'invalid-number': 'That number can\'t be dialled',
-        busy: 'Finish the current call first'
+        busy: 'Finish the current call first',
+        paused: PAUSED_TEXT
     };
     // Header badge when snap.canReceive === false in the ready phase.
     var READY_NOT_RECEIVING = { dot: '#F4C76A', label: 'Ready · reconnecting' };
@@ -502,7 +505,7 @@
 
     function syncCallButton() {
         var hasNumber = !!digitsOf(ui.display.value).replace('+', '');
-        ui.call.disabled = !hasNumber || isActive();
+        ui.call.disabled = !hasNumber || isActive() || errKind() === 'paused';
     }
 
     function loadEntity(t) {
@@ -1239,6 +1242,8 @@
             a = { tone: 'amber', title: 'Your NetSuite session ended. Sign in again in this tab.', text: '', act: 'Sign in', run: host.signIn };
         } else if (kind === 'session') {
             a = { tone: 'amber', title: 'Reconnecting the phone…', text: '', act: '', run: null };
+        } else if (kind === 'paused') {
+            a = { tone: 'amber', title: PAUSED_TEXT, text: '', act: '', run: null };
         } else if (kind === 'twilio') {
             a = { tone: 'red', title: 'Phone error', text: String((snap.error && snap.error.message) || ''), act: 'Retry', run: host.reloadPhone, phone: true };
         }

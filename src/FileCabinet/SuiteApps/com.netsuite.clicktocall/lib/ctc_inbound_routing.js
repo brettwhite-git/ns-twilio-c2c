@@ -8,8 +8,9 @@
  *
  *   rep assignments ──routesFromAssignments──▶ routes (one per phone SID)
  *   routes ──buildFlowDefinition──▶ Studio definition
- *   publishRouting: create/update the flow, store its SID + time on the
- *   config record, then point each routed number's VoiceUrl at the flow.
+ *   publishRouting: create/update the flow, store its SID on the config
+ *   record, point each routed number's VoiceUrl at the flow, and only
+ *   when every number is pointed store the publish time.
  *
  * Flow shape (per route n):
  *   Trigger ─incomingCall─▶ split_dialed ─To == route n─▶ ring_n
@@ -382,10 +383,24 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
     /**
      * Publish the inbound routing flow and point the routed numbers at it.
      *
-     * @returns {{ok: boolean, skipped?: string, message?: string,
-     *            flowSid?: string, publishedAt?: string,
+     * Order: upsert flow → save flow SID (if new) → point each number →
+     * save routing_published_at. The publish time is written only when
+     * every number was pointed, so a partial publish never looks complete.
+     *
+     *   ok:true                 every number points at the flow; publishedAt is new.
+     *   ok:false, partial:true  the flow is live but some numbers were not
+     *                           updated (errors[], failedNumbers[]); publishedAt
+     *                           is the PREVIOUS publish time ('' if none).
+     *   ok:false (no partial)   nothing changed in the numbers (or the time
+     *                           could not be saved); message says why.
+     * Inbound off: { ok:false, skipped:'inbound_off' } with no Twilio call
+     * (the numbers keep pointing at the flow; SPEC Inbound).
+     *
+     * @returns {{ok: boolean, skipped?: string, partial?: boolean,
+     *            message?: string, flowSid?: string, publishedAt?: string,
      *            numbersUpdated?: number,
-     *            errors?: Array<{phoneNumber: string, message: string}>}}
+     *            errors?: Array<{phoneNumber: string, message: string}>,
+     *            failedNumbers?: string[]}}
      */
     const publishRouting = () => {
         let cfg;
@@ -437,24 +452,26 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
         }
 
         const flowSid = flow.flowSid;
-        const publishedAt = new Date().toISOString();
         const errors = [];
 
-        try {
-            record.submitFields({
-                type: 'customrecord_ctc_config',
-                id: cfg.id,
-                values: {
-                    custrecord_ctc_studio_flow_sid: flowSid,
-                    custrecord_ctc_routing_published_at: publishedAt
-                }
-            });
-        } catch (e) {
-            log.error({ title: 'CTC Inbound — save flow SID failed', details: errMessage(e) });
-            errors.push({ phoneNumber: '', message: 'The flow is published, but NetSuite ' +
-                          'could not save its SID: ' + errMessage(e) });
+        // 1. Keep the flow SID first, so a later publish updates this flow
+        // (no duplicate flows) and the reconciler knows it. If NetSuite
+        // cannot keep it, no number is moved to a flow NetSuite does not know.
+        if (flowSid !== (cfg.studioFlowSid || '')) {
+            try {
+                record.submitFields({
+                    type: 'customrecord_ctc_config',
+                    id: cfg.id,
+                    values: { custrecord_ctc_studio_flow_sid: flowSid }
+                });
+            } catch (e) {
+                log.error({ title: 'CTC Inbound — save flow SID failed', details: errMessage(e) });
+                return failed('The flow is in Twilio, but NetSuite could not save its SID, ' +
+                              'so no number was changed: ' + errMessage(e) + '. Publish again.');
+            }
         }
 
+        // 2. Point every routed number at the flow.
         let numbersUpdated = 0;
         for (let i = 0; i < routes.length; i++) {
             const route = routes[i];
@@ -484,6 +501,45 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
                      ' routes=' + routes.length + ' numbersUpdated=' + numbersUpdated +
                      ' errors=' + errors.length
         });
+
+        // 3a. Partial: the flow is live, some numbers are not on it. The
+        // previous published time stays (a partial publish never looks complete).
+        if (errors.length > 0) {
+            const n = errors.length;
+            return {
+                ok: false,
+                partial: true,
+                message: 'Routing is only partly published: ' + n +
+                         (n === 1 ? ' number was' : ' numbers were') +
+                         ' not updated. Publish again.',
+                flowSid: flowSid,
+                publishedAt: cfg.routingPublishedAt || '',
+                numbersUpdated: numbersUpdated,
+                errors: errors,
+                failedNumbers: errors.map((e) => e.phoneNumber)
+            };
+        }
+
+        // 3b. Every number points at the flow: only now record the publish time.
+        const publishedAt = new Date().toISOString();
+        try {
+            record.submitFields({
+                type: 'customrecord_ctc_config',
+                id: cfg.id,
+                values: { custrecord_ctc_routing_published_at: publishedAt }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Inbound — save publish time failed', details: errMessage(e) });
+            return {
+                ok: false,
+                message: 'Every number points at the flow, but NetSuite could not save ' +
+                         'the publish time: ' + errMessage(e) + '. Publish again.',
+                flowSid: flowSid,
+                publishedAt: cfg.routingPublishedAt || '',
+                numbersUpdated: numbersUpdated,
+                errors: []
+            };
+        }
 
         return {
             ok: true,

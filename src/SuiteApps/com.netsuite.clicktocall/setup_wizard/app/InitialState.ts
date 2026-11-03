@@ -52,9 +52,30 @@ export interface Step5State {
     assignments: unknown[] | null;
     preflight: unknown[] | null;
     activated: boolean;
+    /** wizardActivate is in flight (Activate button busy). */
+    activating: boolean;
     activateError: string | null;
     loading: boolean;
 }
+
+/** A preflight / credential check row as the server returns it. */
+export interface CheckResult {
+    id?: string;
+    label?: string;
+    status?: string;
+    detail?: string;
+    repairHint?: string | null;
+}
+
+/** Unsaved edits of one Phones & reps row (keyed by phone SID). */
+export interface PhoneDraft {
+    employeeIds: number[];
+    /** The rep the number rings (and whose outbound caller ID it is). */
+    primaryEmployeeId: number | null;
+}
+
+/** Twilio list a Voice row edits. */
+export type VoiceListKey = 'twimlApps' | 'phoneNumbers' | 'intelServices';
 
 // ─────────────────────────────────────────────────────────────────────
 // Admin Console state (post-activation, multi-section)
@@ -73,7 +94,18 @@ export interface ConsoleState {
     phonesNumbers: unknown[] | null;
     phonesByPhone: unknown[] | null;
     phonesLoading: boolean;
-    phonesSaving: Record<string, boolean>;
+    /** wizardListPhoneNumbers failed (Twilio error): show it, not "no numbers". */
+    phonesListError: string | null;
+    /** Twilio has more numbers than the first page the server lists. */
+    phonesHasMore: boolean;
+    /** The row open in the editor panel under the grid (one at a time), else null. */
+    phonesEditingSid: string | null;
+    /** Unsaved edits of the open row; Save is enabled while one exists. */
+    phonesDrafts: Record<string, PhoneDraft>;
+    /** The one row save in flight (saves are serialised), else null. */
+    phonesSavingSid: string | null;
+    /** Last save error per row (phone SID). */
+    phonesRowErrors: Record<string, string>;
     phonesError: string | null;
     /** Numbers whose inbound routing did not update after the last save. */
     phonesRoutingErrors: InboundPublishError[];
@@ -87,16 +119,27 @@ export interface ConsoleState {
         intelServices: unknown[] | null;
     };
     voiceListsLoading: boolean;
+    /** Per-list Twilio load errors (shown instead of "no items"). */
+    voiceListErrors: Partial<Record<VoiceListKey, string>>;
     voiceSaving: boolean;
     voiceError: string | null;
 
     // Credentials section
     activeModal: 'rotate-secret' | null;
 
-    // Health + Deactivate flow
+    // Health + Deactivate / Reactivate flow
     pendingDeactivateConfirm: boolean;
+    deactivating: boolean;
     deactivateError: string | null;
+    reactivating: boolean;
+    /** Which Reactivate button ran (its error shows next to it). */
+    reactivateSource: 'banner' | 'overview';
+    reactivateError: string | null;
+    /** Checks that blocked Reactivate (server preflight_failed). */
+    reactivateFailedChecks: CheckResult[];
     preflightRefreshing: boolean;
+    /** wizardRunPreflight did not return (not the same as "not run"). */
+    preflightError: string | null;
 
     // Cross-section error surface
     actionError: string | null;
@@ -114,10 +157,17 @@ export interface InboundPublishError {
 
 export interface InboundPublishResult {
     ok: boolean;
+    /** Why the publish failed or is partial (ok false). */
+    message?: string;
+    /** The flow is live but some numbers were not pointed at it. */
+    partial?: boolean;
     flowSid?: string;
+    /** On ok false: the PREVIOUS publish time ('' = never). */
     publishedAt?: string;
     numbersUpdated?: number;
     errors?: InboundPublishError[];
+    /** E.164 numbers that did not update (partial). */
+    failedNumbers?: string[];
     skipped?: 'inbound_off' | 'not_published';
 }
 
@@ -218,6 +268,14 @@ export interface OutboundSnapshot {
     /** null = not checked. */
     voiceUrlMatches: boolean | null;
     driftVoiceUrl: OutboundDrift;
+    /** Notice version Twilio plays now (0 = no notice). */
+    publishedNoticeVersion: number;
+    /** Published, and the saved notice differs from what Twilio plays. */
+    changesPending: boolean;
+    /** The published service/environment still exist in Twilio; null = not checked / unknown. */
+    functionExists: boolean | null;
+    /** Plain message when the published Function is missing in Twilio ('' otherwise). */
+    functionMessage: string;
 }
 
 export interface OutboundState extends OutboundSnapshot {
@@ -246,13 +304,21 @@ export interface PresenceRow {
     employeeId: string;
     employeeName: string;
     canReceive: boolean;
-    /** registered / unregistered / registering / offline; '' = never reported. */
+    /** registered / unregistered / registering / offline / frozen; '' = never reported. */
     state: string;
     /** ISO time of the last heartbeat write; '' = never. */
     lastSeen: string;
     lastChange: string;
     /** lastSeen older than 12 minutes (or never). */
     stale: boolean;
+    /** The phone's token grants inbound calls (false = inbound off). */
+    incomingGranted: boolean;
+    /** Last phone error the softphone reported ('' = none). Diagnostics. */
+    lastError: string;
+    /** Token identity equals the session user. Diagnostics. */
+    identityMatch: boolean;
+    /** Short browser label, e.g. "Chrome 130 on macOS". */
+    client: string;
 }
 
 export interface PresenceState {
@@ -262,6 +328,25 @@ export interface PresenceState {
     items: PresenceRow[];
     /** Server clock minus browser clock at load (ms), for "2 min ago". */
     clockSkewMs: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Credentials (console) — API key rotation form (wizardSaveCredentials)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface CredentialsState {
+    /** The change form is open. */
+    editing: boolean;
+    /** Form values: the NEW API Key SID and secret script id. */
+    apiKeySid: string;
+    apiSecretId: string;
+    /** Test + save in flight. */
+    saving: boolean;
+    error: string | null;
+    /** Checks that failed the connection test (values not saved). */
+    failedChecks: CheckResult[];
+    /** The last save passed the test and saved. */
+    saved: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -292,6 +377,9 @@ export interface AppState {
      */
     mountRouting: boolean;
 
+    /** A stepper Continue save is in flight (Continue / Back disabled). */
+    wizardSaving: boolean;
+
     // Per-step form state
     step2: Step2State;
     step3: Step3State;
@@ -310,6 +398,9 @@ export interface AppState {
 
     // Outbound recording notice (Voice page; Health "TwiML VoiceUrl")
     outbound: OutboundState;
+
+    // Credentials page — API key rotation form
+    credentials: CredentialsState;
 }
 
 /**
@@ -321,6 +412,7 @@ const initialState: AppState = {
     selectedSection: 'overview',
     railVisible: false,
     mountRouting: true,
+    wizardSaving: false,
     step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
     step3: {
         twimlAppSid: '',
@@ -342,6 +434,7 @@ const initialState: AppState = {
         assignments: null,
         preflight: null,
         activated: false,
+        activating: false,
         activateError: null,
         loading: false
     },
@@ -361,7 +454,12 @@ const initialState: AppState = {
         phonesNumbers: null,
         phonesByPhone: null,
         phonesLoading: false,
-        phonesSaving: {},
+        phonesListError: null,
+        phonesHasMore: false,
+        phonesEditingSid: null,
+        phonesDrafts: {},
+        phonesSavingSid: null,
+        phonesRowErrors: {},
         phonesError: null,
         phonesRoutingErrors: [],
         voiceEditing: null,
@@ -372,12 +470,19 @@ const initialState: AppState = {
             intelServices: null
         },
         voiceListsLoading: false,
+        voiceListErrors: {},
         voiceSaving: false,
         voiceError: null,
         activeModal: null,
         pendingDeactivateConfirm: false,
+        deactivating: false,
         deactivateError: null,
+        reactivating: false,
+        reactivateSource: 'banner',
+        reactivateError: null,
+        reactivateFailedChecks: [],
         preflightRefreshing: false,
+        preflightError: null,
         actionError: null
     },
     inbound: {
@@ -429,12 +534,25 @@ const initialState: AppState = {
         pending: false,
         voiceUrlMatches: null,
         driftVoiceUrl: 'unknown',
+        publishedNoticeVersion: 0,
+        changesPending: false,
+        functionExists: null,
+        functionMessage: '',
         saving: false,
         publishing: false,
         unpublishing: false,
         confirmUnpublish: false,
         error: null,
         steps: null
+    },
+    credentials: {
+        editing: false,
+        apiKeySid: '',
+        apiSecretId: '',
+        saving: false,
+        error: null,
+        failedChecks: [],
+        saved: false
     }
 };
 

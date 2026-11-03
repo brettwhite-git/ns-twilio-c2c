@@ -20,12 +20,13 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadVoiceLists, saveVoiceField} from '../../app/effects/voice';
-import type {AppState, ConsoleState} from '../../app/InitialState';
+import type {AppState, ConsoleState, VoiceListKey} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import OutboundNotice from './OutboundNotice';
+import {formatPhone} from '../shared/formatPhone';
+import {friendlyError} from '../shared/friendlyError';
 
 type VoiceField = NonNullable<ConsoleState['voiceEditing']>;
-type VoiceListKey = 'twimlApps' | 'phoneNumbers' | 'intelServices';
 
 interface TwilioListItem {
     sid?: string;
@@ -111,11 +112,48 @@ const handlePendingChange = (args: { value?: string }): void => {
     ));
 };
 
+/** Dropdown items for a field's Twilio list. */
+const optionsFor = (field: VoiceField, list: TwilioListItem[]): Array<{ value: string; label: string }> =>
+    list.map((it) => {
+        if (field === 'phoneNumber') {
+            return {
+                value: it.phoneNumber || '',
+                label: formatPhone(it.phoneNumber) +
+                    (it.friendlyName ? '  —  ' + it.friendlyName : '')
+            };
+        }
+        return {
+            value: it.sid || '',
+            label: (it.friendlyName || '(unnamed)') +
+                (it.sid ? '  [' + it.sid + ']' : '')
+        };
+    });
+
+/**
+ * The value the dropdown shows and Save sends (always the same): the
+ * pending value when it is in the list; else none for the optional
+ * field, or the first item for a required one.
+ */
+const effectiveValue = (
+    spec: VoiceFieldSpec,
+    options: Array<{ value: string }>,
+    pending: string | null
+): string | null => {
+    if (pending && options.some((o) => o.value === pending)) return pending;
+    if (spec.allowEmpty) return null;
+    return options.length > 0 ? options[0].value : null;
+};
+
 const handleSave = (spec: VoiceFieldSpec): void => {
-    const state = store.getState() as AppState;
-    const pending = state.console.voicePendingValue;
-    if (pending !== null && pending !== undefined) {
-        saveVoiceField(spec.field, pending);
+    const c = (store.getState() as AppState).console;
+    const list = c.voiceLists[listKeyFor(spec.field)] as TwilioListItem[] | null;
+    if (!list) return;
+    const value = effectiveValue(spec, optionsFor(spec.field, list), c.voicePendingValue);
+    if (value) {
+        saveVoiceField(spec.field, value);
+    } else if (spec.allowEmpty) {
+        // "(none)": clear the optional Intelligence service.
+        saveVoiceField(spec.field, '');
     }
 };
 
@@ -181,7 +219,11 @@ export default class VoicePage extends PureComponent<PageTickProps, unknown> {
 
                     if (!isEditing) {
                         const value = snap[row.field];
-                        if (value) return new component.Text({ text: value });
+                        if (value) {
+                            return new component.Text({
+                                text: row.field === 'phoneNumber' ? formatPhone(value) : value
+                            });
+                        }
                         return new component.Text({
                             text: '(not configured)',
                             type: component.Text.Type.WEAK
@@ -199,6 +241,15 @@ export default class VoicePage extends PureComponent<PageTickProps, unknown> {
                         } as never);
                     }
 
+                    const listError = c.voiceListErrors[listKey];
+                    if (listError) {
+                        return new component.Text({
+                            text: '✕ The Twilio list did not load: ' + friendlyError(listError),
+                            type: component.Text.Type.STRONG,
+                            size: component.Text.Size.S
+                        });
+                    }
+
                     if (list.length === 0) {
                         return new component.Text({
                             text: '(no items found in Twilio for this account)',
@@ -206,28 +257,14 @@ export default class VoicePage extends PureComponent<PageTickProps, unknown> {
                         });
                     }
 
-                    const normalized = list.map((it) => {
-                        if (row.field === 'phoneNumber') {
-                            return {
-                                value: it.phoneNumber || '',
-                                label: (it.phoneNumber || '') +
-                                    (it.friendlyName ? '  —  ' + it.friendlyName : '')
-                            };
-                        }
-                        return {
-                            value: it.sid || '',
-                            label: (it.friendlyName || '(unnamed)') +
-                                (it.sid ? '  [' + it.sid + ']' : '')
-                        };
-                    });
+                    const normalized = optionsFor(row.field, list);
                     const ds = new core.ArrayDataSource(normalized);
-                    const pending = c.voicePendingValue;
 
                     return new component.Dropdown({
                         dataSource: ds,
                         valueMember: 'value',
                         displayMember: 'label',
-                        selectedValue: pending || (row.allowEmpty ? null : normalized[0].value),
+                        selectedValue: effectiveValue(row, normalized, c.voicePendingValue),
                         allowEmpty: !!row.allowEmpty,
                         placeholder: row.allowEmpty ? '(none)' : 'Select…',
                         onSelectionChanged: handlePendingChange
@@ -262,6 +299,25 @@ export default class VoicePage extends PureComponent<PageTickProps, unknown> {
                         return new component.Button({
                             label: 'Cancel',
                             action: handleCancel
+                        } as never);
+                    }
+
+                    // Twilio list failed — Retry or Cancel
+                    if (c.voiceListErrors[listKey]) {
+                        return new component.StackPanel({
+                            orientation: component.StackPanel.Orientation.HORIZONTAL,
+                            itemGap: component.StackPanel.GapSize.S,
+                            items: [
+                                new component.Button({
+                                    label: 'Retry',
+                                    startIcon: core.SystemIcon.REFRESH,
+                                    action: (): void => { loadVoiceLists(); }
+                                } as never),
+                                new component.Button({
+                                    label: 'Cancel',
+                                    action: handleCancel
+                                } as never)
+                            ]
                         } as never);
                     }
 
@@ -316,7 +372,7 @@ export default class VoicePage extends PureComponent<PageTickProps, unknown> {
             c.voiceError && (
                 <component.StackPanel.Item>
                     <component.Text type={component.Text.Type.STRONG}>
-                        ✕ {c.voiceError}
+                        {'✕ ' + friendlyError(c.voiceError)}
                     </component.Text>
                 </component.StackPanel.Item>
             ),

@@ -7,7 +7,9 @@
  *                                 defaultText, maxLength, appSid, functionUrl,
  *                                 prevVoiceUrl, publishedAt, publishedCodeVersion,
  *                                 codeVersion, needsRepublish, published, pending,
- *                                 voiceUrlMatches, drift:{voiceUrl}}
+ *                                 voiceUrlMatches, publishedNoticeVersion, changesPending,
+ *                                 functionExists?, functionMessage?,
+ *                                 drift:{voiceUrl, functionCode, functionService}}
  *   wizardSaveOutbound      {noticeOn, noticeText} → same as load | {ok:false, error}
  *   wizardPublishOutbound   {resume?} → {ok, pending?, steps:[{key, label, status, detail}], state}
  *   wizardUnpublishOutbound {} → {ok, steps, state}
@@ -75,7 +77,11 @@ export const toSnapshot = (raw: RawSnapshot): OutboundSnapshot => {
         voiceUrlMatches: typeof raw.voiceUrlMatches === 'boolean' ? raw.voiceUrlMatches : null,
         driftVoiceUrl: DRIFT_STATUSES.indexOf(drift as OutboundDrift) >= 0
             ? drift as OutboundDrift
-            : 'unknown'
+            : 'unknown',
+        publishedNoticeVersion: Number(raw.publishedNoticeVersion) || 0,
+        changesPending: raw.changesPending === true,
+        functionExists: typeof raw.functionExists === 'boolean' ? raw.functionExists : null,
+        functionMessage: str(raw.functionMessage)
     };
 };
 

@@ -4,7 +4,8 @@
  *
  * Server contract (ctc_sl_wizard_api.js):
  *   wizardLoadPresence {} → {ok, now, items:[{employeeId, employeeName,
- *                            canReceive, state, lastSeen, lastChange, stale}]}
+ *                            canReceive, state, lastSeen, lastChange, stale,
+ *                            incomingGranted, lastError, identityMatch, client}]}
  */
 
 import {store} from '../Store';
@@ -29,7 +30,11 @@ const toRow = (raw: unknown): PresenceRow => {
         state: String(r.state ?? ''),
         lastSeen: String(r.lastSeen ?? ''),
         lastChange: String(r.lastChange ?? ''),
-        stale: r.stale !== false
+        stale: r.stale !== false,
+        incomingGranted: r.incomingGranted === true,
+        lastError: String(r.lastError ?? ''),
+        identityMatch: r.identityMatch === true,
+        client: String(r.client ?? '')
     };
 };
 

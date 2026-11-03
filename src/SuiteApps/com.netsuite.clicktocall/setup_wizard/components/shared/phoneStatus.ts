@@ -4,6 +4,9 @@
  *
  * Status rule (row from wizardLoadPresence):
  *   Offline (grey)              — stale (no heartbeat in 12 min, or never) or state 'offline'
+ *   Ready (inbound off) (green) — the phone's token has no inbound grant
+ *                                 (incomingGranted false): it places calls and
+ *                                 is not meant to ring
  *   Not receiving calls (amber) — state is not 'registered', or canReceive is false
  *   Receiving calls (green)     — registered and canReceive
  */
@@ -19,9 +22,11 @@ export interface PhoneStatus {
 export const PHONE_STATUS_RECEIVING: PhoneStatus = { label: 'Receiving calls', color: '#14B981' };
 export const PHONE_STATUS_NOT_RECEIVING: PhoneStatus = { label: 'Not receiving calls', color: '#F4C76A' };
 export const PHONE_STATUS_OFFLINE: PhoneStatus = { label: 'Offline', color: '#9CA3AF' };
+export const PHONE_STATUS_INBOUND_OFF: PhoneStatus = { label: 'Ready (inbound off)', color: '#14B981' };
 
 export const phoneStatus = (row: PresenceRow | null | undefined): PhoneStatus => {
     if (!row || row.stale || row.state === 'offline' || !row.state) return PHONE_STATUS_OFFLINE;
+    if (!row.incomingGranted) return PHONE_STATUS_INBOUND_OFF;
     if (row.state !== 'registered' || !row.canReceive) return PHONE_STATUS_NOT_RECEIVING;
     return PHONE_STATUS_RECEIVING;
 };

@@ -52,7 +52,15 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
                     itemGap={component.StackPanel.GapSize.XXS}
                 >
                     <component.StackPanel.Item>
-                        <component.Heading level={2}>
+                        {/* Focus target after a page change (navigation.ts
+                            afterNavigate); the label names the page. */}
+                        <component.Heading
+                            level={2}
+                            rootAttributes={{
+                                'data-ctc-page-heading': '',
+                                'aria-label': 'Click-to-Call Admin Console: ' + subtitle
+                            }}
+                        >
                             Click-to-Call Admin Console
                         </component.Heading>
                     </component.StackPanel.Item>
@@ -69,7 +77,7 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
         ),
         isPaused && (
             <component.StackPanel.Item>
-                <PausedBanner />
+                <PausedBanner tick={props.tick} />
             </component.StackPanel.Item>
         ),
         (
@@ -86,7 +94,7 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
             columnGap={component.GridPanel.GapSize.NONE}
         >
             <component.GridPanel.Item>
-                <NavRail />
+                <NavRail tick={props.tick} />
             </component.GridPanel.Item>
             <component.GridPanel.Item>
                 <RailContentShell>

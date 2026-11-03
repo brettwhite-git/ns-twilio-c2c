@@ -18,6 +18,9 @@ import {deactivate, reactivate} from '../../app/effects/console';
 import type {AppState, SectionName} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import HealthChecks from './HealthChecks';
+import {formatPhone} from '../shared/formatPhone';
+import {friendlyError} from '../shared/friendlyError';
+import {buildFailedCheckLines} from '../shared/FailedChecks';
 
 interface ConsoleSnapshot {
     active?: boolean;
@@ -144,7 +147,34 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
 
     private handleDeactivate = (): void => { deactivate(); };
 
-    private handleReactivate = (): void => { reactivate(); };
+    private handleReactivate = (): void => { reactivate('overview'); };
+
+    /** Deactivate / Reactivate errors, shown under the quick-action buttons. */
+    private renderActionErrors(c: AppState['console']): core.VDom.Node[] {
+        const out: core.VDom.Node[] = [];
+        if (c.deactivateError) {
+            out.push(
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        {'✕ Deactivate failed: ' + friendlyError(c.deactivateError)}
+                    </component.Text>
+                </component.StackPanel.Item>
+            );
+        }
+        if (c.reactivateError && c.reactivateSource === 'overview') {
+            out.push(
+                <component.StackPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>
+                        {'✕ Reactivate failed: ' + friendlyError(c.reactivateError)}
+                    </component.Text>
+                </component.StackPanel.Item>
+            );
+            buildFailedCheckLines(c.reactivateFailedChecks).forEach((line) => {
+                out.push(<component.StackPanel.Item>{line as never}</component.StackPanel.Item>);
+            });
+        }
+        return out;
+    }
 
     render(): core.VDom.Node {
         const state = store.getState() as AppState;
@@ -152,6 +182,9 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
         const snap = (c.snapshot || {}) as ConsoleSnapshot;
         const assignments = (c.assignments || []) as AssignmentRow[];
         const preflight = (c.preflight || []) as CheckRow[];
+        // Loading: no "0 reps / Not yet run" while the first load runs.
+        const assignmentsPending = c.assignments === null;
+        const preflightPending = c.preflight === null && c.loading;
 
         const phoneCount: Record<string, boolean> = {};
         assignments.forEach((a) => { if (a.phoneSid) phoneCount[a.phoneSid] = true; });
@@ -194,30 +227,34 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                         <component.GridPanel.Item>
                             <StatCard
                                 title="Phone numbers"
-                                metric={String(phonesConfigured)}
-                                description={phonesConfigured === 0
-                                    ? 'No numbers configured'
-                                    : (snap.phoneNumber || '')}
+                                metric={assignmentsPending ? '…' : String(phonesConfigured)}
+                                description={assignmentsPending ? 'Loading…'
+                                    : phonesConfigured === 0
+                                        ? 'No numbers configured'
+                                        : formatPhone(snap.phoneNumber)}
                             />
                         </component.GridPanel.Item>
                         <component.GridPanel.Item>
                             <StatCard
                                 title="Assigned reps"
-                                metric={String(repCount)}
-                                description={repCount === 0
-                                    ? 'No assignments'
-                                    : (repCount === 1 ? '1 rep' : repCount + ' reps')}
+                                metric={assignmentsPending ? '…' : String(repCount)}
+                                description={assignmentsPending ? 'Loading…'
+                                    : repCount === 0
+                                        ? 'No assignments'
+                                        : (repCount === 1 ? '1 rep' : repCount + ' reps')}
                             />
                         </component.GridPanel.Item>
                         <component.GridPanel.Item>
                             <StatCard
                                 title="Preflight"
-                                metric={preflightTotal > 0
-                                    ? preflightPassed + ' of ' + preflightTotal
-                                    : '—'}
-                                description={preflightTotal > 0
-                                    ? 'See checks below'
-                                    : 'Not yet run'}
+                                metric={preflightPending ? '…'
+                                    : preflightTotal > 0
+                                        ? preflightPassed + ' of ' + preflightTotal
+                                        : '—'}
+                                description={preflightPending ? 'Running checks…'
+                                    : preflightTotal > 0
+                                        ? 'See checks below'
+                                        : c.preflightError ? 'Did not run' : 'Not yet run'}
                             />
                         </component.GridPanel.Item>
                     </component.GridPanel>
@@ -235,43 +272,44 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                             background: '#FAFAFB'
                         } as never}
                     >
-                        <component.StackPanel.Item>
+                        {[
+                        (<component.StackPanel.Item>
                             <component.Text
                                 type={component.Text.Type.WEAK}
                                 size={component.Text.Size.S}
                             >
                                 Common admin tasks — full screens still available via the left rail.
                             </component.Text>
-                        </component.StackPanel.Item>
-                        <component.StackPanel.Item>
+                        </component.StackPanel.Item>),
+                        (<component.StackPanel.Item>
                             <component.StackPanel
                                 orientation={component.StackPanel.Orientation.HORIZONTAL}
                                 itemGap={component.StackPanel.GapSize.S}
                             >
                                 <component.StackPanel.Item>
                                     <component.Button
-                                        label="Add a phone number"
-                                        startIcon={core.SystemIcon.ADD as never}
+                                        label="Manage phone numbers"
+                                        startIcon={core.SystemIcon.CALL as never}
                                         action={(): void => this.handleNav('phones')}
                                     />
                                 </component.StackPanel.Item>
                                 <component.StackPanel.Item>
                                     <component.Button
                                         label="Reassign reps"
-                                        startIcon={core.SystemIcon.REFRESH as never}
+                                        startIcon={core.SystemIcon.GROUPS as never}
                                         action={(): void => this.handleNav('phones')}
                                     />
                                 </component.StackPanel.Item>
                                 <component.StackPanel.Item>
                                     <component.Button
                                         label="Update voice config"
-                                        startIcon={core.SystemIcon.PLAY as never}
+                                        startIcon={core.SystemIcon.SETTINGS as never}
                                         action={(): void => this.handleNav('voice')}
                                     />
                                 </component.StackPanel.Item>
                                 <component.StackPanel.Item>
                                     <component.Button
-                                        label="Rotate API Key Secret"
+                                        label="API key rotation guide"
                                         startIcon={core.SystemIcon.LOCK as never}
                                         action={(): void => this.handleNav('credentials')}
                                     />
@@ -279,9 +317,10 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                                 {snap.active === false ? (
                                     <component.StackPanel.Item>
                                         <component.Button
-                                            label="Reactivate"
+                                            label={c.reactivating ? 'Reactivating…' : 'Reactivate'}
                                             type={component.Button.Type.PRIMARY}
                                             startIcon={core.SystemIcon.PLAY as never}
+                                            enabled={!c.reactivating}
                                             action={this.handleReactivate}
                                         />
                                     </component.StackPanel.Item>
@@ -294,14 +333,16 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                                             <component.StackPanel.Item>
                                                 <component.Button
                                                     label="Cancel"
+                                                    enabled={!c.deactivating}
                                                     action={this.handleCancelDeactivate}
                                                 />
                                             </component.StackPanel.Item>
                                             <component.StackPanel.Item>
                                                 <component.Button
-                                                    label="Confirm deactivate"
+                                                    label={c.deactivating ? 'Deactivating…' : 'Confirm deactivate'}
                                                     type={component.Button.Type.DANGER}
                                                     startIcon={core.SystemIcon.STOP as never}
+                                                    enabled={!c.deactivating}
                                                     action={this.handleDeactivate}
                                                 />
                                             </component.StackPanel.Item>
@@ -318,7 +359,9 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                                     </component.StackPanel.Item>
                                 )}
                             </component.StackPanel>
-                        </component.StackPanel.Item>
+                        </component.StackPanel.Item>),
+                        ...this.renderActionErrors(c)
+                        ] as never}
                     </component.StackPanel>
                 </component.StackPanel.Item>
 

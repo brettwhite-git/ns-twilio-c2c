@@ -1854,7 +1854,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     // is not registered (Twilio can ring it). null: no inbound.
                     // false while token fetches fail (session gone): the
                     // dock shows the amber 'reconnecting' hint.
+                    // null while paused: not receiving on purpose (error 'paused').
                     canReceive: tokenFailing ? false
+                        : ctcPaused ? null
                         : (incomingGranted ? !!(device && device.state === 'registered') : null),
                     callWarning: callWarning,
                     audioUnlocked: shellAudioUnlocked,
@@ -2124,6 +2126,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // for a number that is not dialable, and over the rate limits; the
         // snapshot sent back (refused) tells the dock why.
         function dockDial(m) {
+            if (ctcPaused) { refuseRequest(m, 'paused'); return; }
             if (activeCall || pendingInbound || !device || dockPhase !== 'ready') { refuseRequest(m, 'busy'); return; }
             if (!validDialTarget(dialableFormat(String(m.to || '')))) { refuseRequest(m, 'invalid-number'); return; }
             var limit = dialRateCheck(Date.now());
@@ -2543,7 +2546,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             })
             .then(function (data) {
                 if (!data || typeof data !== 'object') throw new Error('empty response');
-                if (data.error) throw new Error('error: ' + data.error);
+                if (data.error) {
+                    var refused = new Error('error: ' + data.error);
+                    // CTC is paused (not this user's access): see enterPaused.
+                    if (data.paused === true) refused.paused = true;
+                    throw refused;
+                }
                 if (!data.token) throw new Error('no token');
                 return { token: data.token, phoneNumber: data.phoneNumber };
             });
@@ -2787,8 +2795,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // Token retry backoff: 5 s, 15 s, 30 s, then every 60 s. The phone
         // never gives up while the page is open (see Token recovery).
         var TOKEN_RETRY_DELAYS_MS = [5000, 15000, 30000, 60000];
-        // Twilio codes for an expired / invalid-expiry JWT.
-        var TOKEN_EXPIRY_CODES = [20104, 31204, 31205, 31206];
+        // Twilio codes for an expired / invalid JWT. 20101 (invalid token,
+        // e.g. its API key was deleted after a key change) renews too.
+        var TOKEN_EXPIRY_CODES = [20101, 20104, 31204, 31205, 31206];
         // True from the first token fetch until the refresh (with its
         // retries) settles. Blocks register() meanwhile.
         var tokenRefreshInFlight = false;
@@ -3020,7 +3029,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         function registrationWatched() {
-            return !!device && incomingGranted && !movedAway && !phoneDisabled;
+            return !!device && incomingGranted && !movedAway && !phoneDisabled && !ctcPaused;
         }
 
         function clearRegisterRetry() {
@@ -3084,7 +3093,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 regLog('Register failed: ' + (err && (err.code || err.message)));
                 notePhoneError('register', err && (err.code || err.message));
                 if (isTokenExpiryError(err)) {
-                    refreshDeviceToken(true);
+                    renewExpiredToken(err.code);
                     return;
                 }
                 scheduleRegisterRetry('register failed');
@@ -3153,6 +3162,11 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function afterCallSettled() {
             setTimeout(function () {
                 if (activeCall || pendingInbound) return;
+                // Paused during the call: stop ringing now that it ended.
+                if (ctcPaused) {
+                    pausedIdle();
+                    return;
+                }
                 if (identityRebuildPending || sessionRebuildPending) {
                     refreshDeviceToken(false);
                     return;
@@ -3202,6 +3216,91 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             return !!err && TOKEN_EXPIRY_CODES.indexOf(Number(err.code)) !== -1;
         }
 
+        // A token Twilio refused (TOKEN_EXPIRY_CODES): fetch a new one at
+        // once. A refusal again within EXPIRY_RENEW_RESET_MS (e.g. 20101
+        // while an old API key is still in use) waits like a failed fetch:
+        // 5 s, 15 s, 30 s, then every 60 s.
+        var EXPIRY_RENEW_RESET_MS = 5 * 60 * 1000;
+        var expiryRenewAttempt = 0;
+        var expiryRenewAt = 0;
+        var expiryRenewTimer = null;
+        function renewExpiredToken(code) {
+            // One renewal at a time: the SDK reports one refusal through
+            // several listeners (device error, register() rejection).
+            if (expiryRenewTimer || tokenRefreshInFlight || phoneDisabled || ctcPaused) return;
+            var now = Date.now();
+            if (now - expiryRenewAt > EXPIRY_RENEW_RESET_MS) expiryRenewAttempt = 0;
+            expiryRenewAt = now;
+            var delay = expiryRenewAttempt === 0 ? 0
+                : TOKEN_RETRY_DELAYS_MS[Math.min(expiryRenewAttempt - 1, TOKEN_RETRY_DELAYS_MS.length - 1)];
+            expiryRenewAttempt++;
+            if (!delay) {
+                refreshDeviceToken(true);
+                return;
+            }
+            regLog('Token refused again (code ' + code + '); new token in ' + (delay / 1000) + ' s');
+            expiryRenewTimer = setTimeout(function () {
+                expiryRenewTimer = null;
+                refreshDeviceToken(true);
+            }, delay);
+        }
+
+        // --- Pause (config custrecord_ctc_active F) ---
+        // The admin paused Click-to-Call. Found by the 60 s sessionPing
+        // (active false) or a token answer marked paused. The phone stops
+        // ringing (unregister) and refuses new calls; a live or ringing call
+        // is left to finish and the unregister runs after it
+        // (afterCallSettled). Snapshot error kind 'paused'. Not permanent:
+        // when sessionPing says active again, the phone fetches a token and
+        // registers again, with no reload.
+        var ctcPaused = false;
+        var PAUSED_MESSAGE = 'Calling is paused by your administrator';
+
+        // Paused and no call: unregister and show the paused state.
+        function pausedIdle() {
+            if (device && device.state === 'registered') {
+                try {
+                    Promise.resolve(device.unregister()).catch(function () { /* already gone */ });
+                } catch (err) { /* not registered */ }
+            }
+            clearError();
+            setStatus('Calling paused', device ? '' : 'error');
+            setButtons(false, false, false);
+        }
+
+        function enterPaused(reason) {
+            clearTokenRetry();
+            tokenRefreshInFlight = false;
+            if (ctcPaused) return;
+            ctcPaused = true;
+            regLog('Calling paused by the administrator (' + reason + ')');
+            clearRegisterRetry();
+            if (expiryRenewTimer) {
+                clearTimeout(expiryRenewTimer);
+                expiryRenewTimer = null;
+            }
+            if (!activeCall && !pendingInbound) pausedIdle();
+            setPhoneError('paused', 'ctc_paused', PAUSED_MESSAGE);
+        }
+
+        function leavePaused(reason) {
+            if (!ctcPaused) return;
+            ctcPaused = false;
+            regLog('Calling resumed (' + reason + '); fetching a token');
+            clearPhoneError(['paused']);
+            if (device && !activeCall && !pendingInbound) deviceReady();
+            // A fresh token (the old one may have ended while paused); the
+            // renewal registers again when inbound is granted.
+            refreshDeviceToken(false);
+        }
+
+        // sessionPing answer: active false pauses, true resumes; anything
+        // else (an older RESTlet, a config read error) changes nothing.
+        function applyActiveFlag(active, reason) {
+            if (active === false) enterPaused(reason);
+            else if (active === true) leavePaused(reason);
+        }
+
         // --- Token recovery ---
         // A token fetch fails when the NetSuite session is gone (logout,
         // timeout). The phone never gives up while the page is open: it
@@ -3214,7 +3313,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // starts the device when the token comes.
         // expired: logged only (the token is already dead).
         function refreshDeviceToken(expired, attempt) {
-            if (phoneDisabled) return;
+            if (phoneDisabled || ctcPaused) return;
             attempt = attempt || 0;
             if (attempt === 0) {
                 if (tokenRefreshInFlight) return;
@@ -3227,10 +3326,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     tokenFailing = false;
                     tokenRetryAttempt = 0;
                     clearPhoneError(['session', 'signed_out']);
+                    // Every token answer carries the rep's caller ID (it can
+                    // change while the phone is open): the next call uses it.
+                    if (result.phoneNumber) callerId = result.phoneNumber;
                     if (!device) {
                         // The page never had a token (boot failed).
                         tokenRefreshInFlight = false;
-                        if (result.phoneNumber) callerId = result.phoneNumber;
                         regLog('Token fetch recovered; starting the phone');
                         clearError();
                         initDevice(result.token);
@@ -3250,7 +3351,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                             publishDock();
                             return;
                         }
-                        if (result.phoneNumber) callerId = result.phoneNumber;
                         rebuildDevice(result.token, 'user changed (' + deviceIdentity + ' to ' + newIdentity + ')');
                         return;
                     }
@@ -3260,7 +3360,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     if (recovered || sessionRebuildPending) {
                         if (!activeCall && !pendingInbound) {
                             tokenRefreshInFlight = false;
-                            if (result.phoneNumber) callerId = result.phoneNumber;
                             rebuildDevice(result.token, 'token fetch recovered');
                             publishDock();
                             return;
@@ -3288,6 +3387,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // tokenRefreshInFlight stays true until a token arrives.
         function tokenFailed(err, expired, attempt) {
             var detail = (err && err.message) || String(err);
+            if (err && err.paused === true) {
+                enterPaused('token refused: paused');
+                return;
+            }
             console.log('[CTC] Token refresh failed (attempt ' + (attempt + 1)
                 + (expired ? ', token expired' : '') + '): ' + detail);
             notePhoneError('token', detail);
@@ -3399,12 +3502,18 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 body: JSON.stringify({ action: 'sessionPing' })
             })
             .then(function (res) {
-                if (!res.ok) return 'HTTP ' + res.status;
-                return res.json().then(function () { return ''; }, function () { return 'not JSON'; });
+                if (!res.ok) return { detail: 'HTTP ' + res.status };
+                return res.json().then(function (b) { return { detail: '', body: b }; },
+                    function () { return { detail: 'not JSON' }; });
             })
-            .then(function (detail) {
+            .then(function (r) {
                 sessionPingInFlight = false;
-                if (!detail || !isSignedOutDetail(detail)) return;
+                var detail = r.detail;
+                if (!detail) {
+                    applyActiveFlag(r.body && r.body.active, 'session ping (' + reason + ')');
+                    return;
+                }
+                if (!isSignedOutDetail(detail)) return;
                 regLog('Session lost (' + reason + ': ' + detail + '); checking the token');
                 refreshDeviceToken(false);
             })
@@ -3510,8 +3619,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 // An expired token is recoverable: renew it instead of
                 // showing the Error pill.
                 if (isTokenExpiryError(err)) {
-                    console.log('[CTC] Token expired (code ' + err.code + '); renewing');
-                    refreshDeviceToken(true);
+                    console.log('[CTC] Token expired or invalid (code ' + err.code + '); renewing');
+                    renewExpiredToken(err.code);
                     return;
                 }
                 var code = err && err.code;
@@ -3698,7 +3807,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
 
         function makeCall() {
-            if (!device || activeCall || pendingInbound) return;
+            if (!device || activeCall || pendingInbound || ctcPaused) return;
             clearError();
             dockLastLog = null;
             callDirection = 'outbound';

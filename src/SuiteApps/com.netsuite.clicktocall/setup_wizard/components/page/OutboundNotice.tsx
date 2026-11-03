@@ -45,15 +45,23 @@ const STEP_STATUS: Record<OutboundStep['status'], { check: string; text: string 
     pending: { check: 'info_enabled', text: 'Pending' }
 };
 
-/** "Published <local date time> · notice v3" / "Not published yet". */
+/**
+ * "Published <local date time> · notice v3" / "Not published yet" /
+ * "Live: notice v2 · Saved changes not published yet". The version shown
+ * is the one Twilio plays (publishedNoticeVersion), never the saved one.
+ */
 export const outboundStatusLine = (outbound: OutboundState): string => {
     if (!outbound.published) return 'Not published yet';
+    const live = outbound.publishedNoticeVersion
+        ? 'notice v' + outbound.publishedNoticeVersion
+        : 'no notice';
+    if (outbound.changesPending) return 'Live: ' + live + ' · Saved changes not published yet';
     const when = new Date(outbound.publishedAt);
     const whenText = !outbound.publishedAt
         ? ''
         : isNaN(when.getTime()) ? outbound.publishedAt : when.toLocaleString();
     return 'Published' + (whenText ? ' ' + whenText : '') +
-        (outbound.noticeVersion ? ' · notice v' + outbound.noticeVersion : '');
+        (outbound.publishedNoticeVersion ? ' · notice v' + outbound.publishedNoticeVersion : '');
 };
 
 const item = (node: core.VDom.Node | false | null | undefined): core.VDom.Node | false =>

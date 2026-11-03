@@ -10,13 +10,13 @@
             <accesslevel>2</accesslevel>
             <applyformatting>F</applyformatting>
             <checkspelling>F</checkspelling>
-            <description>transcripts (default, also when empty) or reconcile. Any other text logs an error and does nothing.</description>
+            <description>transcripts (default, also when empty), reconcile or tick. Any other text logs an error and does nothing.</description>
             <displaytype>NORMAL</displaytype>
             <fieldtype>TEXT</fieldtype>
-            <help>transcripts: recording cleanup, orphan retry and transcript analysis (Phases A to C). reconcile: Twilio call reconciliation only (Phase D). Empty = transcripts.</help>
+            <help>transcripts: recording cleanup, orphan retry and transcript analysis (Phases A to C). reconcile: Twilio call reconciliation only (Phase D). tick: does no work itself; queues the transcripts and reconcile deployments (covers the hours their own schedule misses in this account time zone). Empty = transcripts.</help>
             <isformula>F</isformula>
             <ismandatory>F</ismandatory>
-            <label>Poll mode (transcripts, reconcile)</label>
+            <label>Poll mode (transcripts, reconcile, tick)</label>
             <maxlength>20</maxlength>
             <searchlevel>2</searchlevel>
             <storevalue>T</storevalue>
@@ -52,6 +52,72 @@
                     <everyxdays>1</everyxdays>
                     <startdate>2024-01-01</startdate>
                     <starttime>06:00:00Z</starttime>
+                    <repeat>PT15M</repeat>
+                    <enddate>2099-12-31</enddate>
+                </daily>
+            </recurrence>
+        </scriptdeployment>
+        <!--
+            Time zone (2026-11-03). starttime is UTC; NetSuite converts it to the
+            ACCOUNT time zone, and a daily repeat runs only from that local start
+            to the end of the local day. One fixed UTC start is local midnight in
+            one offset only (06:00Z = 12:00 am in UTC-6): Pacific got about 2 h of
+            runs a day, UTC+8 none in the morning. SDF has no recurrence that
+            repeats across midnight, scripts cannot edit a deployment schedule,
+            and N/task cannot delay a run. So three tick deployments start at
+            00:00Z, 12:00Z and 18:00Z (with the two above at 06:00Z: one start
+            every 6 h). In any time zone one of the four starts falls between
+            12:00 am and 6:00 am local, so from then to midnight a run is due
+            every 15 min. A tick does no work: it queues both deployments
+            above. NetSuite never runs one deployment twice at once, so a tick
+            that finds one queued or running changes nothing. Worst-case gap:
+            under 6 h, overnight (local 12:00 am to the first start). The
+            transcript waits use Twilio times and reconcile looks back from its
+            watermark, so a gap only delays work.
+        -->
+        <scriptdeployment scriptid="customdeploy_ctc_ss_poll_tick00">
+            <custscript_ctc_poll_mode>tick</custscript_ctc_poll_mode>
+            <title>CTC Poll Tick 00:00 UTC</title>
+            <isdeployed>T</isdeployed>
+            <status>SCHEDULED</status>
+            <loglevel>AUDIT</loglevel>
+            <recurrence>
+                <daily>
+                    <everyxdays>1</everyxdays>
+                    <startdate>2024-01-01</startdate>
+                    <starttime>00:00:00Z</starttime>
+                    <repeat>PT15M</repeat>
+                    <enddate>2099-12-31</enddate>
+                </daily>
+            </recurrence>
+        </scriptdeployment>
+        <scriptdeployment scriptid="customdeploy_ctc_ss_poll_tick12">
+            <custscript_ctc_poll_mode>tick</custscript_ctc_poll_mode>
+            <title>CTC Poll Tick 12:00 UTC</title>
+            <isdeployed>T</isdeployed>
+            <status>SCHEDULED</status>
+            <loglevel>AUDIT</loglevel>
+            <recurrence>
+                <daily>
+                    <everyxdays>1</everyxdays>
+                    <startdate>2024-01-01</startdate>
+                    <starttime>12:00:00Z</starttime>
+                    <repeat>PT15M</repeat>
+                    <enddate>2099-12-31</enddate>
+                </daily>
+            </recurrence>
+        </scriptdeployment>
+        <scriptdeployment scriptid="customdeploy_ctc_ss_poll_tick18">
+            <custscript_ctc_poll_mode>tick</custscript_ctc_poll_mode>
+            <title>CTC Poll Tick 18:00 UTC</title>
+            <isdeployed>T</isdeployed>
+            <status>SCHEDULED</status>
+            <loglevel>AUDIT</loglevel>
+            <recurrence>
+                <daily>
+                    <everyxdays>1</everyxdays>
+                    <startdate>2024-01-01</startdate>
+                    <starttime>18:00:00Z</starttime>
                     <repeat>PT15M</repeat>
                     <enddate>2099-12-31</enddate>
                 </daily>

@@ -9,16 +9,23 @@
  * single DataGrid so the page reads like a comparison table rather than three
  * stacked GridPanel cards.
  *
- * The rotate-secret modal flow (U5 Phase 3c) is gated on UIF Modal type
- * support — see legacy notes in sections/credentials.ts.
+ * 2026-11-03: the API Key SID and the secret script id can be changed
+ * here ("Change API key" → Test and save). The server tests the NEW
+ * values first and saves only when the test passes. The rotation guide
+ * follows Twilio's model: a key's secret is shown once, so rotation
+ * means a NEW key (new SID) and a new NetSuite API Secret.
  */
 
 import {PureComponent} from '@uif-js/core';
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
-import type {AppState} from '../../app/InitialState';
+import {Action} from '../../app/Action';
+import {cancelCredentialsEdit, saveCredentials, startCredentialsEdit} from '../../app/effects/credentials';
+import type {AppState, CredentialsState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
+import {friendlyError} from '../shared/friendlyError';
+import {buildFailedCheckLines} from '../shared/FailedChecks';
 
 interface CredentialsSnapshot {
     accountSid?: string;
@@ -49,6 +56,103 @@ export default class CredentialsPage extends PureComponent<PageTickProps, unknow
             window.open('/app/common/scripting/secrets/settings.nl', '_blank');
         } catch (e) { /* ignore */ }
     };
+
+    /** "Change API key" button, or the change form while editing. */
+    private renderChangeForm(creds: CredentialsState): core.VDom.Node[] {
+        const item = (node: unknown): core.VDom.Node =>
+            (<component.StackPanel.Item>{node as never}</component.StackPanel.Item>) as core.VDom.Node;
+
+        if (!creds.editing) {
+            const out: core.VDom.Node[] = [];
+            if (creds.saved) {
+                out.push(item(
+                    <component.Text type={component.Text.Type.STRONG}>
+                        ✓ Saved. The connection test passed with the new API key.
+                    </component.Text>
+                ));
+            }
+            out.push(item(new component.Button({
+                label: 'Change API key',
+                startIcon: core.SystemIcon.EDIT,
+                action: (): void => { startCredentialsEdit(); }
+            } as never)));
+            return out;
+        }
+
+        const field = (label: string, value: string, placeholder: string,
+            key: 'apiKeySid' | 'apiSecretId'): core.VDom.Node[] => [
+            (
+                <component.GridPanel.Item>
+                    <component.Text type={component.Text.Type.STRONG}>{label}</component.Text>
+                </component.GridPanel.Item>
+            ) as core.VDom.Node,
+            (
+                <component.GridPanel.Item>
+                    <component.TextBox
+                        text={value}
+                        placeholder={placeholder}
+                        enabled={!creds.saving}
+                        onTextChanged={(args: { text?: string } | undefined): void => {
+                            store.dispatch(Action.credentialsUpdate({ [key]: (args && args.text) || '' }));
+                        }}
+                        rootStyle={{width: '100%'} as never}
+                    />
+                </component.GridPanel.Item>
+            ) as core.VDom.Node
+        ];
+
+        const out: core.VDom.Node[] = [
+            item(
+                <component.Text type={component.Text.Type.WEAK} size={component.Text.Size.S}>
+                    Enter the new key's SID and the script ID of the NetSuite
+                    API Secret that holds its secret. Click-to-Call tests the
+                    connection with the new values first. If the test fails,
+                    nothing is saved and the current key stays in use.
+                </component.Text>
+            ),
+            item(
+                <component.GridPanel
+                    columns="220px 1fr"
+                    rows="auto auto"
+                    columnGap={component.GridPanel.GapSize.M}
+                    rowGap={component.GridPanel.GapSize.S}
+                    rootStyle={{maxWidth: '640px'} as never}
+                >
+                    {[
+                        ...field('New API Key SID', creds.apiKeySid, 'SK…', 'apiKeySid'),
+                        ...field('New API Key Secret script ID', creds.apiSecretId, 'custsecret_…', 'apiSecretId')
+                    ] as never}
+                </component.GridPanel>
+            ),
+            item(new component.StackPanel({
+                orientation: component.StackPanel.Orientation.HORIZONTAL,
+                itemGap: component.StackPanel.GapSize.S,
+                items: [
+                    new component.Button({
+                        label: creds.saving ? 'Testing connection…' : 'Test and save',
+                        type: component.Button.Type.PRIMARY,
+                        enabled: !creds.saving &&
+                            creds.apiKeySid.trim() !== '' && creds.apiSecretId.trim() !== '',
+                        action: (): void => { saveCredentials(); }
+                    } as never),
+                    new component.Button({
+                        label: 'Cancel',
+                        enabled: !creds.saving,
+                        action: (): void => { cancelCredentialsEdit(); }
+                    } as never)
+                ]
+            } as never))
+        ];
+        if (creds.error) {
+            out.push(item(
+                <component.Text type={component.Text.Type.STRONG}>
+                    {'✕ ' + friendlyError(creds.error)}
+                </component.Text>
+            ));
+            buildFailedCheckLines(creds.failedChecks).forEach((line) => { out.push(item(line)); });
+        }
+        return out;
+    }
 
     private buildColumns(): unknown[] {
         const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
@@ -118,6 +222,16 @@ export default class CredentialsPage extends PureComponent<PageTickProps, unknow
     render(): core.VDom.Node {
         const state = store.getState() as AppState;
         const snap = (state.console.snapshot || {}) as CredentialsSnapshot;
+        const changeForm = (
+            <component.StackPanel.Item>
+                <component.StackPanel
+                    orientation={component.StackPanel.Orientation.VERTICAL}
+                    itemGap={component.StackPanel.GapSize.S}
+                >
+                    {this.renderChangeForm(state.credentials) as never}
+                </component.StackPanel>
+            </component.StackPanel.Item>
+        );
 
         const rows: CredentialRowSpec[] = [
             {
@@ -192,6 +306,7 @@ export default class CredentialsPage extends PureComponent<PageTickProps, unknow
                     } as never) as never}
                 </component.StackPanel.Item>
             ),
+            changeForm,
             openSecretsButton,
             (
                 <component.StackPanel.Item>
@@ -207,28 +322,32 @@ export default class CredentialsPage extends PureComponent<PageTickProps, unknow
                     >
                         <component.StackPanel.Item>
                             <component.Text type={component.Text.Type.STRONG}>
-                                Rotation runbook
+                                API key rotation guide
                             </component.Text>
                         </component.StackPanel.Item>
                         <component.StackPanel.Item>
                             <component.Text size={component.Text.Size.S}>
-                                1. Mint a new API Key Secret in the Twilio
-                                Console (Account &gt; API Keys &amp; tokens).
+                                {'1. In the Twilio Console (Account › API keys & tokens), create a new Standard API key. Copy its secret at once: Twilio shows a key\'s secret only when you create the key, and you cannot change the secret of an existing key.'}
                             </component.Text>
                         </component.StackPanel.Item>
                         <component.StackPanel.Item>
                             <component.Text size={component.Text.Size.S}>
-                                2. Update the secret value in NetSuite (Setup
-                                &gt; Company &gt; API Secrets) — keep the
-                                same script id so the wizard pointer above
-                                stays valid.
+                                {'2. In NetSuite (Setup › Company › API Secrets), create a new secret with that value. Give it the same allowed scripts and allowed domains as the current secret. The allowed scripts must include CTC Setup Wizard API, CTC Token Generator and CTC Poll Transcripts: NetSuite does not let a script read this list, so the test cannot check it for the other two. Note its script ID (custsecret_…).'}
                             </component.Text>
                         </component.StackPanel.Item>
                         <component.StackPanel.Item>
                             <component.Text size={component.Text.Size.S}>
-                                3. Revoke the old Twilio API Key once you've
-                                verified call placement works with the new
-                                secret.
+                                {'3. On this page, click "Change API key". Enter the new API Key SID (SK…, a new SID) and the new secret\'s script ID, then click "Test and save". If the test fails, the current key stays in use.'}
+                            </component.Text>
+                        </component.StackPanel.Item>
+                        <component.StackPanel.Item>
+                            <component.Text size={component.Text.Size.S}>
+                                {'4. Reload phone mode, then place a test call. A phone that stays open keeps its old-key token until it renews (up to 1 hour).'}
+                            </component.Text>
+                        </component.StackPanel.Item>
+                        <component.StackPanel.Item>
+                            <component.Text size={component.Text.Size.S}>
+                                {'5. Wait until open phones renew (up to 1 hour), or ask reps to reload phone mode. Then delete the old API key in the Twilio Console, and then the old secret in NetSuite API Secrets.'}
                             </component.Text>
                         </component.StackPanel.Item>
                     </component.StackPanel>

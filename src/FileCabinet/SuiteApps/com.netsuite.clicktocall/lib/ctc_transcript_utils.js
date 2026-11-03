@@ -172,6 +172,34 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         return (nowMs === undefined ? Date.now() : nowMs) - changedAt >= TRANSCRIPT_WAIT_MS;
     };
 
+    /**
+     * Bounded wait for a call whose Twilio reads keep failing transiently
+     * (401 / 403 / 429 / 5xx / network). Without it such a call stayed
+     * open forever and held a slot in the poller's 50-row window.
+     *   - recording known (the transcript or sentences read failed): the
+     *     same 24 h as transcriptWaitExpired.
+     *   - no recording known (the recording / call read failed): we cannot
+     *     tell "no recording" from "Twilio down", so the longer of the two
+     *     waits applies: RECORDING_WAIT_MS + TRANSCRIPT_WAIT_MS (25 h)
+     *     after the call started (custevent_ctc_call_started, ISO UTC).
+     *     An admin has a day to fix rotated credentials before calls close.
+     * An unreadable or empty start time keeps waiting.
+     *
+     * @param {string} callStartedIso - custevent_ctc_call_started
+     * @param {Object|null} recording - Twilio Recording, when known
+     * @param {number} [nowMs=Date.now()]
+     * @returns {boolean}
+     */
+    const transientWaitExpired = (callStartedIso, recording, nowMs) => {
+        const now = nowMs === undefined ? Date.now() : nowMs;
+        if (recording && typeof recording === 'object' && !isTransientError(recording)) {
+            return transcriptWaitExpired(recording, now);
+        }
+        const startedMs = parseTwilioDate(callStartedIso);
+        if (startedMs === null) return false;
+        return now - startedMs >= RECORDING_WAIT_MS + TRANSCRIPT_WAIT_MS;
+    };
+
     // Sprint 2c — LLM concerns extracted to lib/ctc_llm_analysis.js
     // (prompt template, model params, schema, fallback shape, quota guard,
     // try/catch around llm.generateText). This module re-exports
@@ -319,30 +347,29 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         return transcripts.length ? transcripts[0] : null;
     };
 
+    /**
+     * Sentences of a COMPLETED transcript.
+     *
+     * Return contract (2026-11-03):
+     *   - Array (maybe empty) → Twilio answered 200 with a `sentences`
+     *                           array. [] is a real empty transcript.
+     *   - TRANSIENT_ERROR     → ANY failure: network, timeout, 5xx,
+     *                           401/403/429, 404 / other 4xx, bad JSON, or
+     *                           a body without a `sentences` array.
+     * Before this, every failure returned [], so a failed fetch was saved
+     * as Transcribed with an empty transcript and the recording was
+     * deleted (data loss). Callers must not save or delete the recording
+     * on TRANSIENT_ERROR; the bounded waits close the call later.
+     */
     const fetchSentences = (transcriptSid, authHeader) => {
-        const url = `${TWILIO_INTEL_BASE}/Transcripts/${transcriptSid}/Sentences`;
-
-        let response;
-        try {
-            response = https.get({ url, headers: { Authorization: authHeader }, timeout: HTTPS_TIMEOUT_MS });
-        } catch (e) {
-            log.error({ title: 'CTC Fetch Sentences — network error', details: (e && e.message) || String(e) });
-            return [];
+        const body = getTwilioJson(`${TWILIO_INTEL_BASE}/Transcripts/${transcriptSid}/Sentences`,
+            authHeader, 'CTC Fetch Sentences');
+        if (isTransientError(body)) return body;
+        if (!body || !Array.isArray(body.sentences)) {
+            log.error({ title: 'CTC Fetch Sentences — no sentences list', details: `transcript=${transcriptSid}` });
+            return TRANSIENT_ERROR;
         }
-
-        if (response.code !== 200) {
-            log.error({ title: 'CTC Fetch Sentences Failed', details: `HTTP ${response.code}: ${response.body}` });
-            return [];
-        }
-
-        let body;
-        try {
-            body = JSON.parse(response.body);
-        } catch (e) {
-            log.error({ title: 'CTC Fetch Sentences — JSON parse', details: (e && e.message) || String(e) });
-            return [];
-        }
-        return body.sentences || [];
+        return body.sentences;
     };
 
     /**
@@ -450,9 +477,7 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
 
     /**
      * Spawn one customrecord_ctc_proposed_task per non-empty action item.
-     * Called from inside writePhoneCallEnrichmentFields so both LLM-callers
-     * (RESTlet checkTranscript + Scheduled Script poll) get this for free.
-     * Failures here never block enrichment — wrapped in try/catch at the call site.
+     * Called by createProposedTasksOnce after the Phone Call save.
      *
      * Due date per item: resolveDueDate (the AI date when valid, else call
      * date + 3 business days).
@@ -475,6 +500,39 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
             rec.setValue({ fieldId: 'custrecord_ctc_pt_proposed_due', value: resolveDueDate(item.due_date, callDay) });
             return rec.save({ ignoreMandatoryFields: true });
         });
+    };
+
+    /**
+     * Proposed tasks for a Phone Call, created at most once. Call it only
+     * AFTER the enrichment save succeeded (2026-11-03): before, the tasks
+     * were created inside writePhoneCallEnrichmentFields, before save(), so
+     * a failed save or a killed script repeated them on every retry.
+     * Skips when any proposed task already points at this Phone Call
+     * (one search, 10 units; none when there are no action items).
+     * Never throws.
+     *
+     * @param {string|number} phoneCallId - saved Phone Call internal ID
+     * @param {Object} analysis - LLM output (analysis.action_items)
+     * @param {string} [callDate] - 'YYYY-MM-DD' local call date
+     * @returns {Array<number>} IDs created ([] when skipped or none)
+     */
+    const createProposedTasksOnce = (phoneCallId, analysis, callDate) => {
+        try {
+            if (!phoneCallId || !normalizeActionItems(analysis && analysis.action_items).length) return [];
+            const existing = search.create({
+                type: 'customrecord_ctc_proposed_task',
+                filters: [['custrecord_ctc_pt_phone_call', 'anyof', String(phoneCallId)]],
+                columns: ['internalid']
+            }).run().getRange({ start: 0, end: 1 }) || [];
+            if (existing.length) {
+                log.audit({ title: 'CTC Proposed Tasks — already exist, skipped', details: `phoneCall=${phoneCallId}` });
+                return [];
+            }
+            return createProposedTasksFromAnalysis(phoneCallId, analysis, callDate);
+        } catch (e) {
+            log.error({ title: 'CTC Proposed Task Creation Failed', details: `phoneCall=${phoneCallId}: ${(e && e.message) || e}` });
+            return [];
+        }
     };
 
     /**
@@ -504,8 +562,7 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
      * the RESTlet checkTranscript action and the Scheduled Script retry both end
      * up with identical field sets. Caller is responsible for record.load() and .save().
      *
-     * Also spawns customrecord_ctc_proposed_task rows from analysis.action_items.
-     * Failures in task creation never block the core enrichment write.
+     * Writes fields only. Proposed tasks: createProposedTasksOnce, after save().
      *
      * @param {Object} phoneCallRec - record object already loaded via record.load()
      * @param {Object} opts
@@ -554,14 +611,8 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_ai_brief', value: (analysis.brief || analysis.summary || '').substring(0, 120) });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_processed', value: true });
         phoneCallRec.setValue({ fieldId: 'custevent_ctc_call_status', value: CALL_STATUS.TRANSCRIBED });
-
-        try {
-            if (phoneCallRec.id) {
-                createProposedTasksFromAnalysis(phoneCallRec.id, analysis, opts.callDate);
-            }
-        } catch (e) {
-            log.error({ title: 'CTC Proposed Task Creation Failed', details: e.toString() });
-        }
+        // Proposed tasks are NOT created here: the caller runs
+        // createProposedTasksOnce after save() succeeds.
     };
 
     /**
@@ -691,6 +742,7 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         parseTwilioDate,
         recordingWaitExpired,
         transcriptWaitExpired,
+        transientWaitExpired,
         fetchRecordingForCall,
         fetchRecordingsForCall,
         fetchParentCallRecording,
@@ -702,6 +754,7 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
         normalizeActionItems,
         resolveDueDate,
         createProposedTasksFromAnalysis,
+        createProposedTasksOnce,
         fallbackCallTitle,
         writePhoneCallEnrichmentFields,
         markCallStatus,

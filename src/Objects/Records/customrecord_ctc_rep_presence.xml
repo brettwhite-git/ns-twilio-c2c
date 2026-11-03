@@ -47,7 +47,7 @@
         </customrecordcustomfield>
         <customrecordcustomfield scriptid="custrecord_ctc_rp_state">
             <label>State</label>
-            <description>Twilio device state: registered, unregistered, registering or offline (page closed).</description>
+            <description>Twilio device state: registered, unregistered, registering, offline (page closed) or frozen (background tab frozen by the browser).</description>
             <fieldtype>CLOBTEXT</fieldtype>
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>

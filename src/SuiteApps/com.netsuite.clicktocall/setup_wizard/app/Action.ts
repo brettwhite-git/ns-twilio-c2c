@@ -16,6 +16,9 @@ import type {
     Step4State,
     Step5State,
     ConsoleState,
+    CheckResult,
+    CredentialsState,
+    PhoneDraft,
     InboundPublishError,
     InboundPublishResult,
     InboundRoute,
@@ -37,6 +40,7 @@ const ActionType = {
     SET_SELECTED_SECTION: Symbol('setSelectedSection'),
     SET_RAIL_VISIBLE: Symbol('setRailVisible'),
     SET_MOUNT_ROUTING: Symbol('setMountRouting'),
+    SET_WIZARD_SAVING: Symbol('setWizardSaving'),
 
     // Step form field changes
     STEP2_FIELD_CHANGE: Symbol('step2FieldChange'),
@@ -54,11 +58,15 @@ const ActionType = {
     CONSOLE_LOAD_SUCCESS: Symbol('consoleLoadSuccess'),
     CONSOLE_LOAD_FAILURE: Symbol('consoleLoadFailure'),
     CONSOLE_DRIFT_SET: Symbol('consoleDriftSet'),
+    CONSOLE_PATCH: Symbol('consolePatch'),
 
     // Phones section
     PHONES_LOAD_START: Symbol('phonesLoadStart'),
     PHONES_LOAD_SUCCESS: Symbol('phonesLoadSuccess'),
-    PHONES_ASSIGNMENT_SAVE: Symbol('phonesAssignmentSave'),
+    PHONES_LOAD_FAILURE: Symbol('phonesLoadFailure'),
+    PHONES_DRAFT_SET: Symbol('phonesDraftSet'),
+    PHONES_EDIT_ROW: Symbol('phonesEditRow'),
+    PHONES_ROW_SAVE: Symbol('phonesRowSave'),
 
     // Inbound calls section
     INBOUND_LOAD_START: Symbol('inboundLoadStart'),
@@ -68,6 +76,7 @@ const ActionType = {
     INBOUND_SAVE: Symbol('inboundSave'),
     INBOUND_PUBLISH: Symbol('inboundPublish'),
     INBOUND_ROUTING_UPDATE: Symbol('inboundRoutingUpdate'),
+    INBOUND_ROUTES_SET: Symbol('inboundRoutesSet'),
 
     // Rep phone presence
     PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
@@ -88,11 +97,15 @@ const ActionType = {
 
     // Deactivate / Reactivate flow
     DEACTIVATE_REQUEST: Symbol('deactivateRequest'),
+    DEACTIVATE_START: Symbol('deactivateStart'),
     DEACTIVATE_SUCCESS: Symbol('deactivateSuccess'),
     DEACTIVATE_FAILURE: Symbol('deactivateFailure'),
     REACTIVATE_REQUEST: Symbol('reactivateRequest'),
     REACTIVATE_SUCCESS: Symbol('reactivateSuccess'),
     REACTIVATE_FAILURE: Symbol('reactivateFailure'),
+
+    // Credentials page (API key rotation)
+    CREDENTIALS_UPDATE: Symbol('credentialsUpdate'),
 
     // Cross-section error surface
     ACTION_ERROR_SET: Symbol('actionErrorSet')
@@ -124,6 +137,11 @@ interface SetRailVisibleAction {
 
 interface SetMountRoutingAction {
     type: typeof ActionType.SET_MOUNT_ROUTING;
+    payload: boolean;
+}
+
+interface SetWizardSavingAction {
+    type: typeof ActionType.SET_WIZARD_SAVING;
     payload: boolean;
 }
 
@@ -182,6 +200,12 @@ interface ConsoleDriftSetAction {
     payload: unknown;
 }
 
+/** Merge fields into console state (does not touch console.loading). */
+interface ConsolePatchAction {
+    type: typeof ActionType.CONSOLE_PATCH;
+    payload: Partial<ConsoleState>;
+}
+
 interface PhonesLoadStartAction {
     type: typeof ActionType.PHONES_LOAD_START;
     payload: null;
@@ -193,19 +217,43 @@ interface PhonesLoadSuccessAction {
         employees?: unknown[] | null;
         numbers?: unknown[] | null;
         byPhone?: unknown[] | null;
+        /** Twilio number list error ('' / null = none). */
+        listError?: string | null;
+        hasMore?: boolean;
+        /** Employee / assignment load error. */
+        error?: string | null;
     };
 }
 
-interface PhonesAssignmentSaveAction {
-    type: typeof ActionType.PHONES_ASSIGNMENT_SAVE;
-    payload: {
-        phoneSid: string;
-        saving?: boolean;
-        assignment?: unknown;
-        error?: string | null;
-        /** Inbound routing errors from the save's `routing` result. */
-        routingErrors?: InboundPublishError[];
-    };
+interface PhonesLoadFailureAction {
+    type: typeof ActionType.PHONES_LOAD_FAILURE;
+    payload: { error: string };
+}
+
+interface PhonesDraftSetAction {
+    type: typeof ActionType.PHONES_DRAFT_SET;
+    /** draft null = discard the row's edits (Cancel). */
+    payload: { phoneSid: string; draft: PhoneDraft | null };
+}
+
+interface PhonesEditRowAction {
+    type: typeof ActionType.PHONES_EDIT_ROW;
+    /** The row to open in the editor, or null to close it (drafts dropped). */
+    payload: { phoneSid: string | null };
+}
+
+/** One row save: start (row busy) → success (draft cleared) / failure (error kept). */
+export interface PhonesRowSavePayload {
+    phoneSid: string;
+    phase: 'start' | 'success' | 'failure';
+    error?: string | null;
+    /** Inbound routing errors from the save's `routing` result. */
+    routingErrors?: InboundPublishError[];
+}
+
+interface PhonesRowSaveAction {
+    type: typeof ActionType.PHONES_ROW_SAVE;
+    payload: PhonesRowSavePayload;
 }
 
 export interface InboundLoadPayload extends InboundSettings {
@@ -257,6 +305,18 @@ interface InboundPublishAction {
 interface InboundRoutingUpdateAction {
     type: typeof ActionType.INBOUND_ROUTING_UPDATE;
     payload: InboundPublishResult;
+}
+
+/** Fresh routing table (after a Phones & reps save); leaves form edits alone. */
+export interface InboundRoutesPayload {
+    routes: InboundRoute[];
+    flowSid?: string;
+    publishedAt?: string;
+}
+
+interface InboundRoutesSetAction {
+    type: typeof ActionType.INBOUND_ROUTES_SET;
+    payload: InboundRoutesPayload;
 }
 
 interface PresenceLoadStartAction {
@@ -348,6 +408,11 @@ interface DeactivateRequestAction {
     payload: null;
 }
 
+interface DeactivateStartAction {
+    type: typeof ActionType.DEACTIVATE_START;
+    payload: null;
+}
+
 interface DeactivateSuccessAction {
     type: typeof ActionType.DEACTIVATE_SUCCESS;
     payload: null;
@@ -360,7 +425,7 @@ interface DeactivateFailureAction {
 
 interface ReactivateRequestAction {
     type: typeof ActionType.REACTIVATE_REQUEST;
-    payload: null;
+    payload: { source: ConsoleState['reactivateSource'] };
 }
 
 interface ReactivateSuccessAction {
@@ -370,7 +435,12 @@ interface ReactivateSuccessAction {
 
 interface ReactivateFailureAction {
     type: typeof ActionType.REACTIVATE_FAILURE;
-    payload: { error: string };
+    payload: { error: string; failedChecks: CheckResult[] };
+}
+
+interface CredentialsUpdateAction {
+    type: typeof ActionType.CREDENTIALS_UPDATE;
+    payload: Partial<CredentialsState>;
 }
 
 interface ActionErrorSetAction {
@@ -385,6 +455,7 @@ export type AppAction =
     | SetSelectedSectionAction
     | SetRailVisibleAction
     | SetMountRoutingAction
+    | SetWizardSavingAction
     | Step2FieldChangeAction
     | Step3FieldChangeAction
     | Step4FieldChangeAction
@@ -396,9 +467,13 @@ export type AppAction =
     | ConsoleLoadSuccessAction
     | ConsoleLoadFailureAction
     | ConsoleDriftSetAction
+    | ConsolePatchAction
     | PhonesLoadStartAction
     | PhonesLoadSuccessAction
-    | PhonesAssignmentSaveAction
+    | PhonesLoadFailureAction
+    | PhonesDraftSetAction
+    | PhonesEditRowAction
+    | PhonesRowSaveAction
     | InboundLoadStartAction
     | InboundLoadSuccessAction
     | InboundLoadFailureAction
@@ -406,6 +481,7 @@ export type AppAction =
     | InboundSaveAction
     | InboundPublishAction
     | InboundRoutingUpdateAction
+    | InboundRoutesSetAction
     | PresenceLoadStartAction
     | PresenceLoadSuccessAction
     | PresenceLoadFailureAction
@@ -418,11 +494,13 @@ export type AppAction =
     | VoiceFieldEditAction
     | VoiceFieldSaveAction
     | DeactivateRequestAction
+    | DeactivateStartAction
     | DeactivateSuccessAction
     | DeactivateFailureAction
     | ReactivateRequestAction
     | ReactivateSuccessAction
     | ReactivateFailureAction
+    | CredentialsUpdateAction
     | ActionErrorSetAction;
 
 // ─────────────────────────────────────────────────────────────────────
@@ -444,6 +522,9 @@ const Action = {
     },
     setMountRouting(routing: boolean): SetMountRoutingAction {
         return { type: ActionType.SET_MOUNT_ROUTING, payload: routing };
+    },
+    setWizardSaving(saving: boolean): SetWizardSavingAction {
+        return { type: ActionType.SET_WIZARD_SAVING, payload: saving };
     },
 
     step2FieldChange(field: keyof Step2State, value: string): Step2FieldChangeAction {
@@ -481,6 +562,9 @@ const Action = {
     consoleDriftSet(drift: unknown): ConsoleDriftSetAction {
         return { type: ActionType.CONSOLE_DRIFT_SET, payload: drift };
     },
+    consolePatch(patch: Partial<ConsoleState>): ConsolePatchAction {
+        return { type: ActionType.CONSOLE_PATCH, payload: patch };
+    },
 
     phonesLoadStart(): PhonesLoadStartAction {
         return { type: ActionType.PHONES_LOAD_START, payload: null };
@@ -488,10 +572,17 @@ const Action = {
     phonesLoadSuccess(slice: PhonesLoadSuccessAction['payload']): PhonesLoadSuccessAction {
         return { type: ActionType.PHONES_LOAD_SUCCESS, payload: slice };
     },
-    phonesAssignmentSave(
-        payload: PhonesAssignmentSaveAction['payload']
-    ): PhonesAssignmentSaveAction {
-        return { type: ActionType.PHONES_ASSIGNMENT_SAVE, payload };
+    phonesLoadFailure(error: string): PhonesLoadFailureAction {
+        return { type: ActionType.PHONES_LOAD_FAILURE, payload: { error } };
+    },
+    phonesDraftSet(phoneSid: string, draft: PhoneDraft | null): PhonesDraftSetAction {
+        return { type: ActionType.PHONES_DRAFT_SET, payload: { phoneSid, draft } };
+    },
+    phonesEditRow(phoneSid: string | null): PhonesEditRowAction {
+        return { type: ActionType.PHONES_EDIT_ROW, payload: { phoneSid } };
+    },
+    phonesRowSave(payload: PhonesRowSavePayload): PhonesRowSaveAction {
+        return { type: ActionType.PHONES_ROW_SAVE, payload };
     },
 
     inboundLoadStart(): InboundLoadStartAction {
@@ -514,11 +605,14 @@ const Action = {
     },
     /**
      * A Phones & reps save republished routing. Copies the new
-     * flowSid/publishedAt and marks the inbound slice for a reload
-     * (the primary reps, so the routes, may have changed).
+     * flowSid/publishedAt (the routes refresh with inboundRoutesSet;
+     * unsaved Inbound form edits are kept).
      */
     inboundRoutingUpdate(publish: InboundPublishResult): InboundRoutingUpdateAction {
         return { type: ActionType.INBOUND_ROUTING_UPDATE, payload: publish };
+    },
+    inboundRoutesSet(payload: InboundRoutesPayload): InboundRoutesSetAction {
+        return { type: ActionType.INBOUND_ROUTES_SET, payload };
     },
 
     presenceLoadStart(): PresenceLoadStartAction {
@@ -563,20 +657,27 @@ const Action = {
     deactivateRequest(): DeactivateRequestAction {
         return { type: ActionType.DEACTIVATE_REQUEST, payload: null };
     },
+    deactivateStart(): DeactivateStartAction {
+        return { type: ActionType.DEACTIVATE_START, payload: null };
+    },
     deactivateSuccess(): DeactivateSuccessAction {
         return { type: ActionType.DEACTIVATE_SUCCESS, payload: null };
     },
     deactivateFailure(error: string): DeactivateFailureAction {
         return { type: ActionType.DEACTIVATE_FAILURE, payload: { error } };
     },
-    reactivateRequest(): ReactivateRequestAction {
-        return { type: ActionType.REACTIVATE_REQUEST, payload: null };
+    reactivateRequest(source: ConsoleState['reactivateSource']): ReactivateRequestAction {
+        return { type: ActionType.REACTIVATE_REQUEST, payload: { source } };
     },
     reactivateSuccess(): ReactivateSuccessAction {
         return { type: ActionType.REACTIVATE_SUCCESS, payload: null };
     },
-    reactivateFailure(error: string): ReactivateFailureAction {
-        return { type: ActionType.REACTIVATE_FAILURE, payload: { error } };
+    reactivateFailure(error: string, failedChecks: CheckResult[] = []): ReactivateFailureAction {
+        return { type: ActionType.REACTIVATE_FAILURE, payload: { error, failedChecks } };
+    },
+
+    credentialsUpdate(patch: Partial<CredentialsState>): CredentialsUpdateAction {
+        return { type: ActionType.CREDENTIALS_UPDATE, payload: patch };
     },
 
     actionErrorSet(error: string | null): ActionErrorSetAction {

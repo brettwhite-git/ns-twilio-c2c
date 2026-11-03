@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '22';
+    const DOCK_ASSET_VERSION = '23';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -118,7 +118,7 @@ define(['./ctc_html'], (ctcHtml) => {
     //   Kept in the shell tab's sessionStorage (MISSED_STORAGE_KEY), so a
     //   phone-frame restart keeps it; another tab starts at 0.
     // error: { kind, code, message } — kind '' (no error) | 'mic' | 'session'
-    //   | 'signed_out' | 'network' | 'twilio' | 'not_enabled'. signed_out:
+    //   | 'signed_out' | 'network' | 'twilio' | 'not_enabled' | 'paused'. signed_out:
     //   NetSuite answered 401 / 403 or its login page (token fetch, or the
     //   60 s 'sessionPing'): the rep must sign in again; the phone recovers by
     //   itself after that (ERROR_SIGNED_OUT). session: other token fetch
@@ -137,9 +137,18 @@ define(['./ctc_html'], (ctcHtml) => {
     //   administrator." with Exit phone mode. Docks should not auto-enter
     //   phone mode for this user (dock loader; the shell tab's sessionStorage
     //   has no flag for it yet) and should not offer Call.
+    //   paused: the admin paused Click-to-Call (config active F), seen by the
+    //   60 s 'sessionPing' (answer active false) or a token refusal marked
+    //   paused. code 'ctc_paused'. The anchor unregisters (after a live call
+    //   ends; it never ends one), refuses 'dial' (refused.reason 'paused')
+    //   and fetches no tokens. Not permanent: when 'sessionPing' says active
+    //   again the anchor fetches a token, registers and clears the error (no
+    //   reload). Docks show "Calling is paused by your administrator" and
+    //   should not offer Call.
     // refused: null | { action, reason, nonce, at } — the last request the
     //   anchor refused. reason: 'busy' | 'invalid-number' | 'rate'
-    //   | 'hourly-limit' | 'call-live' (takeover during a call). Match nonce to
+    //   | 'hourly-limit' | 'call-live' (takeover during a call) | 'paused'
+    //   (dial while Click-to-Call is paused). Match nonce to
     //   your own request. Requests without origin / nonce are dropped silently.
     //
     // ---- Multi-tab ("Use phone here") ----

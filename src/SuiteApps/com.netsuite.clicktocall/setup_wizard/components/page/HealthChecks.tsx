@@ -26,6 +26,8 @@ import type {AppState, OutboundState, PresenceRow, PresenceState} from '../../ap
 import type {PageTickProps} from '../../App';
 import {ErrorText} from '../shared/ErrorText';
 import {buildLastSeenCell, buildPhoneStatusCell} from '../shared/phoneStatus';
+import {formatPhone} from '../shared/formatPhone';
+import {friendlyError} from '../shared/friendlyError';
 
 interface CheckItem {
     id?: string;
@@ -36,8 +38,25 @@ interface CheckItem {
 
 interface DriftSnapshot {
     voiceUrl?: string;
-    phoneNumbers?: string;
-    intelService?: string;
+}
+
+interface ConfigSnapshot {
+    phoneNumber?: string;
+    intelServiceSid?: string;
+}
+
+interface TwilioNumber {
+    sid?: string;
+    phoneNumber?: string;
+}
+
+interface TwilioService {
+    sid?: string;
+}
+
+interface AssignmentRef {
+    phoneSid?: string;
+    phoneNumber?: string;
 }
 
 interface CellArgs {
@@ -81,6 +100,12 @@ export const voiceUrlDriftRow = (drift: DriftSnapshot, outbound: OutboundState):
     if (outbound.loaded && !outbound.published) {
         return { ...row, status: 'not_published', detail: '' };
     }
+    // The app can still point at a Function that was deleted in Twilio:
+    // then every outbound call fails, so this is not a pass.
+    if (outbound.functionExists === false) {
+        return { ...row, status: 'fail', detail: outbound.functionMessage ||
+            'The outbound Function is missing in Twilio. Publish again.' };
+    }
     if (drift.voiceUrl === 'pass') return { ...row, status: 'pass', detail: '' };
     if (drift.voiceUrl === 'fail') {
         return { ...row, status: 'fail', detail: 'Voice URL does not point at the published Function.' };
@@ -102,8 +127,68 @@ export const outboundVersionRow = (outbound: OutboundState): CheckItem => {
     return {
         ...row,
         status: 'pass',
-        detail: outbound.noticeVersion ? 'Notice v' + outbound.noticeVersion : ''
+        // The version Twilio plays, not the saved one.
+        detail: outbound.publishedNoticeVersion ? 'Notice v' + outbound.publishedNoticeVersion : ''
     };
+};
+
+/**
+ * The 'Phone numbers' drift row: are the default caller ID and every
+ * assigned number still in the Twilio account? Computed from data the
+ * console already has (the Phones & reps Twilio list); without that
+ * list the row is a neutral "Not checked", never a pass.
+ */
+export const phoneNumbersDriftRow = (c: AppState['console']): CheckItem => {
+    const row = { label: 'Phone numbers' };
+    const numbers = c.phonesNumbers as TwilioNumber[] | null;
+    if (c.phonesListError) {
+        return { ...row, status: 'unknown', detail: 'The Twilio number list did not load: ' + friendlyError(c.phonesListError) };
+    }
+    if (numbers === null || c.assignments === null) {
+        return { ...row, status: 'unknown', detail: 'Open Phones & reps to check the numbers against Twilio.' };
+    }
+    const sids: Record<string, boolean> = {};
+    const e164s: Record<string, boolean> = {};
+    numbers.forEach((n) => {
+        if (n.sid) sids[n.sid] = true;
+        if (n.phoneNumber) e164s[n.phoneNumber] = true;
+    });
+    const missing: string[] = [];
+    const snap = (c.snapshot || {}) as ConfigSnapshot;
+    if (snap.phoneNumber && !e164s[snap.phoneNumber]) missing.push(formatPhone(snap.phoneNumber));
+    const seen: Record<string, boolean> = {};
+    (c.assignments as AssignmentRef[]).forEach((a) => {
+        if (!a.phoneSid || seen[a.phoneSid]) return;
+        seen[a.phoneSid] = true;
+        if (!sids[a.phoneSid]) missing.push(formatPhone(a.phoneNumber) || a.phoneSid);
+    });
+    if (missing.length === 0) {
+        return { ...row, status: 'pass', detail: 'The default caller ID and every assigned number are in Twilio.' };
+    }
+    if (c.phonesHasMore) {
+        return { ...row, status: 'unknown', detail: 'Twilio lists more numbers than were loaded; not checked.' };
+    }
+    return { ...row, status: 'fail', detail: 'Not in the Twilio account: ' + missing.join(', ') };
+};
+
+/**
+ * The 'Intelligence service' drift row: is the saved service in the
+ * Twilio account? Only with real data (the Voice page's Twilio list);
+ * else a neutral "Not checked".
+ */
+export const intelDriftRow = (c: AppState['console']): CheckItem => {
+    const row = { label: 'Intelligence service' };
+    const snap = (c.snapshot || {}) as ConfigSnapshot;
+    if (c.snapshot && !snap.intelServiceSid) {
+        return { ...row, status: 'info_disabled', detail: 'No Intelligence service is set (no transcripts).' };
+    }
+    const services = c.voiceLists.intelServices as TwilioService[] | null;
+    if (c.voiceListErrors.intelServices || services === null || !snap.intelServiceSid) {
+        return { ...row, status: 'unknown', detail: '' };
+    }
+    return services.some((sv) => sv.sid === snap.intelServiceSid)
+        ? { ...row, status: 'pass', detail: '' }
+        : { ...row, status: 'fail', detail: 'The saved service is not in the Twilio account.' };
 };
 
 export default class HealthChecks extends PureComponent<PageTickProps, unknown> {
@@ -194,20 +279,25 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
     }
 
     private rerunPreflight = async (): Promise<void> => {
-        store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true } as never));
+        store.dispatch(Action.consolePatch({ preflightRefreshing: true, preflightError: null }));
         try {
             const payload = await wizardCall('wizardRunPreflight', {});
             const checks = payload && (payload as { checks?: unknown[] }).checks;
-            store.dispatch(Action.consoleLoadSuccess({
-                preflight: Array.isArray(checks) ? checks : []
-            }));
+            if (Array.isArray(checks)) {
+                store.dispatch(Action.consolePatch({ preflight: checks }));
+            } else {
+                const p = (payload || {}) as { error?: string; errorMessage?: string };
+                store.dispatch(Action.consolePatch({
+                    preflightError: p.errorMessage || p.error || 'Preflight did not return any checks'
+                }));
+            }
         } catch (e) {
             const err = e as { message?: string };
-            store.dispatch(Action.actionErrorSet(
-                'Preflight failed: ' + (err.message || String(e))
-            ));
+            store.dispatch(Action.consolePatch({
+                preflightError: 'Network: ' + (err.message || String(e))
+            }));
         } finally {
-            store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: false } as never));
+            store.dispatch(Action.consolePatch({ preflightRefreshing: false }));
         }
     };
 
@@ -223,7 +313,7 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
                 stretchFactor: 1,
                 content: (args: CellArgs): unknown => {
                     const row = args?.cell?.row?.dataItem;
-                    const status = row?.status || 'info_enabled';
+                    const status = row?.status || 'unknown';
                     const si = statusIcon(status);
                     return new component.Image({
                         image: si.icon,
@@ -267,7 +357,7 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
                 stretchFactor: 2,
                 content: (args: CellArgs): unknown => {
                     const row = args?.cell?.row?.dataItem;
-                    const status = row?.status || 'info_enabled';
+                    const status = row?.status || 'unknown';
                     const sb = statusToBadge(status);
                     return new component.Badge({
                         content: sb.text,
@@ -288,13 +378,15 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
         const c = state.console;
         const preflight = c.preflight as CheckItem[] | null | undefined;
         const drift = (c.drift || {}) as DriftSnapshot;
-        const refreshing = !!c.preflightRefreshing;
+        // The first console load runs preflight too: show it as running.
+        const refreshing = !!c.preflightRefreshing || (c.loading && preflight === null);
 
+        // Every row is computed from real data or shows "Not checked".
         const driftRows: CheckItem[] = [
             voiceUrlDriftRow(drift, state.outbound),
             outboundVersionRow(state.outbound),
-            { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
-            { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
+            phoneNumbersDriftRow(c),
+            intelDriftRow(c)
         ];
 
         const columns = this.buildCheckColumns();
@@ -312,12 +404,23 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
                 </component.StackPanel.Item>
             ) as core.VDom.Node
         );
+        if (c.preflightError) {
+            preflightContent.push(
+                (
+                    <component.StackPanel.Item>
+                        <ErrorText message={'Preflight did not run: ' + friendlyError(c.preflightError)} />
+                    </component.StackPanel.Item>
+                ) as core.VDom.Node
+            );
+        }
         if (preflight === null || preflight === undefined) {
             preflightContent.push(
                 (
                     <component.StackPanel.Item>
                         <component.Text type={component.Text.Type.WEAK}>
-                            Click "Re-run" to evaluate.
+                            {refreshing
+                                ? 'Running preflight checks…'
+                                : 'Click "Re-run preflight" to evaluate.'}
                         </component.Text>
                     </component.StackPanel.Item>
                 ) as core.VDom.Node
@@ -450,17 +553,10 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
                     </component.StackPanel>
                 </component.StackPanel.Item>
             ),
-            c.deactivateError && (
-                <component.StackPanel.Item>
-                    <component.Text type={component.Text.Type.STRONG}>
-                        ✕ Deactivate failed: {c.deactivateError}
-                    </component.Text>
-                </component.StackPanel.Item>
-            ),
             c.actionError && (
                 <component.StackPanel.Item>
                     <component.Text type={component.Text.Type.STRONG}>
-                        ✕ {c.actionError}
+                        {'✕ ' + friendlyError(c.actionError)}
                     </component.Text>
                 </component.StackPanel.Item>
             )

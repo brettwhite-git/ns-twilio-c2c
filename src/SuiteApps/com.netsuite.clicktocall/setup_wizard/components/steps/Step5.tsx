@@ -25,6 +25,7 @@ import {goToConsole, goToStep} from '../../app/effects/navigation';
 import {wizardCall} from '../../services/wizardApi';
 import type {AppState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
+import {friendlyError} from '../shared/friendlyError';
 
 interface ConfigSnapshot {
     accountSid?: string;
@@ -93,6 +94,9 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
     };
 
     private activate = async (): Promise<void> => {
+        if ((store.getState() as AppState).step5.activating) return;
+        store.dispatch(Action.step5FieldChange('activating', true));
+        store.dispatch(Action.step5FieldChange('activateError', null));
         try {
             const payload = await wizardCall('wizardActivate', {});
             const resp = payload as {
@@ -113,7 +117,7 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
             } else {
                 store.dispatch(Action.step5FieldChange(
                     'activateError',
-                    (resp && resp.error) || 'unknown'
+                    (resp && ((resp as { errorMessage?: string }).errorMessage || resp.error)) || 'unknown'
                 ));
                 if (resp && resp.failedChecks) {
                     store.dispatch(Action.consoleLoadSuccess({
@@ -127,6 +131,8 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
                 'activateError',
                 'Network: ' + (err.message || String(e))
             ));
+        } finally {
+            store.dispatch(Action.step5FieldChange('activating', false));
         }
     };
 
@@ -416,11 +422,13 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
         items.push(
             <component.StackPanel.Item>
                 <component.Button
-                    label={allPassed
-                        ? 'Activate Click-to-Call'
-                        : 'Activate Click-to-Call (fix preflight first)'}
+                    label={s.activating
+                        ? 'Activating…'
+                        : allPassed
+                            ? 'Activate Click-to-Call'
+                            : 'Activate Click-to-Call (fix preflight first)'}
                     type={component.Button.Type.PRIMARY}
-                    enabled={allPassed}
+                    enabled={allPassed && !s.activating}
                     action={(): void => { this.activate(); }}
                 />
             </component.StackPanel.Item>
@@ -430,7 +438,7 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
             items.push(
                 <component.StackPanel.Item>
                     <component.Text type={component.Text.Type.STRONG}>
-                        ✕ Activation failed: {s.activateError}
+                        {'✕ Activation failed: ' + friendlyError(s.activateError)}
                     </component.Text>
                 </component.StackPanel.Item>
             );
@@ -446,6 +454,7 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
                         <component.Button
                             label="Back"
                             type={component.Button.Type.DEFAULT}
+                            enabled={!s.activating}
                             action={(): void => { goToStep(4); }}
                         />
                     </component.StackPanel.Item>
@@ -453,6 +462,7 @@ export default class Step5 extends PureComponent<PageTickProps, unknown> {
                         <component.Button
                             label="Re-run preflight"
                             type={component.Button.Type.DEFAULT}
+                            enabled={!s.activating}
                             action={this.rerunPreflight}
                         />
                     </component.StackPanel.Item>

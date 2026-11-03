@@ -21,21 +21,32 @@ import {ActionType} from './Action';
 import type {AppAction} from './Action';
 import type {
     AppState,
+    CheckResult,
+    CredentialsState,
     InboundPublishError,
     InboundPublishResult,
     InboundSettings,
     OutboundSnapshot,
+    PhoneDraft,
     PresenceRow
 } from './InitialState';
-import type {InboundLoadPayload, OutboundFields, OutboundRequestPayload} from './Action';
+import type {
+    InboundLoadPayload,
+    InboundRoutesPayload,
+    OutboundFields,
+    OutboundRequestPayload,
+    PhonesRowSavePayload
+} from './Action';
 
-/** Copy a publish result into the inbound draft (flowSid/publishedAt on ok). */
+/**
+ * Copy a publish result into the inbound draft: flowSid on ok or partial
+ * (the server kept the SID); publishedAt only on ok (a partial or failed
+ * publish keeps the previous time).
+ */
 const applyPublish = (inbound: AppState['inbound'], publish: InboundPublishResult): void => {
     inbound.lastPublish = publish;
-    if (publish.ok) {
-        if (publish.flowSid) inbound.flowSid = publish.flowSid;
-        if (publish.publishedAt) inbound.publishedAt = publish.publishedAt;
-    }
+    if ((publish.ok || publish.partial) && publish.flowSid) inbound.flowSid = publish.flowSid;
+    if (publish.ok && publish.publishedAt) inbound.publishedAt = publish.publishedAt;
 };
 
 type Handler = (state: AppState) => AppState;
@@ -59,6 +70,9 @@ export default function reducer(state: AppState, action: AppAction): AppState {
         })],
         [ActionType.SET_MOUNT_ROUTING, (s) => ImmutableUpdate.of(s, (d) => {
             d.mountRouting = a.payload as boolean;
+        })],
+        [ActionType.SET_WIZARD_SAVING, (s) => ImmutableUpdate.of(s, (d) => {
+            d.wizardSaving = a.payload as boolean;
         })],
 
         // ── Step form field changes ────────────────────────────────
@@ -114,6 +128,9 @@ export default function reducer(state: AppState, action: AppAction): AppState {
         [ActionType.CONSOLE_DRIFT_SET, (s) => ImmutableUpdate.of(s, (d) => {
             d.console.drift = a.payload;
         })],
+        [ActionType.CONSOLE_PATCH, (s) => ImmutableUpdate.of(s, (d) => {
+            Object.assign(d.console, a.payload as Partial<AppState['console']>);
+        })],
 
         // ── Phones section ─────────────────────────────────────────
         [ActionType.PHONES_LOAD_START, (s) => ImmutableUpdate.of(s, (d) => {
@@ -125,32 +142,67 @@ export default function reducer(state: AppState, action: AppAction): AppState {
                 employees?: unknown[] | null;
                 numbers?: unknown[] | null;
                 byPhone?: unknown[] | null;
+                listError?: string | null;
+                hasMore?: boolean;
+                error?: string | null;
             };
             if (p.employees !== undefined) d.console.phonesEmployees = p.employees;
             if (p.numbers !== undefined) d.console.phonesNumbers = p.numbers;
             if (p.byPhone !== undefined) d.console.phonesByPhone = p.byPhone;
+            if (p.listError !== undefined) d.console.phonesListError = p.listError;
+            if (p.hasMore !== undefined) d.console.phonesHasMore = p.hasMore;
+            if (p.error !== undefined) d.console.phonesError = p.error;
             d.console.phonesLoading = false;
         })],
-        [ActionType.PHONES_ASSIGNMENT_SAVE, (s) => ImmutableUpdate.of(s, (d) => {
-            const p = a.payload as {
-                phoneSid: string;
-                saving?: boolean;
-                assignment?: unknown;
-                error?: string | null;
-                routingErrors?: InboundPublishError[];
-            };
-            if (p.saving !== undefined) {
-                d.console.phonesSaving[p.phoneSid] = p.saving;
+        [ActionType.PHONES_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
+            d.console.phonesLoading = false;
+            d.console.phonesError = (a.payload as { error: string }).error;
+        })],
+        [ActionType.PHONES_DRAFT_SET, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as { phoneSid: string; draft: PhoneDraft | null };
+            const drafts = { ...d.console.phonesDrafts };
+            if (p.draft) drafts[p.phoneSid] = p.draft;
+            else delete drafts[p.phoneSid];
+            d.console.phonesDrafts = drafts;
+            if (!p.draft) {
+                const errs = { ...d.console.phonesRowErrors };
+                delete errs[p.phoneSid];
+                d.console.phonesRowErrors = errs;
             }
-            if (p.error !== undefined) {
-                d.console.phonesError = p.error;
+        })],
+        [ActionType.PHONES_EDIT_ROW, (s) => ImmutableUpdate.of(s, (d) => {
+            // One row at a time: opening or closing the editor drops any
+            // unsaved edits and the old row's error.
+            const p = a.payload as { phoneSid: string | null };
+            d.console.phonesEditingSid = p.phoneSid;
+            d.console.phonesDrafts = {};
+            d.console.phonesRowErrors = {};
+        })],
+        [ActionType.PHONES_ROW_SAVE, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as PhonesRowSavePayload;
+            const errs = { ...d.console.phonesRowErrors };
+            delete errs[p.phoneSid];
+            if (p.phase === 'start') {
+                d.console.phonesSavingSid = p.phoneSid;
+                d.console.phonesRoutingErrors = [];
+            } else if (p.phase === 'success') {
+                d.console.phonesSavingSid = null;
+                // Close the editor unless a refresh warning must show in it.
+                if (d.console.phonesEditingSid === p.phoneSid && !p.error) {
+                    d.console.phonesEditingSid = null;
+                }
+                const drafts = { ...d.console.phonesDrafts };
+                delete drafts[p.phoneSid];
+                d.console.phonesDrafts = drafts;
+                if (p.error) errs[p.phoneSid] = p.error;
+            } else {
+                d.console.phonesSavingSid = null;
+                errs[p.phoneSid] = p.error || 'Save failed';
             }
             if (p.routingErrors !== undefined) {
-                d.console.phonesRoutingErrors = p.routingErrors;
+                d.console.phonesRoutingErrors = p.routingErrors as InboundPublishError[];
             }
-            // The actual assignment row mutation is left to the effect
-            // module to compose into a phonesLoadSuccess(byPhone:...)
-            // follow-up dispatch — keeps the reducer simple.
+            d.console.phonesRowErrors = errs;
         })],
 
         // ── Inbound calls section ──────────────────────────────────
@@ -223,8 +275,14 @@ export default function reducer(state: AppState, action: AppAction): AppState {
             }
         })],
         [ActionType.INBOUND_ROUTING_UPDATE, (s) => ImmutableUpdate.of(s, (d) => {
+            // Publish state only: the form (and its unsaved edits) stays.
             applyPublish(d.inbound, a.payload as InboundPublishResult);
-            d.inbound.loaded = false;
+        })],
+        [ActionType.INBOUND_ROUTES_SET, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as InboundRoutesPayload;
+            d.inbound.routes = p.routes;
+            if (p.flowSid !== undefined) d.inbound.flowSid = p.flowSid;
+            if (p.publishedAt !== undefined) d.inbound.publishedAt = p.publishedAt;
         })],
 
         // ── Rep phone presence ─────────────────────────────────────
@@ -291,6 +349,8 @@ export default function reducer(state: AppState, action: AppAction): AppState {
                 field: AppState['console']['voiceEditing'];
                 pendingValue?: string | null;
             };
+            // Opening, switching or cancelling a row starts with no error.
+            if (p.field !== d.console.voiceEditing) d.console.voiceError = null;
             d.console.voiceEditing = p.field;
             d.console.voicePendingValue = p.pendingValue ?? null;
         })],
@@ -329,26 +389,45 @@ export default function reducer(state: AppState, action: AppAction): AppState {
             d.console.pendingDeactivateConfirm = true;
             d.console.deactivateError = null;
         })],
+        [ActionType.DEACTIVATE_START, (s) => ImmutableUpdate.of(s, (d) => {
+            d.console.deactivating = true;
+            d.console.deactivateError = null;
+        })],
         [ActionType.DEACTIVATE_SUCCESS, (s) => ImmutableUpdate.of(s, (d) => {
             d.console.pendingDeactivateConfirm = false;
+            d.console.deactivating = false;
             d.console.deactivateError = null;
         })],
         [ActionType.DEACTIVATE_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
             const p = a.payload as { error: string };
             d.console.pendingDeactivateConfirm = false;
+            d.console.deactivating = false;
             d.console.deactivateError = p.error;
         })],
 
         // ── Reactivate flow ────────────────────────────────────────
         [ActionType.REACTIVATE_REQUEST, (s) => ImmutableUpdate.of(s, (d) => {
-            d.console.actionError = null;
+            const p = a.payload as { source: AppState['console']['reactivateSource'] };
+            d.console.reactivating = true;
+            d.console.reactivateSource = p.source;
+            d.console.reactivateError = null;
+            d.console.reactivateFailedChecks = [];
         })],
         [ActionType.REACTIVATE_SUCCESS, (s) => ImmutableUpdate.of(s, (d) => {
-            d.console.actionError = null;
+            d.console.reactivating = false;
+            d.console.reactivateError = null;
+            d.console.reactivateFailedChecks = [];
         })],
         [ActionType.REACTIVATE_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
-            const p = a.payload as { error: string };
-            d.console.actionError = p.error;
+            const p = a.payload as { error: string; failedChecks: CheckResult[] };
+            d.console.reactivating = false;
+            d.console.reactivateError = p.error;
+            d.console.reactivateFailedChecks = p.failedChecks || [];
+        })],
+
+        // ── Credentials page ───────────────────────────────────────
+        [ActionType.CREDENTIALS_UPDATE, (s) => ImmutableUpdate.of(s, (d) => {
+            Object.assign(d.credentials, a.payload as Partial<CredentialsState>);
         })],
 
         // ── Cross-section error surface ────────────────────────────

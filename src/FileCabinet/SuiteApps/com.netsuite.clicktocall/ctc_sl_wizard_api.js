@@ -88,6 +88,14 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             }
 
             const payload = parsePayload(request);
+            if (stepperRefused(action, payload)) {
+                log.audit({
+                    title: 'CTC Wizard API — setup step refused (CTC active)',
+                    details: 'action=' + action + ' user=' + runtime.getCurrentUser().id
+                });
+                response.write(JSON.stringify({ ok: false, error: STEPPER_ACTIVE_ERROR }));
+                return;
+            }
             const result = handler(payload);
             response.write(JSON.stringify(Object.assign({ ok: true }, result)));
         } catch (e) {
@@ -102,6 +110,43 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 ok: false,
                 error: 'internal_error'
             }));
+        }
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Stepper guard: setup steps never change an active config           */
+    /* ------------------------------------------------------------------ */
+
+    // The setup stepper (Steps 2-4) runs only while CTC is not active; the
+    // console edits an active config with its own actions. The SPA hides
+    // the stepper when active; this is the server side of that rule.
+    const STEPPER_ACTIVE_ERROR = 'config_active';
+    // action -> true when this payload is a stepper save (not a console one).
+    const STEPPER_SAVES = {
+        // Step 2 only (the console uses wizardSaveCredentials).
+        wizardSavePublicIds: () => true,
+        // Step 3 sends the full form; the console Voice page sends partial.
+        wizardSaveVoice: (p) => !(p && p.partial === true),
+        // Step 4 marks its save; the console Phones page does not.
+        wizardSaveAssignments: (p) => !!(p && p.stepper === true)
+    };
+
+    /**
+     * True when `action` is a stepper save and CTC is active. One config
+     * search (10 units), only for stepper saves. No config = not refused
+     * (the action answers config_not_found itself).
+     * @param {string} action
+     * @param {Object} payload
+     * @returns {boolean}
+     */
+    const stepperRefused = (action, payload) => {
+        const isStepperSave = Object.prototype.hasOwnProperty.call(STEPPER_SAVES, action)
+            ? STEPPER_SAVES[action] : null;
+        if (!isStepperSave || !isStepperSave(payload)) return false;
+        try {
+            return config.loadConfig().active === true;
+        } catch (e) {
+            return false;
         }
     };
 
@@ -447,25 +492,70 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     /**
      * Persist TwiML App SID + phone number + Intel Service SID to the
      * config singleton.
+     *
+     * Two shapes:
+     *   Step 3 (full form): { twimlAppSid, phoneNumber, intelServiceSid? }
+     *     — both twimlAppSid and phoneNumber are required.
+     *   Console Voice page (one field): { partial: true, <one field> }
+     *     — only the fields present are validated and written, so two
+     *     admins editing different fields do not overwrite each other
+     *     with a stale snapshot.
+     * An empty intelServiceSid keeps the saved value. `clearIntelService:
+     * true` clears it (console Voice page, "(none)").
+     *
+     * Guard (C2-G4): while the outbound recording notice Function is
+     * published (or a publish is pending), the TwiML App cannot change —
+     * its stored previous Voice URL belongs to the current app, so
+     * unpublish would corrupt the new app. Refused with
+     * { ok:false, error:'outbound_published', errorMessage }.
      */
+    const VOICE_APP_LOCKED_MESSAGE = 'Unpublish the recording notice first ' +
+        '(Voice › Outbound recording notice › Unpublish and remove), then change the TwiML App.';
+
     const wizardSaveVoice = (payload) => {
-        const sids = validateSidPayload(payload, ['twimlAppSid']);
-        if (sids.error) return sids;
+        const p = payload || {};
+        const partial = p.partial === true;
+        const values = {};
 
-        if (!payload.phoneNumber || typeof payload.phoneNumber !== 'string') {
-            return { ok: false, error: 'missing_phone_number' };
+        if (!partial || p.twimlAppSid !== undefined) {
+            const sids = validateSidPayload(p, ['twimlAppSid']);
+            if (sids.error) return sids;
+            values.custrecord_ctc_twiml_app_sid = p.twimlAppSid;
+        }
+        if (!partial || p.phoneNumber !== undefined) {
+            if (!p.phoneNumber || typeof p.phoneNumber !== 'string') {
+                return { ok: false, error: 'missing_phone_number' };
+            }
+            values.custrecord_ctc_phone_number = p.phoneNumber;
+        }
+        if (p.clearIntelService === true) {
+            values.custrecord_ctc_intel_service_sid = '';
+        } else if (p.intelServiceSid) {
+            values.custrecord_ctc_intel_service_sid = p.intelServiceSid;
+        }
+        if (Object.keys(values).length === 0) {
+            return { ok: false, error: 'nothing_to_save' };
         }
 
-        const id = getConfigRecordId();
+        let id;
+        if (values.custrecord_ctc_twiml_app_sid !== undefined) {
+            const cfg = loadOutboundConfigOrError();
+            if (cfg.error) return { ok: false, error: cfg.error };
+            id = cfg.id;
+            const changing = String(cfg.twimlAppSid || '') !== p.twimlAppSid;
+            const locked = outbound.isPublished(cfg) || !!cfg.outPrevVoiceUrl || !!cfg.outFnPendingBuild;
+            if (changing && locked) {
+                log.audit({
+                    title: 'CTC Wizard — TwiML App change refused (outbound notice published)',
+                    details: 'from=' + twilio.maskSid(cfg.twimlAppSid || '') +
+                             ' to=' + twilio.maskSid(p.twimlAppSid)
+                });
+                return { ok: false, error: 'outbound_published', errorMessage: VOICE_APP_LOCKED_MESSAGE };
+            }
+        } else {
+            id = getConfigRecordId();
+        }
         if (!id) return { ok: false, error: 'config_not_found' };
-
-        const values = {
-            custrecord_ctc_twiml_app_sid: payload.twimlAppSid,
-            custrecord_ctc_phone_number: payload.phoneNumber
-        };
-        if (payload.intelServiceSid) {
-            values.custrecord_ctc_intel_service_sid = payload.intelServiceSid;
-        }
 
         record.submitFields({
             type: 'customrecord_ctc_config',
@@ -473,14 +563,19 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             values: values
         });
 
+        const has = (k) => values[k] !== undefined;
         log.audit({
-            title: 'CTC Wizard — Step 3 saved',
-            details: 'twimlApp=' + twilio.maskSid(payload.twimlAppSid) +
-                     ' phone=' + payload.phoneNumber +
+            title: 'CTC Wizard — voice settings saved',
+            details: (partial ? 'partial ' : '') +
+                     'twimlApp=' + (has('custrecord_ctc_twiml_app_sid')
+                         ? twilio.maskSid(p.twimlAppSid) : '(unchanged)') +
+                     ' phone=' + (has('custrecord_ctc_phone_number') ? p.phoneNumber : '(unchanged)') +
                      ' intelService=' +
-                        (payload.intelServiceSid
-                            ? twilio.maskSid(payload.intelServiceSid)
-                            : '(none)')
+                        (p.clearIntelService === true
+                            ? '(cleared)'
+                            : p.intelServiceSid
+                                ? twilio.maskSid(p.intelServiceSid)
+                                : '(unchanged)')
         });
 
         return { saved: true };
@@ -682,6 +777,63 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
      *       ...
      *   ]}
      */
+    const isChecked = (v) => v === true || v === 'T';
+
+    /**
+     * Exactly one primary among the active rows of one number: the first
+     * primary by internalid, else the first row. Every other row is set
+     * to not primary. Deterministic, so two concurrent savers converge.
+     * Cost: one search (10) + 2 per changed row. Returns the rows changed.
+     */
+    const enforceOnePrimary = (phoneSid) => {
+        const rows = search.create({
+            type: 'customrecord_ctc_rep_assignment',
+            filters: [
+                ['custrecord_ctc_ra_phone_sid', 'is', phoneSid],
+                'AND',
+                ['isinactive', 'is', 'F']
+            ],
+            columns: [
+                search.createColumn({ name: 'internalid', sort: search.Sort.ASC }),
+                'custrecord_ctc_ra_is_primary'
+            ]
+        }).run().getRange({ start: 0, end: 1000 });
+        if (rows.length === 0) return 0;
+
+        const firstPrimary = rows.filter((r) => isChecked(r.getValue('custrecord_ctc_ra_is_primary')))[0];
+        const keepId = String((firstPrimary || rows[0]).id);
+        let changed = 0;
+        rows.forEach((r) => {
+            const want = String(r.id) === keepId;
+            if (isChecked(r.getValue('custrecord_ctc_ra_is_primary')) === want) return;
+            record.submitFields({
+                type: 'customrecord_ctc_rep_assignment',
+                id: r.id,
+                values: { custrecord_ctc_ra_is_primary: want }
+            });
+            changed++;
+        });
+        if (changed > 0) {
+            log.audit({
+                title: 'CTC Wizard — primary fixed after concurrent save',
+                details: 'phoneSid=' + twilio.maskSid(phoneSid) + ' rows=' + rows.length +
+                         ' changed=' + changed + ' primaryRow=' + keepId
+            });
+        }
+        return changed;
+    };
+
+    /** Employee ids as positive integers, first occurrence kept, order kept. */
+    const uniqueEmployeeIds = (raw) => {
+        const out = [];
+        (Array.isArray(raw) ? raw : []).forEach((v) => {
+            const n = Number(v);
+            if (!n || !isFinite(n) || n <= 0 || Math.floor(n) !== n) return;
+            if (out.indexOf(n) < 0) out.push(n);
+        });
+        return out;
+    };
+
     const wizardSaveAssignments = (payload) => {
         // U9b diagnostic: log the exact incoming payload so the NS Script
         // Execution Log shows whether Step 4's MultiselectDropdown actually
@@ -699,8 +851,8 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         // CRIT-4 / HIGH-14 (SAFE review 2026-05-21) — payload size caps.
         // Pre-fix this had three nested loops with no caps; a payload
         // with N phones × M employees × E existing rows triggered
-        // 700+ record ops in one Suitelet execution, blowing the 10k
-        // governance budget mid-save and leaving the rep_assignment
+        // 700+ record ops in one Suitelet execution, blowing the 1,000-unit
+        // Suitelet governance budget mid-save and leaving the rep_assignment
         // table partially deleted (no transaction rollback). Caps:
         //   - At most 20 phone numbers per save (typical install: 1-5)
         //   - At most 50 employees per phone (typical: 1-10)
@@ -725,12 +877,16 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
 
         let inserted = 0;
         let deleted = 0;
+        let primaryFixes = 0;
 
         try {
             for (let i = 0; i < payload.assignments.length; i++) {
                 // CRIT-4 — per-iteration governance check. Suitelet
-                // budget is 10k units; each phone iteration costs ~5
-                // per existing-row delete plus ~5 per insert. Break
+                // budget is 1,000 units per request; each phone iteration
+                // costs 10 (row search) + 4 per existing-row delete + ~6
+                // per insert + 10 (primary re-read) + 2 per primary fix,
+                // and the routing republish after the loop needs about
+                // 40 + 10 per number. Break
                 // out cleanly when we're near exhaustion so callers
                 // get a partial-progress envelope they can act on,
                 // rather than a half-executed save with no signal.
@@ -782,11 +938,16 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                     deleted++;
                 }
 
-                // Insert one row per employee
-                const empIds = empIdsRaw;
+                // Insert one row per employee. Exactly one primary per
+                // number: primaryEmployeeId when it is one of the reps,
+                // else the first rep (inbound routing and the outbound
+                // caller ID use the primary).
+                const empIds = uniqueEmployeeIds(empIdsRaw);
+                const primaryId = empIds.indexOf(Number(a.primaryEmployeeId)) >= 0
+                    ? Number(a.primaryEmployeeId)
+                    : (empIds.length > 0 ? empIds[0] : null);
                 for (let k = 0; k < empIds.length; k++) {
                     const empId = empIds[k];
-                    if (!empId) continue;
                     const rec = record.create({
                         type: 'customrecord_ctc_rep_assignment',
                         isDynamic: false
@@ -809,16 +970,25 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                     if (a.label) rec.setValue({ fieldId: 'custrecord_ctc_ra_label', value: a.label });
                     rec.setValue({
                         fieldId: 'custrecord_ctc_ra_is_primary',
-                        value: Number(empId) === Number(a.primaryEmployeeId)
+                        value: empId === primaryId
                     });
                     rec.save();
                     inserted++;
                 }
+
+                // Two concurrent saves of this number (two admins / tabs)
+                // can interleave delete/insert and leave two primaries.
+                // Re-read and keep exactly one, by the same rule routing
+                // uses (lib/ctc_inbound_routing loadRoutes: first primary
+                // by internalid, else the first row), so routing, caller
+                // ID and the Rings column agree.
+                primaryFixes += enforceOnePrimary(a.phoneSid);
             }
 
             log.audit({
                 title: 'CTC Wizard — Step 4 assignments saved',
                 details: 'deleted=' + deleted + ' inserted=' + inserted +
+                         ' primaryFixes=' + primaryFixes +
                          ' phoneSids=' + payload.assignments.length
             });
 
@@ -842,22 +1012,29 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     /* Action: wizardRunPreflight (Step 5 — Test & activate)              */
     /* ------------------------------------------------------------------ */
 
-    /**
-     * Run 5 preflight checks in sequence. Returns structured results
-     * the SPA renders as a pass/fail list. The "Activate" button is
-     * enabled only when all 5 pass.
-     */
-    const wizardRunPreflight = () => {
-        const checks = [];
-        let cfg = null;
+    // Scripts that must be on the API Secret's allow-list (Restricted
+    // Scripts). NetSuite gives scripts no way to read that list, so the
+    // checks can only prove it for this Suitelet and name the others.
+    const SECRET_SCRIPTS_TEXT = 'CTC Setup Wizard API, CTC Token Generator (customscript_ctc_rl_token) ' +
+        'and CTC Poll Transcripts (customscript_ctc_ss_poll)';
 
-        try { cfg = config.loadConfig(); }
-        catch (e) {
-            checks.push({ id: 'config', label: 'Configuration loaded',
-                          status: 'fail',
-                          detail: 'Config record missing — return to Step 2.' });
-            return { checks: checks, allPassed: false };
-        }
+    /**
+     * The credential checks shared by preflight and wizardSaveCredentials:
+     * 1. Twilio REST API reachable with the key + secret, 2. a voice token
+     * (JWT) mints exactly as the token RESTlet mints it (same secret
+     * pointer, identity and grants), 3. the API Secret resolves via
+     * N/crypto. With opts.transcripts (wizardSaveCredentials): 4. the
+     * Intelligence API (intelligence.twilio.com, the host the poller reads
+     * transcripts from) accepts the key: proves the secret's allowed
+     * domains include it. Each check is
+     * { id, label, status: 'pass'|'fail', detail, repairHint? }. Never throws.
+     * `cfg` carries accountSid, apiKeySid, apiSecretId, twimlAppSid,
+     * inboundEnabled.
+     * @param {Object} cfg
+     * @param {{transcripts?: boolean}} [opts]
+     */
+    const credentialChecks = (cfg, opts) => {
+        const checks = [];
 
         // 1. Twilio REST API reachable — exercise the SAME path the
         //    wizard's Steps 3-4 use (sub-resource list call). Twilio
@@ -867,7 +1044,14 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         //    Probing /Accounts/{Sid}/Applications.json?PageSize=1
         //    proves reachability AND auth without requiring elevated
         //    API Key scope.
-        const apps = twilio.listApplications(cfg);
+        let apps;
+        try { apps = twilio.listApplications(cfg); }
+        catch (e) {
+            // A secret id the runtime cannot resolve throws while the
+            // auth header is built: report it as an unreachable API.
+            apps = { ok: false, errorCode: 'AUTH_HEADER_FAILED',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
         checks.push({
             id: 'twilio_reachable',
             label: 'Twilio REST API reachable',
@@ -882,15 +1066,17 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                     : 'Verify Account SID, API Key SID, and API Key Secret in Step 2')
         });
 
-        // 2. JWT mint dry-run
+        // 2. JWT mint dry-run, with the token RESTlet's arguments
+        //    (ctc_rl_token generateToken): the session user as identity,
+        //    inbound grant from the config.
         try {
             const token = jwt.generateAccessToken({
                 accountSid: cfg.accountSid,
                 apiKeySid: cfg.apiKeySid,
                 apiSecretId: cfg.apiSecretId,
                 twimlAppSid: cfg.twimlAppSid,
-                identity: 'wizard-preflight',
-                ttl: 60
+                identity: String(runtime.getCurrentUser().id),
+                incomingAllow: cfg.inboundEnabled === true
             });
             const looksLikeJWT = typeof token === 'string' &&
                                  token.split('.').length === 3;
@@ -924,7 +1110,8 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 id: 'secret_resolves',
                 label: 'API Key Secret resolves via N/crypto',
                 status: 'pass',
-                detail: cfg.apiSecretId + ' is in this script\'s allow-list.'
+                detail: cfg.apiSecretId + ' is in this script\'s allow-list. NetSuite does not let ' +
+                        'scripts read the allow-list, so check that it also names ' + SECRET_SCRIPTS_TEXT + '.'
             });
         } catch (e) {
             checks.push({
@@ -933,10 +1120,54 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 status: 'fail',
                 detail: 'createSecretKey threw: ' +
                         (e && e.message ? e.message : String(e)),
-                repairHint: 'Add this Suitelet to ' + cfg.apiSecretId +
+                repairHint: 'Add ' + SECRET_SCRIPTS_TEXT + ' to ' + cfg.apiSecretId +
                             '\'s Restricted Scripts list'
             });
         }
+
+        // 4. Transcripts host (save test only: one more Twilio call).
+        if (opts && opts.transcripts === true) {
+            let intel;
+            try { intel = twilio.listIntelServices(cfg); }
+            catch (e) {
+                intel = { ok: false, errorCode: 'AUTH_HEADER_FAILED',
+                          errorMessage: e && e.message ? e.message : String(e) };
+            }
+            checks.push({
+                id: 'intelligence_reachable',
+                label: 'Twilio transcripts API reachable',
+                status: intel.ok ? 'pass' : 'fail',
+                detail: intel.ok
+                    ? 'intelligence.twilio.com accepted the key (the host the poller reads transcripts from).'
+                    : (intel.errorMessage || 'Twilio call failed'),
+                repairHint: intel.ok ? null
+                    : 'Add intelligence.twilio.com to ' + cfg.apiSecretId +
+                      '\'s allowed domains at Setup > Company > API Secrets'
+            });
+        }
+
+        return checks;
+    };
+
+    /**
+     * Run 5 preflight checks in sequence. Returns structured results
+     * the SPA renders as a pass/fail list. The "Activate" button is
+     * enabled only when all 5 pass.
+     */
+    const wizardRunPreflight = () => {
+        const checks = [];
+        let cfg = null;
+
+        try { cfg = config.loadConfig(); }
+        catch (e) {
+            checks.push({ id: 'config', label: 'Configuration loaded',
+                          status: 'fail',
+                          detail: 'Config record missing — return to Step 2.' });
+            return { checks: checks, allPassed: false };
+        }
+
+        // 1-3. Twilio REST reachable, JWT mints, secret resolves.
+        credentialChecks(cfg).forEach((c) => { checks.push(c); });
 
         // 4. rep_assignment record queryable
         try {
@@ -1076,6 +1307,79 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             return { ok: false, error: 'activate_failed',
                      errorMessage: e && e.message ? e.message : String(e) };
         }
+    };
+
+    /* ------------------------------------------------------------------ */
+    /* Action: wizardSaveCredentials (console Credentials — key rotation) */
+    /* ------------------------------------------------------------------ */
+
+    // NetSuite API Secret script ids. The id goes into a {custsecret_...}
+    // placeholder, so only these characters are accepted.
+    const API_SECRET_ID_RE = /^custsecret_[A-Za-z0-9_]+$/;
+
+    /**
+     * Point the config at a new Twilio API key (rotation: a new key has a
+     * new SID; its secret lives in a new NetSuite API Secret). Runs the
+     * credential checks with the NEW values first; saves only when all
+     * pass, so a failed test keeps the old, working values. The secret
+     * VALUE never reaches this action.
+     *
+     * wizardSaveCredentials { apiKeySid, apiSecretId } →
+     *   { saved: true, apiKeySid, apiSecretId, checks } |
+     *   { ok: false, error: 'missing_*' | 'invalid_format_*' | 'config_not_found' |
+     *     'connection_test_failed', checks? }
+     */
+    const wizardSaveCredentials = (payload) => {
+        const apiKeySid = payload && typeof payload.apiKeySid === 'string'
+            ? payload.apiKeySid.trim() : '';
+        const apiSecretId = payload && typeof payload.apiSecretId === 'string'
+            ? payload.apiSecretId.trim() : '';
+
+        const sids = validateSidPayload({ apiKeySid: apiKeySid }, ['apiKeySid']);
+        if (sids.error) return sids;
+        if (!apiSecretId) return { ok: false, error: 'missing_apiSecretId' };
+        if (!API_SECRET_ID_RE.test(apiSecretId)) {
+            return { ok: false, error: 'invalid_format_apiSecretId' };
+        }
+
+        const cfg = loadConfigOrError();
+        if (cfg.error) return { ok: false, error: cfg.error };
+        const id = getConfigRecordId();
+        if (!id) return { ok: false, error: 'config_not_found' };
+
+        const checks = credentialChecks(Object.assign({}, cfg, {
+            apiKeySid: apiKeySid,
+            apiSecretId: apiSecretId
+        }), { transcripts: true });
+        const failed = checks.filter((c) => c.status !== 'pass');
+        if (failed.length > 0) {
+            log.audit({
+                title: 'CTC Wizard — credentials test failed (not saved)',
+                details: 'apiKeySid=' + twilio.maskSid(apiKeySid) +
+                         ' apiSecretId=' + apiSecretId +
+                         ' failed=' + failed.map((c) => c.id).join(',')
+            });
+            return { ok: false, error: 'connection_test_failed', checks: checks };
+        }
+
+        record.submitFields({
+            type: 'customrecord_ctc_config',
+            id: id,
+            values: {
+                custrecord_ctc_api_key_sid: apiKeySid,
+                custrecord_ctc_api_secret_id: apiSecretId
+            }
+        });
+
+        log.audit({
+            title: 'CTC Wizard — credentials changed',
+            details: 'apiKeySid ' + twilio.maskSid(cfg.apiKeySid) + ' → ' +
+                     twilio.maskSid(apiKeySid) + ', apiSecretId ' +
+                     (cfg.apiSecretId || '(none)') + ' → ' + apiSecretId +
+                     ', user=' + runtime.getCurrentUser().id
+        });
+
+        return { saved: true, apiKeySid: apiKeySid, apiSecretId: apiSecretId, checks: checks };
     };
 
     /* ------------------------------------------------------------------ */
@@ -1388,8 +1692,10 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
      *     appSid, functionUrl, prevVoiceUrl, publishedAt,
      *     publishedCodeVersion, codeVersion, needsRepublish, published,
      *     pending, voiceUrlMatches, publishedNoticeVersion, changesPending,
-     *     drift?: { voiceUrl, functionCode } }
-     * live true: one Twilio GET of the TwiML App (voiceUrlMatches, drift).
+     *     functionExists?, functionMessage?,
+     *     drift?: { voiceUrl, functionCode, functionService } }
+     * live true: one Twilio GET of the TwiML App (voiceUrlMatches, drift),
+     * plus one GET of the Function environment when published.
      * live false: no Twilio call; voiceUrlMatches is null and there is no
      * drift key.
      */
@@ -1419,7 +1725,12 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             // Saved notice settings differ from what Twilio runs now.
             changesPending: published && (noticeOn ? noticeVersion : 0) !== publishedNoticeVersion
         };
-        if (st) state.drift = st.drift;
+        if (st) {
+            state.drift = st.drift;
+            // null = not checked / unknown; false = service or environment deleted.
+            state.functionExists = st.functionExists;
+            if (st.functionMessage) state.functionMessage = st.functionMessage;
+        }
         return state;
     };
 
@@ -1549,7 +1860,10 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
      *
      * wizardLoadPresence {} →
      *   { items: [{ employeeId, employeeName, canReceive, state, lastSeen,
-     *               lastChange, stale }], now }
+     *               lastChange, stale, incomingGranted, lastError,
+     *               identityMatch, client }], now }
+     * incomingGranted false = the phone's token has no inbound grant
+     * (inbound off): "Ready (inbound off)", not "Not receiving calls".
      * A rep with an assignment and no presence row has state '' and
      * stale true (the phone never reported).
      */
@@ -1567,7 +1881,11 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                     state: '',
                     lastSeen: '',
                     lastChange: '',
-                    stale: true
+                    stale: true,
+                    incomingGranted: false,
+                    lastError: '',
+                    identityMatch: false,
+                    client: ''
                 };
                 order.push(key);
             } else if (!byEmployee[key].employeeName && employeeName) {
@@ -1596,7 +1914,12 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                 'custrecord_ctc_rp_last_seen',
                 'custrecord_ctc_rp_can_receive',
                 'custrecord_ctc_rp_state',
-                'custrecord_ctc_rp_last_change'
+                'custrecord_ctc_rp_last_change',
+                // Same search, no extra units.
+                'custrecord_ctc_rp_incoming_granted',
+                'custrecord_ctc_rp_last_error',
+                'custrecord_ctc_rp_identity_match',
+                'custrecord_ctc_rp_client'
             ]
         }).run().getRange({ start: 0, end: 1000 });
         rows.forEach((r) => {
@@ -1610,6 +1933,10 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             item.lastSeen = lastSeen;
             item.lastChange = String(r.getValue('custrecord_ctc_rp_last_change') || '');
             item.stale = isNaN(seenMs) || nowMs - seenMs > PRESENCE_STALE_MS;
+            item.incomingGranted = presenceChecked(r.getValue('custrecord_ctc_rp_incoming_granted'));
+            item.lastError = String(r.getValue('custrecord_ctc_rp_last_error') || '');
+            item.identityMatch = presenceChecked(r.getValue('custrecord_ctc_rp_identity_match'));
+            item.client = String(r.getValue('custrecord_ctc_rp_client') || '');
         });
 
         const items = order.map((k) => byEmployee[k]);
@@ -1625,6 +1952,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardPrereqs:           wizardPrereqs,
         wizardSnapshot:          wizardSnapshot,
         wizardSavePublicIds:     wizardSavePublicIds,
+        wizardSaveCredentials:   wizardSaveCredentials,
         wizardListTwiMLApps:     wizardListTwiMLApps,
         wizardListPhoneNumbers:  wizardListPhoneNumbers,
         wizardListIntelServices: wizardListIntelServices,

@@ -27,6 +27,12 @@
  * Logged + processed F when the claim is over 30 minutes old and the call
  * has no AI summary, so the normal path retries it. After
  * MAX_STALE_RELEASES releases it gives up: Failed + processed T.
+ *
+ * Attempt cap: each claim adds 1 to the stamp count. claimForAnalysis
+ * refuses a call whose count already reached MAX_ANALYSIS_ATTEMPTS and
+ * closes it as Failed + processed T (reason 'gave_up'), so a call that
+ * fails after the claim (save error, customer UE script) is analysed at
+ * most MAX_ANALYSIS_ATTEMPTS times instead of every 15 min forever.
  * The time is our own UTC stamp, not lastmodified (search date values
  * come back in the user's format and time zone).
  */
@@ -38,6 +44,10 @@ define(['N/search', 'N/record', 'N/log', './ctc_transcript_utils'], (search, rec
     const CLAIM_FIELD = 'custevent_ctc_analysis_claim';
     const STALE_CLAIM_MS = 30 * 60 * 1000;
     const MAX_STALE_RELEASES = 3;
+    // Most claims (analysis attempts, LLM calls) one call gets, on any
+    // path: browser, poller retry after Failed, stale release. Same
+    // value as the stale-release cap.
+    const MAX_ANALYSIS_ATTEMPTS = MAX_STALE_RELEASES;
     const STALE_SEARCH_MAX = 20;
 
     /**
@@ -91,10 +101,42 @@ define(['N/search', 'N/record', 'N/log', './ctc_transcript_utils'], (search, rec
     };
 
     /**
-     * Claim a call for analysis. Re-reads the call first.
+     * Close a call that used up its analysis attempts: Failed + processed
+     * T, stamp emptied. A failed write is reported as claim_failed (the
+     * caller treats it as transient and the next run tries again).
+     * @param {string|number} recordId
+     * @param {{status:string, claim:string}} current
+     * @param {number} count
+     * @returns {{ok:false, reason:'gave_up'|'claim_failed'}}
+     */
+    const giveUp = (recordId, current, count) => {
+        const values = { custevent_ctc_call_status: utils.CALL_STATUS.FAILED, custevent_ctc_processed: true };
+        values[CLAIM_FIELD] = '';
+        try {
+            record.submitFields({
+                type: record.Type.PHONE_CALL,
+                id: recordId,
+                values: values,
+                options: { enableSourcing: false, ignoreMandatoryFields: true }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC claim write failed', details: `${recordId}: ${(e && e.message) || e}` });
+            return { ok: false, reason: 'claim_failed' };
+        }
+        log.error({
+            title: 'CTC analysis gave up — attempt cap',
+            details: `phoneCall=${recordId} attempts=${count} max=${MAX_ANALYSIS_ATTEMPTS} ` +
+                     `status=${current.status} claim=${current.claim} — closed as Failed (processed T); recording left in Twilio`
+        });
+        return { ok: false, reason: 'gave_up' };
+    };
+
+    /**
+     * Claim a call for analysis. Re-reads the call first. A call that
+     * already used MAX_ANALYSIS_ATTEMPTS claims is closed instead (giveUp).
      * Never throws.
      * @param {string|number} recordId - Phone Call internal id
-     * @returns {{ok:true} | {ok:false, reason:'transcribed'|'terminal'|'claimed'|'claim_failed', status?:string}}
+     * @returns {{ok:true} | {ok:false, reason:'transcribed'|'terminal'|'claimed'|'claim_failed'|'gave_up', status?:string}}
      */
     const claimForAnalysis = (recordId) => {
         /** @type {{processed:*, status:string, claim:string}} */
@@ -116,12 +158,19 @@ define(['N/search', 'N/record', 'N/log', './ctc_transcript_utils'], (search, rec
         }
         const where = stateOf(current);
         if (where !== 'open') return { ok: false, reason: where, status: current.status };
+        const priorCount = parseClaim(current.claim).count;
+        // Attempt cap (2026-11-03). Every claim is one analysis attempt
+        // (one LLM call). A call released as Failed + processed F after an
+        // error came back every 15 min forever. After MAX_ANALYSIS_ATTEMPTS
+        // claims the call ends as Failed for good (processed T; stamp
+        // emptied so it leaves the stale-claim search).
+        if (priorCount >= MAX_ANALYSIS_ATTEMPTS) return giveUp(recordId, current, priorCount);
         const values = {
             custevent_ctc_call_status: utils.CALL_STATUS.PROCESSING,
             custevent_ctc_processed: true
         };
         // The count survives releases, so the stale-claim cap holds.
-        values[CLAIM_FIELD] = new Date().toISOString() + '|' + (parseClaim(current.claim).count + 1);
+        values[CLAIM_FIELD] = new Date().toISOString() + '|' + (priorCount + 1);
         try {
             record.submitFields({
                 type: record.Type.PHONE_CALL,
@@ -216,6 +265,7 @@ define(['N/search', 'N/record', 'N/log', './ctc_transcript_utils'], (search, rec
         CLAIM_FIELD,
         STALE_CLAIM_MS,
         MAX_STALE_RELEASES,
+        MAX_ANALYSIS_ATTEMPTS,
         claimForAnalysis,
         releaseClaim,
         stateOf,

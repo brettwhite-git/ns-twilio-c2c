@@ -17,87 +17,113 @@
 import {store} from '../Store';
 import {Action} from '../Action';
 import {wizardCall} from '../../services/wizardApi';
-import type {ConsoleState} from '../InitialState';
+import type {AppState, CheckResult, ConsoleState} from '../InitialState';
+
+/** Server text for a failed call: message, else the error code. */
+const errorOf = (result: unknown, fallback: string): string => {
+    const r = (result || {}) as { error?: string; errorMessage?: string; message?: string };
+    return r.errorMessage || r.message || r.error || fallback;
+};
+
+const thrownText = (e: unknown, fallback: string): string =>
+    e instanceof Error && e.message ? 'Network: ' + e.message : fallback;
 
 /**
- * Load the four console-shared payloads in parallel. Mirrors
- * AppController.loadConsole() (paths 447-490). Each Promise rejects
- * silently — partial failures degrade to null fields rather than
- * aborting the whole load — matching legacy behavior.
+ * Load the console-shared payloads. Each part is stored as soon as it
+ * lands, so the slow preflight (two Twilio GETs) does not hold back the
+ * snapshot and assignment counts. console.loading stays true until all
+ * parts are done. A failed part keeps its previous value: a failed
+ * preflight sets preflightError instead of reading as "not yet run".
  */
 export async function loadConsole(): Promise<void> {
     store.dispatch(Action.consoleLoadStart());
+    store.dispatch(Action.consolePatch({ preflightError: null }));
 
-    const safe = <T>(promise: Promise<T>): Promise<T | null> =>
-        promise.catch(() => null);
+    const snapshotTask = wizardCall('wizardSnapshot', {})
+        .then((payload) => {
+            const snap = payload && (payload as { snapshot?: unknown }).snapshot;
+            if (snap) store.dispatch(Action.consolePatch({ snapshot: snap }));
+        })
+        .catch(() => { /* keep the cached snapshot */ });
 
-    try {
-        const [snapshot, assignments, preflight] = await Promise.all([
-            safe(wizardCall('wizardSnapshot', {})),
-            safe(wizardCall('wizardLoadAssignments', {})),
-            safe(wizardCall('wizardRunPreflight', {}))
-        ]);
+    const assignmentsTask = wizardCall('wizardLoadAssignments', {})
+        .then((payload) => {
+            const items = payload && (payload as { items?: unknown[] }).items;
+            if (Array.isArray(items)) store.dispatch(Action.consolePatch({ assignments: items }));
+        })
+        .catch(() => { /* keep the previous counts */ });
 
-        // Server-response shape extraction — match the legacy
-        // AppController loadConsole exactly:
-        //   wizardSnapshot           -> { snapshot: {...} }
-        //   wizardLoadAssignments    -> { items: [...] }
-        //   wizardRunPreflight       -> { checks: [...] }
-        // Default to [] (empty array) on missing/failed so the UI can
-        // render its "no data" state instead of staying in "loading…".
-        const snap = snapshot && (snapshot as { snapshot?: unknown }).snapshot;
-        const slice: Partial<ConsoleState> = {
-            snapshot: snap || null,
-            assignments: (assignments && (assignments as { items?: unknown[] }).items) || [],
-            preflight: (preflight && (preflight as { checks?: unknown[] }).checks) || []
-        };
+    const preflightTask = wizardCall('wizardRunPreflight', {})
+        .then((payload) => {
+            const checks = payload && (payload as { checks?: unknown[] }).checks;
+            if (Array.isArray(checks)) {
+                store.dispatch(Action.consolePatch({ preflight: checks }));
+            } else {
+                store.dispatch(Action.consolePatch({
+                    preflightError: errorOf(payload, 'Preflight did not return any checks')
+                }));
+            }
+        })
+        .catch((e: unknown) => {
+            store.dispatch(Action.consolePatch({
+                preflightError: thrownText(e, 'Preflight did not run')
+            }));
+        });
 
-        store.dispatch(Action.consoleLoadSuccess(slice));
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Console load failed';
-        store.dispatch(Action.consoleLoadFailure(msg));
-    }
+    await Promise.all([snapshotTask, assignmentsTask, preflightTask]);
+    store.dispatch(Action.consoleLoadSuccess({}));
 }
 
+/** Mark the cached snapshot active / paused at once (the banner and rail follow). */
+const setActiveFlag = (active: boolean): void => {
+    const snap = (store.getState() as AppState).console.snapshot as Record<string, unknown> | null;
+    store.dispatch(Action.consolePatch({ snapshot: { ...(snap || {}), active } }));
+};
+
 /**
- * Deactivate the SuiteApp. Mirrors AppController.confirmDeactivate
- * (paths 690-720). On success the snapshot is refetched so the console
- * shows the Paused banner.
+ * Deactivate the SuiteApp (second click of the two-click confirm).
+ * Busy while the call runs; on success the cached snapshot flips to
+ * paused at once (banner shows), then the console reloads.
  */
 export async function deactivate(): Promise<void> {
-    store.dispatch(Action.deactivateRequest());
+    if ((store.getState() as AppState).console.deactivating) return;
+    store.dispatch(Action.deactivateStart());
     try {
         const result = await wizardCall('wizardActivate', { deactivate: true });
-        if (result && (result as { ok?: boolean }).ok === false) {
-            const err = (result as { error?: string }).error || 'Deactivate failed';
-            store.dispatch(Action.deactivateFailure(err));
+        if (!result || (result as { ok?: boolean }).ok === false) {
+            store.dispatch(Action.deactivateFailure(errorOf(result, 'Deactivate failed')));
             return;
         }
+        setActiveFlag(false);
         store.dispatch(Action.deactivateSuccess());
         await loadConsole();
     } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Deactivate failed';
-        store.dispatch(Action.deactivateFailure(msg));
+        store.dispatch(Action.deactivateFailure(thrownText(e, 'Deactivate failed')));
     }
 }
 
 /**
- * Reactivate the SuiteApp. Mirrors AppController.reactivate (paths
- * 722-740). Triggered from the Paused banner's CTA.
+ * Reactivate the SuiteApp (Paused banner or Overview). The server re-runs
+ * preflight; on preflight_failed the failed checks are kept for display
+ * next to the button that ran it.
  */
-export async function reactivate(): Promise<void> {
-    store.dispatch(Action.reactivateRequest());
+export async function reactivate(source: ConsoleState['reactivateSource'] = 'banner'): Promise<void> {
+    if ((store.getState() as AppState).console.reactivating) return;
+    store.dispatch(Action.reactivateRequest(source));
     try {
         const result = await wizardCall('wizardActivate', {});
-        if (result && (result as { ok?: boolean }).ok === false) {
-            const err = (result as { error?: string }).error || 'Reactivate failed';
-            store.dispatch(Action.reactivateFailure(err));
+        if (!result || (result as { ok?: boolean }).ok === false) {
+            const failed = (result && (result as { failedChecks?: CheckResult[] }).failedChecks) || [];
+            store.dispatch(Action.reactivateFailure(
+                errorOf(result, 'Reactivate failed'),
+                Array.isArray(failed) ? failed : []
+            ));
             return;
         }
+        setActiveFlag(true);
         store.dispatch(Action.reactivateSuccess());
         await loadConsole();
     } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Reactivate failed';
-        store.dispatch(Action.reactivateFailure(msg));
+        store.dispatch(Action.reactivateFailure(thrownText(e, 'Reactivate failed')));
     }
 }

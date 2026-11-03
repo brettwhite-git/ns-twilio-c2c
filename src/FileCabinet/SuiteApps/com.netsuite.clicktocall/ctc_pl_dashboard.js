@@ -35,8 +35,8 @@
  * Reference: /Users/brettwhite/Projects/opportunity-kanban (proven pattern).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_dock', './lib/ctc_fonts'],
-       (url, log, runtime, file, ctcHtml, workspaceQueries, ctcDock, ctcFonts) => {
+define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_workspace_queries', './lib/ctc_dock', './lib/ctc_fonts', './lib/ctc_config'],
+       (url, log, runtime, file, ctcHtml, workspaceQueries, ctcDock, ctcFonts, ctcConfig) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs   = ctcHtml.escapeJs;
@@ -129,6 +129,23 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
     // Follow-ups shown in the portlet (the newest pending ones).
     const TASK_LIMIT = 5;
 
+    // Shown in place of the Call button while CTC is not active (paused by
+    // Deactivate, or not activated yet).
+    const PAUSED_TEXT = 'Calling is paused by your administrator';
+
+    /**
+     * True only when the config says active. No config (fresh install) or a
+     * read error counts as not active: no dock, no Call.
+     * @returns {boolean}
+     */
+    const isCtcActive = () => {
+        try {
+            return ctcConfig.loadConfig().active === true;
+        } catch (e) {
+            return false;
+        }
+    };
+
     /**
      * Portlet entry point.
      */
@@ -184,8 +201,14 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         const tasksResult   = workspaceQueries.loadTaskGroups({ userId, bookCustomerIds, tab: 'pending', limit: TASK_LIMIT });
         const stats         = workspaceQueries.computeStats(historyResult.rows || []);
 
+        // Paused: no dock and no call actions. An empty call URL drops the
+        // dock loader and disables every Call / Call back / Call again.
+        const paused = !isCtcActive();
+        const callShellUrl = paused ? '' : shellUrl;
+
         portlet.html = ctcFonts.buildFigtreeStyle() + buildHtml({
-            shellUrl,
+            shellUrl: callShellUrl,
+            paused,
             restletUrl,
             reportingUrl,
             rows: historyResult.rows || [],
@@ -197,7 +220,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             stats: stats,
             historyError: historyResult.error || '',
             tasksError: tasksResult.error || ''
-        }) + buildDockLoader(shellUrl, restletUrl);
+        }) + buildDockLoader(callShellUrl, restletUrl);
     };
 
     /**
@@ -804,7 +827,9 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
               // A hairline between the two actions.
               '<span class="ctc-pl-head-divider" aria-hidden="true"></span>'
             : '';
-        const callButtonHtml = placeCallOnclick
+        const callButtonHtml = opts.paused
+            ? '<span class="ctc-pl-paused" role="status">' + escapeHtml(PAUSED_TEXT) + '</span>'
+            : placeCallOnclick
             ? '<button class="ctc-pl-call-btn" type="button" title="Open the phone" onclick="' + escapeHtml(placeCallOnclick) + '">' + callSvg(13) + 'Call</button>'
             : '<button class="ctc-pl-call-btn ctc-pl-call-btn-disabled" type="button" disabled ' +
               'aria-label="Call (unavailable)" title="Phone mode Suitelet not deployed — check CTC Configuration">' + callSvg(13) + 'Call</button>';
@@ -899,6 +924,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-call-btn { height: 32px; padding: 0 12px 0 10px; transition: transform 140ms ease-out, background-color 120ms ease; border: 0; border-radius: 8px; background: #0F1B30; color: #FFFFFF; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
 .ctc-pl-call-btn:hover:not(:disabled) { background: #1B2A44; }
 .ctc-pl-call-btn svg { color: #14B981; display: block; }
+.ctc-pl-paused { font-size: 12.5px; color: #5C5955; }
 
 /* KPI strip: flat, hairline dividers */
 .ctc-pl-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0 22px; border-radius: 10px; background: #FAFAF8; box-shadow: inset 0 0 0 1px #F1EFEA; }

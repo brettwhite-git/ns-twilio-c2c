@@ -39,12 +39,17 @@
  *               build SID is kept in custrecord_ctc_out_fn_pending_build and
  *               publishOutbound(cfg, { resume: true }) finishes it.
  *   variables   GET + POST .../Environments/{ZE}/Variables (only changed values)
- *   deployment  POST .../Environments/{ZE}/Deployments { BuildSid }
+ *   deployment  POST .../Environments/{ZE}/Deployments { BuildSid }, then
+ *               record.submitFields of the build, code version/hash and
+ *               custrecord_ctc_out_pub_notice_ver (what Twilio now serves)
  *   voiceUrl    GET + POST /2010-04-01/.../Applications/{AP}.json
  *               (the first publish stores the old Voice URL for unpublish)
- *   save        record.submitFields on the config record
- * No half-publish: the TwiML App Voice URL changes only after a completed
- * deployment. A failed step leaves the earlier deployment and Voice URL.
+ *   save        record.submitFields on the config record (published_at, ...)
+ * The TwiML App Voice URL changes only after a completed deployment. On a
+ * republish the app already points at the Function, so the deployment
+ * itself makes the new notice live: the live notice version is saved right
+ * after it, before the voiceUrl and save steps, so a later failure cannot
+ * leave the consent log (noticeForCall) on the old version.
  *
  * Governance (N/https call = 10 units, config submitFields = 2 units):
  *   first publish, worst case: 19 calls + MAX_BUILD_POLLS polls
@@ -52,7 +57,7 @@
  *   republish, code unchanged (text / on-off change): about 9 calls = 90 units.
  *   resume: 1-10 polls + 7 calls = 80-170 units.
  *   unpublish: 2-4 calls = 20-40 units.
- *   outboundStatus: 1 call = 10 units.
+ *   outboundStatus: 1-2 calls = 10-20 units (TwiML App; environment when published).
  * Polling stops early when the script has fewer than MIN_USAGE_TO_POLL
  * units left. SuiteScript has no sleep: each poll is one N/https call.
  *
@@ -250,6 +255,10 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
         return { played: played, version: played ? v : 0 };
     };
 
+    /** Notice version a deployment with these settings makes live (0 = no notice). */
+    const livePublishedNoticeVersion = (cfg) =>
+        (cfg && cfg.outNoticeOn === true ? (Number(cfg.outNoticeVersion) || 1) : 0);
+
     /** Variables the Function reads (all strings). */
     const desiredVariables = (cfg) => {
         const vars = {
@@ -369,6 +378,24 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
         if (!dep.body || !SID.deployment.test(String(dep.body.sid || ''))) {
             return rec.fail('deployment', 'Twilio did not return a valid deployment SID');
         }
+        // The environment now serves this build with these variables. On a
+        // republish the TwiML App already points here, so the new notice is
+        // live NOW: record its version before any later step can fail, so
+        // the consent log (noticeForCall → logCall) matches what Twilio plays.
+        // A first publish is not live until published_at is saved below
+        // (noticeForCall needs it), so this early write is safe there too.
+        try {
+            saveConfig(cfg, {
+                custrecord_ctc_out_fn_build: ctx.zb,
+                custrecord_ctc_out_fn_pending_build: '',
+                custrecord_ctc_out_fn_code_ver: FN_CODE_VERSION,
+                custrecord_ctc_out_fn_hash: codeHash(),
+                custrecord_ctc_out_pub_notice_ver: livePublishedNoticeVersion(cfg)
+            });
+        } catch (e) {
+            return rec.fail('deployment', 'Deployed in Twilio, but NetSuite could not record the ' +
+                            'live notice version: ' + errText(e) + '. Publish again.');
+        }
         rec.add('deployment', 'ok', 'Live at ' + ctx.domain);
 
         // TwiML App Voice URL (only after a completed deployment)
@@ -405,7 +432,7 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
                 custrecord_ctc_out_fn_code_ver: FN_CODE_VERSION,
                 custrecord_ctc_out_fn_hash: codeHash(),
                 custrecord_ctc_out_published_at: publishedAt,
-                custrecord_ctc_out_pub_notice_ver: cfg.outNoticeOn === true ? (cfg.outNoticeVersion || 1) : 0
+                custrecord_ctc_out_pub_notice_ver: livePublishedNoticeVersion(cfg)
             });
         } catch (e) {
             return rec.fail('save', 'The Function is live, but NetSuite could not save the publish details: ' +
@@ -647,6 +674,13 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
                                       (set.errorMessage || set.status));
                     }
                     r.add('voiceUrl', 'ok', 'Restored the earlier Voice URL');
+                    // Calls no longer reach the Function: no notice from now on,
+                    // even if a later step fails (consent log, noticeForCall).
+                    try { saveConfig(cfg, { custrecord_ctc_out_pub_notice_ver: 0 }); }
+                    catch (e) {
+                        log.error({ title: 'CTC Outbound — clear live notice version failed',
+                                    details: errText(e) });
+                    }
                 }
             }
         } else {
@@ -700,15 +734,21 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
 
     /**
      * Read-only status. One Twilio call (GET the TwiML App) when an app
-     * SID is set.
+     * SID is set, plus one (GET the service environment) when published.
      *
      * @returns {{published: boolean, pending: boolean, functionUrl: string,
      *            appVoiceUrl: string|null, voiceUrlMatches: boolean|null,
+     *            functionExists: boolean|null, functionMessage?: string,
      *            needsRepublish: boolean,
      *            drift: {voiceUrl: 'pass'|'fail'|'unknown',
-     *                    functionCode: 'pass'|'fail'|'unknown'}}}
+     *                    functionCode: 'pass'|'fail'|'unknown',
+     *                    functionService: 'pass'|'fail'|'unknown'}}}
      *   voiceUrlMatches is null when the app cannot be read.
      *   drift.voiceUrl: 'unknown' until published or when the app cannot be read.
+     *   drift.functionCode: a NetSuite comparison (stored code version).
+     *   drift.functionService: the service/environment still exist in
+     *   Twilio ('fail' + functionMessage when deleted; 'unknown' when not
+     *   published or Twilio did not answer).
      */
     const outboundStatus = (cfg) => {
         const published = isPublished(cfg);
@@ -726,6 +766,7 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
                 log.error({ title: 'CTC Outbound — status read failed', details: errText(e) });
             }
         }
+        const fn = published ? functionExists(cfg) : { exists: null, message: '' };
         const republish = needsRepublish(cfg);
         return {
             published: published,
@@ -733,12 +774,42 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
             functionUrl: fnUrl,
             appVoiceUrl: appVoiceUrl,
             voiceUrlMatches: voiceUrlMatches,
+            functionExists: fn.exists,
+            // undefined (left out of JSON) unless the Function is missing.
+            functionMessage: fn.message || undefined,
             needsRepublish: republish,
             drift: {
                 voiceUrl: !published || voiceUrlMatches === null ? 'unknown' : (voiceUrlMatches ? 'pass' : 'fail'),
-                functionCode: !published ? 'unknown' : (republish ? 'fail' : 'pass')
+                functionCode: !published ? 'unknown' : (republish ? 'fail' : 'pass'),
+                functionService: fn.exists === null ? 'unknown' : (fn.exists ? 'pass' : 'fail')
             }
         };
+    };
+
+    const FUNCTION_MISSING_MESSAGE = 'The outbound Function is missing in Twilio, so outbound ' +
+        'calls fail. Publish again.';
+
+    /**
+     * Does the published service + environment still exist in Twilio?
+     * One GET (10 units). 404 → { exists:false, message }; any other
+     * failure → { exists:null } (unknown, not a false alarm).
+     */
+    const functionExists = (cfg) => {
+        const zs = cfg && cfg.outFnService;
+        const ze = cfg && cfg.outFnEnv;
+        if (!SID.service.test(zs || '') || !SID.environment.test(ze || '')) {
+            return { exists: false, message: FUNCTION_MISSING_MESSAGE };
+        }
+        try {
+            const auth = twilio.buildSecureAuthHeader(cfg);
+            const res = twilio.httpGetJson(SERVERLESS_SERVICES + '/' + zs + '/Environments/' + ze, auth);
+            if (res && res.ok) return { exists: true, message: '' };
+            if (res && res.status === 404) return { exists: false, message: FUNCTION_MISSING_MESSAGE };
+            return { exists: null, message: '' };
+        } catch (e) {
+            log.error({ title: 'CTC Outbound — function check failed', details: errText(e) });
+            return { exists: null, message: '' };
+        }
     };
 
     return {

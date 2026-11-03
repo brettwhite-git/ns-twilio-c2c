@@ -14,6 +14,11 @@
  *     calls the browser never logged (lib/ctc_call_reconcile: missed
  *     inbound, too short, cut off). Its own deployment gives it its own
  *     governance budget: after Phases A-C it often had too little left.
+ *   - 'tick' (customdeploy_ctc_ss_poll_tick00 / _tick12 / _tick18): no work;
+ *     queues the two deployments above. Their own schedule starts at 06:00Z,
+ *     which is local midnight in UTC-6 only; the ticks start at 00:00Z,
+ *     12:00Z and 18:00Z, so every account time zone gets runs every 15 min
+ *     from before 6:00 am local (see the XML comment).
  */
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile', './lib/ctc_call_claim', './lib/ctc_time'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile, callClaim, ctcTime) => {
@@ -38,8 +43,9 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
     const SCRIPT_ID = 'customscript_ctc_ss_poll';
     // The transcripts deployment. Only that mode yields and resumes.
     const DEPLOY_ID = 'customdeploy_ctc_ss_poll';
+    const RECON_DEPLOY_ID = 'customdeploy_ctc_ss_poll_recon';
     const MODE_PARAM = 'custscript_ctc_poll_mode';
-    const MODE = { TRANSCRIPTS: 'transcripts', RECONCILE: 'reconcile' };
+    const MODE = { TRANSCRIPTS: 'transcripts', RECONCILE: 'reconcile', TICK: 'tick' };
 
     /**
      * The deployment's poll mode, lower case. Empty or unreadable →
@@ -107,7 +113,15 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                 'AND',
                 ['custevent_ctc_call_sid', 'isnotempty', '']
             ],
-            columns: ['internalid', 'custevent_ctc_call_sid', 'custevent_ctc_inbound', 'custevent_ctc_call_started']
+            // Oldest first (internal id ascending), a stable order. With no
+            // sort the 50-row window came back in an unspecified order, so
+            // calls that never closed could take the same slots every run.
+            // Every open call now ends (bounded waits, transient waits,
+            // attempt cap), so oldest-first always moves forward.
+            columns: [
+                search.createColumn({ name: 'internalid', sort: search.Sort.ASC }),
+                'custevent_ctc_call_sid', 'custevent_ctc_inbound', 'custevent_ctc_call_started'
+            ]
         }).run().getRange({ start: 0, end: 50 });
 
         return results.map((r) => {
@@ -404,7 +418,11 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
             includeDuration: true,
             callDate: callDate
         });
-        return phoneCall.save();
+        const savedId = phoneCall.save();
+        // Proposed tasks only after a successful save, at most once per
+        // Phone Call (never throws).
+        utils.createProposedTasksOnce(savedId || recordId, analysis, callDate);
+        return savedId;
     };
 
     // Result of one checkCall() pass over an unprocessed call.
@@ -413,7 +431,9 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         PENDING: 'pending',              // Twilio may still deliver; poll again
         ALREADY_DONE: 'alreadyDone',     // the browser analysed or is analysing it
         NO_TRANSCRIPT: 'noTranscript',   // Twilio never will; close the call
-        TRANSIENT: 'transient'           // Twilio unreachable; status untouched
+        TRANSIENT: 'transient',          // Twilio unreachable; status untouched
+        TRANSIENT_EXPIRED: 'transientExpired', // transient past the bounded wait; close as No transcript
+        GAVE_UP: 'gaveUp'                // attempt cap reached; claim closed it as Failed (processed T)
     };
 
     /**
@@ -436,48 +456,67 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
      */
     const checkCall = (call, ctx) => {
         const accountSid = ctx.config.accountSid;
-        let recording = utils.fetchRecordingForCall(accountSid, call.callSid, ctx.authHeader);
         // Sprint 2b (HIGH-1) — transient Twilio errors (5xx / network /
         // timeout / malformed JSON / 401 / 403 / 429) leave call_status
         // untouched so the next cycle picks the call up cleanly, instead
         // of churning every call during a sustained Twilio outage.
-        if (utils.isTransientError(recording)) return OUTCOME.TRANSIENT;
+        // 2026-11-03: bounded too (utils.transientWaitExpired). Past the
+        // wait the call closes as No transcript instead of staying open
+        // forever (a 403 on Intelligence used to keep every call open).
+        const transient = (knownRecording) => (
+            utils.transientWaitExpired(call.callStarted, knownRecording || null)
+                ? OUTCOME.TRANSIENT_EXPIRED : OUTCOME.TRANSIENT
+        );
+
+        let recording = utils.fetchRecordingForCall(accountSid, call.callSid, ctx.authHeader);
+        if (utils.isTransientError(recording)) return transient(null);
 
         let twilioCall;
         let fetchedCall = false;
         if (!recording && call.inbound) {
             twilioCall = utils.fetchCall(accountSid, call.callSid, ctx.authHeader);
             fetchedCall = true;
-            if (utils.isTransientError(twilioCall)) return OUTCOME.TRANSIENT;
+            if (utils.isTransientError(twilioCall)) return transient(null);
             recording = utils.fetchParentCallRecording(accountSid, twilioCall, ctx.authHeader);
-            if (utils.isTransientError(recording)) return OUTCOME.TRANSIENT;
+            if (utils.isTransientError(recording)) return transient(null);
         }
         if (!recording) {
             if (!fetchedCall) {
                 twilioCall = utils.fetchCall(accountSid, call.callSid, ctx.authHeader);
-                if (utils.isTransientError(twilioCall)) return OUTCOME.TRANSIENT;
+                if (utils.isTransientError(twilioCall)) return transient(null);
             }
             return utils.recordingWaitExpired(twilioCall) ? OUTCOME.NO_TRANSCRIPT : OUTCOME.PENDING;
         }
         if (utils.isRecordingTerminal(recording)) return OUTCOME.NO_TRANSCRIPT;
 
         const transcript = utils.fetchTranscript(recording.sid, ctx.authHeader);
-        if (utils.isTransientError(transcript)) return OUTCOME.TRANSIENT;
+        if (utils.isTransientError(transcript)) return transient(recording);
         if (utils.isTranscriptTerminal(transcript)) return OUTCOME.NO_TRANSCRIPT;
         if (!transcript || !utils.isTranscriptComplete(transcript)) {
             return utils.transcriptWaitExpired(recording) ? OUTCOME.NO_TRANSCRIPT : OUTCOME.PENDING;
         }
 
+        // Sentences BEFORE the claim (2026-11-03). A failed fetch used to
+        // return [] and the call was saved Transcribed with an empty
+        // transcript and its recording deleted (data loss). Now a failed
+        // fetch is TRANSIENT_ERROR: nothing is saved, the recording stays,
+        // no claim (attempt) is spent, and the transcript wait bounds it.
+        // A real empty transcript ([] from a 200) is saved as before.
+        const sentences = utils.fetchSentences(transcript.sid, ctx.authHeader);
+        if (utils.isTransientError(sentences)) return transient(recording);
+
         // Claim the call before the LLM so the browser's checkTranscript
         // does not analyse it too (lib/ctc_call_claim). After the claim,
         // an error reaches execute()'s catch, which writes Failed +
-        // processed F: that releases the claim for the next cycle.
+        // processed F: that releases the claim for the next cycle. The
+        // claim closes a call that used up its attempts (gave_up).
         const claim = callClaim.claimForAnalysis(call.recordId);
         if (!claim.ok) {
-            return claim.reason === 'claim_failed' ? OUTCOME.TRANSIENT : OUTCOME.ALREADY_DONE;
+            if (claim.reason === 'claim_failed') return transient(recording);
+            if (claim.reason === 'gave_up') return OUTCOME.GAVE_UP;
+            return OUTCOME.ALREADY_DONE;
         }
 
-        const sentences = utils.fetchSentences(transcript.sid, ctx.authHeader);
         const transcriptText = utils.formatTranscript(sentences, { inbound: !!call.inbound });
 
         let analysis = {
@@ -537,6 +576,11 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         let orphanRejected = 0;
         let staleReleased = 0;
         let staleGaveUp = 0;
+        let gaveUp = 0;         // attempt cap reached: closed as Failed for good
+        let transientExpired = 0; // transient past the bounded wait: closed as No transcript
+        // A crash outside the per-call catch (config, auth, a search)
+        // used to log errors=0 in the summary. It now counts as an error.
+        let crashed = false;
 
         try {
             const config = loadConfig();
@@ -685,6 +729,16 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                         alreadyDone++;
                     } else if (outcome === OUTCOME.TRANSIENT) {
                         transient++;
+                    } else if (outcome === OUTCOME.TRANSIENT_EXPIRED) {
+                        log.audit({
+                            title: 'CTC Transient wait expired — closed as No transcript',
+                            details: `phoneCall=${call.recordId} callSid=${call.callSid} started=${call.callStarted} ` +
+                                     '— Twilio kept failing (401/403/429/5xx/network); recording (if any) left in Twilio'
+                        });
+                        utils.markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
+                        transientExpired++;
+                    } else if (outcome === OUTCOME.GAVE_UP) {
+                        gaveUp++;
                     } else if (outcome === OUTCOME.NO_TRANSCRIPT) {
                         utils.markCallStatus(call.recordId, utils.CALL_STATUS.NO_TRANSCRIPT, true);
                         noTranscript++;
@@ -702,7 +756,8 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                 }
             }
         } catch (e) {
-            log.error({ title: 'CTC Poll Execute Error', details: e.message || e });
+            crashed = true;
+            log.error({ title: 'CTC Poll Execute Error', details: (e && e.message) || String(e) });
         }
 
         // Sprint 2 review #7 — audit summary includes ALL three
@@ -711,7 +766,8 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
         log.audit({
             title: 'CTC Poll Complete',
             details: `main(processed=${processed}, skipped=${skipped}, noTranscript=${noTranscript}, ` +
-                     `transient=${transient}, alreadyDone=${alreadyDone}, errors=${errors}) ` +
+                     `transient=${transient}, alreadyDone=${alreadyDone}, errors=${errors + (crashed ? 1 : 0)}, ` +
+                     `transientExpired=${transientExpired}, gaveUp=${gaveUp}${crashed ? ', crashed=true' : ''}) ` +
                      `cleanup(resolved=${cleanupResolved}, transient=${cleanupTransient}) ` +
                      `orphan(resolved=${orphanResolved}, failed=${orphanFailed}, rejected=${orphanRejected}) ` +
                      `stale(released=${staleReleased}, gaveUp=${staleGaveUp})`
@@ -746,17 +802,38 @@ define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/
                 `noAnswer=${rcCreated.noAnswer || 0}, logged=${rcCreated.logged || 0}, ` +
                 `voicemail=${rcCreated.voicemail || 0}), deferred=${rc.deferred || 0}, ` +
                 `skipped=${rc.skipped || 0}, errors=${(rc.errors || 0) + (reconCrashed ? 1 : 0)}, ` +
-                `complete=${rc.complete === true}${rc.stopped ? `, stopped=${rc.stopped}` : ''})`
+                `complete=${rc.complete === true}${rc.stopped ? `, stopped=${rc.stopped}` : ''}` +
+                `${rc.dropped ? `, dropped=${rc.dropped}` : ''})`
         });
+    };
+
+    /**
+     * 'tick' mode: queue the transcripts and reconcile deployments. Does no
+     * work itself (40 units). NetSuite runs one deployment at most once at a
+     * time, so a submit while it is queued or running fails (or queues one
+     * re-run): either way no two runs of one mode overlap. Failures are
+     * expected during the deployments' own window, so they log at debug.
+     */
+    const runTick = () => {
+        const out = [DEPLOY_ID, RECON_DEPLOY_ID].map((deploymentId) => {
+            try {
+                task.create({ taskType: task.TaskType.SCHEDULED_SCRIPT, scriptId: SCRIPT_ID, deploymentId: deploymentId }).submit();
+                return `${deploymentId}=queued`;
+            } catch (e) {
+                return `${deploymentId}=not queued (${(e && e.name) || (e && e.message) || e})`;
+            }
+        });
+        log.debug({ title: 'CTC Poll tick', details: out.join(' ') });
     };
 
     const execute = () => {
         const mode = readMode();
         if (mode === MODE.TRANSCRIPTS) return runTranscripts();
         if (mode === MODE.RECONCILE) return runReconcile();
+        if (mode === MODE.TICK) return runTick();
         log.error({
             title: 'CTC Poll — unknown mode',
-            details: `${MODE_PARAM}=${mode}; expected ${MODE.TRANSCRIPTS} or ${MODE.RECONCILE}. Nothing done.`
+            details: `${MODE_PARAM}=${mode}; expected ${MODE.TRANSCRIPTS}, ${MODE.RECONCILE} or ${MODE.TICK}. Nothing done.`
         });
     };
 

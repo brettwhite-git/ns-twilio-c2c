@@ -47,12 +47,17 @@
  * Owner: the client identity (child legs) or the number's primary rep
  * (parent legs). An inactive / unknown rep, or a number with no route,
  * gives the config fallback owner (custrecord_ctc_fallback_owner); with no
- * active fallback owner the call is skipped (as before).
+ * active fallback owner the call is skipped (as before); each run with
+ * skips logs one audit row 'CTC Recon skipped calls — no owner' (count +
+ * SIDs).
  *
  * Watermark (config custrecord_ctc_recon_watermark, ISO UTC): every
  * browser call that ended before it is reconciled. It moves only after a
  * complete run (all pages read, no governance stop), to the settle cutoff
- * (now - 5 min), but never past the end of a call whose create failed.
+ * (now - 5 min), but never past the end of a call whose create failed,
+ * while that call ended less than MAX_PIN_MS (6 h) ago. An older failing
+ * call no longer holds it: it is logged ('CTC Recon call dropped — failed
+ * too long') and counted as `dropped`.
  * The next run starts 15 min before the watermark, never more than 7 days
  * back (also the first-run lookback).
  */
@@ -66,6 +71,15 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
     const OVERLAP_MS = 15 * 60 * 1000;
     const SETTLE_MS = 5 * 60 * 1000;
     const MAX_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+    // A call whose create keeps failing holds the watermark (so the next
+    // run retries it) only while its end is less than MAX_PIN_MS old:
+    // about 24 runs at 15 min. After that the watermark moves past it and
+    // the call is logged as dropped (2026-11-03). Before, one poison call
+    // (customer UE script, mandatory field) pinned the watermark up to
+    // 7 days and every run re-read the whole window.
+    const MAX_PIN_MS = 6 * 60 * 60 * 1000;
+    // Most skipped SIDs listed in the per-run skip summary.
+    const SKIP_LIST_MAX = 20;
     const MIN_LOG_SECONDS = 3;
     // Safety cap on pages per run (100 calls each). Walking a page of
     // already-logged calls costs about 20 units, so MAX_UNITS binds first.
@@ -273,6 +287,8 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
      * @property {Object} stats
      * @property {string} stopped
      * @property {number|null} earliestFailedEndMs
+     * @property {number} nowMs
+     * @property {Array<string>} skippedSids - no-owner skips this run (capped)
      */
 
     const remainingUnits = () => runtime.getCurrentScript().getRemainingUsage();
@@ -586,9 +602,26 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
 
     const markFailed = (cand, ctx) => {
         ctx.stats.errors++;
+        // Pin cap: past MAX_PIN_MS the call no longer holds the watermark.
+        if (typeof cand.endMs === 'number' && ctx.nowMs - cand.endMs > MAX_PIN_MS) {
+            ctx.stats.dropped++;
+            log.error({
+                title: 'CTC Recon call dropped — failed too long',
+                details: `callSid=${(cand.call && cand.call.sid) || 'unknown'} ` +
+                         `ended=${new Date(cand.endMs).toISOString()} — failed on every run for over ` +
+                         `${MAX_PIN_MS / 3600000} h; the watermark no longer waits for it. No Phone Call was created.`
+            });
+            return;
+        }
         if (ctx.earliestFailedEndMs === null || cand.endMs < ctx.earliestFailedEndMs) {
             ctx.earliestFailedEndMs = cand.endMs;
         }
+    };
+
+    /** A call with no owner: counted and listed for the run's skip summary. */
+    const markSkipped = (sid, ctx) => {
+        ctx.stats.skipped++;
+        if (ctx.skippedSids.length < SKIP_LIST_MAX) ctx.skippedSids.push(String(sid || ''));
     };
 
     /** Not decided yet (voicemail may still be running): hold the watermark. */
@@ -630,7 +663,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
         if (!ownerId) {
             log.audit({ title: 'CTC Recon skip — no owner for inbound call',
                         details: `callSid=${call.sid} to=${toNumber} routedRep=${routedRep || 'none'}` });
-            ctx.stats.skipped++;
+            markSkipped(call.sid, ctx);
             return;
         }
         const fetched = fetchChildLegs(call.sid, ctx);
@@ -677,7 +710,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
         const ownerId = REP_ID_PATTERN.test(repId) ? resolveOwner(repId, ctx) : '';
         if (!ownerId) {
             log.audit({ title: 'CTC Recon skip — not an active employee', details: `callSid=${cand.call.sid} identity=${repId}` });
-            ctx.stats.skipped++;
+            markSkipped(cand.call.sid, ctx);
             return;
         }
         if (ownerId !== repId) {
@@ -731,7 +764,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
                 if (flow.transient) {
                     // Flow numbers not readable: hold the watermark, retry next run.
                     ctx.handled[sid] = true;
-                    if (endMs !== null) markFailed({ endMs: endMs }, ctx);
+                    if (endMs !== null) markFailed({ call: c, endMs: endMs }, ctx);
                     else ctx.stats.errors++;
                     return;
                 }
@@ -806,7 +839,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
      * window date is still listed.
      *
      * @param {{config: Object, authHeader: *, nowMs?: number}} opts
-     * @returns {{seen: number, existing: number, skipped: number, errors: number, deferred: number,
+     * @returns {{seen: number, existing: number, skipped: number, errors: number, deferred: number, dropped: number,
      *            created: {missed: number, tooShort: number, noAnswer: number, logged: number, voicemail: number},
      *            pages: number, complete: boolean, stopped: string, watermark: string}}
      */
@@ -814,7 +847,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
         const cfg = opts.config;
         const nowMs = typeof opts.nowMs === 'number' ? opts.nowMs : Date.now();
         const stats = {
-            seen: 0, existing: 0, skipped: 0, errors: 0, deferred: 0,
+            seen: 0, existing: 0, skipped: 0, errors: 0, deferred: 0, dropped: 0,
             created: { missed: 0, tooShort: 0, noAnswer: 0, logged: 0, voicemail: 0 },
             pages: 0, complete: false, stopped: '', watermark: String(cfg.reconWatermark || '')
         };
@@ -840,7 +873,9 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
             flow: null,
             stats: stats,
             stopped: '',
-            earliestFailedEndMs: null
+            earliestFailedEndMs: null,
+            nowMs: nowMs,
+            skippedSids: []
         };
 
         let url = `${utils.TWILIO_API_BASE}/${cfg.accountSid}/Calls.json` +
@@ -877,6 +912,18 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
         stats.stopped = ctx.stopped;
         stats.complete = !ctx.stopped;
 
+        // No-owner skips are lost calls (no Phone Call, and the watermark
+        // moves past them). One summary per run with the count, so the
+        // loss is visible without reading every per-call row.
+        if (stats.skipped > 0) {
+            log.audit({
+                title: 'CTC Recon skipped calls — no owner',
+                details: `skipped=${stats.skipped} fallbackOwner=${ctx.fallbackOwnerId || 'none'} ` +
+                         `callSids=${ctx.skippedSids.join(',')}${stats.skipped > ctx.skippedSids.length ? ',…' : ''} ` +
+                         '— no Phone Call was created. Set an active fallback owner (Setup Wizard) to keep these calls.'
+            });
+        }
+
         if (stats.complete) {
             let newMs = ctx.cutoffMs;
             if (ctx.earliestFailedEndMs !== null) newMs = Math.min(newMs, ctx.earliestFailedEndMs);
@@ -907,6 +954,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
         MAX_UNITS,
         OVERLAP_MS,
         SETTLE_MS,
-        MAX_LOOKBACK_MS
+        MAX_LOOKBACK_MS,
+        MAX_PIN_MS
     };
 });

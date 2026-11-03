@@ -23,8 +23,8 @@ import {Action} from './app/Action';
 import {wizardCall} from './services/wizardApi';
 import {
     determineLandingStep,
-    goToConsole,
-    goToStep
+    landFromHash,
+    startHashRouting
 } from './app/effects/navigation';
 import type {AppState} from './app/InitialState';
 import Step1 from './components/steps/Step1';
@@ -87,6 +87,7 @@ export default class App extends PureComponent<unknown, AppInternalState> {
 
     componentDidMount(): void {
         this.storeUnsubscribe = store.subscribe(this.forceRerender);
+        startHashRouting();
         this.initializeApp();
     }
 
@@ -110,20 +111,21 @@ export default class App extends PureComponent<unknown, AppInternalState> {
         store.dispatch(Action.setMountRouting(true));
         try {
             const payload = await wizardCall('wizardSnapshot', {});
-            const snap = (payload && (payload as { snapshot?: SnapshotForRouting }).snapshot) || {};
+            // snapshot null = no config record yet (fresh install).
+            const raw = payload && (payload as { snapshot?: SnapshotForRouting | null }).snapshot;
+            const snap = raw || {};
             // Cache the snapshot for downstream consumers (Step5 review,
             // Voice/Credentials/Overview rendering, Paused banner gate).
             store.dispatch(Action.consoleLoadSuccess({ snapshot: snap as never }));
 
-            const target = determineLandingStep(snap);
-            if (target === 'console') {
-                goToConsole();
-            } else {
-                goToStep(target);
-            }
+            // The URL hash (#/phones, #/setup/2, ...) picks the page when
+            // it is allowed; else the landing page opens.
+            // A fresh install starts at Step 1, which creates the config
+            // record (wizardPrereqs); Step 2 cannot save without it.
+            landFromHash(raw ? determineLandingStep(snap) : 1);
         } catch (e) {
             // Snapshot failed — land on Step 1 (fresh install path).
-            goToStep(1);
+            landFromHash(1);
         } finally {
             store.dispatch(Action.setMountRouting(false));
         }

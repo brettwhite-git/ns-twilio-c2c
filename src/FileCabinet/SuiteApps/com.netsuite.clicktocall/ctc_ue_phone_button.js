@@ -23,17 +23,14 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_
      * Once the wizard's preflight passes and admin clicks Activate,
      * `cfg.active` flips to true and the icon appears on the next form load.
      *
-     * Back-compat: existing installs (pre-Phase 2) had a populated config
-     * but no `active` field; we treat that as "active=true" so legacy
-     * installs don't lose the icon at deploy time.
+     * Only `active === true` counts. A paused config (Deactivate) keeps its
+     * account SID, so "account SID set" must not count as active: the old
+     * back-compat rule kept the Call button on screen while paused.
      */
     const isCtcActive = () => {
         try {
             const cfg = ctcConfig.loadConfig();
-            if (cfg.active === true) return true;
-            // Back-compat: populated config + unset active → treat as active
-            if (cfg.accountSid && cfg.accountSid.length > 0) return true;
-            return false;
+            return cfg.active === true;
         } catch (e) {
             // No config record at all = fresh install before wizard ran
             return false;

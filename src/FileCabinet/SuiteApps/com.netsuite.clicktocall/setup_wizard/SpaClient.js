@@ -26,6 +26,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         SET_SELECTED_SECTION: Symbol('setSelectedSection'),
         SET_RAIL_VISIBLE: Symbol('setRailVisible'),
         SET_MOUNT_ROUTING: Symbol('setMountRouting'),
+        SET_WIZARD_SAVING: Symbol('setWizardSaving'),
         STEP2_FIELD_CHANGE: Symbol('step2FieldChange'),
         STEP3_FIELD_CHANGE: Symbol('step3FieldChange'),
         STEP4_FIELD_CHANGE: Symbol('step4FieldChange'),
@@ -37,9 +38,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         CONSOLE_LOAD_SUCCESS: Symbol('consoleLoadSuccess'),
         CONSOLE_LOAD_FAILURE: Symbol('consoleLoadFailure'),
         CONSOLE_DRIFT_SET: Symbol('consoleDriftSet'),
+        CONSOLE_PATCH: Symbol('consolePatch'),
         PHONES_LOAD_START: Symbol('phonesLoadStart'),
         PHONES_LOAD_SUCCESS: Symbol('phonesLoadSuccess'),
-        PHONES_ASSIGNMENT_SAVE: Symbol('phonesAssignmentSave'),
+        PHONES_LOAD_FAILURE: Symbol('phonesLoadFailure'),
+        PHONES_DRAFT_SET: Symbol('phonesDraftSet'),
+        PHONES_EDIT_ROW: Symbol('phonesEditRow'),
+        PHONES_ROW_SAVE: Symbol('phonesRowSave'),
         INBOUND_LOAD_START: Symbol('inboundLoadStart'),
         INBOUND_LOAD_SUCCESS: Symbol('inboundLoadSuccess'),
         INBOUND_LOAD_FAILURE: Symbol('inboundLoadFailure'),
@@ -47,6 +52,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         INBOUND_SAVE: Symbol('inboundSave'),
         INBOUND_PUBLISH: Symbol('inboundPublish'),
         INBOUND_ROUTING_UPDATE: Symbol('inboundRoutingUpdate'),
+        INBOUND_ROUTES_SET: Symbol('inboundRoutesSet'),
         PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
         PRESENCE_LOAD_SUCCESS: Symbol('presenceLoadSuccess'),
         PRESENCE_LOAD_FAILURE: Symbol('presenceLoadFailure'),
@@ -59,11 +65,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
         VOICE_FIELD_SAVE: Symbol('voiceFieldSave'),
         DEACTIVATE_REQUEST: Symbol('deactivateRequest'),
+        DEACTIVATE_START: Symbol('deactivateStart'),
         DEACTIVATE_SUCCESS: Symbol('deactivateSuccess'),
         DEACTIVATE_FAILURE: Symbol('deactivateFailure'),
         REACTIVATE_REQUEST: Symbol('reactivateRequest'),
         REACTIVATE_SUCCESS: Symbol('reactivateSuccess'),
         REACTIVATE_FAILURE: Symbol('reactivateFailure'),
+        CREDENTIALS_UPDATE: Symbol('credentialsUpdate'),
         ACTION_ERROR_SET: Symbol('actionErrorSet')
     };
     const Action = {
@@ -81,6 +89,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         },
         setMountRouting(routing) {
             return { type: ActionType.SET_MOUNT_ROUTING, payload: routing };
+        },
+        setWizardSaving(saving) {
+            return { type: ActionType.SET_WIZARD_SAVING, payload: saving };
         },
         step2FieldChange(field, value) {
             return { type: ActionType.STEP2_FIELD_CHANGE, payload: { field, value } };
@@ -115,14 +126,26 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         consoleDriftSet(drift) {
             return { type: ActionType.CONSOLE_DRIFT_SET, payload: drift };
         },
+        consolePatch(patch) {
+            return { type: ActionType.CONSOLE_PATCH, payload: patch };
+        },
         phonesLoadStart() {
             return { type: ActionType.PHONES_LOAD_START, payload: null };
         },
         phonesLoadSuccess(slice) {
             return { type: ActionType.PHONES_LOAD_SUCCESS, payload: slice };
         },
-        phonesAssignmentSave(payload) {
-            return { type: ActionType.PHONES_ASSIGNMENT_SAVE, payload };
+        phonesLoadFailure(error) {
+            return { type: ActionType.PHONES_LOAD_FAILURE, payload: { error } };
+        },
+        phonesDraftSet(phoneSid, draft) {
+            return { type: ActionType.PHONES_DRAFT_SET, payload: { phoneSid, draft } };
+        },
+        phonesEditRow(phoneSid) {
+            return { type: ActionType.PHONES_EDIT_ROW, payload: { phoneSid } };
+        },
+        phonesRowSave(payload) {
+            return { type: ActionType.PHONES_ROW_SAVE, payload };
         },
         inboundLoadStart() {
             return { type: ActionType.INBOUND_LOAD_START, payload: null };
@@ -144,6 +167,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         },
         inboundRoutingUpdate(publish) {
             return { type: ActionType.INBOUND_ROUTING_UPDATE, payload: publish };
+        },
+        inboundRoutesSet(payload) {
+            return { type: ActionType.INBOUND_ROUTES_SET, payload };
         },
         presenceLoadStart() {
             return { type: ActionType.PRESENCE_LOAD_START, payload: null };
@@ -181,20 +207,26 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         deactivateRequest() {
             return { type: ActionType.DEACTIVATE_REQUEST, payload: null };
         },
+        deactivateStart() {
+            return { type: ActionType.DEACTIVATE_START, payload: null };
+        },
         deactivateSuccess() {
             return { type: ActionType.DEACTIVATE_SUCCESS, payload: null };
         },
         deactivateFailure(error) {
             return { type: ActionType.DEACTIVATE_FAILURE, payload: { error } };
         },
-        reactivateRequest() {
-            return { type: ActionType.REACTIVATE_REQUEST, payload: null };
+        reactivateRequest(source) {
+            return { type: ActionType.REACTIVATE_REQUEST, payload: { source } };
         },
         reactivateSuccess() {
             return { type: ActionType.REACTIVATE_SUCCESS, payload: null };
         },
-        reactivateFailure(error) {
-            return { type: ActionType.REACTIVATE_FAILURE, payload: { error } };
+        reactivateFailure(error, failedChecks = []) {
+            return { type: ActionType.REACTIVATE_FAILURE, payload: { error, failedChecks } };
+        },
+        credentialsUpdate(patch) {
+            return { type: ActionType.CREDENTIALS_UPDATE, payload: patch };
         },
         actionErrorSet(error) {
             return { type: ActionType.ACTION_ERROR_SET, payload: error };
@@ -203,12 +235,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
 
     const applyPublish = (inbound, publish) => {
         inbound.lastPublish = publish;
-        if (publish.ok) {
-            if (publish.flowSid)
-                inbound.flowSid = publish.flowSid;
-            if (publish.publishedAt)
-                inbound.publishedAt = publish.publishedAt;
-        }
+        if ((publish.ok || publish.partial) && publish.flowSid)
+            inbound.flowSid = publish.flowSid;
+        if (publish.ok && publish.publishedAt)
+            inbound.publishedAt = publish.publishedAt;
     };
     function reducer(state, action) {
         const a = action;
@@ -227,6 +257,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 })],
             [ActionType.SET_MOUNT_ROUTING, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.mountRouting = a.payload;
+                })],
+            [ActionType.SET_WIZARD_SAVING, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.wizardSaving = a.payload;
                 })],
             [ActionType.STEP2_FIELD_CHANGE, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
@@ -276,6 +309,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             [ActionType.CONSOLE_DRIFT_SET, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.console.drift = a.payload;
                 })],
+            [ActionType.CONSOLE_PATCH, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    Object.assign(d.console, a.payload);
+                })],
             [ActionType.PHONES_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.console.phonesLoading = true;
                     d.console.phonesError = null;
@@ -288,19 +324,65 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         d.console.phonesNumbers = p.numbers;
                     if (p.byPhone !== undefined)
                         d.console.phonesByPhone = p.byPhone;
+                    if (p.listError !== undefined)
+                        d.console.phonesListError = p.listError;
+                    if (p.hasMore !== undefined)
+                        d.console.phonesHasMore = p.hasMore;
+                    if (p.error !== undefined)
+                        d.console.phonesError = p.error;
                     d.console.phonesLoading = false;
                 })],
-            [ActionType.PHONES_ASSIGNMENT_SAVE, (s) => core.ImmutableUpdate.of(s, (d) => {
+            [ActionType.PHONES_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.phonesLoading = false;
+                    d.console.phonesError = a.payload.error;
+                })],
+            [ActionType.PHONES_DRAFT_SET, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
-                    if (p.saving !== undefined) {
-                        d.console.phonesSaving[p.phoneSid] = p.saving;
+                    const drafts = { ...d.console.phonesDrafts };
+                    if (p.draft)
+                        drafts[p.phoneSid] = p.draft;
+                    else
+                        delete drafts[p.phoneSid];
+                    d.console.phonesDrafts = drafts;
+                    if (!p.draft) {
+                        const errs = { ...d.console.phonesRowErrors };
+                        delete errs[p.phoneSid];
+                        d.console.phonesRowErrors = errs;
                     }
-                    if (p.error !== undefined) {
-                        d.console.phonesError = p.error;
+                })],
+            [ActionType.PHONES_EDIT_ROW, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.console.phonesEditingSid = p.phoneSid;
+                    d.console.phonesDrafts = {};
+                    d.console.phonesRowErrors = {};
+                })],
+            [ActionType.PHONES_ROW_SAVE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    const errs = { ...d.console.phonesRowErrors };
+                    delete errs[p.phoneSid];
+                    if (p.phase === 'start') {
+                        d.console.phonesSavingSid = p.phoneSid;
+                        d.console.phonesRoutingErrors = [];
+                    }
+                    else if (p.phase === 'success') {
+                        d.console.phonesSavingSid = null;
+                        if (d.console.phonesEditingSid === p.phoneSid && !p.error) {
+                            d.console.phonesEditingSid = null;
+                        }
+                        const drafts = { ...d.console.phonesDrafts };
+                        delete drafts[p.phoneSid];
+                        d.console.phonesDrafts = drafts;
+                        if (p.error)
+                            errs[p.phoneSid] = p.error;
+                    }
+                    else {
+                        d.console.phonesSavingSid = null;
+                        errs[p.phoneSid] = p.error || 'Save failed';
                     }
                     if (p.routingErrors !== undefined) {
                         d.console.phonesRoutingErrors = p.routingErrors;
                     }
+                    d.console.phonesRowErrors = errs;
                 })],
             [ActionType.INBOUND_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.inbound.loading = true;
@@ -370,7 +452,14 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 })],
             [ActionType.INBOUND_ROUTING_UPDATE, (s) => core.ImmutableUpdate.of(s, (d) => {
                     applyPublish(d.inbound, a.payload);
-                    d.inbound.loaded = false;
+                })],
+            [ActionType.INBOUND_ROUTES_SET, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.inbound.routes = p.routes;
+                    if (p.flowSid !== undefined)
+                        d.inbound.flowSid = p.flowSid;
+                    if (p.publishedAt !== undefined)
+                        d.inbound.publishedAt = p.publishedAt;
                 })],
             [ActionType.PRESENCE_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.presence.loading = true;
@@ -434,6 +523,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 })],
             [ActionType.VOICE_FIELD_EDIT, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
+                    if (p.field !== d.console.voiceEditing)
+                        d.console.voiceError = null;
                     d.console.voiceEditing = p.field;
                     d.console.voicePendingValue = p.pendingValue ?? null;
                 })],
@@ -463,24 +554,41 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     d.console.pendingDeactivateConfirm = true;
                     d.console.deactivateError = null;
                 })],
+            [ActionType.DEACTIVATE_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.console.deactivating = true;
+                    d.console.deactivateError = null;
+                })],
             [ActionType.DEACTIVATE_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.console.pendingDeactivateConfirm = false;
+                    d.console.deactivating = false;
                     d.console.deactivateError = null;
                 })],
             [ActionType.DEACTIVATE_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
                     d.console.pendingDeactivateConfirm = false;
+                    d.console.deactivating = false;
                     d.console.deactivateError = p.error;
                 })],
             [ActionType.REACTIVATE_REQUEST, (s) => core.ImmutableUpdate.of(s, (d) => {
-                    d.console.actionError = null;
+                    const p = a.payload;
+                    d.console.reactivating = true;
+                    d.console.reactivateSource = p.source;
+                    d.console.reactivateError = null;
+                    d.console.reactivateFailedChecks = [];
                 })],
             [ActionType.REACTIVATE_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
-                    d.console.actionError = null;
+                    d.console.reactivating = false;
+                    d.console.reactivateError = null;
+                    d.console.reactivateFailedChecks = [];
                 })],
             [ActionType.REACTIVATE_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
-                    d.console.actionError = p.error;
+                    d.console.reactivating = false;
+                    d.console.reactivateError = p.error;
+                    d.console.reactivateFailedChecks = p.failedChecks || [];
+                })],
+            [ActionType.CREDENTIALS_UPDATE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    Object.assign(d.credentials, a.payload);
                 })],
             [ActionType.ACTION_ERROR_SET, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.console.actionError = a.payload;
@@ -496,6 +604,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         selectedSection: 'overview',
         railVisible: false,
         mountRouting: true,
+        wizardSaving: false,
         step2: { accountSid: '', apiKeySid: '', apiSecretId: '' },
         step3: {
             twimlAppSid: '',
@@ -517,6 +626,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             assignments: null,
             preflight: null,
             activated: false,
+            activating: false,
             activateError: null,
             loading: false
         },
@@ -536,7 +646,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             phonesNumbers: null,
             phonesByPhone: null,
             phonesLoading: false,
-            phonesSaving: {},
+            phonesListError: null,
+            phonesHasMore: false,
+            phonesEditingSid: null,
+            phonesDrafts: {},
+            phonesSavingSid: null,
+            phonesRowErrors: {},
             phonesError: null,
             phonesRoutingErrors: [],
             voiceEditing: null,
@@ -547,12 +662,19 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 intelServices: null
             },
             voiceListsLoading: false,
+            voiceListErrors: {},
             voiceSaving: false,
             voiceError: null,
             activeModal: null,
             pendingDeactivateConfirm: false,
+            deactivating: false,
             deactivateError: null,
+            reactivating: false,
+            reactivateSource: 'banner',
+            reactivateError: null,
+            reactivateFailedChecks: [],
             preflightRefreshing: false,
+            preflightError: null,
             actionError: null
         },
         inbound: {
@@ -604,12 +726,25 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             pending: false,
             voiceUrlMatches: null,
             driftVoiceUrl: 'unknown',
+            publishedNoticeVersion: 0,
+            changesPending: false,
+            functionExists: null,
+            functionMessage: '',
             saving: false,
             publishing: false,
             unpublishing: false,
             confirmUnpublish: false,
             error: null,
             steps: null
+        },
+        credentials: {
+            editing: false,
+            apiKeySid: '',
+            apiSecretId: '',
+            saving: false,
+            error: null,
+            failedChecks: [],
+            saved: false
         }
     };
 
@@ -660,60 +795,87 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }).then(extractPayload);
     };
 
+    const errorOf = (result, fallback) => {
+        const r = (result || {});
+        return r.errorMessage || r.message || r.error || fallback;
+    };
+    const thrownText$1 = (e, fallback) => e instanceof Error && e.message ? 'Network: ' + e.message : fallback;
     async function loadConsole() {
         store.dispatch(Action.consoleLoadStart());
-        const safe = (promise) => promise.catch(() => null);
-        try {
-            const [snapshot, assignments, preflight] = await Promise.all([
-                safe(wizardCall('wizardSnapshot', {})),
-                safe(wizardCall('wizardLoadAssignments', {})),
-                safe(wizardCall('wizardRunPreflight', {}))
-            ]);
-            const snap = snapshot && snapshot.snapshot;
-            const slice = {
-                snapshot: snap || null,
-                assignments: (assignments && assignments.items) || [],
-                preflight: (preflight && preflight.checks) || []
-            };
-            store.dispatch(Action.consoleLoadSuccess(slice));
-        }
-        catch (e) {
-            const msg = e instanceof Error ? e.message : 'Console load failed';
-            store.dispatch(Action.consoleLoadFailure(msg));
-        }
+        store.dispatch(Action.consolePatch({ preflightError: null }));
+        const snapshotTask = wizardCall('wizardSnapshot', {})
+            .then((payload) => {
+            const snap = payload && payload.snapshot;
+            if (snap)
+                store.dispatch(Action.consolePatch({ snapshot: snap }));
+        })
+            .catch(() => { });
+        const assignmentsTask = wizardCall('wizardLoadAssignments', {})
+            .then((payload) => {
+            const items = payload && payload.items;
+            if (Array.isArray(items))
+                store.dispatch(Action.consolePatch({ assignments: items }));
+        })
+            .catch(() => { });
+        const preflightTask = wizardCall('wizardRunPreflight', {})
+            .then((payload) => {
+            const checks = payload && payload.checks;
+            if (Array.isArray(checks)) {
+                store.dispatch(Action.consolePatch({ preflight: checks }));
+            }
+            else {
+                store.dispatch(Action.consolePatch({
+                    preflightError: errorOf(payload, 'Preflight did not return any checks')
+                }));
+            }
+        })
+            .catch((e) => {
+            store.dispatch(Action.consolePatch({
+                preflightError: thrownText$1(e, 'Preflight did not run')
+            }));
+        });
+        await Promise.all([snapshotTask, assignmentsTask, preflightTask]);
+        store.dispatch(Action.consoleLoadSuccess({}));
     }
+    const setActiveFlag = (active) => {
+        const snap = store.getState().console.snapshot;
+        store.dispatch(Action.consolePatch({ snapshot: { ...(snap || {}), active } }));
+    };
     async function deactivate() {
-        store.dispatch(Action.deactivateRequest());
+        if (store.getState().console.deactivating)
+            return;
+        store.dispatch(Action.deactivateStart());
         try {
             const result = await wizardCall('wizardActivate', { deactivate: true });
-            if (result && result.ok === false) {
-                const err = result.error || 'Deactivate failed';
-                store.dispatch(Action.deactivateFailure(err));
+            if (!result || result.ok === false) {
+                store.dispatch(Action.deactivateFailure(errorOf(result, 'Deactivate failed')));
                 return;
             }
+            setActiveFlag(false);
             store.dispatch(Action.deactivateSuccess());
             await loadConsole();
         }
         catch (e) {
-            const msg = e instanceof Error ? e.message : 'Deactivate failed';
-            store.dispatch(Action.deactivateFailure(msg));
+            store.dispatch(Action.deactivateFailure(thrownText$1(e, 'Deactivate failed')));
         }
     }
-    async function reactivate() {
-        store.dispatch(Action.reactivateRequest());
+    async function reactivate(source = 'banner') {
+        if (store.getState().console.reactivating)
+            return;
+        store.dispatch(Action.reactivateRequest(source));
         try {
             const result = await wizardCall('wizardActivate', {});
-            if (result && result.ok === false) {
-                const err = result.error || 'Reactivate failed';
-                store.dispatch(Action.reactivateFailure(err));
+            if (!result || result.ok === false) {
+                const failed = (result && result.failedChecks) || [];
+                store.dispatch(Action.reactivateFailure(errorOf(result, 'Reactivate failed'), Array.isArray(failed) ? failed : []));
                 return;
             }
+            setActiveFlag(true);
             store.dispatch(Action.reactivateSuccess());
             await loadConsole();
         }
         catch (e) {
-            const msg = e instanceof Error ? e.message : 'Reactivate failed';
-            store.dispatch(Action.reactivateFailure(msg));
+            store.dispatch(Action.reactivateFailure(thrownText$1(e, 'Reactivate failed')));
         }
     }
 
@@ -753,6 +915,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
         return Object.values(map);
     }
+    const listError = (p) => p && (p.error || p.errorMessage) ? String(p.errorMessage || p.error) : null;
+    const thrownText = (e, fallback) => e instanceof Error && e.message ? 'Network: ' + e.message : fallback;
     async function loadPhonesData() {
         store.dispatch(Action.phonesLoadStart());
         try {
@@ -761,61 +925,180 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 wizardCall('wizardListEmployees', {}),
                 wizardCall('wizardLoadAssignments', {})
             ]);
-            const numbers = (phonesPayload && phonesPayload.items) || [];
-            const employees = (employeesPayload && employeesPayload.items) || [];
-            const assignmentRows = (assignmentsPayload && assignmentsPayload.items) || [];
+            const phones = phonesPayload;
+            const emps = employeesPayload;
+            const asg = assignmentsPayload;
+            const numbers = (phones && phones.items) || [];
+            const employees = (emps && emps.items) || [];
+            const assignmentRows = (asg && asg.items) || [];
             const byPhone = groupByPhone(numbers, assignmentRows);
-            store.dispatch(Action.phonesLoadSuccess({ numbers, employees, byPhone }));
+            const otherErrors = [
+                listError(emps) ? 'Employees: ' + listError(emps) : '',
+                listError(asg) ? 'Assignments: ' + listError(asg) : ''
+            ].filter(Boolean).join(' · ');
+            store.dispatch(Action.phonesLoadSuccess({
+                numbers,
+                employees,
+                byPhone,
+                listError: listError(phones),
+                hasMore: !!(phones && phones.hasMore),
+                error: otherErrors || null
+            }));
+            if (!listError(asg)) {
+                store.dispatch(Action.consolePatch({ assignments: assignmentRows }));
+            }
         }
         catch (e) {
-            const msg = e instanceof Error ? e.message : 'Phones load failed';
-            store.dispatch(Action.phonesAssignmentSave({
-                phoneSid: '__load__',
-                error: msg
-            }));
+            store.dispatch(Action.phonesLoadFailure(thrownText(e, 'Phones load failed')));
         }
     }
-    async function savePhonesAssignment(phoneSid, phoneNumber, employeeIds, label, primaryEmployeeId) {
-        store.dispatch(Action.phonesAssignmentSave({
-            phoneSid, saving: true, error: null, routingErrors: []
-        }));
+    function savedRow(phoneSid) {
+        const rows = (store.getState().console.phonesByPhone || []);
+        return rows.find((r) => r.phoneSid === phoneSid) || null;
+    }
+    function effectivePrimary(employeeIds, primary) {
+        if (primary !== null && employeeIds.indexOf(primary) >= 0)
+            return primary;
+        return employeeIds.length > 0 ? employeeIds[0] : null;
+    }
+    function rowValues(row, drafts) {
+        const draft = drafts[row.phoneSid];
+        const employeeIds = draft ? draft.employeeIds : row.employeeIds;
+        const primary = draft ? draft.primaryEmployeeId : row.primaryEmployeeId;
+        return { employeeIds, primaryEmployeeId: effectivePrimary(employeeIds, primary) };
+    }
+    const sameIds = (a, b) => a.length === b.length && a.every((v) => b.indexOf(v) >= 0);
+    function editPhonesRow(phoneSid, changes) {
+        const state = store.getState();
+        if (state.console.phonesSavingSid === phoneSid)
+            return;
+        if (state.console.phonesEditingSid !== phoneSid)
+            return;
+        const saved = savedRow(phoneSid);
+        if (!saved)
+            return;
+        const current = rowValues(saved, state.console.phonesDrafts);
+        const picked = changes.employeeIds !== undefined ? changes.employeeIds : current.employeeIds;
+        const employeeIds = sameIds(picked, current.employeeIds) ? current.employeeIds : picked;
+        const requested = changes.primaryEmployeeId !== undefined
+            ? changes.primaryEmployeeId : current.primaryEmployeeId;
+        const next = {
+            employeeIds,
+            primaryEmployeeId: effectivePrimary(employeeIds, requested)
+        };
+        if (sameIds(next.employeeIds, current.employeeIds) &&
+            next.primaryEmployeeId === current.primaryEmployeeId)
+            return;
+        const savedValues = rowValues(saved, {});
+        const unchanged = sameIds(next.employeeIds, savedValues.employeeIds) &&
+            next.primaryEmployeeId === savedValues.primaryEmployeeId;
+        store.dispatch(Action.phonesDraftSet(phoneSid, unchanged ? null : next));
+    }
+    function openPhonesEditor(phoneSid) {
+        const c = store.getState().console;
+        if (c.phonesSavingSid !== null || c.phonesEditingSid === phoneSid)
+            return;
+        store.dispatch(Action.phonesEditRow(phoneSid));
+    }
+    function cancelPhonesRow(phoneSid) {
+        if (store.getState().console.phonesSavingSid === phoneSid)
+            return;
+        store.dispatch(Action.phonesEditRow(null));
+    }
+    let saveInFlight = false;
+    async function refreshInboundRoutes() {
+        if (!store.getState().inbound.loaded)
+            return;
         try {
-            const payload = {
+            const r = (await wizardCall('wizardLoadInbound', {}));
+            if (!r || r.ok !== true || !Array.isArray(r.routes))
+                return;
+            store.dispatch(Action.inboundRoutesSet({
+                routes: r.routes,
+                flowSid: r.flowSid || '',
+                publishedAt: r.publishedAt || ''
+            }));
+        }
+        catch (e) {
+        }
+    }
+    async function savePhonesRow(phoneSid) {
+        if (saveInFlight)
+            return;
+        const state = store.getState();
+        const saved = savedRow(phoneSid);
+        const draft = state.console.phonesDrafts[phoneSid];
+        if (!saved || !draft)
+            return;
+        saveInFlight = true;
+        store.dispatch(Action.phonesRowSave({ phoneSid, phase: 'start' }));
+        try {
+            const values = rowValues(saved, state.console.phonesDrafts);
+            const result = await wizardCall('wizardSaveAssignments', {
                 assignments: [{
                         phoneSid,
-                        phoneNumber,
-                        employeeIds,
-                        label,
-                        primaryEmployeeId
+                        phoneNumber: saved.phoneNumber,
+                        employeeIds: values.employeeIds,
+                        label: saved.label,
+                        primaryEmployeeId: values.primaryEmployeeId
                     }]
-            };
-            const result = await wizardCall('wizardSaveAssignments', payload);
-            const ok = result && (result.saved === true);
-            if (!ok) {
-                const err = (result && result.error) || 'Save failed';
-                store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: err }));
+            });
+            if (!result || result.saved !== true) {
+                store.dispatch(Action.phonesRowSave({
+                    phoneSid,
+                    phase: 'failure',
+                    error: (result && (result.errorMessage || result.error)) || 'save_failed'
+                }));
                 return;
             }
             const routing = result.routing;
-            if (routing && routing.ok) {
+            if (routing && !routing.skipped && typeof routing.ok === 'boolean') {
                 store.dispatch(Action.inboundRoutingUpdate(routing));
             }
-            const routingErrors = routing && Array.isArray(routing.errors) ? routing.errors : [];
-            const [phonesPayload, refreshedAssignments] = await Promise.all([
-                wizardCall('wizardListPhoneNumbers', {}),
-                wizardCall('wizardLoadAssignments', {})
-            ]);
-            const numbers = (phonesPayload && phonesPayload.items) || [];
-            const assignmentRows = (refreshedAssignments && refreshedAssignments.items) || [];
-            const byPhone = groupByPhone(numbers, assignmentRows);
-            store.dispatch(Action.phonesLoadSuccess({ byPhone }));
-            store.dispatch(Action.phonesAssignmentSave({
-                phoneSid, saving: false, error: null, routingErrors
+            const routingErrors = routing && Array.isArray(routing.errors) ? routing.errors.slice() : [];
+            if (routing && routing.ok === false && !routing.skipped && !routing.partial &&
+                routingErrors.length === 0) {
+                routingErrors.push({
+                    phoneNumber: '',
+                    message: routing.message || 'Inbound routing was not published. Publish again.'
+                });
+            }
+            let reloadError = null;
+            let rows = null;
+            try {
+                const asg = (await wizardCall('wizardLoadAssignments', {}));
+                if (asg && Array.isArray(asg.items) && !listError(asg))
+                    rows = asg.items;
+            }
+            catch (e) {
+                rows = null;
+            }
+            if (rows) {
+                const numbers = (store.getState().console.phonesNumbers || []);
+                store.dispatch(Action.phonesLoadSuccess({ byPhone: groupByPhone(numbers, rows) }));
+                store.dispatch(Action.consolePatch({ assignments: rows }));
+            }
+            else {
+                const current = (store.getState().console.phonesByPhone || []);
+                store.dispatch(Action.phonesLoadSuccess({
+                    byPhone: current.map((r) => (r.phoneSid === phoneSid
+                        ? { ...r, employeeIds: values.employeeIds, primaryEmployeeId: values.primaryEmployeeId }
+                        : r))
+                }));
+                reloadError = 'Saved, but the list did not refresh. Click "Refresh from Twilio".';
+            }
+            store.dispatch(Action.phonesRowSave({
+                phoneSid, phase: 'success', routingErrors, error: reloadError
             }));
+            await refreshInboundRoutes();
         }
         catch (e) {
-            const msg = e instanceof Error ? e.message : 'Save failed';
-            store.dispatch(Action.phonesAssignmentSave({ phoneSid, saving: false, error: msg }));
+            store.dispatch(Action.phonesRowSave({
+                phoneSid, phase: 'failure', error: thrownText(e, 'save_failed')
+            }));
+        }
+        finally {
+            saveInFlight = false;
         }
     }
 
@@ -869,7 +1152,79 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             }
         });
     }
-    function goToStep(stepNum) {
+    const SECTIONS = ['overview', 'phones', 'inbound', 'voice', 'credentials'];
+    function parseHash(hash) {
+        const path = String(hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
+        if (!path)
+            return null;
+        const step = /^setup\/([1-5])$/.exec(path);
+        if (step)
+            return { kind: 'step', step: Number(step[1]) };
+        const section = SECTIONS.find((sec) => sec === path);
+        return section ? { kind: 'section', section } : null;
+    }
+    const hashFor = (route) => route.kind === 'section' ? '#/' + route.section : '#/setup/' + route.step;
+    function writeHash(route, push) {
+        try {
+            const target = hashFor(route);
+            if (window.location.hash === target)
+                return;
+            if (push)
+                window.history.pushState(null, '', target);
+            else
+                window.history.replaceState(null, '', target);
+        }
+        catch (e) {
+        }
+    }
+    function currentRoute(state) {
+        return state.mode === 'stepper'
+            ? { kind: 'step', step: state.currentStep }
+            : { kind: 'section', section: state.selectedSection };
+    }
+    let furthestStep = 0;
+    function maxStepFor(state) {
+        const snap = (state.console.snapshot || {});
+        const landing = determineLandingStep(snap);
+        return landing === 'console' ? TOTAL_STEPS$1 : Math.max(landing, furthestStep);
+    }
+    function consoleAllowed(state) {
+        const snap = (state.console.snapshot || {});
+        return state.railVisible || determineLandingStep(snap) === 'console';
+    }
+    let railSync = null;
+    function registerRailSync(fn) {
+        railSync = fn;
+    }
+    function afterNavigate() {
+        const run = () => {
+            try {
+                if (railSync)
+                    railSync();
+            }
+            catch (e) { }
+            try {
+                const heading = document.querySelector('[data-ctc-page-heading]');
+                if (!heading)
+                    return;
+                for (let el = heading.parentElement; el; el = el.parentElement) {
+                    if (el.scrollTop > 0)
+                        el.scrollTop = 0;
+                }
+                if (!heading.hasAttribute('tabindex'))
+                    heading.setAttribute('tabindex', '-1');
+                heading.focus({ preventScroll: true });
+            }
+            catch (e) { }
+        };
+        if (typeof window.requestAnimationFrame === 'function') {
+            window.requestAnimationFrame(() => { setTimeout(run, 0); });
+        }
+        else {
+            setTimeout(run, 0);
+        }
+    }
+    function goToStep(stepNum, opts = {}) {
         const state = store.getState();
         if (isConfigActive(state))
             return;
@@ -880,28 +1235,108 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             }
         }
         const clamped = Math.max(1, Math.min(TOTAL_STEPS$1, stepNum));
+        const changed = state.mode !== 'stepper' || state.currentStep !== clamped;
+        furthestStep = Math.max(furthestStep, clamped);
         store.dispatch(Action.setMode('stepper'));
         store.dispatch(Action.setCurrentStep(clamped));
+        writeHash({ kind: 'step', step: clamped }, opts.push !== false && !state.mountRouting);
         if (clamped === 1) {
             loadPrereqs();
         }
+        if (changed && !state.mountRouting)
+            afterNavigate();
     }
-    function goToConsole() {
+    function goToConsole(section = 'overview', opts = {}) {
+        const state = store.getState();
         store.dispatch(Action.setMode('console'));
-        store.dispatch(Action.setSelectedSection('overview'));
+        store.dispatch(Action.setSelectedSection(section));
         store.dispatch(Action.setRailVisible(true));
         store.dispatch(Action.actionErrorSet(null));
+        writeHash({ kind: 'section', section }, opts.push !== false && !state.mountRouting);
         loadConsole();
+        loadSectionData(section);
+        if (!state.mountRouting)
+            afterNavigate();
     }
-    function goToSection(sectionName) {
-        store.dispatch(Action.setSelectedSection(sectionName));
+    function loadSectionData(section) {
+        const c = store.getState().console;
+        if (section === 'phones' && c.phonesNumbers === null && !c.phonesLoading) {
+            loadPhonesData();
+        }
+    }
+    function goToSection(sectionName, opts = {}) {
         const state = store.getState();
+        store.dispatch(Action.setSelectedSection(sectionName));
         if (state.mode === 'stepper') {
             store.dispatch(Action.setMode('console'));
         }
         store.dispatch(Action.actionErrorSet(null));
-        if (sectionName === 'phones' && state.console.phonesNumbers === null) {
-            loadPhonesData();
+        writeHash({ kind: 'section', section: sectionName }, opts.push !== false);
+        loadSectionData(sectionName);
+        afterNavigate();
+    }
+    function landFromHash(landing) {
+        const route = parseHash(window.location.hash);
+        const state = store.getState();
+        if (landing === 'console') {
+            if (route && route.kind === 'step' && !isConfigActive(state)) {
+                store.dispatch(Action.setRailVisible(true));
+                goToStep(route.step, { push: false });
+                return;
+            }
+            goToConsole(route && route.kind === 'section' ? route.section : 'overview', { push: false });
+            return;
+        }
+        const step = route && route.kind === 'step' ? Math.min(route.step, landing) : landing;
+        goToStep(step, { push: false });
+    }
+    function onHashChange() {
+        const state = store.getState();
+        if (state.mountRouting)
+            return;
+        const route = parseHash(window.location.hash);
+        if (route && route.kind === 'section' && consoleAllowed(state)) {
+            if (state.mode === 'console' && state.selectedSection === route.section)
+                return;
+            if (state.mode === 'console')
+                goToSection(route.section, { push: false });
+            else
+                goToConsole(route.section, { push: false });
+            return;
+        }
+        if (route && route.kind === 'step' && !isConfigActive(state)) {
+            const step = Math.min(route.step, maxStepFor(state));
+            if (state.mode === 'stepper' && state.currentStep === step) {
+                writeHash({ kind: 'step', step }, false);
+                return;
+            }
+            goToStep(step, { push: false });
+            return;
+        }
+        if (!route && consoleAllowed(state)) {
+            if (state.mode === 'console' && state.selectedSection === 'overview') {
+                writeHash({ kind: 'section', section: 'overview' }, false);
+            }
+            else if (state.mode === 'console') {
+                goToSection('overview', { push: false });
+            }
+            else {
+                goToConsole('overview', { push: false });
+            }
+            return;
+        }
+        writeHash(currentRoute(state), false);
+    }
+    let hashListening = false;
+    function startHashRouting() {
+        if (hashListening)
+            return;
+        hashListening = true;
+        try {
+            window.addEventListener('hashchange', onHashChange);
+        }
+        catch (e) {
+            hashListening = false;
         }
     }
 
@@ -1089,7 +1524,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         });
         console.log('[CTC Setup Wizard] Step 4 Continue — assignments map:', assignmentsMap);
         console.log('[CTC Setup Wizard] Step 4 Continue — payload rows (' + rows.length + '):', rows);
-        return callSave('wizardSaveAssignments', { assignments: rows });
+        return callSave('wizardSaveAssignments', { assignments: rows, stepper: true });
     }
     async function loadStep5() {
         const safe = (promise) => promise.catch(() => null);
@@ -1135,15 +1570,87 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const FIELD_LABELS = {
+        accountSid: 'Account SID',
+        apiKeySid: 'API Key SID',
+        apiSecretId: 'API Key Secret script ID',
+        api_secret_id: 'API Key Secret script ID',
+        twimlAppSid: 'TwiML Application SID',
+        intelServiceSid: 'Intelligence service SID',
+        phoneNumber: 'phone number',
+        phone_number: 'phone number',
+        assignments: 'rep assignments'
+    };
+    const FORMAT_HINTS = {
+        accountSid: 'AC followed by 32 letters or digits',
+        apiKeySid: 'SK followed by 32 letters or digits',
+        apiSecretId: 'custsecret_ followed by letters, digits or _',
+        twimlAppSid: 'AP followed by 32 letters or digits',
+        intelServiceSid: 'GA followed by 32 letters or digits'
+    };
+    const MESSAGES = {
+        preflight_failed: 'Some preflight checks failed. Fix the checks listed, then try again.',
+        config_not_found: 'The Click-to-Call configuration record was not found. Run the setup wizard from Step 1.',
+        forbidden: 'Only the Administrator role can change Click-to-Call settings.',
+        method_not_allowed: 'The server refused the request. Reload the page and try again.',
+        unknown_action: 'The server does not know this request. Reload the page to get the latest version.',
+        internal_error: 'The server had an unexpected error. See the execution log of the CTC Wizard API script.',
+        save_failed: 'The save did not complete. Try again.',
+        outbound_published: 'Unpublish the recording notice first, then change the TwiML App.',
+        nothing_to_save: 'Nothing to save.',
+        config_active: 'Click-to-Call is active, so the setup wizard cannot change settings. Make the change in the console, or deactivate first.',
+        activate_failed: 'Click-to-Call could not change its active setting. Try again.',
+        governance_limit: 'NetSuite stopped the save before it finished (usage limit). Save again to finish.',
+        payload_too_large: 'Too many phone numbers in one save. Save fewer numbers at a time.',
+        load_assignments_failed: 'The rep assignments did not load.',
+        load_routes_failed: 'The inbound routing table did not load.',
+        connection_test_failed: 'The connection test failed, so nothing was saved. The old values are still in use.',
+        EMPTY_SECRET_OR_INVALID: 'Twilio rejected the credentials. Check the API Key SID and the secret value in NetSuite API Secrets.',
+        NETWORK_ERROR: 'NetSuite could not reach Twilio. Try again.'
+    };
+    const friendlyError = (raw) => {
+        const text = String(raw == null ? '' : raw).trim();
+        if (!text)
+            return 'Something went wrong. Try again.';
+        if (MESSAGES[text])
+            return MESSAGES[text];
+        const missing = /^missing_([A-Za-z_]+)$/.exec(text);
+        if (missing) {
+            const label = FIELD_LABELS[missing[1]] || missing[1].replace(/_/g, ' ');
+            return 'Enter the ' + label + '.';
+        }
+        const format = /^invalid_format_([A-Za-z_]+)$/.exec(text);
+        if (format) {
+            const field = format[1];
+            const label = FIELD_LABELS[field] || field.replace(/_/g, ' ');
+            const hint = FORMAT_HINTS[field];
+            return 'The ' + label + ' does not look right' +
+                (hint ? ' (expected ' + hint + ').' : '.');
+        }
+        if (/^[A-Za-z0-9_]+$/.test(text) && text.indexOf('_') >= 0) {
+            return 'The request failed (' + text + '). Try again.';
+        }
+        return text;
+    };
+
     const TOTAL_STEPS = 5;
     const advance = async (currentStep, saver) => {
+        if (store.getState().wizardSaving)
+            return;
         store.dispatch(Action.actionErrorSet(null));
-        const result = await saver();
+        store.dispatch(Action.setWizardSaving(true));
+        let result;
+        try {
+            result = await saver();
+        }
+        finally {
+            store.dispatch(Action.setWizardSaving(false));
+        }
         if (result.ok) {
             goToStep(currentStep + 1);
         }
         else {
-            store.dispatch(Action.actionErrorSet('Save failed (Step ' + currentStep + '): ' + (result.error || 'unknown')));
+            store.dispatch(Action.actionErrorSet('Save failed (Step ' + currentStep + '): ' + friendlyError(result.error || 'unknown')));
         }
     };
     const onContinue = (currentStep) => {
@@ -1174,14 +1681,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const showContinue = currentStep < TOTAL_STEPS;
             if (!showBack && !showContinue)
                 return null;
-            const continueEnabled = isStepValid(currentStep, state);
+            const saving = state.wizardSaving;
+            const continueEnabled = isStepValid(currentStep, state) && !saving;
             const errorMsg = state.console.actionError;
             const items = [];
             if (showBack) {
-                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, action: () => { goToStep(currentStep - 1); } }) }));
+                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, enabled: !saving, action: () => { goToStep(currentStep - 1); } }) }));
             }
             if (showContinue) {
-                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Continue", type: component__namespace.Button.Type.PRIMARY, enabled: continueEnabled, action: () => { onContinue(currentStep); } }) }));
+                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: saving ? 'Saving…' : 'Continue', type: component__namespace.Button.Type.PRIMARY, enabled: continueEnabled, action: () => { onContinue(currentStep); } }) }));
             }
             const row = (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: items }));
             if (!errorMsg)
@@ -1501,6 +2009,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             });
         };
         activate = async () => {
+            if (store.getState().step5.activating)
+                return;
+            store.dispatch(Action.step5FieldChange('activating', true));
+            store.dispatch(Action.step5FieldChange('activateError', null));
             try {
                 const payload = await wizardCall('wizardActivate', {});
                 const resp = payload;
@@ -1513,7 +2025,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     store.dispatch(Action.step5FieldChange('activateError', null));
                 }
                 else {
-                    store.dispatch(Action.step5FieldChange('activateError', (resp && resp.error) || 'unknown'));
+                    store.dispatch(Action.step5FieldChange('activateError', (resp && (resp.errorMessage || resp.error)) || 'unknown'));
                     if (resp && resp.failedChecks) {
                         store.dispatch(Action.consoleLoadSuccess({
                             preflight: resp.failedChecks
@@ -1524,6 +2036,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             catch (e) {
                 const err = e;
                 store.dispatch(Action.step5FieldChange('activateError', 'Network: ' + (err.message || String(e))));
+            }
+            finally {
+                store.dispatch(Action.step5FieldChange('activating', false));
             }
         };
         buildCheckColumns() {
@@ -1672,13 +2187,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const rightCol = (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: rightItems }));
             const items = [];
             items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: leftCol }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: rightCol })] }) }));
-            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: allPassed
-                        ? 'Activate Click-to-Call'
-                        : 'Activate Click-to-Call (fix preflight first)', type: component__namespace.Button.Type.PRIMARY, enabled: allPassed, action: () => { this.activate(); } }) }));
+            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: s.activating
+                        ? 'Activating…'
+                        : allPassed
+                            ? 'Activate Click-to-Call'
+                            : 'Activate Click-to-Call (fix preflight first)', type: component__namespace.Button.Type.PRIMARY, enabled: allPassed && !s.activating, action: () => { this.activate(); } }) }));
             if (s.activateError) {
-                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Activation failed: ", s.activateError] }) }));
+                items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ Activation failed: ' + friendlyError(s.activateError) }) }));
             }
-            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, action: () => { goToStep(4); } }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Re-run preflight", type: component__namespace.Button.Type.DEFAULT, action: this.rerunPreflight }) })] }) }));
+            items.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Back", type: component__namespace.Button.Type.DEFAULT, enabled: !s.activating, action: () => { goToStep(4); } }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Re-run preflight", type: component__namespace.Button.Type.DEFAULT, enabled: !s.activating, action: this.rerunPreflight }) })] }) }));
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: items }));
         }
     }
@@ -1692,7 +2209,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             state: String(r.state ?? ''),
             lastSeen: String(r.lastSeen ?? ''),
             lastChange: String(r.lastChange ?? ''),
-            stale: r.stale !== false
+            stale: r.stale !== false,
+            incomingGranted: r.incomingGranted === true,
+            lastError: String(r.lastError ?? ''),
+            identityMatch: r.identityMatch === true,
+            client: String(r.client ?? '')
         };
     };
     async function loadPresence() {
@@ -1740,7 +2261,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             voiceUrlMatches: typeof raw.voiceUrlMatches === 'boolean' ? raw.voiceUrlMatches : null,
             driftVoiceUrl: DRIFT_STATUSES.indexOf(drift) >= 0
                 ? drift
-                : 'unknown'
+                : 'unknown',
+            publishedNoticeVersion: Number(raw.publishedNoticeVersion) || 0,
+            changesPending: raw.changesPending === true,
+            functionExists: typeof raw.functionExists === 'boolean' ? raw.functionExists : null,
+            functionMessage: str(raw.functionMessage)
         };
     };
     const toSteps = (raw) => {
@@ -1887,9 +2412,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#14B981' };
     const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#F4C76A' };
     const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#9CA3AF' };
+    const PHONE_STATUS_INBOUND_OFF = { label: 'Ready (inbound off)', color: '#14B981' };
     const phoneStatus = (row) => {
         if (!row || row.stale || row.state === 'offline' || !row.state)
             return PHONE_STATUS_OFFLINE;
+        if (!row.incomingGranted)
+            return PHONE_STATUS_INBOUND_OFF;
         if (row.state !== 'registered' || !row.canReceive)
             return PHONE_STATUS_NOT_RECEIVING;
         return PHONE_STATUS_RECEIVING;
@@ -1940,6 +2468,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         });
     };
 
+    const formatPhone = (e164) => {
+        const raw = String(e164 || '');
+        const m = /^\+1([0-9]{3})([0-9]{3})([0-9]{4})$/.exec(raw);
+        return m ? '+1 (' + m[1] + ') ' + m[2] + '-' + m[3] : raw;
+    };
+
     const statusToBadge = (status) => {
         switch (status) {
             case 'pass': return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
@@ -1966,6 +2500,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         if (outbound.loaded && !outbound.published) {
             return { ...row, status: 'not_published', detail: '' };
         }
+        if (outbound.functionExists === false) {
+            return { ...row, status: 'fail', detail: outbound.functionMessage ||
+                    'The outbound Function is missing in Twilio. Publish again.' };
+        }
         if (drift.voiceUrl === 'pass')
             return { ...row, status: 'pass', detail: '' };
         if (drift.voiceUrl === 'fail') {
@@ -1985,8 +2523,59 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         return {
             ...row,
             status: 'pass',
-            detail: outbound.noticeVersion ? 'Notice v' + outbound.noticeVersion : ''
+            detail: outbound.publishedNoticeVersion ? 'Notice v' + outbound.publishedNoticeVersion : ''
         };
+    };
+    const phoneNumbersDriftRow = (c) => {
+        const row = { label: 'Phone numbers' };
+        const numbers = c.phonesNumbers;
+        if (c.phonesListError) {
+            return { ...row, status: 'unknown', detail: 'The Twilio number list did not load: ' + friendlyError(c.phonesListError) };
+        }
+        if (numbers === null || c.assignments === null) {
+            return { ...row, status: 'unknown', detail: 'Open Phones & reps to check the numbers against Twilio.' };
+        }
+        const sids = {};
+        const e164s = {};
+        numbers.forEach((n) => {
+            if (n.sid)
+                sids[n.sid] = true;
+            if (n.phoneNumber)
+                e164s[n.phoneNumber] = true;
+        });
+        const missing = [];
+        const snap = (c.snapshot || {});
+        if (snap.phoneNumber && !e164s[snap.phoneNumber])
+            missing.push(formatPhone(snap.phoneNumber));
+        const seen = {};
+        c.assignments.forEach((a) => {
+            if (!a.phoneSid || seen[a.phoneSid])
+                return;
+            seen[a.phoneSid] = true;
+            if (!sids[a.phoneSid])
+                missing.push(formatPhone(a.phoneNumber) || a.phoneSid);
+        });
+        if (missing.length === 0) {
+            return { ...row, status: 'pass', detail: 'The default caller ID and every assigned number are in Twilio.' };
+        }
+        if (c.phonesHasMore) {
+            return { ...row, status: 'unknown', detail: 'Twilio lists more numbers than were loaded; not checked.' };
+        }
+        return { ...row, status: 'fail', detail: 'Not in the Twilio account: ' + missing.join(', ') };
+    };
+    const intelDriftRow = (c) => {
+        const row = { label: 'Intelligence service' };
+        const snap = (c.snapshot || {});
+        if (c.snapshot && !snap.intelServiceSid) {
+            return { ...row, status: 'info_disabled', detail: 'No Intelligence service is set (no transcripts).' };
+        }
+        const services = c.voiceLists.intelServices;
+        if (c.voiceListErrors.intelServices || services === null || !snap.intelServiceSid) {
+            return { ...row, status: 'unknown', detail: '' };
+        }
+        return services.some((sv) => sv.sid === snap.intelServiceSid)
+            ? { ...row, status: 'pass', detail: '' }
+            : { ...row, status: 'fail', detail: 'The saved service is not in the Twilio account.' };
     };
     class HealthChecks extends core.PureComponent {
         componentDidMount() {
@@ -2064,20 +2653,28 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return content;
         }
         rerunPreflight = async () => {
-            store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: true }));
+            store.dispatch(Action.consolePatch({ preflightRefreshing: true, preflightError: null }));
             try {
                 const payload = await wizardCall('wizardRunPreflight', {});
                 const checks = payload && payload.checks;
-                store.dispatch(Action.consoleLoadSuccess({
-                    preflight: Array.isArray(checks) ? checks : []
-                }));
+                if (Array.isArray(checks)) {
+                    store.dispatch(Action.consolePatch({ preflight: checks }));
+                }
+                else {
+                    const p = (payload || {});
+                    store.dispatch(Action.consolePatch({
+                        preflightError: p.errorMessage || p.error || 'Preflight did not return any checks'
+                    }));
+                }
             }
             catch (e) {
                 const err = e;
-                store.dispatch(Action.actionErrorSet('Preflight failed: ' + (err.message || String(e))));
+                store.dispatch(Action.consolePatch({
+                    preflightError: 'Network: ' + (err.message || String(e))
+                }));
             }
             finally {
-                store.dispatch(Action.consoleLoadSuccess({ preflightRefreshing: false }));
+                store.dispatch(Action.consolePatch({ preflightRefreshing: false }));
             }
         };
         buildCheckColumns() {
@@ -2091,7 +2688,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     stretchFactor: 1,
                     content: (args) => {
                         const row = args?.cell?.row?.dataItem;
-                        const status = row?.status || 'info_enabled';
+                        const status = row?.status || 'unknown';
                         const si = statusIcon(status);
                         return new component__namespace.Image({
                             image: si.icon,
@@ -2135,7 +2732,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     stretchFactor: 2,
                     content: (args) => {
                         const row = args?.cell?.row?.dataItem;
-                        const status = row?.status || 'info_enabled';
+                        const status = row?.status || 'unknown';
                         const sb = statusToBadge(status);
                         return new component__namespace.Badge({
                             content: sb.text,
@@ -2155,19 +2752,24 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const c = state.console;
             const preflight = c.preflight;
             const drift = (c.drift || {});
-            const refreshing = !!c.preflightRefreshing;
+            const refreshing = !!c.preflightRefreshing || (c.loading && preflight === null);
             const driftRows = [
                 voiceUrlDriftRow(drift, state.outbound),
                 outboundVersionRow(state.outbound),
-                { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
-                { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
+                phoneNumbersDriftRow(c),
+                intelDriftRow(c)
             ];
             const columns = this.buildCheckColumns();
             const phonesContent = this.buildPhonesContent(state.presence);
             const preflightContent = [];
             preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight" }) })));
+            if (c.preflightError) {
+                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(ErrorText, { message: 'Preflight did not run: ' + friendlyError(c.preflightError) }) })));
+            }
             if (preflight === null || preflight === undefined) {
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Click \"Re-run\" to evaluate." }) })));
+                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: refreshing
+                            ? 'Running preflight checks…'
+                            : 'Click "Re-run preflight" to evaluate.' }) })));
             }
             else if (preflight.length === 0) {
                 preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No checks returned." }) })));
@@ -2208,12 +2810,20 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: preflightContent }) })),
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: driftContent }) })),
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: phonesContent }) })),
-                c.deactivateError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 Deactivate failed: ", c.deactivateError] }) })),
-                c.actionError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.actionError] }) }))
+                c.actionError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(c.actionError) }) }))
             ].filter(Boolean);
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: outerItems }));
         }
     }
+
+    const buildFailedCheckLines = (checks) => checks
+        .filter((c) => c && c.status !== 'pass')
+        .map((c) => new component__namespace.Text({
+        text: '✕ ' + (c.label || c.id || 'Check') +
+            (c.detail ? ': ' + c.detail : '') +
+            (c.repairHint ? ' → ' + c.repairHint : ''),
+        size: component__namespace.Text.Size.S
+    }));
 
     const toneToImageColor = (tone) => {
         switch (tone) {
@@ -2292,13 +2902,28 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         handleRequestDeactivate = () => { store.dispatch(Action.deactivateRequest()); };
         handleCancelDeactivate = () => { store.dispatch(Action.deactivateSuccess()); };
         handleDeactivate = () => { deactivate(); };
-        handleReactivate = () => { reactivate(); };
+        handleReactivate = () => { reactivate('overview'); };
+        renderActionErrors(c) {
+            const out = [];
+            if (c.deactivateError) {
+                out.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ Deactivate failed: ' + friendlyError(c.deactivateError) }) }));
+            }
+            if (c.reactivateError && c.reactivateSource === 'overview') {
+                out.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ Reactivate failed: ' + friendlyError(c.reactivateError) }) }));
+                buildFailedCheckLines(c.reactivateFailedChecks).forEach((line) => {
+                    out.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: line }));
+                });
+            }
+            return out;
+        }
         render() {
             const state = store.getState();
             const c = state.console;
             const snap = (c.snapshot || {});
             const assignments = (c.assignments || []);
             const preflight = (c.preflight || []);
+            const assignmentsPending = c.assignments === null;
+            const preflightPending = c.preflight === null && c.loading;
             const phoneCount = {};
             assignments.forEach((a) => { if (a.phoneSid)
                 phoneCount[a.phoneSid] = true; });
@@ -2314,28 +2939,30 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const statusTone = snap.active === true ? 'success' : snap.active === false ? 'warning' : 'info';
             return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr 1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Status", metric: statusLabel, description: snap.active === false
                                             ? 'Reps cannot place calls'
-                                            : 'Reps can place calls', icon: statusIcon, tone: statusTone }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Phone numbers", metric: String(phonesConfigured), description: phonesConfigured === 0
-                                            ? 'No numbers configured'
-                                            : (snap.phoneNumber || '') }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Assigned reps", metric: String(repCount), description: repCount === 0
-                                            ? 'No assignments'
-                                            : (repCount === 1 ? '1 rep' : repCount + ' reps') }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Preflight", metric: preflightTotal > 0
-                                            ? preflightPassed + ' of ' + preflightTotal
-                                            : '—', description: preflightTotal > 0
-                                            ? 'See checks below'
-                                            : 'Not yet run' }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
+                                            : 'Reps can place calls', icon: statusIcon, tone: statusTone }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Phone numbers", metric: assignmentsPending ? '…' : String(phonesConfigured), description: assignmentsPending ? 'Loading…'
+                                            : phonesConfigured === 0
+                                                ? 'No numbers configured'
+                                                : formatPhone(snap.phoneNumber) }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Assigned reps", metric: assignmentsPending ? '…' : String(repCount), description: assignmentsPending ? 'Loading…'
+                                            : repCount === 0
+                                                ? 'No assignments'
+                                                : (repCount === 1 ? '1 rep' : repCount + ' reps') }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Preflight", metric: preflightPending ? '…'
+                                            : preflightTotal > 0
+                                                ? preflightPassed + ' of ' + preflightTotal
+                                                : '—', description: preflightPending ? 'Running checks…'
+                                            : preflightTotal > 0
+                                                ? 'See checks below'
+                                                : c.preflightError ? 'Did not run' : 'Not yet run' }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
                                 border: '1px solid #E2E3E5',
                                 borderRadius: '8px',
                                 padding: '18px 22px',
                                 background: '#FAFAFB'
-                            }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Add a phone number", startIcon: core__namespace.SystemIcon.ADD, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.REFRESH, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.PLAY, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Rotate API Key Secret", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), snap.active === false ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reactivate", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, action: this.handleReactivate }) })) : c.pendingDeactivateConfirm ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", action: this.handleCancelDeactivate }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Confirm deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleDeactivate }) })] }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleRequestDeactivate }) }))] }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(HealthChecks, { tick: this.props.tick }) })] }));
+                            }, children: [
+                                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) })),
+                                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Manage phone numbers", startIcon: core__namespace.SystemIcon.CALL, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.GROUPS, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.SETTINGS, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "API key rotation guide", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), snap.active === false ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: c.reactivating ? 'Reactivating…' : 'Reactivate', type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, enabled: !c.reactivating, action: this.handleReactivate }) })) : c.pendingDeactivateConfirm ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", enabled: !c.deactivating, action: this.handleCancelDeactivate }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: c.deactivating ? 'Deactivating…' : 'Confirm deactivate', type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, enabled: !c.deactivating, action: this.handleDeactivate }) })] }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleRequestDeactivate }) }))] }) })),
+                                ...this.renderActionErrors(c)
+                            ] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(HealthChecks, { tick: this.props.tick }) })] }));
         }
     }
-
-    const formatPhone = (e164) => {
-        const raw = String(e164 || '');
-        const m = /^\+1([0-9]{3})([0-9]{3})([0-9]{4})$/.exec(raw);
-        return m ? '+1 (' + m[1] + ') ' + m[2] + '-' + m[3] : raw;
-    };
 
     const truncSid = (sid) => {
         if (!sid)
@@ -2344,30 +2971,34 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return sid;
         return sid.slice(0, 6) + '…' + sid.slice(-4);
     };
+    const idOf = (v) => Number(v && typeof v === 'object' ? v.id : v);
+    const toIds = (values) => (values || []).map(idOf).filter((n) => !isNaN(n) && n > 0);
+    const CARD_STYLE = {
+        border: '1px solid #E2E3E5',
+        borderRadius: '8px',
+        padding: '18px 22px',
+        background: '#FAFAFB'
+    };
     class PhonesPage extends core.PureComponent {
         componentDidMount() {
-            const state = store.getState();
-            if (state.console.phonesNumbers === null) {
+            const c = store.getState().console;
+            if (c.phonesNumbers === null && !c.phonesLoading) {
                 loadPhonesData();
             }
         }
-        buildColumns(employees) {
+        buildColumns(nameOf) {
             const CT = component__namespace.DataGrid.ColumnType;
-            const IM = component__namespace.DataGrid.InputMode;
             const BdgType = component__namespace.Badge.Type;
-            const employeesDs = new core__namespace.ArrayDataSource(employees);
             const statusForRow = (row) => {
                 const state = store.getState();
-                const saving = state.console.phonesSaving[row.phoneSid || ''];
-                const hasReps = (row.employeeIds || []).length > 0;
-                if (saving) {
+                if (state.console.phonesSavingSid === row.phoneSid) {
                     return {
                         icon: core__namespace.SystemIcon.STATUS_INFO_FILLED,
                         color: core__namespace.ImageConstant.Color.INFO,
                         label: 'Saving…'
                     };
                 }
-                if (hasReps) {
+                if (row.employeeIds.length > 0) {
                     return {
                         icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED,
                         color: core__namespace.ImageConstant.Color.SUCCESS,
@@ -2407,7 +3038,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     content: (args) => {
                         const row = args?.cell?.row?.dataItem;
                         return new component__namespace.Text({
-                            text: row?.phoneNumber || '(unknown)',
+                            text: formatPhone(row?.phoneNumber) || '(unknown)',
                             type: component__namespace.Text.Type.STRONG
                         });
                     }
@@ -2427,45 +3058,31 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     }
                 },
                 {
-                    type: CT.MULTI_SELECT_DROPDOWN,
+                    type: CT.TEMPLATED,
                     name: 'reps',
                     label: 'Assigned reps',
-                    stretchFactor: 5,
-                    binding: 'employeeIds',
-                    inputMode: IM.EDIT_ONLY,
-                    dataSource: employeesDs,
-                    editable: true,
-                    displayMember: (value) => {
-                        if (value && typeof value === 'object') {
-                            return value.name || '';
+                    stretchFactor: 4,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        const ids = row ? row.employeeIds : [];
+                        if (ids.length === 0) {
+                            return new component__namespace.Text({ text: '—', type: component__namespace.Text.Type.WEAK });
                         }
-                        const id = Number(value);
-                        const emp = employees.find((e) => e.id === id);
-                        return emp?.name || '';
-                    },
-                    widgetOptions: (args) => {
-                        const dataItem = (args?.cell?.row?.dataItem || {});
-                        const phoneSid = dataItem.phoneSid;
-                        const phoneNumber = dataItem.phoneNumber || '';
-                        const label = dataItem.label || '';
-                        const primary = dataItem.primaryEmployeeId ?? null;
-                        return {
-                            dataSource: employeesDs,
-                            valueMember: 'id',
-                            displayMember: 'name',
-                            placeholder: 'Pick reps',
-                            onSelectionChanged: (sel) => {
-                                const newIds = ((sel && sel.values) || []).map((v) => {
-                                    if (v && typeof v === 'object') {
-                                        return Number(v.id);
-                                    }
-                                    return Number(v);
-                                });
-                                if (phoneSid) {
-                                    savePhonesAssignment(phoneSid, phoneNumber, newIds, label, primary);
-                                }
-                            }
-                        };
+                        return new component__namespace.Text({ text: ids.map(nameOf).join(', ') });
+                    }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'rings',
+                    label: 'Rings',
+                    stretchFactor: 3,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        const primary = row ? rowValues(row, {}).primaryEmployeeId : null;
+                        if (primary === null) {
+                            return new component__namespace.Text({ text: '—', type: component__namespace.Text.Type.WEAK });
+                        }
+                        return new component__namespace.Text({ text: nameOf(primary) });
                     }
                 },
                 {
@@ -2491,38 +3108,130 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                             }
                         });
                     }
+                },
+                {
+                    type: CT.TEMPLATED,
+                    name: 'action',
+                    label: '',
+                    stretchFactor: 2,
+                    content: (args) => {
+                        const row = args?.cell?.row?.dataItem;
+                        if (!row)
+                            return new component__namespace.Text({ text: '' });
+                        const c = store.getState().console;
+                        return new component__namespace.Button({
+                            label: 'Edit',
+                            startIcon: core__namespace.SystemIcon.EDIT,
+                            enabled: c.phonesSavingSid === null && c.phonesEditingSid !== row.phoneSid,
+                            action: () => { openPhonesEditor(row.phoneSid); }
+                        });
+                    }
                 }
             ];
+        }
+        renderEditor(row, employees, nameOf) {
+            const c = store.getState().console;
+            const values = rowValues(row, c.phonesDrafts);
+            const savingThis = c.phonesSavingSid === row.phoneSid;
+            const anySaving = c.phonesSavingSid !== null;
+            const dirty = !!c.phonesDrafts[row.phoneSid];
+            const rowError = c.phonesRowErrors[row.phoneSid];
+            const selectedItems = values.employeeIds
+                .map((id) => employees.find((e) => e.id === id) ||
+                { id, name: nameOf(id) });
+            const repsPicker = (jsxRuntime.jsx(component__namespace.MultiselectDropdown, { dataSource: new core__namespace.ArrayDataSource(employees), valueMember: "id", displayMember: "name", selectedItems: selectedItems, comparator: (l, r) => idOf(l) === idOf(r), placeholder: "Pick reps", enabled: !savingThis, onSelectionChanged: (args) => {
+                    editPhonesRow(row.phoneSid, { employeeIds: toIds(args && args.values) });
+                }, rootStyle: { width: '100%' } }));
+            const ringOptions = values.employeeIds.map((id) => ({ id, name: nameOf(id) }));
+            const ringsPicker = ringOptions.length === 0
+                ? new component__namespace.Text({ text: 'Assign a rep first.', type: component__namespace.Text.Type.WEAK })
+                : new component__namespace.Dropdown({
+                    dataSource: new core__namespace.ArrayDataSource(ringOptions),
+                    valueMember: 'id',
+                    displayMember: 'name',
+                    selectedValue: values.primaryEmployeeId,
+                    enabled: !savingThis && ringOptions.length > 1,
+                    onSelectionChanged: (sel) => {
+                        const id = idOf(sel && sel.value);
+                        if (!id || id === values.primaryEmployeeId)
+                            return;
+                        editPhonesRow(row.phoneSid, { primaryEmployeeId: id });
+                    }
+                });
+            const buttons = new component__namespace.StackPanel({
+                orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
+                itemGap: component__namespace.StackPanel.GapSize.S,
+                items: [
+                    new component__namespace.Button({
+                        label: savingThis ? 'Saving…' : 'Save',
+                        type: component__namespace.Button.Type.PRIMARY,
+                        enabled: dirty && !anySaving,
+                        action: () => { savePhonesRow(row.phoneSid); }
+                    }),
+                    new component__namespace.Button({
+                        label: 'Cancel',
+                        enabled: !savingThis,
+                        action: () => { cancelPhonesRow(row.phoneSid); }
+                    })
+                ]
+            });
+            const item = (node) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }));
+            const label = (text) => item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: text }));
+            const items = [
+                item(jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: formatPhone(row.phoneNumber) + (row.friendlyName ? '  —  ' + row.friendlyName : '') })),
+                label('Assigned reps'),
+                item(repsPicker),
+                label('Rings'),
+                item(ringsPicker),
+                item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Inbound calls to this number ring this rep, and this rep calls out from this number." })),
+                item(buttons)
+            ];
+            if (rowError) {
+                items.push(item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(rowError) })));
+            }
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: { ...CARD_STYLE, maxWidth: '640px' }, children: items }));
         }
         render() {
             const state = store.getState();
             const c = state.console;
-            const grouped = (c.phonesByPhone || []);
-            const employees = (c.phonesEmployees || []);
-            if (c.phonesLoading) {
+            const employees = (c.phonesEmployees || [])
+                .map((e) => ({ id: Number(e.id), name: e.name || '' }));
+            const nameOf = (id) => employees.find((e) => e.id === id)?.name || ('Employee ' + id);
+            const routingNumberErrors = c.phonesRoutingErrors.filter((e) => !!e.phoneNumber);
+            const routingPublishErrors = c.phonesRoutingErrors.filter((e) => !e.phoneNumber);
+            if (c.phonesByPhone === null && c.phonesLoading) {
                 return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
                             label: 'Loading phones & reps…',
                             indeterminate: true
                         }) }) }));
             }
-            const columns = this.buildColumns(employees);
-            const rowsDs = grouped.length > 0 ? new core__namespace.ArrayDataSource(grouped) : null;
+            const rows = (c.phonesByPhone || [])
+                .map((r) => ({ ...r, employeeIds: r.employeeIds.slice() }));
+            const editingRow = c.phonesEditingSid
+                ? rows.find((r) => r.phoneSid === c.phonesEditingSid) || null
+                : null;
+            const refreshing = c.phonesLoading;
             const items = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Refresh from Twilio", startIcon: core__namespace.SystemIcon.REFRESH, action: () => { loadPhonesData(); } }) }) }) })),
-                c.phonesError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.phonesError] }) })),
-                c.phonesRoutingErrors.length > 0 && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: '⚠ Inbound routing did not update for: ' +
-                            c.phonesRoutingErrors.map((e) => formatPhone(e.phoneNumber)).join(', ') }) })),
-                grouped.length === 0 ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No phone numbers found in your Twilio account. Buy one in the Twilio Console (link above) then click \"Refresh from Twilio\" to pick it up and assign reps inline." }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
-                        dataSource: rowsDs,
-                        columns,
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Refreshing…' : 'Refresh from Twilio', startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { loadPhonesData(); } }) }) }) })),
+                c.phonesListError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ The Twilio phone numbers did not load: ' + friendlyError(c.phonesListError) +
+                            ' Click "Refresh from Twilio" to try again.' }) })),
+                c.phonesError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(c.phonesError) }) })),
+                c.phonesHasMore && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Only the first 100 Twilio numbers are shown." }) })),
+                routingNumberErrors.length > 0 && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: '⚠ Inbound routing did not update for: ' +
+                            routingNumberErrors.map((e) => formatPhone(e.phoneNumber)).join(', ') }) })),
+                routingPublishErrors.length > 0 && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: '⚠ Inbound routing did not publish: ' +
+                            routingPublishErrors.map((e) => e.message).join(' ') }) })),
+                rows.length === 0 ? (!c.phonesListError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No phone numbers found in your Twilio account. Buy one in the Twilio Console, then click \"Refresh from Twilio\" to pick it up and assign reps." }) }))) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+                        dataSource: new core__namespace.ArrayDataSource(rows),
+                        columns: this.buildColumns(nameOf),
                         columnStretch: true,
                         highlightRowsOnHover: true,
                         stripedRows: true,
                         dataRowHeight: 72,
                         headerRowHeight: 44,
-                        editable: true,
                         rootStyle: { width: '100%' }
-                    }) }))
+                    }) })),
+                editingRow && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: this.renderEditor(editingRow, employees, nameOf) }))
             ].filter(Boolean);
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XL, children: items }));
         }
@@ -2618,11 +3327,18 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     const DEFAULT_RECORDING_NOTICE = 'This call may be recorded for quality and training.';
     const RECORDING_NOTICE_MAX_LENGTH = 300;
     const RING_SECONDS = [10, 15, 20, 25, 30, 45, 60];
+    const OFF_STILL_ROUTED_WARNING = '⚠ Numbers still point at the flow; callers hear the no-answer message.';
     const voicemailLengthLabel = (seconds) => {
         if (seconds % 60 !== 0)
             return seconds + ' seconds';
         const minutes = seconds / 60;
         return minutes + (minutes === 1 ? ' minute' : ' minutes');
+    };
+    const publishFailureText = (inbound) => {
+        const last = inbound.lastPublish;
+        if (!last || last.ok || last.skipped)
+            return '';
+        return last.message || 'Routing was not published. Publish again.';
     };
     const statusLine = (inbound) => {
         const last = inbound.lastPublish;
@@ -2702,8 +3418,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 jsxRuntime.jsx(component__namespace.Switch, { label: "Ring reps in the browser", value: inbound.inboundEnabled, action: (args) => {
                         store.dispatch(Action.inboundFieldChange({ inboundEnabled: !!(args && args.value) }));
                     } }),
-                !inbound.inboundEnabled &&
+                !inbound.inboundEnabled && !inbound.flowSid &&
                     weak$1('Off: phones do not ring; callers hear the no-answer message.'),
+                !inbound.inboundEnabled && !!inbound.flowSid &&
+                    jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: OFF_STILL_ROUTED_WARNING }),
                 weak$1('Open phones pick up a change within an hour, or at once after a reload.')
             ]);
             const ringTime = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
@@ -2784,6 +3502,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 action: () => { saveInbound(); }
             });
             const errors = (inbound.lastPublish && inbound.lastPublish.errors) || [];
+            const failure = publishFailureText(inbound);
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, rootStyle: { maxWidth: '560px' }, children: [
                     item$1(inboundSwitch),
                     item$1(ringTime),
@@ -2792,10 +3511,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     item$1(fallbackOwner),
                     item$1(recording),
                     item$1(saveButton),
-                    item$1(inbound.saveError ? jsxRuntime.jsx(ErrorText, { message: inbound.saveError }) : false),
+                    item$1(inbound.saveError ? jsxRuntime.jsx(ErrorText, { message: friendlyError(inbound.saveError) }) : false),
                     item$1(vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                         jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: statusLine(inbound) }),
-                        ...errors.map((e) => (jsxRuntime.jsx(ErrorText, { message: formatPhone(e.phoneNumber) + ': ' + e.message })))
+                        failure && jsxRuntime.jsx(ErrorText, { message: failure }),
+                        ...errors.map((e) => (jsxRuntime.jsx(ErrorText, { message: (e.phoneNumber ? formatPhone(e.phoneNumber) + ': ' : '') + e.message })))
                     ]))
                 ].filter(Boolean) }));
         }
@@ -2817,7 +3537,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 table,
                 weak$1('The primary rep on Phones & reps is the one who rings.'),
                 new component__namespace.Button({
-                    label: 'Publish again',
+                    label: inbound.publishing ? 'Publishing…' : 'Publish again',
                     enabled: !busy,
                     action: () => { publishRouting(); }
                 })
@@ -2838,7 +3558,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             if (!inbound.loaded) {
                 return vstack$1(component__namespace.StackPanel.GapSize.L, [
                     description,
-                    jsxRuntime.jsx(ErrorText, { message: inbound.loadError || 'Could not load inbound settings' }),
+                    jsxRuntime.jsx(ErrorText, { message: friendlyError(inbound.loadError || 'Could not load inbound settings') }),
                     new component__namespace.Button({
                         label: 'Retry',
                         startIcon: core__namespace.SystemIcon.REFRESH,
@@ -2855,47 +3575,52 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     }
 
     async function loadVoiceLists() {
-        store.dispatch(Action.consoleLoadSuccess({ voiceListsLoading: true }));
-        const safe = (promise) => promise.catch(() => null);
-        try {
-            const [twiml, phones, intel] = await Promise.all([
-                safe(wizardCall('wizardListTwiMLApps', {})),
-                safe(wizardCall('wizardListPhoneNumbers', {})),
-                safe(wizardCall('wizardListIntelServices', {}))
-            ]);
-            const voiceLists = {
-                twimlApps: (twiml && twiml.items) || [],
-                phoneNumbers: (phones && phones.items) || [],
-                intelServices: (intel && intel.items) || []
-            };
-            store.dispatch(Action.consoleLoadSuccess({
-                voiceLists,
-                voiceListsLoading: false
-            }));
-        }
-        catch (e) {
-            const msg = e instanceof Error ? e.message : 'Voice lists load failed';
-            store.dispatch(Action.consoleLoadSuccess({
-                voiceListsLoading: false,
-                voiceError: msg
-            }));
-        }
+        store.dispatch(Action.consolePatch({ voiceListsLoading: true, voiceListErrors: {} }));
+        const fetchList = async (action) => {
+            try {
+                const r = (await wizardCall(action, {}));
+                const items = (r && Array.isArray(r.items)) ? r.items : [];
+                const error = r && (r.errorMessage || r.error);
+                return error ? { items, error: String(error) } : { items };
+            }
+            catch (e) {
+                return { items: [], error: e instanceof Error && e.message ? 'Network: ' + e.message : 'load_failed' };
+            }
+        };
+        const [twiml, phones, intel] = await Promise.all([
+            fetchList('wizardListTwiMLApps'),
+            fetchList('wizardListPhoneNumbers'),
+            fetchList('wizardListIntelServices')
+        ]);
+        const voiceListErrors = {};
+        if (twiml.error)
+            voiceListErrors.twimlApps = twiml.error;
+        if (phones.error)
+            voiceListErrors.phoneNumbers = phones.error;
+        if (intel.error)
+            voiceListErrors.intelServices = intel.error;
+        store.dispatch(Action.consolePatch({
+            voiceLists: {
+                twimlApps: twiml.items,
+                phoneNumbers: phones.items,
+                intelServices: intel.items
+            },
+            voiceListErrors,
+            voiceListsLoading: false
+        }));
     }
     async function saveVoiceField(field, value) {
         store.dispatch(Action.voiceFieldSave({ phase: 'start' }));
-        const state = store.getState();
-        const snap = state.console.snapshot || {};
-        const payload = {
-            twimlAppSid: snap.twimlAppSid || '',
-            phoneNumber: snap.phoneNumber || '',
-            intelServiceSid: snap.intelServiceSid || ''
-        };
+        const payload = { partial: true };
         payload[field] = value;
+        if (field === 'intelServiceSid' && !value)
+            payload.clearIntelService = true;
         try {
             const result = await wizardCall('wizardSaveVoice', payload);
             const saved = result && (result.saved === true);
             if (!saved) {
-                const err = (result && result.error) || 'Voice save failed';
+                const r = (result || {});
+                const err = r.errorMessage || r.error || 'Voice save failed';
                 store.dispatch(Action.voiceFieldSave({ phase: 'failure', error: err }));
                 return;
             }
@@ -2923,12 +3648,17 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     const outboundStatusLine = (outbound) => {
         if (!outbound.published)
             return 'Not published yet';
+        const live = outbound.publishedNoticeVersion
+            ? 'notice v' + outbound.publishedNoticeVersion
+            : 'no notice';
+        if (outbound.changesPending)
+            return 'Live: ' + live + ' · Saved changes not published yet';
         const when = new Date(outbound.publishedAt);
         const whenText = !outbound.publishedAt
             ? ''
             : isNaN(when.getTime()) ? outbound.publishedAt : when.toLocaleString();
         return 'Published' + (whenText ? ' ' + whenText : '') +
-            (outbound.noticeVersion ? ' · notice v' + outbound.noticeVersion : '');
+            (outbound.publishedNoticeVersion ? ' · notice v' + outbound.publishedNoticeVersion : '');
     };
     const item = (node) => node ? jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }) : false;
     const vstack = (gap, nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: gap, children: nodes.map(item).filter(Boolean) }));
@@ -3108,11 +3838,38 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const state = store.getState();
         store.dispatch(Action.voiceFieldEdit(state.console.voiceEditing, value));
     };
+    const optionsFor = (field, list) => list.map((it) => {
+        if (field === 'phoneNumber') {
+            return {
+                value: it.phoneNumber || '',
+                label: formatPhone(it.phoneNumber) +
+                    (it.friendlyName ? '  —  ' + it.friendlyName : '')
+            };
+        }
+        return {
+            value: it.sid || '',
+            label: (it.friendlyName || '(unnamed)') +
+                (it.sid ? '  [' + it.sid + ']' : '')
+        };
+    });
+    const effectiveValue = (spec, options, pending) => {
+        if (pending && options.some((o) => o.value === pending))
+            return pending;
+        if (spec.allowEmpty)
+            return null;
+        return options.length > 0 ? options[0].value : null;
+    };
     const handleSave = (spec) => {
-        const state = store.getState();
-        const pending = state.console.voicePendingValue;
-        if (pending !== null && pending !== undefined) {
-            saveVoiceField(spec.field, pending);
+        const c = store.getState().console;
+        const list = c.voiceLists[listKeyFor(spec.field)];
+        if (!list)
+            return;
+        const value = effectiveValue(spec, optionsFor(spec.field, list), c.voicePendingValue);
+        if (value) {
+            saveVoiceField(spec.field, value);
+        }
+        else if (spec.allowEmpty) {
+            saveVoiceField(spec.field, '');
         }
     };
     class VoicePage extends core.PureComponent {
@@ -3177,8 +3934,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         const isEditing = c.voiceEditing === row.field;
                         if (!isEditing) {
                             const value = snap[row.field];
-                            if (value)
-                                return new component__namespace.Text({ text: value });
+                            if (value) {
+                                return new component__namespace.Text({
+                                    text: row.field === 'phoneNumber' ? formatPhone(value) : value
+                                });
+                            }
                             return new component__namespace.Text({
                                 text: '(not configured)',
                                 type: component__namespace.Text.Type.WEAK
@@ -3192,33 +3952,27 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                                 indeterminate: true
                             });
                         }
+                        const listError = c.voiceListErrors[listKey];
+                        if (listError) {
+                            return new component__namespace.Text({
+                                text: '✕ The Twilio list did not load: ' + friendlyError(listError),
+                                type: component__namespace.Text.Type.STRONG,
+                                size: component__namespace.Text.Size.S
+                            });
+                        }
                         if (list.length === 0) {
                             return new component__namespace.Text({
                                 text: '(no items found in Twilio for this account)',
                                 type: component__namespace.Text.Type.WEAK
                             });
                         }
-                        const normalized = list.map((it) => {
-                            if (row.field === 'phoneNumber') {
-                                return {
-                                    value: it.phoneNumber || '',
-                                    label: (it.phoneNumber || '') +
-                                        (it.friendlyName ? '  —  ' + it.friendlyName : '')
-                                };
-                            }
-                            return {
-                                value: it.sid || '',
-                                label: (it.friendlyName || '(unnamed)') +
-                                    (it.sid ? '  [' + it.sid + ']' : '')
-                            };
-                        });
+                        const normalized = optionsFor(row.field, list);
                         const ds = new core__namespace.ArrayDataSource(normalized);
-                        const pending = c.voicePendingValue;
                         return new component__namespace.Dropdown({
                             dataSource: ds,
                             valueMember: 'value',
                             displayMember: 'label',
-                            selectedValue: pending || (row.allowEmpty ? null : normalized[0].value),
+                            selectedValue: effectiveValue(row, normalized, c.voicePendingValue),
                             allowEmpty: !!row.allowEmpty,
                             placeholder: row.allowEmpty ? '(none)' : 'Select…',
                             onSelectionChanged: handlePendingChange
@@ -3250,6 +4004,23 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                             return new component__namespace.Button({
                                 label: 'Cancel',
                                 action: handleCancel
+                            });
+                        }
+                        if (c.voiceListErrors[listKey]) {
+                            return new component__namespace.StackPanel({
+                                orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
+                                itemGap: component__namespace.StackPanel.GapSize.S,
+                                items: [
+                                    new component__namespace.Button({
+                                        label: 'Retry',
+                                        startIcon: core__namespace.SystemIcon.REFRESH,
+                                        action: () => { loadVoiceLists(); }
+                                    }),
+                                    new component__namespace.Button({
+                                        label: 'Cancel',
+                                        action: handleCancel
+                                    })
+                                ]
                             });
                         }
                         if (list.length === 0) {
@@ -3285,7 +4056,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const rowsDs = new core__namespace.ArrayDataSource(FIELD_SPECS);
             const items = [
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Manage TwiML application, default outbound caller-ID number, and optional Conversational Intelligence service. Changes save immediately and apply to the next call placed." }) })),
-                c.voiceError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: ["\u2715 ", c.voiceError] }) })),
+                c.voiceError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(c.voiceError) }) })),
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
                         dataSource: rowsDs,
                         columns,
@@ -3302,6 +4073,63 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    function startCredentialsEdit() {
+        const snap = (store.getState().console.snapshot || {});
+        store.dispatch(Action.credentialsUpdate({
+            editing: true,
+            apiKeySid: snap.apiKeySid || '',
+            apiSecretId: snap.apiSecretId || '',
+            error: null,
+            failedChecks: [],
+            saved: false
+        }));
+    }
+    function cancelCredentialsEdit() {
+        if (store.getState().credentials.saving)
+            return;
+        store.dispatch(Action.credentialsUpdate({
+            editing: false, error: null, failedChecks: []
+        }));
+    }
+    async function saveCredentials() {
+        const creds = store.getState().credentials;
+        if (creds.saving)
+            return;
+        store.dispatch(Action.credentialsUpdate({ saving: true, error: null, failedChecks: [], saved: false }));
+        try {
+            const result = (await wizardCall('wizardSaveCredentials', {
+                apiKeySid: creds.apiKeySid.trim(),
+                apiSecretId: creds.apiSecretId.trim()
+            }));
+            if (!result || result.saved !== true) {
+                const checks = (result && Array.isArray(result.checks)) ? result.checks : [];
+                store.dispatch(Action.credentialsUpdate({
+                    saving: false,
+                    error: (result && (result.errorMessage || result.error)) || 'save_failed',
+                    failedChecks: checks.filter((c) => c.status !== 'pass')
+                }));
+                return;
+            }
+            const snap = store.getState().console.snapshot;
+            store.dispatch(Action.consolePatch({
+                snapshot: {
+                    ...(snap || {}),
+                    apiKeySid: result.apiKeySid || creds.apiKeySid.trim(),
+                    apiSecretId: result.apiSecretId || creds.apiSecretId.trim()
+                }
+            }));
+            store.dispatch(Action.credentialsUpdate({
+                saving: false, editing: false, error: null, failedChecks: [], saved: true
+            }));
+        }
+        catch (e) {
+            store.dispatch(Action.credentialsUpdate({
+                saving: false,
+                error: e instanceof Error && e.message ? 'Network: ' + e.message : 'save_failed'
+            }));
+        }
+    }
+
     const TWILIO_CREDS_DOCS = {
         accountSid: 'https://www.twilio.com/docs/iam/api/account',
         apiKeySid: 'https://www.twilio.com/docs/iam/api-keys',
@@ -3314,6 +4142,57 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             }
             catch (e) { }
         };
+        renderChangeForm(creds) {
+            const item = (node) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }));
+            if (!creds.editing) {
+                const out = [];
+                if (creds.saved) {
+                    out.push(item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "\u2713 Saved. The connection test passed with the new API key." })));
+                }
+                out.push(item(new component__namespace.Button({
+                    label: 'Change API key',
+                    startIcon: core__namespace.SystemIcon.EDIT,
+                    action: () => { startCredentialsEdit(); }
+                })));
+                return out;
+            }
+            const field = (label, value, placeholder, key) => [
+                (jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: label }) })),
+                (jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.TextBox, { text: value, placeholder: placeholder, enabled: !creds.saving, onTextChanged: (args) => {
+                            store.dispatch(Action.credentialsUpdate({ [key]: (args && args.text) || '' }));
+                        }, rootStyle: { width: '100%' } }) }))
+            ];
+            const out = [
+                item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Enter the new key's SID and the script ID of the NetSuite API Secret that holds its secret. Click-to-Call tests the connection with the new values first. If the test fails, nothing is saved and the current key stays in use." })),
+                item(jsxRuntime.jsx(component__namespace.GridPanel, { columns: "220px 1fr", rows: "auto auto", columnGap: component__namespace.GridPanel.GapSize.M, rowGap: component__namespace.GridPanel.GapSize.S, rootStyle: { maxWidth: '640px' }, children: [
+                        ...field('New API Key SID', creds.apiKeySid, 'SK…', 'apiKeySid'),
+                        ...field('New API Key Secret script ID', creds.apiSecretId, 'custsecret_…', 'apiSecretId')
+                    ] })),
+                item(new component__namespace.StackPanel({
+                    orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
+                    itemGap: component__namespace.StackPanel.GapSize.S,
+                    items: [
+                        new component__namespace.Button({
+                            label: creds.saving ? 'Testing connection…' : 'Test and save',
+                            type: component__namespace.Button.Type.PRIMARY,
+                            enabled: !creds.saving &&
+                                creds.apiKeySid.trim() !== '' && creds.apiSecretId.trim() !== '',
+                            action: () => { saveCredentials(); }
+                        }),
+                        new component__namespace.Button({
+                            label: 'Cancel',
+                            enabled: !creds.saving,
+                            action: () => { cancelCredentialsEdit(); }
+                        })
+                    ]
+                }))
+            ];
+            if (creds.error) {
+                out.push(item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(creds.error) })));
+                buildFailedCheckLines(creds.failedChecks).forEach((line) => { out.push(item(line)); });
+            }
+            return out;
+        }
         buildColumns() {
             const CT = component__namespace.DataGrid.ColumnType;
             return [
@@ -3381,6 +4260,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         render() {
             const state = store.getState();
             const snap = (state.console.snapshot || {});
+            const changeForm = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: this.renderChangeForm(state.credentials) }) }));
             const rows = [
                 {
                     label: 'Account SID',
@@ -3423,37 +4303,56 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         headerRowHeight: 40,
                         rootStyle: { width: '100%' }
                     }) })),
+                changeForm,
                 openSecretsButton,
                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XS, rootStyle: {
                             padding: '12px 16px',
                             border: '1px solid #E2E3E5',
                             borderRadius: '4px',
                             background: '#F7F8F9'
-                        }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Rotation runbook" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: "1. Mint a new API Key Secret in the Twilio Console (Account > API Keys & tokens)." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: "2. Update the secret value in NetSuite (Setup > Company > API Secrets) \u2014 keep the same script id so the wizard pointer above stays valid." }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: "3. Revoke the old Twilio API Key once you've verified call placement works with the new secret." }) })] }) }))
+                        }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "API key rotation guide" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '1. In the Twilio Console (Account › API keys & tokens), create a new Standard API key. Copy its secret at once: Twilio shows a key\'s secret only when you create the key, and you cannot change the secret of an existing key.' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '2. In NetSuite (Setup › Company › API Secrets), create a new secret with that value. Give it the same allowed scripts and allowed domains as the current secret. The allowed scripts must include CTC Setup Wizard API, CTC Token Generator and CTC Poll Transcripts: NetSuite does not let a script read this list, so the test cannot check it for the other two. Note its script ID (custsecret_…).' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '3. On this page, click "Change API key". Enter the new API Key SID (SK…, a new SID) and the new secret\'s script ID, then click "Test and save". If the test fails, the current key stays in use.' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '4. Reload phone mode, then place a test call. A phone that stays open keeps its old-key token until it renews (up to 1 hour).' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '5. Wait until open phones renew (up to 1 hour), or ask reps to reload phone mode. Then delete the old API key in the Twilio Console, and then the old secret in NetSuite API Secrets.' }) })] }) }))
             ].filter(Boolean);
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: items }));
         }
     }
 
-    const NavRail = () => {
+    let drawers = [];
+    const railValueFor = (state) => state.mode === 'stepper' && !isConfigActive(state) ? 're-run' : state.selectedSection;
+    const syncRailSelection = () => {
+        const value = railValueFor(store.getState());
+        drawers.forEach((d) => {
+            if (d.rootElement && d.rootElement.isConnected && d.selectedValue !== value) {
+                d.setSelectedValue(value, { reason: 'ctc-sync' });
+            }
+        });
+    };
+    registerRailSync(syncRailSelection);
+    const navigate = (value) => {
+        if (value === 're-run') {
+            goToStep(1);
+            return;
+        }
+        goToSection(value);
+    };
+    const NavRail = (_props) => {
         const state = store.getState();
         const assignments = state.console.assignments;
         const assignmentBadge = assignments ? String(assignments.length) : undefined;
         const canRerun = !isConfigActive(state);
+        const item = (value, label, icon, extra = {}) => ({
+            value, label, icon, action: () => { navigate(value); }, ...extra
+        });
         const navItems = [
-            { value: 'overview', label: 'Overview', icon: core__namespace.SystemIcon.CARD_VIEW },
-            { value: 'phones', label: 'Phones & reps', icon: core__namespace.SystemIcon.CALL,
-                badge: assignmentBadge },
-            { value: 'inbound', label: 'Inbound calls', icon: core__namespace.SystemIcon.CALL },
-            { value: 'voice', label: 'Voice config', icon: core__namespace.SystemIcon.SETTINGS },
-            { value: 'credentials', label: 'Credentials', icon: core__namespace.SystemIcon.LOCK }
+            item('overview', 'Overview', core__namespace.SystemIcon.CARD_VIEW),
+            item('phones', 'Phones & reps', core__namespace.SystemIcon.GROUPS, { badge: assignmentBadge }),
+            item('inbound', 'Inbound calls', core__namespace.SystemIcon.CALL),
+            item('voice', 'Voice config', core__namespace.SystemIcon.SETTINGS),
+            item('credentials', 'Credentials', core__namespace.SystemIcon.LOCK)
         ];
         if (canRerun) {
-            navItems.push({ value: 're-run', label: 'Re-run wizard', icon: core__namespace.SystemIcon.REFRESH,
-                separatorTop: true,
-                action: () => { goToStep(1); } });
+            navItems.push(item('re-run', 'Re-run wizard', core__namespace.SystemIcon.REFRESH, { separatorTop: true }));
         }
-        const selectedVal = state.mode === 'stepper' && canRerun ? 're-run' : state.selectedSection;
+        const selectedVal = railValueFor(state);
         const drawer = new component__namespace.NavigationDrawer({
             items: navItems,
             selectedValue: selectedVal,
@@ -3463,13 +4362,14 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 const value = args && args.value;
                 if (!value)
                     return;
-                if (value === 're-run') {
-                    goToStep(1);
+                if (value === railValueFor(store.getState()))
                     return;
-                }
-                goToSection(value);
+                navigate(value);
             }
         });
+        drawers.push(drawer);
+        const recent = drawers.slice(-3);
+        drawers = drawers.filter((d) => recent.indexOf(d) >= 0 || (!!d.rootElement && d.rootElement.isConnected));
         return drawer;
     };
 
@@ -3482,14 +4382,16 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     };
 
     const PausedBanner = (props) => {
-        const handleReactivate = props.onReactivate || (() => { reactivate(); });
+        const c = store.getState().console;
+        const handleReactivate = props.onReactivate || (() => { reactivate('banner'); });
         const bodyText = new component__namespace.Text({
-            text: 'Reps cannot place calls until you reactivate. All ' +
-                'config is preserved.'
+            text: 'Reps\' phones stop within about a minute; calls in progress finish. ' +
+                'Calling stays off until you reactivate. All config is preserved.'
         });
         const reactivateBtn = new component__namespace.Button({
-            label: 'Reactivate',
+            label: c.reactivating ? 'Reactivating…' : 'Reactivate',
             type: component__namespace.Button.Type.PRIMARY,
+            enabled: !c.reactivating,
             action: handleReactivate
         });
         const contentRow = new component__namespace.StackPanel({
@@ -3499,9 +4401,24 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             justification: component__namespace.StackPanel.Justification.SPACE_BETWEEN,
             alignment: component__namespace.StackPanel.Alignment.CENTER
         });
+        const showError = !!c.reactivateError && c.reactivateSource === 'banner';
+        const content = showError
+            ? new component__namespace.StackPanel({
+                items: [
+                    contentRow,
+                    new component__namespace.Text({
+                        text: '✕ Reactivate failed: ' + friendlyError(c.reactivateError),
+                        type: component__namespace.Text.Type.STRONG
+                    }),
+                    ...buildFailedCheckLines(c.reactivateFailedChecks)
+                ],
+                orientation: component__namespace.StackPanel.Orientation.VERTICAL,
+                itemGap: component__namespace.StackPanel.GapSize.XS
+            })
+            : contentRow;
         const banner = new component__namespace.BannerMessage({
             title: 'Click-to-Call is paused',
-            content: contentRow,
+            content,
             type: component__namespace.BannerMessage.Type.WARNING,
             showCloseButton: false
         });
@@ -3523,11 +4440,14 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const isPaused = snap?.active === false;
         const subtitle = subtitleFor(state.selectedSection);
         const contentItems = [
-            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Click-to-Call Admin Console" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: subtitle }) })] }) })),
-            isPaused && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PausedBanner, {}) })),
+            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, rootAttributes: {
+                                    'data-ctc-page-heading': '',
+                                    'aria-label': 'Click-to-Call Admin Console: ' + subtitle
+                                }, children: "Click-to-Call Admin Console" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: subtitle }) })] }) })),
+            isPaused && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PausedBanner, { tick: props.tick }) })),
             (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children }))
         ].filter(Boolean);
-        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, {}) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: contentItems }) }) })] }));
+        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, { tick: props.tick }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: contentItems }) }) })] }));
     };
 
     const STEPS = [
@@ -3574,10 +4494,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const step = state.currentStep;
         const stepLabel = STEPS[step - 1]?.label || '';
         const subtitle = 'Step ' + step + ' of ' + STEPS.length + ' — ' + stepLabel;
-        const innerStack = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, children: "Click-to-Call Setup Wizard" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: subtitle }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { grow: 1, children: jsxRuntime.jsx(Stepper, { currentStep: step, tick: props.tick }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children })] }));
+        const innerStack = (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, rootAttributes: {
+                                        'data-ctc-page-heading': '',
+                                        'aria-label': 'Click-to-Call Setup Wizard: ' + subtitle
+                                    }, children: "Click-to-Call Setup Wizard" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: subtitle }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { grow: 1, children: jsxRuntime.jsx(Stepper, { currentStep: step, tick: props.tick }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children })] }));
         const paddedContent = (jsxRuntime.jsx(RailContentShell, { children: innerStack }));
         if (state.railVisible) {
-            return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, {}) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: paddedContent })] }));
+            return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, { tick: props.tick }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: paddedContent })] }));
         }
         return paddedContent;
     };
@@ -3593,6 +4516,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         };
         componentDidMount() {
             this.storeUnsubscribe = store.subscribe(this.forceRerender);
+            startHashRouting();
             this.initializeApp();
         }
         componentWillUnmount() {
@@ -3605,18 +4529,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             store.dispatch(Action.setMountRouting(true));
             try {
                 const payload = await wizardCall('wizardSnapshot', {});
-                const snap = (payload && payload.snapshot) || {};
+                const raw = payload && payload.snapshot;
+                const snap = raw || {};
                 store.dispatch(Action.consoleLoadSuccess({ snapshot: snap }));
-                const target = determineLandingStep(snap);
-                if (target === 'console') {
-                    goToConsole();
-                }
-                else {
-                    goToStep(target);
-                }
+                landFromHash(raw ? determineLandingStep(snap) : 1);
             }
             catch (e) {
-                goToStep(1);
+                landFromHash(1);
             }
             finally {
                 store.dispatch(Action.setMountRouting(false));

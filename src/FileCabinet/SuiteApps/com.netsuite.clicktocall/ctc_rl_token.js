@@ -27,10 +27,11 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     const post = (requestBody) => {
         const body = requestBody || {};
 
-        // Session check for the phone (no queries, no gate): NetSuite itself
-        // answers 401 SESSION_TIMED_OUT before this runs when the session
-        // is gone, so reaching here means the session is alive.
-        if (body.action === 'sessionPing')          return { ok: true };
+        // Session check for the phone (no gate): NetSuite itself answers
+        // 401 SESSION_TIMED_OUT before this runs when the session is gone,
+        // so reaching here means the session is alive. Also says whether
+        // CTC is active, so open phones pause within a minute.
+        if (body.action === 'sessionPing')          return sessionPing();
 
         // Actions open to any internal user: the dashboard portlet and
         // Reporting Central (managers, admins) call these and scope the
@@ -58,7 +59,12 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 details: 'action=' + (body.action || 'token') + ' reason=' + gate.reason +
                          ' userId=' + runtime.getCurrentUser().id
             });
-            return { error: NOT_A_PHONE_USER };
+            // paused: CTC is switched off (not this user's access). The
+            // phone waits for sessionPing to say active again instead of
+            // treating the refusal as permanent.
+            return gate.reason === 'ctc_inactive'
+                ? { error: NOT_A_PHONE_USER, paused: true }
+                : { error: NOT_A_PHONE_USER };
         }
 
         if (body.action === 'logCall')              return logCall(body);
@@ -73,6 +79,26 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         if (body.action === 'phoneHeartbeat')       return phoneHeartbeat(body);
 
         return generateToken(body, gate.config);
+    };
+
+    /**
+     * sessionPing answer: { ok: true, active } where active is the config
+     * flag custrecord_ctc_active (one config search, 10 units). No gate.
+     * A config read error leaves `active` out: the phone keeps its state
+     * (the token gate still fails closed).
+     * @returns {{ok:true, active?:boolean}}
+     */
+    const sessionPing = () => {
+        try {
+            const cfg = loadConfig();
+            return { ok: true, active: !!cfg && cfg.active === true };
+        } catch (e) {
+            const msg = (e && e.message) || String(e);
+            // No config record at all = not active (fresh install).
+            if (/not found/i.test(msg)) return { ok: true, active: false };
+            log.error({ title: 'CTC sessionPing — config read failed', details: msg });
+            return { ok: true };
+        }
     };
 
     // --- Phone user gate (tokens + phone actions) ---
@@ -817,7 +843,18 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 return { status: 'pending' };
             }
 
+            // Sentences before the claim (2026-11-03): a failed fetch is
+            // TRANSIENT_ERROR, not []. Nothing is saved, the recording is
+            // kept, no attempt is spent; the browser retries and the poller
+            // backfills. A real empty transcript ([]) is saved as before.
+            const sentences = utils.fetchSentences(transcript.sid, authHeader);
+            if (utils.isTransientError(sentences)) {
+                return { status: 'transient', reason: 'twilio_unreachable' };
+            }
+
             // Claim before the LLM (fresh read + Processing / processed T).
+            // A call past the attempt cap is closed by the claim (gave_up →
+            // answered as terminal).
             const claim = callClaim.claimForAnalysis(body.recordId);
             if (!claim.ok) {
                 if (claim.reason === 'claim_failed') return { status: 'transient', reason: 'claim_failed' };
@@ -825,7 +862,6 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             }
             claimed = true;
 
-            const sentences = utils.fetchSentences(transcript.sid, authHeader);
             const transcriptText = utils.formatTranscript(sentences, { inbound: inbound });
 
             let analysis = {
@@ -863,6 +899,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             });
             const savedRecordId = phoneCall.save();
             saved = true;
+            // Proposed tasks only after the save, at most once (never throws).
+            utils.createProposedTasksOnce(savedRecordId || body.recordId, analysis, dates.callDate);
 
             // Sprint 2 review #8 — mirror the scheduled-script's
             // cleanup_pending flag-set on transient DELETE failure.

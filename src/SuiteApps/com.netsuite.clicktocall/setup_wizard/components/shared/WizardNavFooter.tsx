@@ -26,6 +26,7 @@ import {goToStep} from '../../app/effects/navigation';
 import {saveStep2, saveStep3, saveStep4, SaveResult} from '../../app/effects/steps';
 import {isStepValid} from '../../app/Validation';
 import type {AppState} from '../../app/InitialState';
+import {friendlyError} from './friendlyError';
 
 const TOTAL_STEPS = 5;
 
@@ -33,13 +34,21 @@ const advance = async (
     currentStep: number,
     saver: () => Promise<SaveResult>
 ): Promise<void> => {
+    // One save at a time: a double click must not run two saves.
+    if ((store.getState() as AppState).wizardSaving) return;
     store.dispatch(Action.actionErrorSet(null));
-    const result = await saver();
+    store.dispatch(Action.setWizardSaving(true));
+    let result: SaveResult;
+    try {
+        result = await saver();
+    } finally {
+        store.dispatch(Action.setWizardSaving(false));
+    }
     if (result.ok) {
         goToStep(currentStep + 1);
     } else {
         store.dispatch(Action.actionErrorSet(
-            'Save failed (Step ' + currentStep + '): ' + (result.error || 'unknown')
+            'Save failed (Step ' + currentStep + '): ' + friendlyError(result.error || 'unknown')
         ));
     }
 };
@@ -70,7 +79,8 @@ export class WizardNavFooter extends PureComponent<WizardNavFooterProps, unknown
         const showContinue = currentStep < TOTAL_STEPS;
         if (!showBack && !showContinue) return null;
 
-        const continueEnabled = isStepValid(currentStep, state);
+        const saving = state.wizardSaving;
+        const continueEnabled = isStepValid(currentStep, state) && !saving;
         const errorMsg = state.console.actionError;
 
         const items: core.VDom.Node[] = [];
@@ -81,6 +91,7 @@ export class WizardNavFooter extends PureComponent<WizardNavFooterProps, unknown
                     <component.Button
                         label="Back"
                         type={component.Button.Type.DEFAULT}
+                        enabled={!saving}
                         action={(): void => { goToStep(currentStep - 1); }}
                     />
                 </component.StackPanel.Item>
@@ -91,7 +102,7 @@ export class WizardNavFooter extends PureComponent<WizardNavFooterProps, unknown
             items.push(
                 <component.StackPanel.Item>
                     <component.Button
-                        label="Continue"
+                        label={saving ? 'Saving…' : 'Continue'}
                         type={component.Button.Type.PRIMARY}
                         enabled={continueEnabled}
                         action={(): void => { onContinue(currentStep); }}

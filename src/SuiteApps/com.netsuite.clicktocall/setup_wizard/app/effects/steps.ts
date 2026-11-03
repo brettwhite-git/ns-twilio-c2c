@@ -260,7 +260,9 @@ export async function saveStep4(): Promise<SaveResult> {
     // eslint-disable-next-line no-console
     console.log('[CTC Setup Wizard] Step 4 Continue — payload rows (' + rows.length + '):', rows);
 
-    return callSave('wizardSaveAssignments', {assignments: rows});
+    // stepper: the server refuses a stepper save while CTC is active
+    // (error config_active); console Phones saves send no flag.
+    return callSave('wizardSaveAssignments', {assignments: rows, stepper: true});
 }
 
 /**
