@@ -33,6 +33,18 @@ export function startCredentialsEdit(): void {
     }));
 }
 
+/**
+ * Twilio account page: the key fields are always shown. The first
+ * keystroke starts an edit from the saved values, then applies the change.
+ */
+export function editCredentialsField(key: 'apiKeySid' | 'apiSecretId', value: string): void {
+    const creds = (store.getState() as AppState).credentials;
+    if (creds.saving) return;
+    if (!creds.editing) startCredentialsEdit();
+    store.dispatch(Action.credentialsUpdate({ [key]: value, saved: false }));
+}
+
+/** Discard the typed key values (back to the saved ones). */
 export function cancelCredentialsEdit(): void {
     if ((store.getState() as AppState).credentials.saving) return;
     store.dispatch(Action.credentialsUpdate({

@@ -10,6 +10,10 @@
  * Matches the legacy AppController.buildRailContentPane structure where
  * `wrapContent(d, stack)` wrapped the ENTIRE content stack (title +
  * banner + body) in one padded ContentPanel.
+ *
+ * 2026-11-03 console rebuild: the shared "Click-to-Call Admin Console"
+ * heading is gone (each page has its own header, as in the canvas); the
+ * content panel carries the console style scope (consoleStyles.ts).
  */
 
 import * as core from '@uif-js/core';
@@ -18,17 +22,8 @@ import {store} from '../../app/Store';
 import {NavRail} from './NavRail';
 import {RailContentShell} from './RailContentShell';
 import {PausedBanner} from './PausedBanner';
-import type {AppState, SectionName} from '../../app/InitialState';
-
-const subtitleFor = (section: SectionName): string => {
-    switch (section) {
-        case 'overview':    return 'Overview';
-        case 'phones':      return 'Phones & reps';
-        case 'inbound':     return 'Inbound calls';
-        case 'voice':       return 'Voice config';
-        case 'credentials': return 'Credentials';
-    }
-};
+import type {AppState} from '../../app/InitialState';
+import {CONSOLE_CLASS, ensureConsoleStyles} from './consoleStyles';
 
 interface ConsoleShellProps {
     children?: core.VDom.Node | core.VDom.Node[];
@@ -36,45 +31,15 @@ interface ConsoleShellProps {
 }
 
 export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
+    ensureConsoleStyles();
     const state = store.getState() as AppState;
     const snap = state.console.snapshot as { active?: boolean } | null | undefined;
     const isPaused = snap?.active === false;
-    const subtitle = subtitleFor(state.selectedSection);
 
-    // Page header — H2 title + small WEAK subtitle, matching the
-    // Quick actions / Recent activity / preflight section headers so
-    // the page hierarchy reads consistently top-to-bottom.
+    // Each page renders its own header (title = focus target after
+    // navigation, see ui.pageHeader). The paused banner sits above it on
+    // every page.
     const contentItems = [
-        (
-            <component.StackPanel.Item>
-                <component.StackPanel
-                    orientation={component.StackPanel.Orientation.VERTICAL}
-                    itemGap={component.StackPanel.GapSize.XXS}
-                >
-                    <component.StackPanel.Item>
-                        {/* Focus target after a page change (navigation.ts
-                            afterNavigate); the label names the page. */}
-                        <component.Heading
-                            level={2}
-                            rootAttributes={{
-                                'data-ctc-page-heading': '',
-                                'aria-label': 'Click-to-Call Admin Console: ' + subtitle
-                            }}
-                        >
-                            Click-to-Call Admin Console
-                        </component.Heading>
-                    </component.StackPanel.Item>
-                    <component.StackPanel.Item>
-                        <component.Text
-                            type={component.Text.Type.WEAK}
-                            size={component.Text.Size.S}
-                        >
-                            {subtitle}
-                        </component.Text>
-                    </component.StackPanel.Item>
-                </component.StackPanel>
-            </component.StackPanel.Item>
-        ),
         isPaused && (
             <component.StackPanel.Item>
                 <PausedBanner tick={props.tick} />
@@ -97,10 +62,10 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
                 <NavRail tick={props.tick} />
             </component.GridPanel.Item>
             <component.GridPanel.Item>
-                <RailContentShell>
+                <RailContentShell classList={[CONSOLE_CLASS]}>
                     <component.StackPanel
                         orientation={component.StackPanel.Orientation.VERTICAL}
-                        itemGap={component.StackPanel.GapSize.L}
+                        itemGap={component.StackPanel.GapSize.SPACING4X}
                     >
                         {contentItems as never}
                     </component.StackPanel>

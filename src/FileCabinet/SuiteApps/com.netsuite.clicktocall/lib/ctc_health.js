@@ -13,7 +13,10 @@
  *     { ok: false, error: 'config_not_found' }   (no config record)
  *   Signal = { key, title, value, severity, detail, action? }
  *     severity  'ok' | 'warn' | 'problem' | 'unknown'
- *     action    { label, route }  route = SPA hash ('#/inbound', ...)
+ *     action    { label, route }  route = an Admin Console page hash:
+ *               '#/inbound', '#/phones', '#/outbound', '#/transcripts',
+ *               '#/health' (SPA app/routes.ts). Every warn / problem
+ *               signal has one.
  *   attention = the 'problem' signals, then the 'warn' signals, in signal
  *   order. 'unknown' (could not check) is not in attention.
  *
@@ -69,10 +72,13 @@ define(['N/query', 'N/search', 'N/log',
         fallbackOwner: 'Fallback call owner'
     };
 
+    /** Admin Console pages (SPA setup_wizard/app/routes.ts SECTIONS). */
     const ROUTES = {
         inbound: '#/inbound',
         phones: '#/phones',
-        voice: '#/voice'
+        outbound: '#/outbound',
+        transcripts: '#/transcripts',
+        health: '#/health'
     };
 
     const MINUTE_MS = 60 * 1000;
@@ -136,6 +142,7 @@ define(['N/query', 'N/search', 'N/log',
     };
 
     const republishAction = () => ({ label: 'Publish again', route: ROUTES.inbound });
+    const transcriptsAction = () => ({ label: 'See Transcripts & AI', route: ROUTES.transcripts });
 
     /** Pure. The non-ok, non-unknown signals: problem first, then warn. */
     const buildAttention = (signals) => SIGNAL_KEYS
@@ -176,14 +183,14 @@ define(['N/query', 'N/search', 'N/log',
         if (value.stuck > 0) {
             return signal('transcriptBacklog', value, 'problem',
                 plural(value.stuck, 'call is', 'calls are') + ' still open after more than 26 hours. ' +
-                'Check the Twilio credentials and the Intelligence service.');
+                'Check the Twilio credentials and the Intelligence service.', transcriptsAction());
         }
         const parts = [];
         if (value.failed > 0) parts.push(plural(value.failed, 'call', 'calls') + ' failed in the last 7 days');
         if (value.cleanupPending > 0) {
             parts.push(plural(value.cleanupPending, 'recording is', 'recordings are') + ' not deleted from Twilio yet');
         }
-        if (parts.length) return signal('transcriptBacklog', value, 'warn', parts.join('. ') + '.');
+        if (parts.length) return signal('transcriptBacklog', value, 'warn', parts.join('. ') + '.', transcriptsAction());
         const open = value.logged + value.processing;
         return signal('transcriptBacklog', value, 'ok',
             open ? plural(open, 'call waits', 'calls wait') + ' for a transcript.' : 'No calls wait for a transcript.');
@@ -250,9 +257,11 @@ define(['N/query', 'N/search', 'N/log',
             warns.push('Call sync is ' + watermarkMinutes + ' minutes behind');
         }
 
-        if (problems.length) return signal('pollerRuns', value, 'problem', problems.concat(warns).join('. ') + '.');
+        if (problems.length) {
+            return signal('pollerRuns', value, 'problem', problems.concat(warns).join('. ') + '.', transcriptsAction());
+        }
         if (unreadable) return signal('pollerRuns', value, 'unknown', 'The run times could not be read.');
-        if (warns.length) return signal('pollerRuns', value, 'warn', warns.join('. ') + '.');
+        if (warns.length) return signal('pollerRuns', value, 'warn', warns.join('. ') + '.', transcriptsAction());
         return signal('pollerRuns', value, 'ok', 'Both jobs ran in the last ' + POLLER_STALE_MINUTES + ' minutes.');
     };
 
@@ -267,9 +276,10 @@ define(['N/query', 'N/search', 'N/log',
         }
         const n = Number(remaining);
         if (n < AI_PROBLEM_BELOW) {
-            return signal('aiQuota', n, 'problem', n + ' AI requests left. New calls are saved without AI analysis.');
+            return signal('aiQuota', n, 'problem', n + ' AI requests left. New calls are saved without AI analysis.',
+                transcriptsAction());
         }
-        if (n < AI_WARN_BELOW) return signal('aiQuota', n, 'warn', 'Only ' + n + ' AI requests left.');
+        if (n < AI_WARN_BELOW) return signal('aiQuota', n, 'warn', 'Only ' + n + ' AI requests left.', transcriptsAction());
         return signal('aiQuota', n, 'ok', n + ' AI requests left.');
     };
 
@@ -314,7 +324,8 @@ define(['N/query', 'N/search', 'N/log',
         if (notReceiving.length) {
             const names = notReceiving.map((r) => r.employeeName || ('Employee ' + r.employeeId));
             return signal('repPhones', value, 'warn',
-                'Not receiving calls: ' + names.join(', ') + '. Ask the rep to open the phone (or reload it).');
+                'Not receiving calls: ' + names.join(', ') + '. Ask the rep to open the phone (or reload it).',
+                { label: 'See rep phones', route: ROUTES.health });
         }
         return signal('repPhones', value, 'ok', 'Every routed rep can receive calls.');
     };
@@ -483,7 +494,7 @@ define(['N/query', 'N/search', 'N/log',
             functionExists: st ? st.functionExists : null,
             voiceUrlMatches: st ? st.voiceUrlMatches : null
         };
-        const act = { label: 'Open Voice', route: ROUTES.voice };
+        const act = { label: 'Open Outbound calls', route: ROUTES.outbound };
         if (!published) {
             if (noticeOn) return signal('outboundNotice', value, 'warn', 'The notice is on but not published.', act);
             return signal('outboundNotice', value, 'ok', 'Not published (the notice is off).');
@@ -514,7 +525,7 @@ define(['N/query', 'N/search', 'N/log',
         const i = input || {};
         const sid = String(i.serviceSid || '');
         const list = i.list || { ok: false };
-        const act = { label: 'Open Voice', route: ROUTES.voice };
+        const act = { label: 'Open Transcripts & AI', route: ROUTES.transcripts };
         if (!sid) {
             return signal('intelligence', { serviceSid: '', exists: null, autoTranscribe: null, friendlyName: '' },
                 'warn', 'No Intelligence service is saved.', act);
@@ -533,7 +544,7 @@ define(['N/query', 'N/search', 'N/log',
         if (!svc) return signal('intelligence', value, 'problem', 'The saved service is not in the Twilio account.', act);
         if (value.autoTranscribe === false) {
             return signal('intelligence', value, 'problem',
-                'Auto-transcribe is off in Twilio, so calls get no transcript. Turn it on in the Twilio Console.');
+                'Auto-transcribe is off in Twilio, so calls get no transcript. Turn it on in the Twilio Console.', act);
         }
         if (value.autoTranscribe === null) {
             return signal('intelligence', value, 'unknown', 'Twilio did not report auto-transcribe.');

@@ -18,6 +18,7 @@
 import {store} from '../Store';
 import {Action} from '../Action';
 import {wizardCall} from '../../services/wizardApi';
+import {loadHealth} from './health';
 import type {
     AppState,
     InboundEmployee,
@@ -109,6 +110,8 @@ export async function saveInbound(): Promise<void> {
             settings: result.settings || settings,
             publish: result.publish
         }));
+        // The routing signals (Since last publish, Needs attention) changed.
+        loadHealth();
     } catch (e) {
         store.dispatch(Action.inboundSave({ phase: 'failure', error: errorText(e, 'Save failed') }));
     }
@@ -128,6 +131,7 @@ export async function publishRouting(): Promise<void> {
             return;
         }
         store.dispatch(Action.inboundPublish({ phase: 'success', publish: result.publish }));
+        loadHealth();
     } catch (e) {
         store.dispatch(Action.inboundPublish({ phase: 'failure', error: errorText(e, 'Publish failed') }));
     }

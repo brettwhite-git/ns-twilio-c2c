@@ -1,451 +1,215 @@
 /**
- * Overview page — admin-console landing (U2).
+ * Overview page (#/overview) — canvas Main.dc.html.
  *
- * Phase 4 (2026-05-28) — JSX rewrite of components/sections/overview.ts.
- * Three blocks stacked vertically:
- *   0. Needs attention   — problem / warn signals from wizardLoadHealth
- *                          (title + one action button); hidden when none
- *   1. Stat-card grid    — 4 KPI cards (status, phones, reps, preflight)
- *   2. Quick actions     — row of 5 deep-link buttons
- *   3. Health checks     — preflight, drift, phones (HealthChecks)
+ *   Header           "Overview" · "Click-to-Call · N numbers · N reps"
+ *   Status card      Active / Paused, one line from the config and the
+ *                    last preflight; Pause calling (confirm) / Resume.
+ *   Four KPI cards   UIF Card.metric, each opens its page:
+ *                    Numbers routed (numberRouting), Reps receiving now
+ *                    (repPhones), Waiting for transcripts
+ *                    (transcriptBacklog), Missed-call sync (pollerRuns).
+ *   Call Central     link to the Reporting Central Suitelet.
+ *   Needs attention  wizardLoadHealth `attention` (problem, then warn;
+ *                    unknown never listed): title, detail, action button
+ *                    (opens the page in the app). Empty: "Nothing needs
+ *                    attention."
+ * The health signals reload every time the page opens.
  */
 
 import {PureComponent} from '@uif-js/core';
 import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
-import {Action} from '../../app/Action';
-import {goToSection, parseHash} from '../../app/effects/navigation';
-import {deactivate, reactivate} from '../../app/effects/console';
-import type {AppState, HealthAttentionItem, SectionName} from '../../app/InitialState';
+import {loadHealth} from '../../app/effects/health';
+import {goToSection} from '../../app/effects/navigation';
+import type {AppState, CheckResult, HealthAttentionItem, SectionName} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
-import HealthChecks from './HealthChecks';
-import {formatPhone} from '../shared/formatPhone';
 import {friendlyError} from '../shared/friendlyError';
-import {buildFailedCheckLines} from '../shared/FailedChecks';
-
-interface ConsoleSnapshot {
-    active?: boolean;
-    phoneNumber?: string;
-}
+import {PauseControl} from '../shared/PauseControl';
+import {relativeTime} from '../shared/phoneStatus';
+import {
+    CALL_CENTRAL_URL, backlogKpi, missedCallSyncKpi, numbersRoutedKpi, repsReceivingKpi, timeOfDay
+} from '../shared/consoleModel';
+import type {
+    BacklogValue, KpiView, NumberRoutingValue, PollerRunsValue, RepPhonesValue, Tone
+} from '../shared/consoleModel';
+import {
+    button, card, cardTitle, chip, divider, dot, dotText, errorLine, extLink, grid, help, hstack,
+    pageHeader, skeleton, text, vstack, Gap
+} from '../shared/ui';
+import type {Child} from '../shared/ui';
+import {openHealthAction} from './HealthPage';
 
 interface AssignmentRow {
     phoneSid?: string;
+    employeeId?: number | string;
 }
 
-interface CheckRow {
-    status?: string;
+const PENDING: KpiView = { metric: '…', metadata: '', tone: null, text: 'Checking…' };
+
+/** Status card line: what reps can do, the Twilio check and its time. */
+export function statusLine(active: boolean | undefined, inboundOn: boolean | null,
+    checks: CheckResult[] | null, at: string, running: boolean, failed: boolean): string {
+    if (active === false) return 'Reps cannot place or receive calls until you resume.';
+    const can = inboundOn === false ? 'Reps can place calls; inbound calls are off.' : 'Reps can place and receive calls.';
+    if (running) return can + ' Running checks…';
+    if (failed || !checks) return can + (failed ? ' The checks did not run.' : '');
+    const passed = checks.filter((c) => c.status === 'pass').length;
+    const twilio = checks.find((c) => c.id === 'twilio_reachable');
+    const parts: string[] = [];
+    if (twilio) parts.push(twilio.status === 'pass' ? 'Twilio connected' : 'Twilio not reachable');
+    const when = timeOfDay(at);
+    parts.push((passed === checks.length ? 'checks passed' : passed + ' of ' + checks.length + ' checks passed') +
+        (when ? ' at ' + when : ''));
+    return can + ' ' + parts.join(' · ') + '.';
 }
-
-// ─────────────────────────────────────────────────────────────────────
-// StatCard — uses UIF Card.metric() for proper KPI styling (padding,
-// border, baseline). Matches the legacy buildStatCard exactly.
-// ─────────────────────────────────────────────────────────────────────
-
-interface StatCardProps {
-    title: string;
-    metric: string;
-    description: string;
-    icon?: unknown;
-    tone?: 'success' | 'warning' | 'info' | 'neutral';
-}
-
-const toneToImageColor = (tone: StatCardProps['tone']): unknown => {
-    switch (tone) {
-        case 'success': return core.ImageConstant.Color.SUCCESS;
-        case 'warning': return core.ImageConstant.Color.WARNING;
-        case 'info':    return core.ImageConstant.Color.INFO;
-        case 'neutral': return core.ImageConstant.Color.NEUTRAL;
-        default: return undefined;
-    }
-};
-
-const buildIconedDescription = (props: StatCardProps): unknown => {
-    const iconColor = toneToImageColor(props.tone);
-    const icon = new component.Image({
-        image: props.icon,
-        size: component.Image.Size.S,
-        color: iconColor,
-        presentation: true
-    } as never);
-    const descText = props.description
-        ? new component.Text({
-            text: props.description,
-            type: component.Text.Type.WEAK,
-            size: component.Text.Size.S
-        })
-        : null;
-    // StackPanel `items` accepts Component instances directly OR
-    // StructuredItemConfiguration { component, options? } — both are
-    // valid ItemConfiguration shapes per the catalog.
-    const items = [
-        icon,
-        descText
-    ].filter(Boolean);
-    return new component.StackPanel({
-        items,
-        orientation: component.StackPanel.Orientation.HORIZONTAL,
-        itemGap: component.StackPanel.GapSize.XS,
-        alignment: component.StackPanel.Alignment.CENTER
-    } as never);
-};
-
-const buildStatCard = (props: StatCardProps): core.VDom.Node => {
-    // Card.metric is the canonical UIF KPI card factory — provides title,
-    // metric value, and description slots with built-in styling. Matches
-    // legacy buildStatCard in _archive/.../components/shared/shell.ts.
-    try {
-        const card = (component.Card as unknown as {
-            metric: (opts: object) => unknown;
-        }).metric({
-            title: props.title,
-            metric: props.metric,
-            description: props.icon
-                ? buildIconedDescription(props)
-                : props.description
-        });
-        return card as never;
-    } catch (e) {
-        // Fallback to hand-rolled stack if Card.metric throws.
-        const titleText = new component.Text({
-            text: props.title,
-            type: component.Text.Type.WEAK,
-            size: component.Text.Size.S
-        });
-        const metricText = new component.Text({
-            text: props.metric,
-            type: component.Text.Type.STRONG
-        });
-        const descText = props.description
-            ? new component.Text({
-                text: props.description,
-                type: component.Text.Type.WEAK,
-                size: component.Text.Size.S
-            })
-            : null;
-        const items = [titleText, metricText, descText].filter(Boolean);
-        return new component.StackPanel({
-            items,
-            orientation: component.StackPanel.Orientation.VERTICAL,
-            itemGap: component.StackPanel.GapSize.XXS
-        } as never) as never;
-    }
-};
-
-const StatCard = (props: StatCardProps): core.VDom.Node => buildStatCard(props);
-
-// ─────────────────────────────────────────────────────────────────────
-// OverviewPage
-// ─────────────────────────────────────────────────────────────────────
 
 export default class OverviewPage extends PureComponent<PageTickProps, unknown> {
-    private handleNav = (section: SectionName): void => goToSection(section);
-
-    // Deactivate asks twice: the first click shows Cancel / Confirm.
-    private handleRequestDeactivate = (): void => { store.dispatch(Action.deactivateRequest()); };
-
-    // deactivateSuccess clears pendingDeactivateConfirm in the reducer.
-    private handleCancelDeactivate = (): void => { store.dispatch(Action.deactivateSuccess()); };
-
-    private handleDeactivate = (): void => { deactivate(); };
-
-    private handleReactivate = (): void => { reactivate('overview'); };
-
-    /** Deactivate / Reactivate errors, shown under the quick-action buttons. */
-    private renderActionErrors(c: AppState['console']): core.VDom.Node[] {
-        const out: core.VDom.Node[] = [];
-        if (c.deactivateError) {
-            out.push(
-                <component.StackPanel.Item>
-                    <component.Text type={component.Text.Type.STRONG}>
-                        {'✕ Deactivate failed: ' + friendlyError(c.deactivateError)}
-                    </component.Text>
-                </component.StackPanel.Item>
-            );
-        }
-        if (c.reactivateError && c.reactivateSource === 'overview') {
-            out.push(
-                <component.StackPanel.Item>
-                    <component.Text type={component.Text.Type.STRONG}>
-                        {'✕ Reactivate failed: ' + friendlyError(c.reactivateError)}
-                    </component.Text>
-                </component.StackPanel.Item>
-            );
-            buildFailedCheckLines(c.reactivateFailedChecks).forEach((line) => {
-                out.push(<component.StackPanel.Item>{line as never}</component.StackPanel.Item>);
-            });
-        }
-        return out;
+    componentDidMount(): void {
+        loadHealth();
     }
 
-    /** Open the page a health action names (a hash like '#/inbound'). */
-    private handleAttentionAction = (route: string): void => {
-        const r = parseHash(route);
-        if (r && r.kind === 'section') this.handleNav(r.section);
-    };
+    private kpiCard(title: string, kpi: KpiView, section: SectionName): unknown {
+        const description = kpi.tone
+            ? dotText(kpi.tone, kpi.text, undefined, { small: true })
+            : text(kpi.text, { weak: true, small: true });
+        try {
+            return (component.Card as unknown as { metric: (o: object) => unknown }).metric({
+                title,
+                metric: kpi.metric,
+                metadata: kpi.metadata,
+                description,
+                action: (): void => { goToSection(section); },
+                cardOptions: { classList: ['ctc-card'] }
+            });
+        } catch (e) {
+            // Card.metric missing in this UIF build: the same content in a plain card.
+            return card([text(title, { weak: true, small: true }), text(kpi.metric + ' ' + kpi.metadata, { strong: true }),
+                description, button('Open', () => { goToSection(section); }, { small: true, link: true })]);
+        }
+    }
 
-    /**
-     * "Needs attention": one row per problem / warn signal (title + its
-     * action button). Nothing when the health load has not landed or all
-     * signals are ok / unknown. Phase 2 redesigns this block.
-     */
-    private renderAttention(items: HealthAttentionItem[]): core.VDom.Node | null {
-        if (!items.length) return null;
-        const rows: core.VDom.Node[] = [
-            <component.StackPanel.Item>
-                <component.Heading level={3}>Needs attention</component.Heading>
-            </component.StackPanel.Item>
-        ];
-        items.forEach((item) => {
-            const action = item.action;
-            rows.push(
-                <component.StackPanel.Item>
-                    <component.StackPanel
-                        orientation={component.StackPanel.Orientation.HORIZONTAL}
-                        itemGap={component.StackPanel.GapSize.S}
-                        alignment={component.StackPanel.Alignment.CENTER}
-                    >
-                        {[
-                            (<component.StackPanel.Item>
-                                {new component.Image({
-                                    image: item.severity === 'problem'
-                                        ? core.SystemIcon.STATUS_ERROR_FILLED
-                                        : core.SystemIcon.STATUS_WARNING_FILLED,
-                                    size: component.Image.Size.S,
-                                    color: item.severity === 'problem'
-                                        ? core.ImageConstant.Color.DANGER
-                                        : core.ImageConstant.Color.WARNING,
-                                    presentation: true
-                                } as never) as never}
-                            </component.StackPanel.Item>),
-                            (<component.StackPanel.Item>
-                                <component.Text type={component.Text.Type.STRONG}>
-                                    {item.title}
-                                </component.Text>
-                            </component.StackPanel.Item>),
-                            action ? (
-                                <component.StackPanel.Item>
-                                    <component.Button
-                                        label={action.label}
-                                        action={(): void => this.handleAttentionAction(action.route)}
-                                    />
-                                </component.StackPanel.Item>
-                            ) : null
-                        ].filter(Boolean) as never}
-                    </component.StackPanel>
-                </component.StackPanel.Item>
-            );
-        });
-        return (
-            <component.StackPanel.Item>
-                <component.StackPanel
-                    orientation={component.StackPanel.Orientation.VERTICAL}
-                    itemGap={component.StackPanel.GapSize.S}
-                >
-                    {rows as never}
-                </component.StackPanel>
-            </component.StackPanel.Item>
-        );
+    private renderStatus(state: AppState): core.VDom.Node {
+        const c = state.console;
+        const snap = (c.snapshot || {}) as { active?: boolean };
+        const routing = state.health.signals.routingChanged;
+        const inboundOn = routing && routing.value
+            ? (routing.value as { inboundEnabled?: boolean }).inboundEnabled === true : null;
+        const tone: Tone = snap.active === false ? 'warn' : snap.active === true ? 'ok' : 'off';
+        const title = snap.active === false ? 'Paused' : snap.active === true ? 'Active' : 'Unknown';
+        const running = !!c.preflightRefreshing || (c.loading && c.preflight === null);
+        return card([
+            grid('auto minmax(0, 1fr) auto', [
+                dot(tone),
+                vstack([
+                    new component.Text({ text: title, size: component.Text.Size.L, weight: component.Text.Weight.BOLD } as never),
+                    text(statusLine(snap.active, inboundOn, c.preflight as CheckResult[] | null, c.preflightAt,
+                        running, !!c.preflightError), { weak: true, small: true })
+                ], Gap.SPACING1X),
+                <PauseControl tick={this.props.tick} />
+            ], Gap.SPACING3X)
+        ], { label: 'Status' });
+    }
+
+    private renderKpis(state: AppState): core.VDom.Node {
+        const h = state.health;
+        const value = <T,>(key: string): T | null => {
+            const s = h.signals[key];
+            return s && s.value ? s.value as T : null;
+        };
+        const waiting = !h.loaded && (h.loading || !h.error);
+        const nowMs = Date.now() + state.presence.clockSkewMs;
+        const kpi = (v: KpiView): KpiView => (waiting ? PENDING : v);
+        return grid('repeat(4, minmax(0, 1fr))', [
+            this.kpiCard('Numbers routed', kpi(numbersRoutedKpi(value<NumberRoutingValue>('numberRouting'))), 'phones'),
+            this.kpiCard('Reps receiving now',
+                kpi(repsReceivingKpi(value<RepPhonesValue>('repPhones'), (iso) => relativeTime(iso, nowMs))), 'health'),
+            this.kpiCard('Waiting for transcripts', kpi(backlogKpi(value<BacklogValue>('transcriptBacklog'))), 'transcripts'),
+            this.kpiCard('Missed-call sync', kpi(missedCallSyncKpi(value<PollerRunsValue>('pollerRuns'))), 'transcripts')
+        ], Gap.SPACING3X, { stretch: true });
+    }
+
+    private renderCallCentral(): core.VDom.Node {
+        return card([
+            grid('auto minmax(0, 1fr) auto', [
+                new component.Image({
+                    image: core.SystemIcon.CHART_BAR,
+                    size: component.Image.Size.M,
+                    color: core.ImageConstant.Color.INFO,
+                    presentation: true
+                } as never),
+                vstack([
+                    text('Call Central', { strong: true }),
+                    text('Calls, follow-ups and missed calls for the whole team. Reps see their own view from the dashboard.',
+                        { weak: true, small: true })
+                ], Gap.SPACING1X),
+                extLink('Open Call Central', CALL_CENTRAL_URL)
+            ], Gap.SPACING3X)
+        ], { label: 'Call Central' });
+    }
+
+    private attentionRow(item: HealthAttentionItem, first: boolean): core.VDom.Node {
+        const action = item.action;
+        return grid('20px minmax(0, 1fr) auto', [
+            dot(item.severity === 'problem' ? 'problem' : 'warn'),
+            vstack([text(item.title, { strong: true }), item.detail ? help(item.detail) : null], Gap.SPACING1X),
+            action ? button(action.label, () => { openHealthAction(action); }, { small: true, primary: first }) : null
+        ], Gap.SPACING3X);
+    }
+
+    private renderAttention(state: AppState): core.VDom.Node {
+        const h = state.health;
+        const items = h.attention.filter((i) => i.severity === 'problem' || i.severity === 'warn');
+        const when = timeOfDay(h.checkedAt);
+        const header = hstack([
+            cardTitle('Needs attention'),
+            h.loaded && items.length ? chip(String(items.length), 'warn') : null,
+            when ? help((h.loading ? 'Checking… · updated ' : 'Updated ') + when) : (h.loading ? help('Checking…') : null)
+        ], Gap.SPACING2X, { growLast: true });
+        const body: Child[] = [header];
+        if (!h.loaded) {
+            if (h.error) {
+                body.push(errorLine('The health checks did not load: ' + friendlyError(h.error)));
+                body.push(hstack([
+                    button('Retry', () => { loadHealth(); }, { primary: true, small: true }),
+                    button('Check the connection', () => { goToSection('account'); }, { link: true, small: true })
+                ], Gap.SPACING2X));
+            } else {
+                body.push(skeleton('lines', 3, 'Checking…'));
+            }
+        } else if (!items.length) {
+            body.push(text('Nothing needs attention.', { weak: true }));
+        } else {
+            items.forEach((item, i) => {
+                body.push(divider());
+                body.push(this.attentionRow(item, i === 0));
+            });
+        }
+        if (h.loaded && h.error) body.push(errorLine('The last check did not finish: ' + friendlyError(h.error)));
+        return card(body, { label: 'Needs attention', gap: Gap.SPACING2X });
     }
 
     render(): core.VDom.Node {
         const state = store.getState() as AppState;
-        const c = state.console;
-        const attention = this.renderAttention(state.health.attention);
-        const snap = (c.snapshot || {}) as ConsoleSnapshot;
-        const assignments = (c.assignments || []) as AssignmentRow[];
-        const preflight = (c.preflight || []) as CheckRow[];
-        // Loading: no "0 reps / Not yet run" while the first load runs.
-        const assignmentsPending = c.assignments === null;
-        const preflightPending = c.preflight === null && c.loading;
-
-        const phoneCount: Record<string, boolean> = {};
-        assignments.forEach((a) => { if (a.phoneSid) phoneCount[a.phoneSid] = true; });
-        const phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
-        const repCount = assignments.length;
-        const preflightPassed = preflight.filter((cc) => cc.status === 'pass').length;
-        const preflightTotal = preflight.length;
-
-        const statusLabel = snap.active === false ? 'Paused'
-            : snap.active === true ? 'Active' : 'Unknown';
-        const statusIcon = snap.active === true ? core.SystemIcon.STATUS_SUCCESS_FILLED
-            : snap.active === false ? core.SystemIcon.STATUS_WARNING_FILLED
-            : core.SystemIcon.STATUS_INFO_FILLED;
-        const statusTone: StatCardProps['tone'] =
-            snap.active === true ? 'success' : snap.active === false ? 'warning' : 'info';
-
-        return (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.VERTICAL}
-                itemGap={component.StackPanel.GapSize.L}
-            >
-                {[
-                attention,
-                /* Stat cards row */
-                (<component.StackPanel.Item>
-                    <component.GridPanel
-                        columns="1fr 1fr 1fr 1fr"
-                        rows="auto"
-                        columnGap={component.GridPanel.GapSize.M}
-                    >
-                        <component.GridPanel.Item>
-                            <StatCard
-                                title="Status"
-                                metric={statusLabel}
-                                description={snap.active === false
-                                    ? 'Reps cannot place calls'
-                                    : 'Reps can place calls'}
-                                icon={statusIcon}
-                                tone={statusTone}
-                            />
-                        </component.GridPanel.Item>
-                        <component.GridPanel.Item>
-                            <StatCard
-                                title="Phone numbers"
-                                metric={assignmentsPending ? '…' : String(phonesConfigured)}
-                                description={assignmentsPending ? 'Loading…'
-                                    : phonesConfigured === 0
-                                        ? 'No numbers configured'
-                                        : formatPhone(snap.phoneNumber)}
-                            />
-                        </component.GridPanel.Item>
-                        <component.GridPanel.Item>
-                            <StatCard
-                                title="Assigned reps"
-                                metric={assignmentsPending ? '…' : String(repCount)}
-                                description={assignmentsPending ? 'Loading…'
-                                    : repCount === 0
-                                        ? 'No assignments'
-                                        : (repCount === 1 ? '1 rep' : repCount + ' reps')}
-                            />
-                        </component.GridPanel.Item>
-                        <component.GridPanel.Item>
-                            <StatCard
-                                title="Preflight"
-                                metric={preflightPending ? '…'
-                                    : preflightTotal > 0
-                                        ? preflightPassed + ' of ' + preflightTotal
-                                        : '—'}
-                                description={preflightPending ? 'Running checks…'
-                                    : preflightTotal > 0
-                                        ? 'See checks below'
-                                        : c.preflightError ? 'Did not run' : 'Not yet run'}
-                            />
-                        </component.GridPanel.Item>
-                    </component.GridPanel>
-                </component.StackPanel.Item>),
-
-                /* Quick actions — wrapped in a soft bordered card to match the wireframe */
-                (<component.StackPanel.Item>
-                    <component.StackPanel
-                        orientation={component.StackPanel.Orientation.VERTICAL}
-                        itemGap={component.StackPanel.GapSize.S}
-                        rootStyle={{
-                            border: '1px solid #E2E3E5',
-                            borderRadius: '8px',
-                            padding: '18px 22px',
-                            background: '#FAFAFB'
-                        } as never}
-                    >
-                        {[
-                        (<component.StackPanel.Item>
-                            <component.Text
-                                type={component.Text.Type.WEAK}
-                                size={component.Text.Size.S}
-                            >
-                                Common admin tasks — full screens still available via the left rail.
-                            </component.Text>
-                        </component.StackPanel.Item>),
-                        (<component.StackPanel.Item>
-                            <component.StackPanel
-                                orientation={component.StackPanel.Orientation.HORIZONTAL}
-                                itemGap={component.StackPanel.GapSize.S}
-                            >
-                                <component.StackPanel.Item>
-                                    <component.Button
-                                        label="Manage phone numbers"
-                                        startIcon={core.SystemIcon.CALL as never}
-                                        action={(): void => this.handleNav('phones')}
-                                    />
-                                </component.StackPanel.Item>
-                                <component.StackPanel.Item>
-                                    <component.Button
-                                        label="Reassign reps"
-                                        startIcon={core.SystemIcon.GROUPS as never}
-                                        action={(): void => this.handleNav('phones')}
-                                    />
-                                </component.StackPanel.Item>
-                                <component.StackPanel.Item>
-                                    <component.Button
-                                        label="Update voice config"
-                                        startIcon={core.SystemIcon.SETTINGS as never}
-                                        action={(): void => this.handleNav('voice')}
-                                    />
-                                </component.StackPanel.Item>
-                                <component.StackPanel.Item>
-                                    <component.Button
-                                        label="API key rotation guide"
-                                        startIcon={core.SystemIcon.LOCK as never}
-                                        action={(): void => this.handleNav('credentials')}
-                                    />
-                                </component.StackPanel.Item>
-                                {snap.active === false ? (
-                                    <component.StackPanel.Item>
-                                        <component.Button
-                                            label={c.reactivating ? 'Reactivating…' : 'Reactivate'}
-                                            type={component.Button.Type.PRIMARY}
-                                            startIcon={core.SystemIcon.PLAY as never}
-                                            enabled={!c.reactivating}
-                                            action={this.handleReactivate}
-                                        />
-                                    </component.StackPanel.Item>
-                                ) : c.pendingDeactivateConfirm ? (
-                                    <component.StackPanel.Item>
-                                        <component.StackPanel
-                                            orientation={component.StackPanel.Orientation.HORIZONTAL}
-                                            itemGap={component.StackPanel.GapSize.S}
-                                        >
-                                            <component.StackPanel.Item>
-                                                <component.Button
-                                                    label="Cancel"
-                                                    enabled={!c.deactivating}
-                                                    action={this.handleCancelDeactivate}
-                                                />
-                                            </component.StackPanel.Item>
-                                            <component.StackPanel.Item>
-                                                <component.Button
-                                                    label={c.deactivating ? 'Deactivating…' : 'Confirm deactivate'}
-                                                    type={component.Button.Type.DANGER}
-                                                    startIcon={core.SystemIcon.STOP as never}
-                                                    enabled={!c.deactivating}
-                                                    action={this.handleDeactivate}
-                                                />
-                                            </component.StackPanel.Item>
-                                        </component.StackPanel>
-                                    </component.StackPanel.Item>
-                                ) : (
-                                    <component.StackPanel.Item>
-                                        <component.Button
-                                            label="Deactivate"
-                                            type={component.Button.Type.DANGER}
-                                            startIcon={core.SystemIcon.STOP as never}
-                                            action={this.handleRequestDeactivate}
-                                        />
-                                    </component.StackPanel.Item>
-                                )}
-                            </component.StackPanel>
-                        </component.StackPanel.Item>),
-                        ...this.renderActionErrors(c)
-                        ] as never}
-                    </component.StackPanel>
-                </component.StackPanel.Item>),
-
-                /* Health checks — preflight, drift, phones */
-                (<component.StackPanel.Item>
-                    <HealthChecks tick={this.props.tick} />
-                </component.StackPanel.Item>)
-                ].filter(Boolean) as never}
-            </component.StackPanel>
-        );
+        const assignments = state.console.assignments as AssignmentRow[] | null;
+        let subtitle = 'Click-to-Call';
+        if (assignments) {
+            const phones: Record<string, boolean> = {};
+            const reps: Record<string, boolean> = {};
+            assignments.forEach((a) => {
+                if (a.phoneSid) phones[a.phoneSid] = true;
+                if (a.employeeId != null) reps[String(a.employeeId)] = true;
+            });
+            const n = Object.keys(phones).length;
+            const r = Object.keys(reps).length;
+            subtitle += ' · ' + n + (n === 1 ? ' number' : ' numbers') + ' · ' + r + (r === 1 ? ' rep' : ' reps');
+        }
+        return vstack([
+            pageHeader('Overview', subtitle),
+            this.renderStatus(state),
+            this.renderKpis(state),
+            this.renderCallCentral(),
+            this.renderAttention(state)
+        ], Gap.SPACING4X);
     }
 }

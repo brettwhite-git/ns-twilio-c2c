@@ -18,7 +18,9 @@
 
 export type Mode = 'stepper' | 'console';
 
-export type SectionName = 'overview' | 'phones' | 'inbound' | 'voice' | 'credentials';
+/** Console pages (hash routes in routes.ts; #/voice and #/credentials redirect). */
+export type SectionName =
+    'overview' | 'phones' | 'inbound' | 'outbound' | 'transcripts' | 'health' | 'account';
 
 // ─────────────────────────────────────────────────────────────────────
 // Per-step state shapes
@@ -109,6 +111,8 @@ export interface ConsoleState {
     phonesError: string | null;
     /** Numbers whose inbound routing did not update after the last save. */
     phonesRoutingErrors: InboundPublishError[];
+    /** ISO time the Twilio number list last loaded ('' = not yet). */
+    phonesLoadedAt: string;
 
     // Voice section
     voiceEditing: 'twimlAppSid' | 'phoneNumber' | 'intelServiceSid' | null;
@@ -140,6 +144,8 @@ export interface ConsoleState {
     preflightRefreshing: boolean;
     /** wizardRunPreflight did not return (not the same as "not run"). */
     preflightError: string | null;
+    /** ISO time the last preflight result landed ('' = none yet). */
+    preflightAt: string;
 
     // Cross-section error surface
     actionError: string | null;
@@ -222,6 +228,9 @@ export interface InboundState {
     /** Fallback-owner choices (from wizardLoadInbound). */
     employees: InboundEmployee[];
 
+    /** The settings as last loaded / saved (unsaved-change count, Discard). */
+    saved: InboundSettings | null;
+
     saving: boolean;
     saveError: string | null;
     publishing: boolean;
@@ -230,7 +239,7 @@ export interface InboundState {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Outbound recording notice (Voice page) — server contract of
+// Outbound recording notice (Outbound calls page) — server contract of
 // wizardLoadOutbound / wizardSaveOutbound / wizardPublishOutbound /
 // wizardUnpublishOutbound (ctc_sl_wizard_api.js)
 // ─────────────────────────────────────────────────────────────────────
@@ -441,10 +450,10 @@ export interface AppState {
     // Health read model (Overview "Needs attention" + drift rows)
     health: HealthState;
 
-    // Outbound recording notice (Voice page; Health "TwiML VoiceUrl")
+    // Outbound recording notice (Outbound calls page; Health "TwiML VoiceUrl")
     outbound: OutboundState;
 
-    // Credentials page — API key rotation form
+    // Twilio account page — API key rotation form
     credentials: CredentialsState;
 }
 
@@ -507,6 +516,7 @@ const initialState: AppState = {
         phonesRowErrors: {},
         phonesError: null,
         phonesRoutingErrors: [],
+        phonesLoadedAt: '',
         voiceEditing: null,
         voicePendingValue: null,
         voiceLists: {
@@ -528,6 +538,7 @@ const initialState: AppState = {
         reactivateFailedChecks: [],
         preflightRefreshing: false,
         preflightError: null,
+        preflightAt: '',
         actionError: null
     },
     inbound: {
@@ -547,6 +558,7 @@ const initialState: AppState = {
         publishedAt: '',
         routes: [],
         employees: [],
+        saved: null,
         saving: false,
         saveError: null,
         publishing: false,

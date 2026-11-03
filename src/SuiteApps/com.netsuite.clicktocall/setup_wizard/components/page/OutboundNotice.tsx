@@ -1,14 +1,15 @@
 /**
- * Outbound recording notice — JSX section on the Voice page, below the
- * TwiML App picker.
+ * Outbound recording notice — the "Recording notice" card of Outbound
+ * calls (canvas Outbound.dc.html) and the action row under it.
  *
- * Switch + notice TextArea (form controls are JSX so the VDom keeps
- * their focus across the per-keystroke re-render, as on InboundPage),
- * first-publish consent copy, "Save & publish" ("Save" while the notice
- * is off and nothing is published) / "Check again" /
- * "Unpublish and remove" (two-click confirm, as Deactivate on the
- * Overview), the step list of the last run, and the publish status.
- * Spec: docs/specs/outbound-recording-notice.md §4, §9a.
+ * Card: title + live status line; left, the switch, help and notice
+ * TextArea (form controls are JSX so the VDom keeps their focus across
+ * the per-keystroke re-render); right, "Last publish" — the step list of
+ * the last publish / unpublish this session, "Check again" while the
+ * Twilio build runs, and the Function URL.
+ * Action row: "Save & publish" ("Save" while the notice is off and
+ * nothing is published) and "Unpublish and remove…" (inline confirm),
+ * with one help line. Spec: docs/specs/outbound-recording-notice.md §4, §9a.
  */
 
 import {PureComponent} from '@uif-js/core';
@@ -24,8 +25,14 @@ import {
 } from '../../app/effects/outbound';
 import type {AppState, OutboundState, OutboundStep} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
-import {CheckRow} from '../shared/CheckRow';
-import {ErrorText} from '../shared/ErrorText';
+import {StatusIcon} from '../shared/StatusIcon';
+import {friendlyError} from '../shared/friendlyError';
+import type {Tone} from '../shared/consoleModel';
+import {
+    button, card, cardTitle, dotText, errorLine, field, grid, help, hstack, problemCard, skeleton, text,
+    vstack, Gap
+} from '../shared/ui';
+import type {Child} from '../shared/ui';
 
 export const CONSENT_TEXT =
     'Publishing creates a Twilio Function named ctc-outbound in your Twilio ' +
@@ -64,45 +71,27 @@ export const outboundStatusLine = (outbound: OutboundState): string => {
         (outbound.publishedNoticeVersion ? ' · notice v' + outbound.publishedNoticeVersion : '');
 };
 
-const item = (node: core.VDom.Node | false | null | undefined): core.VDom.Node | false =>
-    node ? <component.StackPanel.Item>{node as never}</component.StackPanel.Item> : false;
+/** Header status of the notice: tone + headline (+ published time). */
+export function noticeHeadline(o: OutboundState): { tone: Tone; label: string; extra: string } {
+    const when = o.publishedAt && !isNaN(Date.parse(o.publishedAt)) ? '· ' + new Date(o.publishedAt).toLocaleString() : '';
+    if (!o.published) return { tone: 'off', label: 'Not published', extra: '' };
+    if (o.functionExists === false) return { tone: 'problem', label: o.functionMessage || 'The Function is missing in Twilio', extra: '' };
+    if (o.voiceUrlMatches === false) return { tone: 'problem', label: 'The Twilio app does not point at it', extra: when };
+    if (o.pending) return { tone: 'warn', label: 'Published · the Twilio build is still running', extra: when };
+    if (o.needsRepublish) return { tone: 'warn', label: 'Republish needed', extra: when };
+    if (o.changesPending) return { tone: 'warn', label: 'Saved changes are not live yet', extra: when };
+    const live = o.publishedNoticeVersion ? 'version ' + o.publishedNoticeVersion + ' live' : 'no notice plays';
+    return { tone: 'ok', label: 'Published · ' + live + (o.voiceUrlMatches ? ' · Twilio app points at it' : ''), extra: when };
+}
 
-const vstack = (
-    gap: unknown,
-    nodes: Array<core.VDom.Node | false | null | undefined>
-): core.VDom.Node => (
-    <component.StackPanel
-        orientation={component.StackPanel.Orientation.VERTICAL}
-        itemGap={gap as never}
-    >
-        {nodes.map(item).filter(Boolean) as never}
-    </component.StackPanel>
-);
-
-const hstack = (nodes: Array<core.VDom.Node | false | null | undefined>): core.VDom.Node => (
-    <component.StackPanel
-        orientation={component.StackPanel.Orientation.HORIZONTAL}
-        itemGap={component.StackPanel.GapSize.S}
-    >
-        {nodes.map(item).filter(Boolean) as never}
-    </component.StackPanel>
-);
-
-const weak = (text: string): core.VDom.Node => (
-    <component.Text type={component.Text.Type.WEAK} size={component.Text.Size.S}>
-        {text}
-    </component.Text>
-);
-
-const stepRow = (step: OutboundStep): core.VDom.Node => {
+const stepLine = (step: OutboundStep): core.VDom.Node => {
     const s = STEP_STATUS[step.status];
-    return (
-        <CheckRow check={{
-            label: step.label + ' — ' + s.text,
-            status: s.check,
-            detail: step.status === 'failed' ? step.detail : undefined
-        }} />
-    );
+    return grid('18px minmax(0, 1fr) auto', [
+        <StatusIcon status={s.check} size={component.Image.Size.S} />,
+        text(step.label, { small: true }),
+        help(step.status === 'failed' && step.detail ? 'Failed · ' + step.detail
+            : step.detail ? s.text + ' · ' + step.detail : s.text)
+    ], Gap.SPACING2X);
 };
 
 export default class OutboundNotice extends PureComponent<PageTickProps, unknown> {
@@ -113,162 +102,116 @@ export default class OutboundNotice extends PureComponent<PageTickProps, unknown
         }
     }
 
-    private renderButtons(outbound: OutboundState, busy: boolean): core.VDom.Node {
-        // Notice off and nothing published: save only, nothing goes to Twilio.
-        const saveOnly = !outbound.noticeOn && !outbound.published;
-        const working = outbound.saving || outbound.publishing;
-        const saveButton = new component.Button({
-            label: saveOnly
-                ? (working ? 'Saving…' : 'Save')
-                : (working ? 'Publishing…' : 'Save & publish'),
-            type: component.Button.Type.PRIMARY,
-            enabled: !busy,
-            action: (): void => { saveAndPublishOutbound(!saveOnly); }
-        } as never) as never;
-
-        if (!outbound.published) return hstack([saveButton]);
-
-        if (outbound.confirmUnpublish) {
-            return vstack(component.StackPanel.GapSize.XXS, [
-                weak('This restores the previous Voice URL and deletes the Function.'),
-                hstack([
-                    <component.Button
-                        label="Cancel"
-                        enabled={!busy}
-                        action={(): void => { store.dispatch(Action.outboundConfirmUnpublish(false)); }}
-                    />,
-                    <component.Button
-                        label="Confirm unpublish"
-                        type={component.Button.Type.DANGER}
-                        enabled={!busy}
-                        action={(): void => { unpublishOutbound(); }}
-                    />
-                ])
-            ]);
-        }
-
-        return hstack([
-            saveButton,
-            <component.Button
-                label={outbound.unpublishing ? 'Unpublishing…' : 'Unpublish and remove'}
-                type={component.Button.Type.DANGER}
-                enabled={!busy}
-                action={(): void => { store.dispatch(Action.outboundConfirmUnpublish(true)); }}
-            />
-        ]);
-    }
-
-    private renderSettings(outbound: OutboundState): core.VDom.Node {
-        const busy = outbound.saving || outbound.publishing || outbound.unpublishing;
+    private renderLeft(outbound: OutboundState, busy: boolean): core.VDom.Node {
         const max = outbound.maxLength;
-        const steps = outbound.steps || [];
-
-        const noticeSwitch = vstack(component.StackPanel.GapSize.XXS, [
+        return vstack([
             <component.Switch
-                label="Play a recording notice on outbound calls"
+                label="Play a notice before the call connects"
                 value={outbound.noticeOn}
                 enabled={!busy}
                 action={(args: { value?: boolean }): void => {
                     store.dispatch(Action.outboundFieldChange({ noticeOn: !!(args && args.value) }));
                 }}
             />,
-            weak('The person you call hears this after they answer, before the call ' +
-                'connects and before recording starts.')
-        ]);
+            help('The person called hears it after they answer; the rep hears ringing. Recording starts after ' +
+                'the notice, so the notice is not in the transcript. Every outbound call is recorded.'),
+            outbound.noticeOn ? field('Notice',
+                <component.TextArea
+                    text={outbound.noticeText}
+                    placeholder={outbound.defaultText}
+                    maxLength={max}
+                    rowCount={3}
+                    enabled={!busy}
+                    onTextChanged={(args: { text?: string } | undefined): void => {
+                        store.dispatch(Action.outboundFieldChange({
+                            noticeText: ((args && args.text) || '').slice(0, max)
+                        }));
+                    }}
+                    rootStyle={{width: '100%'} as never}
+                />,
+                // The TextArea draws its own n/max counter (maxLength).
+                help('Have your legal counsel approve the wording.')
+            ) : null,
+            !outbound.published && outbound.noticeOn ? help(CONSENT_TEXT) : null,
+            outbound.published && !outbound.noticeOn ? help(NOTICE_OFF_PUBLISHED_NOTE) : null
+        ], Gap.SPACING3X);
+    }
 
-        const noticeText = outbound.noticeOn && vstack(component.StackPanel.GapSize.XXS, [
-            <component.Text type={component.Text.Type.STRONG}>Notice</component.Text>,
-            <component.TextArea
-                text={outbound.noticeText}
-                placeholder={outbound.defaultText}
-                maxLength={max}
-                rowCount={2}
-                enabled={!busy}
-                onTextChanged={(args: { text?: string } | undefined): void => {
-                    store.dispatch(Action.outboundFieldChange({
-                        noticeText: ((args && args.text) || '').slice(0, max)
-                    }));
-                }}
-                rootStyle={{width: '100%'} as never}
-            />,
-            weak(outbound.noticeText.length + ' / ' + max + ' characters'),
-            weak('Have your legal counsel approve the wording.')
-        ]);
+    private renderRight(outbound: OutboundState, busy: boolean): core.VDom.Node {
+        const steps = outbound.steps || [];
+        return vstack([
+            text('Last publish', { strong: true, small: true }),
+            steps.length
+                ? vstack(steps.map(stepLine), Gap.SPACING1X)
+                : help(outbound.published
+                    ? outboundStatusLine(outbound) + '. The steps of a publish show here.'
+                    : 'Nothing published yet. The steps show here after Save & publish.'),
+            outbound.pending && !outbound.publishing ? hstack([
+                help('The Twilio build is still running.'),
+                button('Check again', () => { resumePublishOutbound(); }, {
+                    small: true, enabled: !busy, icon: core.SystemIcon.REFRESH
+                })
+            ], Gap.SPACING2X, { wrap: true }) : null,
+            outbound.published && outbound.functionUrl ? help('Function URL: ' + outbound.functionUrl) : null,
+            outbound.published && outbound.voiceUrlMatches === false ? dotText('problem', VOICE_URL_WARNING, undefined, { small: true }) : null,
+            outbound.published && outbound.needsRepublish ? dotText('warn', REPUBLISH_WARNING, undefined, { small: true }) : null,
+            help('A SuiteApp update that changes the function code shows "Republish needed" here and on Overview.')
+        ], Gap.SPACING2X);
+    }
 
-        const pending = outbound.pending && !outbound.publishing && vstack(component.StackPanel.GapSize.XXS, [
-            <component.Text type={component.Text.Type.WEAK}>
-                {'Publishing… the Twilio build is still running'}
-            </component.Text>,
-            new component.Button({
-                label: 'Check again',
-                startIcon: core.SystemIcon.REFRESH,
-                enabled: !busy,
-                action: (): void => { resumePublishOutbound(); }
-            } as never) as never
-        ]);
-
-        const status = vstack(component.StackPanel.GapSize.XXS, [
-            <component.Text type={component.Text.Type.WEAK}>
-                {outboundStatusLine(outbound)}
-            </component.Text>,
-            outbound.published && !!outbound.functionUrl &&
-                weak('Function URL: ' + outbound.functionUrl),
-            outbound.published && outbound.needsRepublish &&
-                <CheckRow check={{ label: REPUBLISH_WARNING, status: 'warn' }} />,
-            outbound.published && outbound.voiceUrlMatches === false &&
-                <CheckRow check={{ label: VOICE_URL_WARNING, status: 'warn' }} />
-        ]);
-
-        return (
-            <component.StackPanel
-                orientation={component.StackPanel.Orientation.VERTICAL}
-                itemGap={component.StackPanel.GapSize.L}
-                rootStyle={{maxWidth: '560px'} as never}
-            >
-                {[
-                    item(noticeSwitch),
-                    item(noticeText),
-                    item(!outbound.published && outbound.noticeOn && weak(CONSENT_TEXT)),
-                    item(outbound.published && !outbound.noticeOn && weak(NOTICE_OFF_PUBLISHED_NOTE)),
-                    item(this.renderButtons(outbound, busy)),
-                    item(outbound.error ? <ErrorText message={outbound.error} /> : false),
-                    item(pending),
-                    item(steps.length > 0 && vstack(component.StackPanel.GapSize.XS, steps.map(stepRow))),
-                    item(status)
-                ].filter(Boolean) as never}
-            </component.StackPanel>
-        );
+    private renderActions(outbound: OutboundState, busy: boolean): core.VDom.Node {
+        // Notice off and nothing published: save only, nothing goes to Twilio.
+        const saveOnly = !outbound.noticeOn && !outbound.published;
+        const working = outbound.saving || outbound.publishing;
+        const items: Child[] = [
+            button(saveOnly ? (working ? 'Saving…' : 'Save') : (working ? 'Publishing…' : 'Save & publish'),
+                () => { saveAndPublishOutbound(!saveOnly); }, { primary: true, enabled: !busy })
+        ];
+        if (outbound.published && outbound.confirmUnpublish) {
+            items.push(text('This restores the previous Voice URL and deletes the Function.', { small: true }));
+            items.push(button(outbound.unpublishing ? 'Unpublishing…' : 'Confirm unpublish', () => { unpublishOutbound(); }, {
+                danger: true, small: true, enabled: !busy
+            }));
+            items.push(button('Cancel', () => { store.dispatch(Action.outboundConfirmUnpublish(false)); }, {
+                small: true, enabled: !busy
+            }));
+        } else if (outbound.published) {
+            items.push(button(outbound.unpublishing ? 'Unpublishing…' : 'Unpublish and remove…', () => {
+                store.dispatch(Action.outboundConfirmUnpublish(true));
+            }, { danger: true, enabled: !busy }));
+        }
+        items.push(help(saveOnly
+            ? 'The notice is off and nothing is published: Save keeps the setting in NetSuite only.'
+            : 'Save & publish updates the Twilio Function and points the Twilio app at it (15–30 s).'));
+        return hstack(items, Gap.SPACING2X, { wrap: true, growLast: true });
     }
 
     render(): core.VDom.Node {
         const outbound = (store.getState() as AppState).outbound;
-        const heading = <component.Heading level={3}>Outbound recording notice</component.Heading>;
 
         if (outbound.loading || (!outbound.loaded && !outbound.loadError)) {
-            return vstack(component.StackPanel.GapSize.S, [
-                heading,
-                new component.Loader({
-                    label: 'Loading recording notice…',
-                    indeterminate: true
-                } as never) as never
-            ]);
+            return card([cardTitle('Recording notice'), skeleton('lines', 4, 'Loading recording notice…')],
+                { label: 'Recording notice' });
         }
-
         if (!outbound.loaded) {
-            return vstack(component.StackPanel.GapSize.S, [
-                heading,
-                <ErrorText message={outbound.loadError || 'Could not load the outbound recording notice'} />,
-                new component.Button({
-                    label: 'Retry',
-                    startIcon: core.SystemIcon.REFRESH,
-                    action: (): void => { loadOutbound(); }
-                } as never) as never
-            ]);
+            return problemCard('Couldn\'t load the recording notice',
+                friendlyError(outbound.loadError || 'Could not load the outbound recording notice') +
+                ' Nothing was changed.',
+                [button('Retry', () => { loadOutbound(); }, { primary: true, small: true })]);
         }
 
-        return vstack(component.StackPanel.GapSize.S, [
-            heading,
-            this.renderSettings(outbound)
-        ]);
+        const busy = outbound.saving || outbound.publishing || outbound.unpublishing;
+        const head = noticeHeadline(outbound);
+        return vstack([
+            card([
+                hstack([cardTitle('Recording notice'), dotText(head.tone, head.label, head.extra)], Gap.SPACING3X, {
+                    justification: component.StackPanel.Justification.SPACE_BETWEEN, wrap: true
+                }),
+                grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderLeft(outbound, busy), this.renderRight(outbound, busy)],
+                    Gap.SPACING5X),
+                outbound.error ? errorLine(friendlyError(outbound.error)) : null
+            ], { label: 'Recording notice', gap: Gap.SPACING4X }),
+            this.renderActions(outbound, busy)
+        ], Gap.SPACING3X);
     }
 }

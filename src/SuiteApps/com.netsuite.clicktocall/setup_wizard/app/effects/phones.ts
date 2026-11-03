@@ -14,6 +14,7 @@
 import {store} from '../Store';
 import {Action} from '../Action';
 import {wizardCall} from '../../services/wizardApi';
+import {loadHealth} from './health';
 import type {
     AppState,
     InboundPublishError,
@@ -142,6 +143,9 @@ export async function loadPhonesData(): Promise<void> {
             hasMore: !!(phones && phones.hasMore),
             error: otherErrors || null
         }));
+        if (!listError(phones)) {
+            store.dispatch(Action.consolePatch({ phonesLoadedAt: new Date().toISOString() }));
+        }
         // Fresh counts for the Overview cards and the rail badge.
         if (!listError(asg)) {
             store.dispatch(Action.consolePatch({ assignments: assignmentRows }));
@@ -335,6 +339,8 @@ export async function savePhonesRow(phoneSid: string): Promise<void> {
             phoneSid, phase: 'success', routingErrors, error: reloadError
         }));
         await refreshInboundRoutes();
+        // Routing and rep signals changed: refresh them when shown.
+        if ((store.getState() as AppState).health.loaded) loadHealth();
     } catch (e) {
         store.dispatch(Action.phonesRowSave({
             phoneSid, phase: 'failure', error: thrownText(e, 'save_failed')

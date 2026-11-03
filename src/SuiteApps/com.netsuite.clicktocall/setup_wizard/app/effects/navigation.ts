@@ -21,6 +21,8 @@ import {loadConsole} from './console';
 import {loadPhonesData} from './phones';
 import {loadPrereqs} from './prereqs';
 import type {AppState, SectionName, Step2State, Step3State} from '../InitialState';
+import {hashFor, parseHash} from '../routes';
+import type {HashRoute} from '../routes';
 
 // ─────────────────────────────────────────────────────────────────────
 // determineLandingStep — pure helper
@@ -112,29 +114,15 @@ function prefillFromSnapshot(state: AppState): void {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Hash routes — #/overview, #/phones, #/inbound, #/voice, #/credentials,
-// #/setup/<n>. Reload and deep links open the right page; back/forward
-// move between pages (hashchange). Unknown hash → overview.
+// Hash routes — parsing lives in ../routes.ts (pure). Reload and deep
+// links open the right page; back/forward move between pages
+// (hashchange). Unknown hash → overview. Old hashes (#/voice,
+// #/credentials) open the page that replaced them and the address bar
+// is rewritten with replaceState (no history entry).
 // ─────────────────────────────────────────────────────────────────────
 
-const SECTIONS: SectionName[] = ['overview', 'phones', 'inbound', 'voice', 'credentials'];
-
-export type HashRoute =
-    | { kind: 'section'; section: SectionName }
-    | { kind: 'step'; step: number };
-
-/** Parse a location hash ('#/phones', '#/setup/3'). null = empty or unknown. */
-export function parseHash(hash: string): HashRoute | null {
-    const path = String(hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
-    if (!path) return null;
-    const step = /^setup\/([1-5])$/.exec(path);
-    if (step) return { kind: 'step', step: Number(step[1]) };
-    const section = SECTIONS.find((sec) => sec === path);
-    return section ? { kind: 'section', section } : null;
-}
-
-const hashFor = (route: HashRoute): string =>
-    route.kind === 'section' ? '#/' + route.section : '#/setup/' + route.step;
+export {parseHash};
+export type {HashRoute};
 
 /**
  * Show `route` in the address bar. push = a new history entry (user
@@ -343,7 +331,11 @@ function onHashChange(): void {
     const route = parseHash(window.location.hash);
 
     if (route && route.kind === 'section' && consoleAllowed(state)) {
-        if (state.mode === 'console' && state.selectedSection === route.section) return;
+        if (state.mode === 'console' && state.selectedSection === route.section) {
+            // An old hash (#/voice) for the page shown now: fix the address bar.
+            if (route.redirected) writeHash(route, false);
+            return;
+        }
         if (state.mode === 'console') goToSection(route.section, { push: false });
         else goToConsole(route.section, { push: false });
         return;

@@ -50,6 +50,19 @@ const applyPublish = (inbound: AppState['inbound'], publish: InboundPublishResul
     if (publish.ok && publish.publishedAt) inbound.publishedAt = publish.publishedAt;
 };
 
+/** The saved-settings fields of a load payload / the form. */
+const pickInboundSettings = (v: InboundSettings): InboundSettings => ({
+    inboundEnabled: v.inboundEnabled,
+    ringSeconds: v.ringSeconds,
+    noAnswerMessage: v.noAnswerMessage,
+    recordInbound: v.recordInbound,
+    recordingNoticeOn: v.recordingNoticeOn,
+    recordingNotice: v.recordingNotice,
+    voicemailOn: v.voicemailOn,
+    voicemailMaxSeconds: v.voicemailMaxSeconds,
+    fallbackOwnerId: v.fallbackOwnerId
+});
+
 type Handler = (state: AppState) => AppState;
 
 export default function reducer(state: AppState, action: AppAction): AppState {
@@ -229,6 +242,7 @@ export default function reducer(state: AppState, action: AppAction): AppState {
             d.inbound.flowSid = p.flowSid;
             d.inbound.publishedAt = p.publishedAt;
             d.inbound.routes = p.routes;
+            d.inbound.saved = pickInboundSettings(p);
         })],
         [ActionType.INBOUND_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
             const p = a.payload as { error: string };
@@ -252,6 +266,7 @@ export default function reducer(state: AppState, action: AppAction): AppState {
                 d.inbound.saving = false;
                 d.inbound.saveError = null;
                 if (p.settings) Object.assign(d.inbound, p.settings);
+                d.inbound.saved = pickInboundSettings(p.settings || d.inbound);
                 if (p.publish) applyPublish(d.inbound, p.publish);
             } else {
                 d.inbound.saving = false;

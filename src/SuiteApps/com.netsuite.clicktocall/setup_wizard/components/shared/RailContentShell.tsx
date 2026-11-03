@@ -20,6 +20,8 @@ import * as component from '@uif-js/component';
 
 interface RailContentShellProps {
     children?: core.VDom.Node | core.VDom.Node[];
+    /** Classes on the content panel (the console passes its scope class). */
+    classList?: string[];
 }
 
 export const RailContentShell = (props: RailContentShellProps): core.VDom.Node => {
@@ -28,6 +30,7 @@ export const RailContentShell = (props: RailContentShellProps): core.VDom.Node =
             orientation={component.ScrollPanel.Orientation.VERTICAL}
         >
             <component.ContentPanel
+                classList={(props.classList || []) as never}
                 horizontalAlignment={component.ContentPanel.HorizontalAlignment.STRETCH}
                 outerGap={{
                     start: component.ContentPanel.GapSize.XXL,

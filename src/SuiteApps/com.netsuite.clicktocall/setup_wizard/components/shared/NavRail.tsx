@@ -85,11 +85,13 @@ export const NavRail = (_props: NavRailProps): core.VDom.Node => {
         });
 
     const navItems: Array<Record<string, unknown>> = [
-        item('overview',    'Overview',      core.SystemIcon.CARD_VIEW),
-        item('phones',      'Phones & reps', core.SystemIcon.GROUPS, { badge: assignmentBadge }),
-        item('inbound',     'Inbound calls', core.SystemIcon.CALL),
-        item('voice',       'Voice config',  core.SystemIcon.SETTINGS),
-        item('credentials', 'Credentials',   core.SystemIcon.LOCK)
+        item('overview',    'Overview',          core.SystemIcon.CARD_VIEW),
+        item('phones',      'Phones & reps',     core.SystemIcon.CALL, { badge: assignmentBadge }),
+        item('inbound',     'Inbound calls',     core.SystemIcon.ARROW_DIAGONAL_DOWN),
+        item('outbound',    'Outbound calls',    core.SystemIcon.ARROW_DIAGONAL_UP),
+        item('transcripts', 'Transcripts & AI',  core.SystemIcon.AI_SPARKLE),
+        item('health',      'Health',            core.SystemIcon.PERFORMANCE),
+        item('account',     'Twilio account',    core.SystemIcon.CREDENTIALS)
     ];
     if (canRerun) {
         navItems.push(item('re-run', 'Re-run wizard', core.SystemIcon.REFRESH, { separatorTop: true }));

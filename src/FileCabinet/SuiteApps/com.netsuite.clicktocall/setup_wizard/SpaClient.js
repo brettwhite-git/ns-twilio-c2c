@@ -252,6 +252,17 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         if (publish.ok && publish.publishedAt)
             inbound.publishedAt = publish.publishedAt;
     };
+    const pickInboundSettings = (v) => ({
+        inboundEnabled: v.inboundEnabled,
+        ringSeconds: v.ringSeconds,
+        noAnswerMessage: v.noAnswerMessage,
+        recordInbound: v.recordInbound,
+        recordingNoticeOn: v.recordingNoticeOn,
+        recordingNotice: v.recordingNotice,
+        voicemailOn: v.voicemailOn,
+        voicemailMaxSeconds: v.voicemailMaxSeconds,
+        fallbackOwnerId: v.fallbackOwnerId
+    });
     function reducer(state, action) {
         const a = action;
         const handlers = new Map([
@@ -418,6 +429,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     d.inbound.flowSid = p.flowSid;
                     d.inbound.publishedAt = p.publishedAt;
                     d.inbound.routes = p.routes;
+                    d.inbound.saved = pickInboundSettings(p);
                 })],
             [ActionType.INBOUND_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
@@ -438,6 +450,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         d.inbound.saveError = null;
                         if (p.settings)
                             Object.assign(d.inbound, p.settings);
+                        d.inbound.saved = pickInboundSettings(p.settings || d.inbound);
                         if (p.publish)
                             applyPublish(d.inbound, p.publish);
                     }
@@ -683,6 +696,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             phonesRowErrors: {},
             phonesError: null,
             phonesRoutingErrors: [],
+            phonesLoadedAt: '',
             voiceEditing: null,
             voicePendingValue: null,
             voiceLists: {
@@ -704,6 +718,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             reactivateFailedChecks: [],
             preflightRefreshing: false,
             preflightError: null,
+            preflightAt: '',
             actionError: null
         },
         inbound: {
@@ -723,6 +738,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             publishedAt: '',
             routes: [],
             employees: [],
+            saved: null,
             saving: false,
             saveError: null,
             publishing: false,
@@ -858,7 +874,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             .then((payload) => {
             const checks = payload && payload.checks;
             if (Array.isArray(checks)) {
-                store.dispatch(Action.consolePatch({ preflight: checks }));
+                store.dispatch(Action.consolePatch({ preflight: checks, preflightAt: new Date().toISOString() }));
             }
             else {
                 store.dispatch(Action.consolePatch({
@@ -873,6 +889,29 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         });
         await Promise.all([snapshotTask, assignmentsTask, preflightTask]);
         store.dispatch(Action.consoleLoadSuccess({}));
+    }
+    async function rerunPreflight() {
+        if (store.getState().console.preflightRefreshing)
+            return;
+        store.dispatch(Action.consolePatch({ preflightRefreshing: true, preflightError: null }));
+        try {
+            const payload = await wizardCall('wizardRunPreflight', {});
+            const checks = payload && payload.checks;
+            if (Array.isArray(checks)) {
+                store.dispatch(Action.consolePatch({ preflight: checks, preflightAt: new Date().toISOString() }));
+            }
+            else {
+                store.dispatch(Action.consolePatch({
+                    preflightError: errorOf(payload, 'Preflight did not return any checks')
+                }));
+            }
+        }
+        catch (e) {
+            store.dispatch(Action.consolePatch({ preflightError: thrownText$1(e, 'Preflight did not run') }));
+        }
+        finally {
+            store.dispatch(Action.consolePatch({ preflightRefreshing: false }));
+        }
     }
     const setActiveFlag = (active) => {
         const snap = store.getState().console.snapshot;
@@ -913,6 +952,61 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
         catch (e) {
             store.dispatch(Action.reactivateFailure(thrownText$1(e, 'Reactivate failed')));
+        }
+    }
+
+    const SEVERITIES = ['ok', 'warn', 'problem', 'unknown'];
+    const toSeverity = (v) => (SEVERITIES.indexOf(v) !== -1 ? v : 'unknown');
+    const toAction = (v) => {
+        const a = (v || null);
+        if (!a || typeof a.label !== 'string' || typeof a.route !== 'string')
+            return undefined;
+        return { label: a.label, route: a.route };
+    };
+    const toSignal = (raw) => {
+        const r = (raw || {});
+        const out = {
+            key: String(r.key ?? ''),
+            title: String(r.title ?? ''),
+            value: r.value ?? null,
+            severity: toSeverity(r.severity),
+            detail: String(r.detail ?? '')
+        };
+        const action = toAction(r.action);
+        if (action)
+            out.action = action;
+        return out;
+    };
+    const toAttention = (raw) => {
+        const s = toSignal(raw);
+        const item = { key: s.key, title: s.title, severity: s.severity, detail: s.detail };
+        if (s.action)
+            item.action = s.action;
+        return item;
+    };
+    async function loadHealth() {
+        if (store.getState().health.loading)
+            return;
+        store.dispatch(Action.healthLoadStart());
+        try {
+            const result = (await wizardCall('wizardLoadHealth', {}));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.healthLoadFailure((result && (result.message || result.error)) || 'Could not load the health checks'));
+                return;
+            }
+            const signals = {};
+            Object.keys(result.signals || {}).forEach((k) => {
+                signals[k] = toSignal(result.signals[k]);
+            });
+            const attention = Array.isArray(result.attention) ? result.attention.map(toAttention) : [];
+            store.dispatch(Action.healthLoadSuccess({
+                checkedAt: String(result.checkedAt || ''),
+                signals,
+                attention
+            }));
+        }
+        catch (e) {
+            store.dispatch(Action.healthLoadFailure(e instanceof Error && e.message ? e.message : 'Could not load the health checks'));
         }
     }
 
@@ -981,6 +1075,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 hasMore: !!(phones && phones.hasMore),
                 error: otherErrors || null
             }));
+            if (!listError(phones)) {
+                store.dispatch(Action.consolePatch({ phonesLoadedAt: new Date().toISOString() }));
+            }
             if (!listError(asg)) {
                 store.dispatch(Action.consolePatch({ assignments: assignmentRows }));
             }
@@ -1128,6 +1225,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 phoneSid, phase: 'success', routingErrors, error: reloadError
             }));
             await refreshInboundRoutes();
+            if (store.getState().health.loaded)
+                loadHealth();
         }
         catch (e) {
             store.dispatch(Action.phonesRowSave({
@@ -1151,6 +1250,28 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             store.dispatch(Action.prereqsLoadFailure(msg));
         }
     }
+
+    const SECTIONS = ['overview', 'phones', 'inbound', 'outbound', 'transcripts', 'health', 'account'];
+    const LEGACY_SECTIONS = {
+        voice: 'outbound',
+        credentials: 'account'
+    };
+    function parseHash(hash) {
+        const path = String(hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
+        if (!path)
+            return null;
+        const step = /^setup\/([1-5])$/.exec(path);
+        if (step)
+            return { kind: 'step', step: Number(step[1]) };
+        const section = SECTIONS.find((sec) => sec === path);
+        if (section)
+            return { kind: 'section', section };
+        if (Object.prototype.hasOwnProperty.call(LEGACY_SECTIONS, path)) {
+            return { kind: 'section', section: LEGACY_SECTIONS[path], redirected: true };
+        }
+        return null;
+    }
+    const hashFor = (route) => route.kind === 'section' ? '#/' + route.section : '#/setup/' + route.step;
 
     function isConfigActive(state) {
         const snap = state.console.snapshot;
@@ -1189,18 +1310,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             }
         });
     }
-    const SECTIONS = ['overview', 'phones', 'inbound', 'voice', 'credentials'];
-    function parseHash(hash) {
-        const path = String(hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
-        if (!path)
-            return null;
-        const step = /^setup\/([1-5])$/.exec(path);
-        if (step)
-            return { kind: 'step', step: Number(step[1]) };
-        const section = SECTIONS.find((sec) => sec === path);
-        return section ? { kind: 'section', section } : null;
-    }
-    const hashFor = (route) => route.kind === 'section' ? '#/' + route.section : '#/setup/' + route.step;
     function writeHash(route, push) {
         try {
             const target = hashFor(route);
@@ -1333,8 +1442,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return;
         const route = parseHash(window.location.hash);
         if (route && route.kind === 'section' && consoleAllowed(state)) {
-            if (state.mode === 'console' && state.selectedSection === route.section)
+            if (state.mode === 'console' && state.selectedSection === route.section) {
+                if (route.redirected)
+                    writeHash(route, false);
                 return;
+            }
             if (state.mode === 'console')
                 goToSection(route.section, { push: false });
             else
@@ -2021,7 +2133,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
         }
     };
-    const statusIcon$1 = (status) => {
+    const statusIcon = (status) => {
         switch (status) {
             case 'pass': return { icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED, color: core__namespace.ImageConstant.Color.SUCCESS };
             case 'fail': return { icon: core__namespace.SystemIcon.STATUS_ERROR_FILLED, color: core__namespace.ImageConstant.Color.DANGER };
@@ -2089,7 +2201,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     stretchFactor: 1,
                     content: (args) => {
                         const status = args?.cell?.row?.dataItem?.status || 'info_enabled';
-                        const si = statusIcon$1(status);
+                        const si = statusIcon(status);
                         return new component__namespace.Image({
                             image: si.icon,
                             size: component__namespace.Image.Size.M,
@@ -2236,6 +2348,400 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: items }));
         }
     }
+
+    const buildFailedCheckLines = (checks) => checks
+        .filter((c) => c && c.status !== 'pass')
+        .map((c) => new component__namespace.Text({
+        text: '✕ ' + (c.label || c.id || 'Check') +
+            (c.detail ? ': ' + c.detail : '') +
+            (c.repairHint ? ' → ' + c.repairHint : ''),
+        size: component__namespace.Text.Size.S
+    }));
+
+    const SP = component__namespace.StackPanel;
+    const Gap = component__namespace.StackPanel.GapSize;
+    const present = (nodes) => nodes.filter((n) => n !== null && n !== undefined && n !== false && n !== '');
+    const empty = () => new component__namespace.Text({ text: '' });
+    function vstack(nodes, gap = Gap.SPACING3X, opts = {}) {
+        const list = present(nodes);
+        return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: SP.Orientation.VERTICAL, itemGap: gap, alignment: (opts.alignment ?? SP.Alignment.STRETCH), classList: (opts.classList || []), children: (list.length ? list : [empty()]).map((n) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: n }))) }));
+    }
+    function hstack(nodes, gap = Gap.SPACING2X, opts = {}) {
+        const list = present(nodes);
+        const items = list.length ? list : [empty()];
+        return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: SP.Orientation.HORIZONTAL, itemGap: gap, alignment: (opts.alignment ?? SP.Alignment.CENTER), justification: (opts.justification ?? SP.Justification.START), wrap: !!opts.wrap, children: items.map((n, i) => {
+                const grow = (opts.growFirst && i === 0) || (opts.growLast && i === items.length - 1) ? 1 : 0;
+                return jsxRuntime.jsx(component__namespace.StackPanel.Item, { grow: grow, children: n });
+            }) }));
+    }
+    function grid(columns, cells, gap = Gap.SPACING3X, opts = {}) {
+        const list = present(cells);
+        return (jsxRuntime.jsx(component__namespace.GridPanel, { columns: columns, columnGap: gap, rowGap: (opts.rowGap ?? gap), children: (list.length ? list : [empty()]).map((n) => (jsxRuntime.jsx(component__namespace.GridPanel.Item, { alignment: (opts.stretch ? component__namespace.GridPanel.Alignment.STRETCH
+                    : component__namespace.GridPanel.Alignment.START), children: n }))) }));
+    }
+    function card(nodes, opts = {}) {
+        const variant = opts.variant || 'default';
+        const cls = variant === 'flush' ? 'ctc-card-flush' : variant === 'danger' ? 'ctc-card-danger' : 'ctc-card';
+        const classList = opts.fill ? [cls, 'ctc-fill'] : [cls];
+        const pad = variant === 'flush'
+            ? component__namespace.Card.GapSize.NONE
+            : { vertical: component__namespace.Card.GapSize.SPACING4X, horizontal: component__namespace.Card.GapSize.SPACING4X };
+        return (jsxRuntime.jsx(component__namespace.Card, { classList: classList, contentGap: pad, ariaLabel: opts.label, children: vstack(nodes, opts.gap ?? Gap.SPACING3X) }));
+    }
+    function text(t, opts = {}) {
+        return new component__namespace.Text({
+            text: t,
+            type: opts.strong ? component__namespace.Text.Type.STRONG : opts.weak ? component__namespace.Text.Type.WEAK : component__namespace.Text.Type.DEFAULT,
+            size: opts.small ? component__namespace.Text.Size.S : component__namespace.Text.Size.M,
+            classList: opts.classList || []
+        });
+    }
+    const help = (t) => text(t, { weak: true, small: true });
+    function cardTitle(t, opts = {}) {
+        return new component__namespace.Heading({
+            content: t,
+            level: 2,
+            type: component__namespace.Heading.Type.SMALL_HEADING,
+            classList: opts.danger ? ['ctc-danger-title'] : []
+        });
+    }
+    function metric(value, unit) {
+        return hstack([
+            new component__namespace.Text({ text: value, size: component__namespace.Text.Size.XXL, weight: component__namespace.Text.Weight.BOLD }),
+            unit ? text(unit, { weak: true }) : null
+        ], Gap.SPACING1X, { alignment: SP.Alignment.BASELINE });
+    }
+    const CHIP_TONE = {
+        ok: 'ctc-chip-ok', warn: 'ctc-chip-warn', problem: 'ctc-chip-problem',
+        off: 'ctc-chip-neutral', neutral: 'ctc-chip-neutral', info: 'ctc-chip-info'
+    };
+    function chip(label, tone) {
+        return new component__namespace.Badge({
+            content: label,
+            type: component__namespace.Badge.Type.SUBTLE,
+            size: component__namespace.Badge.Size.SMALL,
+            classList: [CHIP_TONE[tone]]
+        });
+    }
+    function stepBadge(n) {
+        return new component__namespace.Badge({
+            content: String(n),
+            type: component__namespace.Badge.Type.SUBTLE,
+            classList: ['ctc-step']
+        });
+    }
+    function dot(tone) {
+        return new component__namespace.Text({
+            text: '●',
+            classList: ['ctc-dot-' + tone],
+            rootAttributes: { 'aria-hidden': 'true' }
+        });
+    }
+    function dotText(tone, label, extra, opts = {}) {
+        return hstack([
+            dot(tone),
+            text(label, { small: opts.small }),
+            extra ? text(extra, { weak: true, small: opts.small }) : null
+        ], Gap.SPACING1X);
+    }
+    function divider() {
+        return new component__namespace.Divider({ orientation: component__namespace.Divider.Orientation.HORIZONTAL });
+    }
+    function button(label, action, opts = {}) {
+        const type = opts.link ? component__namespace.Button.Type.LINK
+            : opts.danger ? component__namespace.Button.Type.DANGER
+                : opts.primary ? component__namespace.Button.Type.PRIMARY
+                    : component__namespace.Button.Type.DEFAULT;
+        return new component__namespace.Button({
+            label,
+            type,
+            size: opts.small ? component__namespace.Button.Size.SMALL : component__namespace.Button.Size.MEDIUM,
+            enabled: opts.enabled !== false,
+            startIcon: opts.icon,
+            action: (_args, sender) => { action(sender); }
+        });
+    }
+    function extLink(label, url) {
+        return new component__namespace.Link({
+            content: label + ' ↗',
+            url,
+            target: component__namespace.Link.Target.BLANK
+        });
+    }
+    function field(label, control, helpText) {
+        return vstack([
+            new component__namespace.Text({ text: label, type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S }),
+            control,
+            helpText ? (typeof helpText === 'string' ? help(helpText) : helpText) : null
+        ], Gap.SPACING1X);
+    }
+    function loader(label) {
+        return new component__namespace.Loader({ label, indeterminate: true });
+    }
+    function skeleton(kind, size = 3, label = 'Loading…') {
+        try {
+            const S = component__namespace.Skeleton;
+            if (kind === 'table')
+                return S.table({ rows: size, columns: 4 });
+            if (kind === 'kpi')
+                return S.kpi();
+            return S.lines({ count: size });
+        }
+        catch (e) {
+            return loader(label);
+        }
+    }
+    function problemCard(title, detail, actions = []) {
+        return card([
+            grid('auto minmax(0, 1fr)', [
+                dot('problem'),
+                vstack([
+                    text(title, { strong: true }),
+                    detail ? help(detail) : null,
+                    present(actions).length ? hstack(actions, Gap.SPACING2X, { wrap: true }) : null
+                ], Gap.SPACING1X)
+            ], Gap.SPACING3X)
+        ]);
+    }
+    function emptyCard(title, detail, actions = []) {
+        return card([
+            text(title, { strong: true }),
+            help(detail),
+            present(actions).length ? hstack(actions, Gap.SPACING2X, { wrap: true }) : null
+        ], { gap: Gap.SPACING2X });
+    }
+    const errorLine = (msg) => text('✕ ' + msg, { strong: true });
+    function pageHeader(title, subtitle, aside = []) {
+        const heading = new component__namespace.Heading({
+            content: title,
+            level: 1,
+            type: component__namespace.Heading.Type.PAGE_TITLE,
+            rootAttributes: { 'data-ctc-page-heading': '' }
+        });
+        const left = vstack([heading, subtitle ? text(subtitle, { weak: true }) : null], Gap.SPACING1X);
+        const right = present(aside);
+        if (!right.length)
+            return left;
+        return hstack([left, hstack(right, Gap.SPACING3X, { wrap: true })], Gap.SPACING4X, {
+            alignment: SP.Alignment.END, justification: SP.Justification.SPACE_BETWEEN, wrap: true, growFirst: true
+        });
+    }
+
+    const PAUSE_CONFIRM_TEXT = 'Reps will not be able to call until you resume. Open phones stop within about a minute; ' +
+        'calls in progress finish.';
+    const PauseControl = (props) => {
+        const c = store.getState().console;
+        const snap = (c.snapshot || {});
+        const paused = snap.active === false;
+        const out = [];
+        if (paused) {
+            out.push(button(c.reactivating ? 'Resuming…' : 'Resume calling', () => { reactivate('overview'); }, {
+                primary: true, enabled: !c.reactivating, icon: core__namespace.SystemIcon.PLAY
+            }));
+        }
+        else if (c.deactivating) {
+            out.push(button('Pausing…', () => undefined, { danger: true, enabled: false }));
+        }
+        else if (c.pendingDeactivateConfirm) {
+            out.push(hstack([
+                text(PAUSE_CONFIRM_TEXT, { small: true }),
+                button('Confirm pause', () => { deactivate(); }, { small: true }),
+                button('Cancel', () => { store.dispatch(Action.deactivateSuccess()); }, { small: true })
+            ], Gap.SPACING2X, { wrap: true }));
+        }
+        else {
+            out.push(button(props.pauseLabel || 'Pause calling', () => { store.dispatch(Action.deactivateRequest()); }, {
+                danger: !!props.danger
+            }));
+        }
+        if (c.deactivateError)
+            out.push(errorLine('Pause failed: ' + friendlyError(c.deactivateError)));
+        if (c.reactivateError && c.reactivateSource === 'overview') {
+            out.push(errorLine('Resume failed: ' + friendlyError(c.reactivateError)));
+            buildFailedCheckLines(c.reactivateFailedChecks).forEach((line) => { out.push(line); });
+        }
+        return vstack(out, Gap.SPACING2X, { alignment: component__namespace.StackPanel.Alignment.END });
+    };
+
+    const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#2E9E6B' };
+    const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#E9A62A' };
+    const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#B9B5AE' };
+    const PHONE_STATUS_INBOUND_OFF = { label: 'Ready (inbound off)', color: '#2E9E6B' };
+    const phoneStatus = (row) => {
+        if (!row || row.stale || row.state === 'offline' || !row.state)
+            return PHONE_STATUS_OFFLINE;
+        if (!row.incomingGranted)
+            return PHONE_STATUS_INBOUND_OFF;
+        if (row.state !== 'registered' || !row.canReceive)
+            return PHONE_STATUS_NOT_RECEIVING;
+        return PHONE_STATUS_RECEIVING;
+    };
+    const relativeTime = (iso, nowMs) => {
+        const t = Date.parse(iso || '');
+        if (isNaN(t))
+            return 'Never';
+        const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
+        if (sec < 60)
+            return 'Just now';
+        const min = Math.floor(sec / 60);
+        if (min < 60)
+            return min + ' min ago';
+        const hr = Math.floor(min / 60);
+        if (hr < 24)
+            return hr + ' h ago';
+        const days = Math.floor(hr / 24);
+        return days + (days === 1 ? ' day ago' : ' days ago');
+    };
+    const exactTime = (iso) => {
+        const t = Date.parse(iso || '');
+        return isNaN(t) ? '' : new Date(t).toLocaleString();
+    };
+
+    const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+    function agoParts(minutes) {
+        const m = Math.max(0, Math.round(minutes));
+        if (m < 60)
+            return { value: String(m), unit: 'min ago' };
+        const h = Math.floor(m / 60);
+        if (h < 48)
+            return { value: String(h), unit: 'h ago' };
+        return { value: String(Math.floor(h / 24)), unit: 'days ago' };
+    }
+    function timeOfDay(iso) {
+        const t = Date.parse(iso || '');
+        if (isNaN(t))
+            return '';
+        return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+    function backlogKpi(v) {
+        if (!v)
+            return { metric: '—', metadata: '', tone: null, text: 'Not checked' };
+        const total = v.logged + v.processing + v.failed;
+        const parts = [];
+        if (v.processing)
+            parts.push(v.processing + ' processing');
+        if (v.logged)
+            parts.push(v.logged + ' logged');
+        if (v.failed)
+            parts.push(v.failed + ' failed');
+        return {
+            metric: String(total),
+            metadata: total === 1 ? 'call' : 'calls',
+            tone: v.failed > 0 ? 'warn' : null,
+            text: parts.length ? parts.join(' · ') : 'Nothing waiting'
+        };
+    }
+    function numbersRoutedKpi(v) {
+        if (!v)
+            return { metric: '—', metadata: '', tone: null, text: 'Not checked' };
+        const total = v.numbers.length;
+        if (total === 0)
+            return { metric: '0', metadata: '', tone: 'off', text: 'No number has a rep yet' };
+        const missing = v.numbers.filter((n) => !n.inTwilio).length;
+        const onFlow = v.numbers.filter((n) => n.onFlow === true).length;
+        const meta = 'of ' + total;
+        if (missing) {
+            return { metric: String(onFlow), metadata: meta, tone: 'problem',
+                text: plural(missing, 'number is', 'numbers are') + ' not in Twilio' };
+        }
+        if (!v.flowSid)
+            return { metric: '0', metadata: meta, tone: 'warn', text: 'Routing is not published' };
+        if (onFlow === total) {
+            return { metric: String(onFlow), metadata: meta, tone: v.inboundEnabled ? 'ok' : 'off',
+                text: v.inboundEnabled ? 'All point at CTC routing' : 'All point at CTC routing · inbound off' };
+        }
+        return { metric: String(onFlow), metadata: meta, tone: v.inboundEnabled ? 'problem' : 'off',
+            text: plural(total - onFlow, 'number does', 'numbers do') + ' not point at CTC routing' };
+    }
+    function repsReceivingKpi(v, relative) {
+        if (!v)
+            return { metric: '—', metadata: '', tone: null, text: 'Not checked' };
+        const total = v.reps.length;
+        if (total === 0)
+            return { metric: '0', metadata: '', tone: 'off', text: 'No rep rings for a number' };
+        const receiving = v.reps.filter((r) => r.receiving);
+        const meta = 'of ' + total;
+        if (!v.inboundEnabled) {
+            return { metric: String(receiving.length), metadata: meta, tone: 'off', text: 'Inbound calls are off' };
+        }
+        const tone = receiving.length === total ? 'ok' : 'warn';
+        if (receiving.length === 1) {
+            const r = receiving[0];
+            const seen = r.lastSeen ? relative(r.lastSeen) : '';
+            return { metric: '1', metadata: meta, tone, text: r.employeeName + (seen ? ' · ' + seen.toLowerCase() : '') };
+        }
+        if (receiving.length === 0)
+            return { metric: '0', metadata: meta, tone, text: 'No rep has a phone open' };
+        return { metric: String(receiving.length), metadata: meta, tone,
+            text: tone === 'ok' ? 'Every routed rep' : plural(total - receiving.length, 'rep is', 'reps are') + ' not receiving' };
+    }
+    function runStatusText(status) {
+        switch (status) {
+            case 'complete': return 'Completed';
+            case 'processing': return 'Running';
+            case 'failed': return 'Failed';
+            default: return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'No run yet';
+        }
+    }
+    function jobTone(j, staleAfterMinutes = 45) {
+        if (!j || !j.lastStatus || j.minutesSinceLastRun === null)
+            return 'off';
+        if (j.lastStatus === 'failed')
+            return 'problem';
+        if (j.failedRecent > 0 || j.minutesSinceLastRun > staleAfterMinutes)
+            return 'warn';
+        return 'ok';
+    }
+    function missedCallSyncKpi(v) {
+        const j = v && v.reconcile;
+        if (!j)
+            return { metric: '—', metadata: '', tone: null, text: 'Not checked' };
+        if (!j.lastStatus || j.minutesSinceLastRun === null) {
+            return { metric: '—', metadata: '', tone: 'off', text: runStatusText(j.lastStatus) };
+        }
+        const ago = agoParts(j.minutesSinceLastRun);
+        return { metric: ago.value, metadata: ago.unit, tone: jobTone(j), text: runStatusText(j.lastStatus) };
+    }
+    function routingStatus(row, v) {
+        if (row.ringId === null)
+            return { label: 'No rep', tone: 'off' };
+        const n = v ? v.numbers.find((x) => x.phoneSid === row.phoneSid) : null;
+        if (!n)
+            return { label: 'Not checked', tone: 'off' };
+        if (!n.inTwilio)
+            return { label: 'Not in Twilio', tone: 'problem' };
+        if (n.onFlow === true)
+            return { label: 'CTC routing', tone: 'ok' };
+        return { label: 'Not routed', tone: 'warn' };
+    }
+    function callerIdPlan(rows, defaultNumber) {
+        const byRep = {};
+        const repIds = [];
+        rows.forEach((r) => {
+            r.employeeIds.forEach((id) => { if (repIds.indexOf(id) < 0)
+                repIds.push(id); });
+            if (r.ringId !== null && !byRep[String(r.ringId)]) {
+                byRep[String(r.ringId)] = { phoneNumber: r.phoneNumber, ringsThem: true };
+            }
+        });
+        repIds.forEach((id) => {
+            if (!byRep[String(id)])
+                byRep[String(id)] = { phoneNumber: defaultNumber || '', ringsThem: false };
+        });
+        return { byRep, repIds };
+    }
+    const firstName = (name) => String(name || '').trim().split(/\s+/)[0] || name;
+    const INBOUND_FIELDS = [
+        'inboundEnabled', 'ringSeconds', 'noAnswerMessage', 'recordInbound', 'recordingNoticeOn',
+        'recordingNotice', 'voicemailOn', 'voicemailMaxSeconds', 'fallbackOwnerId'
+    ];
+    function countInboundChanges(form, saved) {
+        if (!saved)
+            return 0;
+        return INBOUND_FIELDS.filter((k) => form[k] !== saved[k]).length;
+    }
+    const CALL_CENTRAL_URL = '/app/site/hosting/scriptlet.nl?script=customscript_ctc_sl_reporting&deploy=customdeploy_ctc_sl_reporting';
+    const API_SECRETS_URL = '/app/common/scripting/secrets/settings.nl';
 
     const toRow = (raw) => {
         const r = (raw || {});
@@ -2446,120 +2952,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
-    const SEVERITIES = ['ok', 'warn', 'problem', 'unknown'];
-    const toSeverity = (v) => (SEVERITIES.indexOf(v) !== -1 ? v : 'unknown');
-    const toAction = (v) => {
-        const a = (v || null);
-        if (!a || typeof a.label !== 'string' || typeof a.route !== 'string')
-            return undefined;
-        return { label: a.label, route: a.route };
-    };
-    const toSignal = (raw) => {
-        const r = (raw || {});
-        const out = {
-            key: String(r.key ?? ''),
-            title: String(r.title ?? ''),
-            value: r.value ?? null,
-            severity: toSeverity(r.severity),
-            detail: String(r.detail ?? '')
-        };
-        const action = toAction(r.action);
-        if (action)
-            out.action = action;
-        return out;
-    };
-    const toAttention = (raw) => {
-        const s = toSignal(raw);
-        const item = { key: s.key, title: s.title, severity: s.severity, detail: s.detail };
-        if (s.action)
-            item.action = s.action;
-        return item;
-    };
-    async function loadHealth() {
-        if (store.getState().health.loading)
-            return;
-        store.dispatch(Action.healthLoadStart());
-        try {
-            const result = (await wizardCall('wizardLoadHealth', {}));
-            if (!result || result.ok !== true) {
-                store.dispatch(Action.healthLoadFailure((result && (result.message || result.error)) || 'Could not load the health checks'));
-                return;
-            }
-            const signals = {};
-            Object.keys(result.signals || {}).forEach((k) => {
-                signals[k] = toSignal(result.signals[k]);
-            });
-            const attention = Array.isArray(result.attention) ? result.attention.map(toAttention) : [];
-            store.dispatch(Action.healthLoadSuccess({
-                checkedAt: String(result.checkedAt || ''),
-                signals,
-                attention
-            }));
-        }
-        catch (e) {
-            store.dispatch(Action.healthLoadFailure(e instanceof Error && e.message ? e.message : 'Could not load the health checks'));
-        }
-    }
-
-    const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#14B981' };
-    const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#F4C76A' };
-    const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#9CA3AF' };
-    const PHONE_STATUS_INBOUND_OFF = { label: 'Ready (inbound off)', color: '#14B981' };
-    const phoneStatus = (row) => {
-        if (!row || row.stale || row.state === 'offline' || !row.state)
-            return PHONE_STATUS_OFFLINE;
-        if (!row.incomingGranted)
-            return PHONE_STATUS_INBOUND_OFF;
-        if (row.state !== 'registered' || !row.canReceive)
-            return PHONE_STATUS_NOT_RECEIVING;
-        return PHONE_STATUS_RECEIVING;
-    };
-    const relativeTime = (iso, nowMs) => {
-        const t = Date.parse(iso || '');
-        if (isNaN(t))
-            return 'Never';
-        const sec = Math.max(0, Math.floor((nowMs - t) / 1000));
-        if (sec < 60)
-            return 'Just now';
-        const min = Math.floor(sec / 60);
-        if (min < 60)
-            return min + ' min ago';
-        const hr = Math.floor(min / 60);
-        if (hr < 24)
-            return hr + ' h ago';
-        const days = Math.floor(hr / 24);
-        return days + (days === 1 ? ' day ago' : ' days ago');
-    };
-    const exactTime = (iso) => {
-        const t = Date.parse(iso || '');
-        return isNaN(t) ? '' : new Date(t).toLocaleString();
-    };
-    const buildPhoneStatusCell = (row) => {
-        const status = phoneStatus(row);
-        return new component__namespace.StackPanel({
-            items: [
-                new component__namespace.Text({
-                    text: '●',
-                    rootStyle: { color: status.color },
-                    rootAttributes: { 'aria-hidden': 'true' }
-                }),
-                new component__namespace.Text({ text: status.label })
-            ],
-            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-            itemGap: component__namespace.StackPanel.GapSize.XS,
-            alignment: component__namespace.StackPanel.Alignment.CENTER
-        });
-    };
-    const buildLastSeenCell = (row, nowMs) => {
-        const iso = (row && row.lastSeen) || '';
-        const title = exactTime(iso);
-        return new component__namespace.Text({
-            text: relativeTime(iso, nowMs),
-            type: component__namespace.Text.Type.WEAK,
-            rootAttributes: title ? { title: title } : {}
-        });
-    };
-
     const formatPhone = (e164) => {
         const raw = String(e164 || '');
         const m = /^\+1([0-9]{3})([0-9]{3})([0-9]{4})$/.exec(raw);
@@ -2568,27 +2960,18 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
 
     const statusToBadge = (status) => {
         switch (status) {
-            case 'pass': return { text: 'Pass', palette: { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } };
-            case 'fail': return { text: 'Fail', palette: { bg: '#F8D7DA', fg: '#721C24', border: '#F1B5BB' } };
-            case 'warn': return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
-            case 'info_enabled': return { text: 'Enabled', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
-            case 'info_disabled': return { text: 'Disabled', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-            case 'unknown': return { text: 'Not checked', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-            case 'not_published': return { text: 'Not published', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-            default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
-        }
-    };
-    const statusIcon = (status) => {
-        switch (status) {
-            case 'pass': return { icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED, color: core__namespace.ImageConstant.Color.SUCCESS };
-            case 'fail': return { icon: core__namespace.SystemIcon.STATUS_ERROR_FILLED, color: core__namespace.ImageConstant.Color.DANGER };
-            case 'warn': return { icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED, color: core__namespace.ImageConstant.Color.WARNING };
-            case 'info_enabled': return { icon: core__namespace.SystemIcon.STATUS_INFO_FILLED, color: core__namespace.ImageConstant.Color.INFO };
-            default: return { icon: core__namespace.SystemIcon.STATUS_INFO, color: core__namespace.ImageConstant.Color.NEUTRAL };
+            case 'pass': return { text: 'Pass', tone: 'ok' };
+            case 'fail': return { text: 'Fail', tone: 'problem' };
+            case 'warn': return { text: 'Needs action', tone: 'warn' };
+            case 'info_enabled': return { text: 'Enabled', tone: 'info' };
+            case 'info_disabled': return { text: 'Disabled', tone: 'neutral' };
+            case 'unknown': return { text: 'Not checked', tone: 'neutral' };
+            case 'not_published': return { text: 'Not published', tone: 'neutral' };
+            default: return { text: status || '—', tone: 'neutral' };
         }
     };
     const voiceUrlDriftRow = (drift, outbound) => {
-        const row = { label: 'TwiML VoiceUrl' };
+        const row = { label: 'Twilio app points at our dial function' };
         if (outbound.loaded && !outbound.published) {
             return { ...row, status: 'not_published', detail: '' };
         }
@@ -2597,25 +2980,25 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     'The outbound Function is missing in Twilio. Publish again.' };
         }
         if (drift.voiceUrl === 'pass')
-            return { ...row, status: 'pass', detail: '' };
+            return { ...row, status: 'pass', detail: 'Voice URL matches' };
         if (drift.voiceUrl === 'fail') {
             return { ...row, status: 'fail', detail: 'Voice URL does not point at the published Function.' };
         }
         return { ...row, status: 'unknown', detail: '' };
     };
     const outboundVersionRow = (outbound) => {
-        const row = { label: 'Outbound notice version' };
+        const row = { label: 'Recording notice code is current' };
         if (!outbound.loaded)
             return { ...row, status: 'unknown', detail: '' };
         if (!outbound.published)
             return { ...row, status: 'not_published', detail: '' };
         if (outbound.needsRepublish) {
-            return { ...row, status: 'warn', detail: 'A newer version is available. Republish on the Voice page.' };
+            return { ...row, status: 'warn', detail: 'A newer version is available. Republish on the Outbound calls page.' };
         }
         return {
             ...row,
             status: 'pass',
-            detail: outbound.publishedNoticeVersion ? 'Notice v' + outbound.publishedNoticeVersion : ''
+            detail: 'Published ' + (outbound.publishedCodeVersion || '—') + ' · installed ' + (outbound.codeVersion || '—')
         };
     };
     const signalRow = (label, sig) => {
@@ -2625,10 +3008,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         return { label, status, detail: sig.detail };
     };
     const phoneNumbersDriftRow = (c, health) => {
-        const fromSignal = signalRow('Phone numbers', health && health.signals.numberRouting);
+        const fromSignal = signalRow('Phone numbers still in Twilio', health && health.signals.numberRouting);
         if (fromSignal)
             return fromSignal;
-        const row = { label: 'Phone numbers' };
+        const row = { label: 'Phone numbers still in Twilio' };
         const numbers = c.phonesNumbers;
         if (c.phonesListError) {
             return { ...row, status: 'unknown', detail: 'The Twilio number list did not load: ' + friendlyError(c.phonesListError) };
@@ -2665,10 +3048,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         return { ...row, status: 'fail', detail: 'Not in the Twilio account: ' + missing.join(', ') };
     };
     const intelDriftRow = (c, health) => {
-        const fromSignal = signalRow('Intelligence service', health && health.signals.intelligence);
+        const fromSignal = signalRow('Transcription service auto-transcribes', health && health.signals.intelligence);
         if (fromSignal)
             return fromSignal;
-        const row = { label: 'Intelligence service' };
+        const row = { label: 'Transcription service auto-transcribes' };
         const snap = (c.snapshot || {});
         if (c.snapshot && !snap.intelServiceSid) {
             return { ...row, status: 'info_disabled', detail: 'No Intelligence service is set (no transcripts).' };
@@ -2681,590 +3064,152 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             ? { ...row, status: 'pass', detail: '' }
             : { ...row, status: 'fail', detail: 'The saved service is not in the Twilio account.' };
     };
-    class HealthChecks extends core.PureComponent {
-        componentDidMount() {
-            loadPresence();
-            loadHealth();
-            const outbound = store.getState().outbound;
-            if (!outbound.loaded && !outbound.loading) {
-                loadOutbound();
-            }
-        }
-        buildPresenceColumns(nowMs) {
-            const CT = component__namespace.DataGrid.ColumnType;
-            return [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'rep',
-                    label: 'Rep',
-                    stretchFactor: 3,
-                    content: (args) => new component__namespace.Text({
-                        text: args?.cell?.row?.dataItem?.employeeName || '(unnamed rep)',
-                        type: component__namespace.Text.Type.STRONG
-                    })
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'status',
-                    label: 'Status',
-                    stretchFactor: 3,
-                    content: (args) => buildPhoneStatusCell(args?.cell?.row?.dataItem)
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'lastSeen',
-                    label: 'Last seen',
-                    stretchFactor: 2,
-                    content: (args) => buildLastSeenCell(args?.cell?.row?.dataItem, nowMs)
-                }
-            ];
-        }
-        buildPhonesContent(presence) {
-            const content = [];
-            const push = (node) => {
-                content.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node })));
-            };
-            push(jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Phones" }));
-            if (presence.error) {
-                push(jsxRuntime.jsx(ErrorText, { message: presence.error }));
-            }
-            if (!presence.loaded) {
-                if (!presence.error) {
-                    push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Loading phones\u2026" }));
-                }
-            }
-            else if (presence.items.length === 0) {
-                push(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No reps have phones yet." }));
-            }
-            else {
-                const nowMs = Date.now() + presence.clockSkewMs;
-                push(new component__namespace.DataGrid({
-                    dataSource: new core__namespace.ArrayDataSource(presence.items),
-                    columns: this.buildPresenceColumns(nowMs),
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    stripedRows: true,
-                    dataRowHeight: 48,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                }));
-            }
-            push(new component__namespace.Button({
-                label: presence.loading ? 'Refreshing…' : 'Refresh',
-                startIcon: core__namespace.SystemIcon.REFRESH,
-                enabled: !presence.loading,
-                action: () => { loadPresence(); }
-            }));
-            return content;
-        }
-        rerunPreflight = async () => {
-            store.dispatch(Action.consolePatch({ preflightRefreshing: true, preflightError: null }));
-            try {
-                const payload = await wizardCall('wizardRunPreflight', {});
-                const checks = payload && payload.checks;
-                if (Array.isArray(checks)) {
-                    store.dispatch(Action.consolePatch({ preflight: checks }));
-                }
-                else {
-                    const p = (payload || {});
-                    store.dispatch(Action.consolePatch({
-                        preflightError: p.errorMessage || p.error || 'Preflight did not return any checks'
-                    }));
-                }
-            }
-            catch (e) {
-                const err = e;
-                store.dispatch(Action.consolePatch({
-                    preflightError: 'Network: ' + (err.message || String(e))
-                }));
-            }
-            finally {
-                store.dispatch(Action.consolePatch({ preflightRefreshing: false }));
-            }
-        };
-        buildCheckColumns() {
-            const CT = component__namespace.DataGrid.ColumnType;
-            const BdgType = component__namespace.Badge.Type;
-            return [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'statusIcon',
-                    label: '',
-                    stretchFactor: 1,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        const status = row?.status || 'unknown';
-                        const si = statusIcon(status);
-                        return new component__namespace.Image({
-                            image: si.icon,
-                            size: component__namespace.Image.Size.M,
-                            color: si.color,
-                            presentation: true
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'check',
-                    label: 'Check',
-                    stretchFactor: 4,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.label || '(unlabeled check)',
-                            type: component__namespace.Text.Type.STRONG
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'detail',
-                    label: 'Detail',
-                    stretchFactor: 6,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.detail || '—',
-                            type: component__namespace.Text.Type.WEAK,
-                            size: component__namespace.Text.Size.S
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'status',
-                    label: 'Status',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        const status = row?.status || 'unknown';
-                        const sb = statusToBadge(status);
-                        return new component__namespace.Badge({
-                            content: sb.text,
-                            type: BdgType.SUBTLE,
-                            rootStyle: {
-                                backgroundColor: sb.palette.bg,
-                                color: sb.palette.fg,
-                                border: '1px solid ' + sb.palette.border
-                            }
-                        });
-                    }
-                }
-            ];
-        }
-        render() {
-            const state = store.getState();
-            const c = state.console;
-            const preflight = c.preflight;
-            const drift = (c.drift || {});
-            const refreshing = !!c.preflightRefreshing || (c.loading && preflight === null);
-            const driftRows = [
-                voiceUrlDriftRow(drift, state.outbound),
-                outboundVersionRow(state.outbound),
-                phoneNumbersDriftRow(c, state.health),
-                intelDriftRow(c, state.health)
-            ];
-            const columns = this.buildCheckColumns();
-            const phonesContent = this.buildPhonesContent(state.presence);
-            const preflightContent = [];
-            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Preflight" }) })));
-            if (c.preflightError) {
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(ErrorText, { message: 'Preflight did not run: ' + friendlyError(c.preflightError) }) })));
-            }
-            if (preflight === null || preflight === undefined) {
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: refreshing
-                            ? 'Running preflight checks…'
-                            : 'Click "Re-run preflight" to evaluate.' }) })));
-            }
-            else if (preflight.length === 0) {
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No checks returned." }) })));
-            }
-            else {
-                const preflightDs = new core__namespace.ArrayDataSource(preflight);
-                preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
-                        dataSource: preflightDs,
-                        columns,
-                        columnStretch: true,
-                        highlightRowsOnHover: true,
-                        stripedRows: true,
-                        dataRowHeight: 64,
-                        headerRowHeight: 40,
-                        rootStyle: { width: '100%' }
-                    }) })));
-            }
-            preflightContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Re-running…' : 'Re-run preflight', type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { this.rerunPreflight(); }, rootStyle: {
-                        backgroundColor: '#2D4458',
-                        color: '#FFFFFF',
-                        borderColor: '#2D4458'
-                    } }) })));
-            const driftContent = [];
-            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Drift detection" }) })));
-            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Compares the saved wizard config against the live Twilio account. Re-runs each time the console mounts." }) })));
-            const driftDs = new core__namespace.ArrayDataSource(driftRows);
-            driftContent.push((jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
-                    dataSource: driftDs,
-                    columns,
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    stripedRows: true,
-                    dataRowHeight: 64,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                }) })));
-            const outerItems = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: preflightContent }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: driftContent }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: phonesContent }) })),
-                c.actionError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(c.actionError) }) }))
-            ].filter(Boolean);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: outerItems }));
-        }
-    }
 
-    const buildFailedCheckLines = (checks) => checks
-        .filter((c) => c && c.status !== 'pass')
-        .map((c) => new component__namespace.Text({
-        text: '✕ ' + (c.label || c.id || 'Check') +
-            (c.detail ? ': ' + c.detail : '') +
-            (c.repairHint ? ' → ' + c.repairHint : ''),
-        size: component__namespace.Text.Size.S
-    }));
-
-    const toneToImageColor = (tone) => {
-        switch (tone) {
-            case 'success': return core__namespace.ImageConstant.Color.SUCCESS;
-            case 'warning': return core__namespace.ImageConstant.Color.WARNING;
-            case 'info': return core__namespace.ImageConstant.Color.INFO;
-            case 'neutral': return core__namespace.ImageConstant.Color.NEUTRAL;
-            default: return undefined;
-        }
-    };
-    const buildIconedDescription = (props) => {
-        const iconColor = toneToImageColor(props.tone);
-        const icon = new component__namespace.Image({
-            image: props.icon,
-            size: component__namespace.Image.Size.S,
-            color: iconColor,
-            presentation: true
-        });
-        const descText = props.description
-            ? new component__namespace.Text({
-                text: props.description,
-                type: component__namespace.Text.Type.WEAK,
-                size: component__namespace.Text.Size.S
-            })
-            : null;
-        const items = [
-            icon,
-            descText
-        ].filter(Boolean);
-        return new component__namespace.StackPanel({
-            items,
-            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-            itemGap: component__namespace.StackPanel.GapSize.XS,
-            alignment: component__namespace.StackPanel.Alignment.CENTER
-        });
-    };
-    const buildStatCard = (props) => {
-        try {
-            const card = component__namespace.Card.metric({
-                title: props.title,
-                metric: props.metric,
-                description: props.icon
-                    ? buildIconedDescription(props)
-                    : props.description
-            });
-            return card;
-        }
-        catch (e) {
-            const titleText = new component__namespace.Text({
-                text: props.title,
-                type: component__namespace.Text.Type.WEAK,
-                size: component__namespace.Text.Size.S
-            });
-            const metricText = new component__namespace.Text({
-                text: props.metric,
-                type: component__namespace.Text.Type.STRONG
-            });
-            const descText = props.description
-                ? new component__namespace.Text({
-                    text: props.description,
-                    type: component__namespace.Text.Type.WEAK,
-                    size: component__namespace.Text.Size.S
-                })
-                : null;
-            const items = [titleText, metricText, descText].filter(Boolean);
-            return new component__namespace.StackPanel({
-                items,
-                orientation: component__namespace.StackPanel.Orientation.VERTICAL,
-                itemGap: component__namespace.StackPanel.GapSize.XXS
-            });
-        }
-    };
-    const StatCard = (props) => buildStatCard(props);
-    class OverviewPage extends core.PureComponent {
-        handleNav = (section) => goToSection(section);
-        handleRequestDeactivate = () => { store.dispatch(Action.deactivateRequest()); };
-        handleCancelDeactivate = () => { store.dispatch(Action.deactivateSuccess()); };
-        handleDeactivate = () => { deactivate(); };
-        handleReactivate = () => { reactivate('overview'); };
-        renderActionErrors(c) {
-            const out = [];
-            if (c.deactivateError) {
-                out.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ Deactivate failed: ' + friendlyError(c.deactivateError) }) }));
-            }
-            if (c.reactivateError && c.reactivateSource === 'overview') {
-                out.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ Reactivate failed: ' + friendlyError(c.reactivateError) }) }));
-                buildFailedCheckLines(c.reactivateFailedChecks).forEach((line) => {
-                    out.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: line }));
-                });
-            }
-            return out;
-        }
-        handleAttentionAction = (route) => {
-            const r = parseHash(route);
-            if (r && r.kind === 'section')
-                this.handleNav(r.section);
-        };
-        renderAttention(items) {
-            if (!items.length)
-                return null;
-            const rows = [
-                jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Needs attention" }) })
-            ];
-            items.forEach((item) => {
-                const action = item.action;
-                rows.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, alignment: component__namespace.StackPanel.Alignment.CENTER, children: [
-                            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Image({
-                                    image: item.severity === 'problem'
-                                        ? core__namespace.SystemIcon.STATUS_ERROR_FILLED
-                                        : core__namespace.SystemIcon.STATUS_WARNING_FILLED,
-                                    size: component__namespace.Image.Size.S,
-                                    color: item.severity === 'problem'
-                                        ? core__namespace.ImageConstant.Color.DANGER
-                                        : core__namespace.ImageConstant.Color.WARNING,
-                                    presentation: true
-                                }) })),
-                            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: item.title }) })),
-                            action ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: action.label, action: () => this.handleAttentionAction(action.route) }) })) : null
-                        ].filter(Boolean) }) }));
-            });
-            return (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: rows }) }));
-        }
-        render() {
-            const state = store.getState();
-            const c = state.console;
-            const attention = this.renderAttention(state.health.attention);
-            const snap = (c.snapshot || {});
-            const assignments = (c.assignments || []);
-            const preflight = (c.preflight || []);
-            const assignmentsPending = c.assignments === null;
-            const preflightPending = c.preflight === null && c.loading;
-            const phoneCount = {};
-            assignments.forEach((a) => { if (a.phoneSid)
-                phoneCount[a.phoneSid] = true; });
-            const phonesConfigured = Object.keys(phoneCount).length || (snap.phoneNumber ? 1 : 0);
-            const repCount = assignments.length;
-            const preflightPassed = preflight.filter((cc) => cc.status === 'pass').length;
-            const preflightTotal = preflight.length;
-            const statusLabel = snap.active === false ? 'Paused'
-                : snap.active === true ? 'Active' : 'Unknown';
-            const statusIcon = snap.active === true ? core__namespace.SystemIcon.STATUS_SUCCESS_FILLED
-                : snap.active === false ? core__namespace.SystemIcon.STATUS_WARNING_FILLED
-                    : core__namespace.SystemIcon.STATUS_INFO_FILLED;
-            const statusTone = snap.active === true ? 'success' : snap.active === false ? 'warning' : 'info';
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [
-                    attention,
-                    (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr 1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Status", metric: statusLabel, description: snap.active === false
-                                            ? 'Reps cannot place calls'
-                                            : 'Reps can place calls', icon: statusIcon, tone: statusTone }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Phone numbers", metric: assignmentsPending ? '…' : String(phonesConfigured), description: assignmentsPending ? 'Loading…'
-                                            : phonesConfigured === 0
-                                                ? 'No numbers configured'
-                                                : formatPhone(snap.phoneNumber) }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Assigned reps", metric: assignmentsPending ? '…' : String(repCount), description: assignmentsPending ? 'Loading…'
-                                            : repCount === 0
-                                                ? 'No assignments'
-                                                : (repCount === 1 ? '1 rep' : repCount + ' reps') }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Preflight", metric: preflightPending ? '…'
-                                            : preflightTotal > 0
-                                                ? preflightPassed + ' of ' + preflightTotal
-                                                : '—', description: preflightPending ? 'Running checks…'
-                                            : preflightTotal > 0
-                                                ? 'See checks below'
-                                                : c.preflightError ? 'Did not run' : 'Not yet run' }) })] }) })),
-                    (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
-                                border: '1px solid #E2E3E5',
-                                borderRadius: '8px',
-                                padding: '18px 22px',
-                                background: '#FAFAFB'
-                            }, children: [
-                                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) })),
-                                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Manage phone numbers", startIcon: core__namespace.SystemIcon.CALL, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.GROUPS, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.SETTINGS, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "API key rotation guide", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), snap.active === false ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: c.reactivating ? 'Reactivating…' : 'Reactivate', type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, enabled: !c.reactivating, action: this.handleReactivate }) })) : c.pendingDeactivateConfirm ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", enabled: !c.deactivating, action: this.handleCancelDeactivate }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: c.deactivating ? 'Deactivating…' : 'Confirm deactivate', type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, enabled: !c.deactivating, action: this.handleDeactivate }) })] }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleRequestDeactivate }) }))] }) })),
-                                ...this.renderActionErrors(c)
-                            ] }) })),
-                    (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(HealthChecks, { tick: this.props.tick }) }))
-                ].filter(Boolean) }));
-        }
-    }
-
-    const truncSid = (sid) => {
-        if (!sid)
-            return '';
-        if (sid.length <= 14)
-            return sid;
-        return sid.slice(0, 6) + '…' + sid.slice(-4);
-    };
     const idOf = (v) => Number(v && typeof v === 'object' ? v.id : v);
     const toIds = (values) => (values || []).map(idOf).filter((n) => !isNaN(n) && n > 0);
-    const CARD_STYLE = {
-        border: '1px solid #E2E3E5',
-        borderRadius: '8px',
-        padding: '18px 22px',
-        background: '#FAFAFB'
-    };
+    function presenceTone(row) {
+        const s = phoneStatus(row);
+        if (s === PHONE_STATUS_OFFLINE)
+            return { tone: 'off', label: s.label };
+        if (s === PHONE_STATUS_NOT_RECEIVING)
+            return { tone: 'warn', label: s.label };
+        return { tone: 'ok', label: s.label };
+    }
+    function employeeNames(state) {
+        const employees = (state.console.phonesEmployees || [])
+            .map((e) => ({ id: Number(e.id), name: e.name || '' }));
+        const names = {};
+        (state.console.assignments || [])
+            .forEach((a) => { if (a.employeeName)
+            names[String(a.employeeId)] = a.employeeName; });
+        const nameOf = (id) => employees.find((e) => e.id === id)?.name || names[String(id)] || ('Employee ' + id);
+        return { employees, nameOf };
+    }
+    function tableRows(state) {
+        return (state.console.phonesByPhone || []).map((r) => ({
+            ...r,
+            employeeIds: r.employeeIds.slice(),
+            ringId: rowValues(r, {}).primaryEmployeeId
+        }));
+    }
+    function callerIdList(state) {
+        const c = state.console;
+        if (c.phonesByPhone === null) {
+            return c.phonesLoading ? skeleton('lines', 3) : text('Not loaded yet.', { weak: true });
+        }
+        const rows = tableRows(state);
+        const defaultNumber = (c.snapshot || {}).phoneNumber || '';
+        const plan = callerIdPlan(rows, defaultNumber);
+        const { nameOf } = employeeNames(state);
+        const lines = [];
+        plan.repIds.forEach((id) => {
+            const out = plan.byRep[String(id)];
+            lines.push(text(nameOf(id), { strong: true, small: true }));
+            lines.push(text(out && out.phoneNumber
+                ? formatPhone(out.phoneNumber) + (out.ringsThem ? ' · rings this rep' : ' · default (rings for no number)')
+                : 'No default caller ID set', { small: true }));
+        });
+        return lines.length ? grid('auto minmax(0, 1fr)', lines, Gap.SPACING4X, { rowGap: Gap.SPACING2X })
+            : text(rows.length ? 'No rep is assigned to a number yet.' : 'No numbers yet.', { weak: true });
+    }
+    const ALSO_ASSIGNED_HELP = 'Only the rep under Rings receives this number\'s calls and calls out from it. ' +
+        'Also assigned reps are for reference only: they do not ring and do not change caller ID. ' +
+        'Saving republishes inbound routing when inbound calls are on (a few seconds).';
     class PhonesPage extends core.PureComponent {
         componentDidMount() {
-            const c = store.getState().console;
-            if (c.phonesNumbers === null && !c.phonesLoading) {
+            const state = store.getState();
+            const c = state.console;
+            if (c.phonesNumbers === null && !c.phonesLoading)
                 loadPhonesData();
-            }
+            loadPresence();
+            if (!state.health.loaded && !state.health.loading)
+                loadHealth();
         }
-        buildColumns(nameOf) {
+        buildColumns(nameOf, plan) {
             const CT = component__namespace.DataGrid.ColumnType;
-            const BdgType = component__namespace.Badge.Type;
-            const statusForRow = (row) => {
-                const state = store.getState();
-                if (state.console.phonesSavingSid === row.phoneSid) {
-                    return {
-                        icon: core__namespace.SystemIcon.STATUS_INFO_FILLED,
-                        color: core__namespace.ImageConstant.Color.INFO,
-                        label: 'Saving…'
-                    };
-                }
-                if (row.employeeIds.length > 0) {
-                    return {
-                        icon: core__namespace.SystemIcon.STATUS_SUCCESS_FILLED,
-                        color: core__namespace.ImageConstant.Color.SUCCESS,
-                        label: 'Live'
-                    };
-                }
-                return {
-                    icon: core__namespace.SystemIcon.STATUS_WARNING_FILLED,
-                    color: core__namespace.ImageConstant.Color.WARNING,
-                    label: 'No reps'
-                };
-            };
+            const state = store.getState();
+            const routingSig = state.health.signals.numberRouting;
+            const routingValue = (routingSig && routingSig.value);
+            const presence = state.presence;
+            const byEmployee = {};
+            presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
+            const nowMs = Date.now() + presence.clockSkewMs;
+            const row = (args) => args?.cell?.row?.dataItem;
+            const c = state.console;
             return [
                 {
-                    type: CT.TEMPLATED,
-                    name: 'statusIcon',
-                    label: '',
-                    stretchFactor: 1,
+                    type: CT.TEMPLATED, name: 'number', label: 'Number', stretchFactor: 3,
                     content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row)
-                            return new component__namespace.Text({ text: '' });
-                        const s = statusForRow(row);
-                        return new component__namespace.Image({
-                            image: s.icon,
-                            size: component__namespace.Image.Size.M,
-                            color: s.color,
-                            presentation: true
-                        });
+                        const r = row(args);
+                        return vstack([
+                            text(formatPhone(r?.phoneNumber) || '(unknown)', { strong: true }),
+                            r && r.friendlyName ? help(r.friendlyName) : null
+                        ], Gap.NONE);
                     }
                 },
                 {
-                    type: CT.TEMPLATED,
-                    name: 'phone',
-                    label: 'Phone number',
-                    stretchFactor: 2,
+                    type: CT.TEMPLATED, name: 'rings', label: 'Rings', stretchFactor: 3,
                     content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: formatPhone(row?.phoneNumber) || '(unknown)',
-                            type: component__namespace.Text.Type.STRONG
-                        });
+                        const r = row(args);
+                        return r && r.ringId !== null ? text(nameOf(r.ringId)) : text('—', { weak: true });
                     }
                 },
                 {
-                    type: CT.TEMPLATED,
-                    name: 'phoneSid',
-                    label: 'Phone SID',
-                    stretchFactor: 2,
+                    type: CT.TEMPLATED, name: 'also', label: 'Also assigned', stretchFactor: 3,
                     content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: truncSid(row?.phoneSid),
-                            type: component__namespace.Text.Type.WEAK,
-                            size: component__namespace.Text.Size.S
-                        });
+                        const r = row(args);
+                        const others = r ? r.employeeIds.filter((id) => id !== r.ringId) : [];
+                        return others.length ? text(others.map(nameOf).join(', ')) : text('—', { weak: true });
                     }
                 },
                 {
-                    type: CT.TEMPLATED,
-                    name: 'reps',
-                    label: 'Assigned reps',
-                    stretchFactor: 4,
+                    type: CT.TEMPLATED, name: 'routing', label: 'Routing', stretchFactor: 3,
                     content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        const ids = row ? row.employeeIds : [];
-                        if (ids.length === 0) {
-                            return new component__namespace.Text({ text: '—', type: component__namespace.Text.Type.WEAK });
+                        const r = row(args);
+                        if (!r)
+                            return text('');
+                        if (!routingValue && r.ringId !== null) {
+                            return text(state.health.loading ? 'Checking…' : 'Not checked', { weak: true });
                         }
-                        return new component__namespace.Text({ text: ids.map(nameOf).join(', ') });
+                        const s = routingStatus(r, routingValue);
+                        return dotText(s.tone, s.label);
                     }
                 },
                 {
-                    type: CT.TEMPLATED,
-                    name: 'rings',
-                    label: 'Rings',
-                    stretchFactor: 3,
+                    type: CT.TEMPLATED, name: 'phone', label: 'Rep\'s phone', stretchFactor: 4,
                     content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        const primary = row ? rowValues(row, {}).primaryEmployeeId : null;
-                        if (primary === null) {
-                            return new component__namespace.Text({ text: '—', type: component__namespace.Text.Type.WEAK });
-                        }
-                        return new component__namespace.Text({ text: nameOf(primary) });
+                        const r = row(args);
+                        if (!r || r.ringId === null)
+                            return text('—', { weak: true });
+                        if (!presence.loaded)
+                            return text(presence.error ? '—' : 'Loading…', { weak: true });
+                        const p = byEmployee[String(r.ringId)];
+                        const s = presenceTone(p);
+                        return dotText(s.tone, s.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
                     }
                 },
                 {
-                    type: CT.TEMPLATED,
-                    name: 'status',
-                    label: 'Status',
-                    stretchFactor: 2,
+                    type: CT.TEMPLATED, name: 'callsOut', label: 'Calls out from', stretchFactor: 4,
                     content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row)
-                            return new component__namespace.Text({ text: '—' });
-                        const s = statusForRow(row);
-                        const palette = s.label === 'Live' ? { bg: '#D4EDDA', fg: '#155724', border: '#A3D9AE' } :
-                            s.label === 'Saving…' ? { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } :
-                                { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' };
-                        return new component__namespace.Badge({
-                            content: s.label,
-                            type: BdgType.SUBTLE,
-                            rootStyle: {
-                                backgroundColor: palette.bg,
-                                color: palette.fg,
-                                border: '1px solid ' + palette.border
-                            }
-                        });
+                        const r = row(args);
+                        if (!r || r.ringId === null)
+                            return text('—', { weak: true });
+                        const out = plan.byRep[String(r.ringId)];
+                        const who = firstName(nameOf(r.ringId));
+                        if (out && out.phoneNumber === r.phoneNumber)
+                            return text(who + ', from this number');
+                        return text(who + ', from ' + (out && out.phoneNumber ? formatPhone(out.phoneNumber) : 'the default'));
                     }
                 },
                 {
-                    type: CT.TEMPLATED,
-                    name: 'action',
-                    label: '',
-                    stretchFactor: 2,
+                    type: CT.TEMPLATED, name: 'action', label: 'Actions', stretchFactor: 2,
                     content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row)
-                            return new component__namespace.Text({ text: '' });
-                        const c = store.getState().console;
-                        return new component__namespace.Button({
-                            label: 'Edit',
-                            startIcon: core__namespace.SystemIcon.EDIT,
-                            enabled: c.phonesSavingSid === null && c.phonesEditingSid !== row.phoneSid,
-                            action: () => { openPhonesEditor(row.phoneSid); }
+                        const r = row(args);
+                        if (!r)
+                            return text('');
+                        return button('Edit', () => { openPhonesEditor(r.phoneSid); }, {
+                            small: true,
+                            enabled: c.phonesSavingSid === null && c.phonesEditingSid !== r.phoneSid
                         });
                     }
                 }
@@ -3277,104 +3222,505 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const anySaving = c.phonesSavingSid !== null;
             const dirty = !!c.phonesDrafts[row.phoneSid];
             const rowError = c.phonesRowErrors[row.phoneSid];
-            const selectedItems = values.employeeIds
-                .map((id) => employees.find((e) => e.id === id) ||
-                { id, name: nameOf(id) });
-            const repsPicker = (jsxRuntime.jsx(component__namespace.MultiselectDropdown, { dataSource: new core__namespace.ArrayDataSource(employees), valueMember: "id", displayMember: "name", selectedItems: selectedItems, comparator: (l, r) => idOf(l) === idOf(r), placeholder: "Pick reps", enabled: !savingThis, onSelectionChanged: (args) => {
-                    editPhonesRow(row.phoneSid, { employeeIds: toIds(args && args.values) });
-                }, rootStyle: { width: '100%' } }));
-            const ringOptions = values.employeeIds.map((id) => ({ id, name: nameOf(id) }));
-            const ringsPicker = ringOptions.length === 0
-                ? new component__namespace.Text({ text: 'Assign a rep first.', type: component__namespace.Text.Type.WEAK })
-                : new component__namespace.Dropdown({
-                    dataSource: new core__namespace.ArrayDataSource(ringOptions),
-                    valueMember: 'id',
-                    displayMember: 'name',
-                    selectedValue: values.primaryEmployeeId,
-                    enabled: !savingThis && ringOptions.length > 1,
-                    onSelectionChanged: (sel) => {
-                        const id = idOf(sel && sel.value);
-                        if (!id || id === values.primaryEmployeeId)
-                            return;
-                        editPhonesRow(row.phoneSid, { primaryEmployeeId: id });
+            const ringId = values.primaryEmployeeId;
+            const others = values.employeeIds.filter((id) => id !== ringId);
+            const ringsPicker = (jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(employees), valueMember: "id", displayMember: "name", selectedValue: ringId, allowEmpty: true, placeholder: "No rep (callers hear the no-answer message)", enabled: !savingThis, onSelectionChanged: (sel) => {
+                    const id = idOf(sel && sel.value);
+                    if (!id || isNaN(id)) {
+                        editPhonesRow(row.phoneSid, { employeeIds: [], primaryEmployeeId: null });
+                        return;
                     }
-                });
-            const buttons = new component__namespace.StackPanel({
-                orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-                itemGap: component__namespace.StackPanel.GapSize.S,
-                items: [
-                    new component__namespace.Button({
-                        label: savingThis ? 'Saving…' : 'Save',
-                        type: component__namespace.Button.Type.PRIMARY,
-                        enabled: dirty && !anySaving,
-                        action: () => { savePhonesRow(row.phoneSid); }
+                    if (id === ringId)
+                        return;
+                    editPhonesRow(row.phoneSid, {
+                        employeeIds: [id].concat(values.employeeIds.filter((x) => x !== id)),
+                        primaryEmployeeId: id
+                    });
+                }, rootStyle: { width: '100%' } }));
+            const alsoChoices = employees.filter((e) => e.id !== ringId);
+            const selectedItems = others.map((id) => alsoChoices.find((e) => e.id === id) || { id, name: nameOf(id) });
+            const alsoPicker = (jsxRuntime.jsx(component__namespace.MultiselectDropdown, { dataSource: new core__namespace.ArrayDataSource(alsoChoices), valueMember: "id", displayMember: "name", selectedItems: selectedItems, comparator: (l, r) => idOf(l) === idOf(r), placeholder: ringId === null ? 'Pick who rings first' : 'Add reps', enabled: !savingThis && ringId !== null, onSelectionChanged: (args) => {
+                    if (ringId === null)
+                        return;
+                    const picked = toIds(args && args.values).filter((id) => id !== ringId);
+                    editPhonesRow(row.phoneSid, { employeeIds: [ringId].concat(picked), primaryEmployeeId: ringId });
+                }, rootStyle: { width: '100%' } }));
+            const body = [
+                cardTitle('Editing ' + formatPhone(row.phoneNumber) + (row.friendlyName ? ' · ' + row.friendlyName : '')),
+                grid('minmax(0, 1fr) minmax(0, 1fr)', [
+                    vstack([text('Rings', { strong: true, small: true }), ringsPicker], Gap.SPACING1X),
+                    vstack([text('Also assigned', { strong: true, small: true }), alsoPicker], Gap.SPACING1X)
+                ], Gap.SPACING4X),
+                help(ALSO_ASSIGNED_HELP),
+                hstack([
+                    button(savingThis ? 'Saving…' : 'Save', () => { savePhonesRow(row.phoneSid); }, {
+                        primary: true, small: true, enabled: dirty && !anySaving
                     }),
-                    new component__namespace.Button({
-                        label: 'Cancel',
-                        enabled: !savingThis,
-                        action: () => { cancelPhonesRow(row.phoneSid); }
-                    })
-                ]
-            });
-            const item = (node) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }));
-            const label = (text) => item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: text }));
-            const items = [
-                item(jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: formatPhone(row.phoneNumber) + (row.friendlyName ? '  —  ' + row.friendlyName : '') })),
-                label('Assigned reps'),
-                item(repsPicker),
-                label('Rings'),
-                item(ringsPicker),
-                item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Inbound calls to this number ring this rep, and this rep calls out from this number." })),
-                item(buttons)
+                    button('Cancel', () => { cancelPhonesRow(row.phoneSid); }, { small: true, enabled: !savingThis })
+                ])
             ];
-            if (rowError) {
-                items.push(item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(rowError) })));
-            }
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: { ...CARD_STYLE, maxWidth: '640px' }, children: items }));
+            if (rowError)
+                body.push(errorLine(friendlyError(rowError)));
+            return card(body, { label: 'Edit number' });
+        }
+        renderCallerId(state, defaultNumber) {
+            const how = card([
+                cardTitle('How caller ID works'),
+                text('Each rep calls out from the number that rings them, so a callback reaches the same rep. ' +
+                    'A rep who rings for no number calls out from the default, ' +
+                    (defaultNumber ? formatPhone(defaultNumber) : '(not set)') + '. Also assigned reps do not ring and ' +
+                    'do not change caller ID.', { weak: true }),
+                button('Change the default under Outbound calls', () => { goToSection('outbound'); }, { link: true, small: true })
+            ], { label: 'How caller ID works', fill: true });
+            const who = card([cardTitle('Who calls out from what today'), callerIdList(state)], { label: 'Who calls out from what today', fill: true });
+            return grid('minmax(0, 1fr) minmax(0, 1fr)', [how, who], Gap.SPACING3X, { stretch: true });
         }
         render() {
             const state = store.getState();
             const c = state.console;
-            const employees = (c.phonesEmployees || [])
-                .map((e) => ({ id: Number(e.id), name: e.name || '' }));
-            const nameOf = (id) => employees.find((e) => e.id === id)?.name || ('Employee ' + id);
+            const { employees, nameOf } = employeeNames(state);
+            const defaultNumber = (c.snapshot || {}).phoneNumber || '';
+            const refreshing = c.phonesLoading;
+            const numbers = (c.phonesNumbers || []);
+            const listed = timeOfDay(c.phonesLoadedAt);
+            const header = pageHeader('Phones & reps', 'Which rep each Twilio number rings, and the number each rep calls out from.', [
+                c.phonesNumbers !== null && !c.phonesListError
+                    ? help(numbers.length + (numbers.length === 1 ? ' number' : ' numbers') + ' from Twilio' +
+                        (listed ? ' · listed ' + listed : ''))
+                    : null,
+                button(refreshing ? 'Refreshing…' : 'Refresh from Twilio', () => { loadPhonesData(); }, {
+                    enabled: !refreshing, icon: core__namespace.SystemIcon.REFRESH
+                })
+            ]);
+            if (c.phonesByPhone === null && c.phonesLoading) {
+                return vstack([
+                    header,
+                    grid('minmax(0, 1fr) minmax(0, 1fr)', [card([skeleton('lines', 3)]), card([skeleton('lines', 3)])], Gap.SPACING3X, { stretch: true }),
+                    card([skeleton('table', 3, 'Loading phones & reps…')])
+                ], Gap.SPACING4X);
+            }
+            const rows = tableRows(state);
+            const plan = callerIdPlan(rows, defaultNumber);
+            const editingRow = c.phonesEditingSid ? rows.find((r) => r.phoneSid === c.phonesEditingSid) || null : null;
             const routingNumberErrors = c.phonesRoutingErrors.filter((e) => !!e.phoneNumber);
             const routingPublishErrors = c.phonesRoutingErrors.filter((e) => !e.phoneNumber);
-            if (c.phonesByPhone === null && c.phonesLoading) {
-                return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Loader({
-                            label: 'Loading phones & reps…',
-                            indeterminate: true
-                        }) }) }));
+            const messages = [
+                c.phonesListError ? problemCard('Couldn\'t load phone numbers', friendlyError(c.phonesListError) + ' Your saved assignments are unchanged.', [
+                    button(refreshing ? 'Refreshing…' : 'Retry', () => { loadPhonesData(); }, {
+                        primary: true, small: true, enabled: !refreshing
+                    }),
+                    button('Check the connection', () => { goToSection('account'); }, { link: true, small: true })
+                ]) : null,
+                c.phonesError ? errorLine(friendlyError(c.phonesError)) : null,
+                c.phonesHasMore ? help('Only the first 100 Twilio numbers are shown.') : null,
+                routingNumberErrors.length ? text('⚠ Inbound routing did not update for: ' +
+                    routingNumberErrors.map((e) => formatPhone(e.phoneNumber)).join(', '), { strong: true, small: true }) : null,
+                routingPublishErrors.length ? text('⚠ Inbound routing did not publish: ' +
+                    routingPublishErrors.map((e) => e.message).join(' '), { strong: true, small: true }) : null
+            ];
+            let table;
+            if (rows.length === 0) {
+                table = c.phonesListError ? null : emptyCard('No phone numbers yet', 'Buy or port a number in the Twilio Console, then refresh here. Reps can call out before a number rings anyone.', [
+                    button(refreshing ? 'Refreshing…' : 'Refresh from Twilio', () => { loadPhonesData(); }, {
+                        small: true, enabled: !refreshing
+                    }),
+                    extLink('Twilio Console', 'https://console.twilio.com/')
+                ]);
             }
-            const rows = (c.phonesByPhone || [])
-                .map((r) => ({ ...r, employeeIds: r.employeeIds.slice() }));
-            const editingRow = c.phonesEditingSid
-                ? rows.find((r) => r.phoneSid === c.phonesEditingSid) || null
-                : null;
-            const refreshing = c.phonesLoading;
-            const items = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: refreshing ? 'Refreshing…' : 'Refresh from Twilio', startIcon: core__namespace.SystemIcon.REFRESH, enabled: !refreshing, action: () => { loadPhonesData(); } }) }) }) })),
-                c.phonesListError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ The Twilio phone numbers did not load: ' + friendlyError(c.phonesListError) +
-                            ' Click "Refresh from Twilio" to try again.' }) })),
-                c.phonesError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(c.phonesError) }) })),
-                c.phonesHasMore && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Only the first 100 Twilio numbers are shown." }) })),
-                routingNumberErrors.length > 0 && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: '⚠ Inbound routing did not update for: ' +
-                            routingNumberErrors.map((e) => formatPhone(e.phoneNumber)).join(', ') }) })),
-                routingPublishErrors.length > 0 && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: '⚠ Inbound routing did not publish: ' +
-                            routingPublishErrors.map((e) => e.message).join(' ') }) })),
-                rows.length === 0 ? (!c.phonesListError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "No phone numbers found in your Twilio account. Buy one in the Twilio Console, then click \"Refresh from Twilio\" to pick it up and assign reps." }) }))) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
+            else {
+                table = card([
+                    new component__namespace.DataGrid({
                         dataSource: new core__namespace.ArrayDataSource(rows),
-                        columns: this.buildColumns(nameOf),
+                        columns: this.buildColumns(nameOf, plan),
                         columnStretch: true,
                         highlightRowsOnHover: true,
-                        stripedRows: true,
-                        dataRowHeight: 72,
-                        headerRowHeight: 44,
+                        dataRowHeight: 64,
+                        headerRowHeight: 40,
                         rootStyle: { width: '100%' }
-                    }) })),
-                editingRow && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: this.renderEditor(editingRow, employees, nameOf) }))
-            ].filter(Boolean);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XL, children: items }));
+                    }),
+                    hstack([
+                        dotText('ok', 'CTC routing: calls to the number reach the rep under Rings', undefined, { small: true }),
+                        dotText('warn', 'Not routed: the number points somewhere else in Twilio', undefined, { small: true }),
+                        dotText('off', 'No rep: calls hear the no-answer message', undefined, { small: true })
+                    ], Gap.SPACING4X, { wrap: true })
+                ], { label: 'Numbers' });
+            }
+            return vstack([
+                header,
+                this.renderCallerId(state, defaultNumber),
+                ...messages,
+                table,
+                editingRow ? this.renderEditor(editingRow, employees, nameOf) : null
+            ], Gap.SPACING4X);
+        }
+    }
+
+    const openHealthAction = (action) => {
+        const r = parseHash(action.route);
+        if (r && r.kind === 'section')
+            goToSection(r.section);
+    };
+    function healthCheckAside() {
+        const h = store.getState().health;
+        const when = timeOfDay(h.checkedAt);
+        return [
+            when ? text('Checked ' + when, { weak: true, small: true }) : null,
+            button(h.loading ? 'Checking…' : 'Check now', () => { loadHealth(); }, {
+                enabled: !h.loading, icon: core__namespace.SystemIcon.REFRESH
+            })
+        ];
+    }
+    function runAllChecks() {
+        rerunPreflight();
+        loadHealth();
+        loadPresence();
+        loadOutbound();
+    }
+    const CT = () => component__namespace.DataGrid.ColumnType;
+    function checkGrid(rows) {
+        const row = (args) => args?.cell?.row?.dataItem;
+        return new component__namespace.DataGrid({
+            dataSource: new core__namespace.ArrayDataSource(rows),
+            columns: [
+                { type: CT().TEMPLATED, name: 'check', label: 'Check', stretchFactor: 4,
+                    content: (args) => text(row(args)?.label || '(unlabeled check)') },
+                { type: CT().TEMPLATED, name: 'result', label: 'Result', stretchFactor: 5,
+                    content: (args) => {
+                        const r = row(args);
+                        const link = r && r.link;
+                        return vstack([
+                            text(r?.detail || '—', { weak: true, small: true }),
+                            link ? button(link.label, () => { openHealthAction(link); }, { link: true, small: true }) : null
+                        ], Gap.NONE);
+                    } },
+                { type: CT().TEMPLATED, name: 'status', label: 'Status', stretchFactor: 2,
+                    content: (args) => {
+                        const b = statusToBadge(row(args)?.status || 'unknown');
+                        return chip(b.text, b.tone);
+                    } }
+            ],
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            dataRowHeight: 64,
+            headerRowHeight: 40,
+            rootStyle: { width: '100%' }
+        });
+    }
+    class HealthPage extends core.PureComponent {
+        componentDidMount() {
+            loadPresence();
+            loadHealth();
+            const outbound = store.getState().outbound;
+            if (!outbound.loaded && !outbound.loading)
+                loadOutbound();
+        }
+        renderSetup(state) {
+            const c = state.console;
+            const checks = c.preflight;
+            const running = !!c.preflightRefreshing || (c.loading && checks === null);
+            const passed = (checks || []).filter((ch) => ch.status === 'pass').length;
+            const total = (checks || []).length;
+            const body = [
+                hstack([
+                    cardTitle('Setup checks'),
+                    total ? chip(passed + ' of ' + total + ' pass', passed === total ? 'ok'
+                        : (checks || []).some((ch) => ch.status === 'fail') ? 'problem' : 'warn') : null
+                ], Gap.SPACING2X)
+            ];
+            if (c.preflightError)
+                body.push(errorLine('The checks did not run: ' + friendlyError(c.preflightError)));
+            if (checks === null)
+                body.push(running ? skeleton('table', 5, 'Running checks…') : help('Click Run checks.'));
+            else if (!checks.length)
+                body.push(text('No checks returned.', { weak: true }));
+            else
+                body.push(checkGrid(checks));
+            return card(body, { label: 'Setup checks' });
+        }
+        renderDrift(state) {
+            const c = state.console;
+            const routing = signalRow('Inbound routing matches Phones & reps', state.health.signals.routingChanged);
+            const rows = [
+                voiceUrlDriftRow((c.drift || {}), state.outbound),
+                outboundVersionRow(state.outbound),
+                phoneNumbersDriftRow(c, state.health),
+                intelDriftRow(c, state.health),
+                routing
+                    ? { ...routing, link: { label: 'Inbound calls', route: '#/inbound' } }
+                    : { label: 'Inbound routing matches Phones & reps', status: 'unknown', detail: '' }
+            ];
+            const needs = rows.filter((r) => r.status === 'fail' || r.status === 'warn').length;
+            return card([
+                hstack([
+                    cardTitle('Drift checks'),
+                    chip(needs ? needs + ' needs action' : 'All match', needs ? 'warn' : 'ok'),
+                    help('NetSuite vs. live Twilio')
+                ], Gap.SPACING2X, { wrap: true }),
+                state.health.error ? errorLine('Some checks did not load: ' + friendlyError(state.health.error)) : null,
+                checkGrid(rows)
+            ], { label: 'Drift checks' });
+        }
+        renderPhones(state) {
+            const presence = state.presence;
+            const nowMs = Date.now() + presence.clockSkewMs;
+            const row = (args) => args?.cell?.row?.dataItem;
+            const body = [
+                grid('auto minmax(0, 1fr) auto', [
+                    cardTitle('Rep phones'),
+                    help('A rep receives calls only while a phone is open in the browser.'),
+                    button(presence.loading ? 'Refreshing…' : 'Refresh', () => { loadPresence(); }, {
+                        small: true, enabled: !presence.loading, icon: core__namespace.SystemIcon.REFRESH
+                    })
+                ], Gap.SPACING3X)
+            ];
+            if (presence.error) {
+                body.push(errorLine('Phone status did not load: ' + friendlyError(presence.error)));
+            }
+            if (!presence.loaded) {
+                if (!presence.error)
+                    body.push(skeleton('table', 3, 'Loading phones…'));
+            }
+            else if (presence.items.length === 0) {
+                body.push(text('No rep has opened a phone yet.', { weak: true }));
+            }
+            else {
+                body.push(new component__namespace.DataGrid({
+                    dataSource: new core__namespace.ArrayDataSource(presence.items),
+                    columns: [
+                        { type: CT().TEMPLATED, name: 'rep', label: 'Rep', stretchFactor: 3,
+                            content: (a) => text(row(a)?.employeeName || '(unnamed rep)') },
+                        { type: CT().TEMPLATED, name: 'status', label: 'Status', stretchFactor: 3,
+                            content: (a) => {
+                                const s = presenceTone(row(a));
+                                return dotText(s.tone, s.label);
+                            } },
+                        { type: CT().TEMPLATED, name: 'seen', label: 'Last seen', stretchFactor: 2,
+                            content: (a) => {
+                                const iso = row(a)?.lastSeen || '';
+                                const title = exactTime(iso);
+                                return new component__namespace.Text({
+                                    text: relativeTime(iso, nowMs),
+                                    rootAttributes: title ? { title } : {}
+                                });
+                            } },
+                        { type: CT().TEMPLATED, name: 'client', label: 'Browser', stretchFactor: 3,
+                            content: (a) => text(row(a)?.client || '—', { weak: !row(a)?.client }) },
+                        { type: CT().TEMPLATED, name: 'incoming', label: 'Incoming calls', stretchFactor: 2,
+                            content: (a) => {
+                                const r = row(a);
+                                return !r || !r.state ? text('—', { weak: true }) : text(r.incomingGranted ? 'Allowed' : 'Off');
+                            } },
+                        { type: CT().TEMPLATED, name: 'error', label: 'Last error', stretchFactor: 4,
+                            content: (a) => text(row(a)?.lastError || '—', { weak: true, small: true }) }
+                    ],
+                    columnStretch: true,
+                    highlightRowsOnHover: true,
+                    dataRowHeight: 48,
+                    headerRowHeight: 40,
+                    rootStyle: { width: '100%' }
+                }));
+            }
+            return card(body, { label: 'Rep phones' });
+        }
+        renderVersions(state) {
+            const o = state.outbound;
+            const item = (label, value) => vstack([help(label), text(value)], Gap.SPACING1X);
+            return card([
+                cardTitle('Versions'),
+                grid('repeat(5, minmax(0, 1fr))', [
+                    item('Dial function code', o.loaded
+                        ? (o.codeVersion || '—') + (o.published ? ' · published ' + (o.publishedCodeVersion || '—') : ' · not published')
+                        : '—'),
+                    item('Recording notice live', o.loaded && o.published
+                        ? (o.publishedNoticeVersion ? 'version ' + o.publishedNoticeVersion : 'no notice') : '—')
+                ], Gap.SPACING3X)
+            ], { label: 'Versions' });
+        }
+        render() {
+            const state = store.getState();
+            const c = state.console;
+            const running = !!c.preflightRefreshing || state.health.loading;
+            const last = [c.preflightAt, state.health.checkedAt].filter(Boolean).sort().pop() || '';
+            const when = timeOfDay(last);
+            const header = pageHeader('Health', 'Setup checks, drift between NetSuite and Twilio, rep phones and versions.', [
+                when ? text('Last run ' + when, { weak: true, small: true }) : null,
+                button(running ? 'Running…' : 'Run checks', () => { runAllChecks(); }, { primary: true, enabled: !running })
+            ]);
+            if (!state.health.loaded && state.health.error && c.preflight === null && c.preflightError) {
+                return vstack([header, problemCard('Couldn\'t run the checks', friendlyError(state.health.error) +
+                        ' Nothing was changed.', [button('Retry', () => { runAllChecks(); }, { primary: true, small: true })])], Gap.SPACING4X);
+            }
+            return vstack([
+                header,
+                grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderSetup(state), this.renderDrift(state)], Gap.SPACING3X),
+                this.renderPhones(state),
+                this.renderVersions(state)
+            ], Gap.SPACING4X);
+        }
+    }
+
+    const PENDING = { metric: '…', metadata: '', tone: null, text: 'Checking…' };
+    function statusLine$1(active, inboundOn, checks, at, running, failed) {
+        if (active === false)
+            return 'Reps cannot place or receive calls until you resume.';
+        const can = inboundOn === false ? 'Reps can place calls; inbound calls are off.' : 'Reps can place and receive calls.';
+        if (running)
+            return can + ' Running checks…';
+        if (failed || !checks)
+            return can + (failed ? ' The checks did not run.' : '');
+        const passed = checks.filter((c) => c.status === 'pass').length;
+        const twilio = checks.find((c) => c.id === 'twilio_reachable');
+        const parts = [];
+        if (twilio)
+            parts.push(twilio.status === 'pass' ? 'Twilio connected' : 'Twilio not reachable');
+        const when = timeOfDay(at);
+        parts.push((passed === checks.length ? 'checks passed' : passed + ' of ' + checks.length + ' checks passed') +
+            (when ? ' at ' + when : ''));
+        return can + ' ' + parts.join(' · ') + '.';
+    }
+    class OverviewPage extends core.PureComponent {
+        componentDidMount() {
+            loadHealth();
+        }
+        kpiCard(title, kpi, section) {
+            const description = kpi.tone
+                ? dotText(kpi.tone, kpi.text, undefined, { small: true })
+                : text(kpi.text, { weak: true, small: true });
+            try {
+                return component__namespace.Card.metric({
+                    title,
+                    metric: kpi.metric,
+                    metadata: kpi.metadata,
+                    description,
+                    action: () => { goToSection(section); },
+                    cardOptions: { classList: ['ctc-card'] }
+                });
+            }
+            catch (e) {
+                return card([text(title, { weak: true, small: true }), text(kpi.metric + ' ' + kpi.metadata, { strong: true }),
+                    description, button('Open', () => { goToSection(section); }, { small: true, link: true })]);
+            }
+        }
+        renderStatus(state) {
+            const c = state.console;
+            const snap = (c.snapshot || {});
+            const routing = state.health.signals.routingChanged;
+            const inboundOn = routing && routing.value
+                ? routing.value.inboundEnabled === true : null;
+            const tone = snap.active === false ? 'warn' : snap.active === true ? 'ok' : 'off';
+            const title = snap.active === false ? 'Paused' : snap.active === true ? 'Active' : 'Unknown';
+            const running = !!c.preflightRefreshing || (c.loading && c.preflight === null);
+            return card([
+                grid('auto minmax(0, 1fr) auto', [
+                    dot(tone),
+                    vstack([
+                        new component__namespace.Text({ text: title, size: component__namespace.Text.Size.L, weight: component__namespace.Text.Weight.BOLD }),
+                        text(statusLine$1(snap.active, inboundOn, c.preflight, c.preflightAt, running, !!c.preflightError), { weak: true, small: true })
+                    ], Gap.SPACING1X),
+                    jsxRuntime.jsx(PauseControl, { tick: this.props.tick })
+                ], Gap.SPACING3X)
+            ], { label: 'Status' });
+        }
+        renderKpis(state) {
+            const h = state.health;
+            const value = (key) => {
+                const s = h.signals[key];
+                return s && s.value ? s.value : null;
+            };
+            const waiting = !h.loaded && (h.loading || !h.error);
+            const nowMs = Date.now() + state.presence.clockSkewMs;
+            const kpi = (v) => (waiting ? PENDING : v);
+            return grid('repeat(4, minmax(0, 1fr))', [
+                this.kpiCard('Numbers routed', kpi(numbersRoutedKpi(value('numberRouting'))), 'phones'),
+                this.kpiCard('Reps receiving now', kpi(repsReceivingKpi(value('repPhones'), (iso) => relativeTime(iso, nowMs))), 'health'),
+                this.kpiCard('Waiting for transcripts', kpi(backlogKpi(value('transcriptBacklog'))), 'transcripts'),
+                this.kpiCard('Missed-call sync', kpi(missedCallSyncKpi(value('pollerRuns'))), 'transcripts')
+            ], Gap.SPACING3X, { stretch: true });
+        }
+        renderCallCentral() {
+            return card([
+                grid('auto minmax(0, 1fr) auto', [
+                    new component__namespace.Image({
+                        image: core__namespace.SystemIcon.CHART_BAR,
+                        size: component__namespace.Image.Size.M,
+                        color: core__namespace.ImageConstant.Color.INFO,
+                        presentation: true
+                    }),
+                    vstack([
+                        text('Call Central', { strong: true }),
+                        text('Calls, follow-ups and missed calls for the whole team. Reps see their own view from the dashboard.', { weak: true, small: true })
+                    ], Gap.SPACING1X),
+                    extLink('Open Call Central', CALL_CENTRAL_URL)
+                ], Gap.SPACING3X)
+            ], { label: 'Call Central' });
+        }
+        attentionRow(item, first) {
+            const action = item.action;
+            return grid('20px minmax(0, 1fr) auto', [
+                dot(item.severity === 'problem' ? 'problem' : 'warn'),
+                vstack([text(item.title, { strong: true }), item.detail ? help(item.detail) : null], Gap.SPACING1X),
+                action ? button(action.label, () => { openHealthAction(action); }, { small: true, primary: first }) : null
+            ], Gap.SPACING3X);
+        }
+        renderAttention(state) {
+            const h = state.health;
+            const items = h.attention.filter((i) => i.severity === 'problem' || i.severity === 'warn');
+            const when = timeOfDay(h.checkedAt);
+            const header = hstack([
+                cardTitle('Needs attention'),
+                h.loaded && items.length ? chip(String(items.length), 'warn') : null,
+                when ? help((h.loading ? 'Checking… · updated ' : 'Updated ') + when) : (h.loading ? help('Checking…') : null)
+            ], Gap.SPACING2X, { growLast: true });
+            const body = [header];
+            if (!h.loaded) {
+                if (h.error) {
+                    body.push(errorLine('The health checks did not load: ' + friendlyError(h.error)));
+                    body.push(hstack([
+                        button('Retry', () => { loadHealth(); }, { primary: true, small: true }),
+                        button('Check the connection', () => { goToSection('account'); }, { link: true, small: true })
+                    ], Gap.SPACING2X));
+                }
+                else {
+                    body.push(skeleton('lines', 3, 'Checking…'));
+                }
+            }
+            else if (!items.length) {
+                body.push(text('Nothing needs attention.', { weak: true }));
+            }
+            else {
+                items.forEach((item, i) => {
+                    body.push(divider());
+                    body.push(this.attentionRow(item, i === 0));
+                });
+            }
+            if (h.loaded && h.error)
+                body.push(errorLine('The last check did not finish: ' + friendlyError(h.error)));
+            return card(body, { label: 'Needs attention', gap: Gap.SPACING2X });
+        }
+        render() {
+            const state = store.getState();
+            const assignments = state.console.assignments;
+            let subtitle = 'Click-to-Call';
+            if (assignments) {
+                const phones = {};
+                const reps = {};
+                assignments.forEach((a) => {
+                    if (a.phoneSid)
+                        phones[a.phoneSid] = true;
+                    if (a.employeeId != null)
+                        reps[String(a.employeeId)] = true;
+                });
+                const n = Object.keys(phones).length;
+                const r = Object.keys(reps).length;
+                subtitle += ' · ' + n + (n === 1 ? ' number' : ' numbers') + ' · ' + r + (r === 1 ? ' rep' : ' reps');
+            }
+            return vstack([
+                pageHeader('Overview', subtitle),
+                this.renderStatus(state),
+                this.renderKpis(state),
+                this.renderCallCentral(),
+                this.renderAttention(state)
+            ], Gap.SPACING4X);
         }
     }
 
@@ -3438,6 +3784,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 settings: result.settings || settings,
                 publish: result.publish
             }));
+            loadHealth();
         }
         catch (e) {
             store.dispatch(Action.inboundSave({ phase: 'failure', error: errorText(e, 'Save failed') }));
@@ -3455,6 +3802,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 return;
             }
             store.dispatch(Action.inboundPublish({ phase: 'success', publish: result.publish }));
+            loadHealth();
         }
         catch (e) {
             store.dispatch(Action.inboundPublish({ phase: 'failure', error: errorText(e, 'Publish failed') }));
@@ -3495,223 +3843,402 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             : '';
         return 'Published ' + whenText + count;
     };
-    const item$1 = (node) => node ? jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }) : false;
-    const vstack$1 = (gap, nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: gap, children: nodes.map(item$1).filter(Boolean) }));
-    const weak$1 = (text) => (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }));
+    const lower = (s) => (s ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+    const noStop = (s) => String(s || '').replace(/\.$/, '');
+    const switchControl = (label, value, onChange, enabled = true) => (jsxRuntime.jsx(component__namespace.Switch, { label: label, value: value, enabled: enabled, action: (args) => { onChange(!!(args && args.value)); } }));
+    const setField = (changes) => {
+        store.dispatch(Action.inboundFieldChange(changes));
+    };
     class InboundPage extends core.PureComponent {
-        componentDidMount() {
+        constructor(props, context) {
+            super(props, context);
+            this.state = { confirmOff: false };
+        }
+        onMasterSwitch = (on) => {
             const inbound = store.getState().inbound;
-            if (!inbound.loaded && !inbound.loading) {
-                loadInbound();
+            if (!on && inbound.inboundEnabled && inbound.saved && inbound.saved.inboundEnabled) {
+                this.setState({ confirmOff: true });
+                return;
             }
+            this.setState({ confirmOff: false });
+            setField({ inboundEnabled: on });
+        };
+        componentDidMount() {
+            const state = store.getState();
+            if (!state.inbound.loaded && !state.inbound.loading)
+                loadInbound();
             loadPresence();
+            if (!state.health.loaded && !state.health.loading)
+                loadHealth();
         }
-        buildColumns() {
-            const CT = component__namespace.DataGrid.ColumnType;
-            const presence = store.getState().presence;
-            const byEmployee = {};
-            presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
-            return [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'number',
-                    label: 'Number',
-                    stretchFactor: 1,
-                    content: (args) => new component__namespace.Text({
-                        text: formatPhone(args?.cell?.row?.dataItem?.phoneNumber),
-                        type: component__namespace.Text.Type.STRONG
-                    })
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'rings',
-                    label: 'Rings',
-                    stretchFactor: 1,
-                    content: (args) => new component__namespace.Text({
-                        text: args?.cell?.row?.dataItem?.employeeName || ''
-                    })
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'phone',
-                    label: 'Phone',
-                    stretchFactor: 1,
-                    content: (args) => {
-                        if (!presence.loaded) {
-                            return new component__namespace.Text({
-                                text: presence.error ? '—' : 'Loading…',
-                                type: component__namespace.Text.Type.WEAK
-                            });
-                        }
-                        const id = args?.cell?.row?.dataItem?.employeeId;
-                        return buildPhoneStatusCell(id == null ? undefined : byEmployee[String(id)]);
-                    }
-                }
-            ];
-        }
-        renderSettings(inbound) {
+        renderStatusBar(state) {
+            const inbound = state.inbound;
             const busy = inbound.saving || inbound.publishing;
+            const changes = countInboundChanges(inbound, inbound.saved);
+            const sig = state.health.signals.routingChanged;
+            const parts = [];
+            if (changes)
+                parts.push(changes + (changes === 1 ? ' unsaved change' : ' unsaved changes'));
+            if (sig && (sig.severity === 'warn' || sig.severity === 'problem') && sig.detail) {
+                parts.push(parts.length ? lower(noStop(sig.detail)) : noStop(sig.detail));
+            }
+            if (!parts.length)
+                parts.push(inbound.inboundEnabled ? 'No unsaved changes' : 'Inbound calls are off');
+            const tone = sig && sig.severity === 'problem' ? 'problem'
+                : changes || (sig && sig.severity === 'warn') ? 'warn'
+                    : inbound.inboundEnabled ? 'ok' : 'off';
+            const primaryLabel = inbound.saving || inbound.publishing ? 'Publishing…'
+                : changes ? 'Save & publish' : 'Publish again';
+            const bar = grid('auto minmax(0, 1fr) auto auto', [
+                switchControl('Ring reps in the browser', inbound.inboundEnabled && !this.state.confirmOff, this.onMasterSwitch, !busy && !this.state.confirmOff),
+                dotText(tone, parts.join(' · '), '· ' + statusLine(inbound).replace(/^Published/, 'published')),
+                button('Discard', () => { if (inbound.saved)
+                    setField(inbound.saved); }, { enabled: changes > 0 && !busy }),
+                button(primaryLabel, () => { if (changes)
+                    saveInbound();
+                else
+                    publishRouting(); }, {
+                    primary: true, enabled: !busy
+                })
+            ], Gap.SPACING4X);
+            const errors = (inbound.lastPublish && inbound.lastPublish.errors) || [];
+            const failure = publishFailureText(inbound);
+            return card([
+                bar,
+                this.state.confirmOff ? hstack([
+                    text('Every number will hear the no-answer message after you publish.', { small: true }),
+                    button('Turn off', () => {
+                        this.setState({ confirmOff: false });
+                        setField({ inboundEnabled: false });
+                    }, { small: true }),
+                    button('Keep on', () => { this.setState({ confirmOff: false }); }, { small: true })
+                ], Gap.SPACING2X, { wrap: true }) : null,
+                inbound.saveError ? problemCard('Save failed', friendlyError(inbound.saveError) + ' Nothing was published.') : null,
+                failure ? errorLine(failure) : null,
+                ...errors.map((e) => errorLine((e.phoneNumber ? formatPhone(e.phoneNumber) + ': ' : '') + e.message)),
+                !inbound.inboundEnabled && inbound.flowSid ? text(OFF_STILL_ROUTED_WARNING, { strong: true, small: true }) : null,
+                !inbound.inboundEnabled && !inbound.flowSid
+                    ? help('Off: phones do not ring; callers hear the no-answer message.') : null,
+                help('Open phones pick up a change within an hour, or at once after a reload.')
+            ], { label: 'Inbound status', gap: Gap.SPACING2X });
+        }
+        stepRow(n, title, helpText, controls) {
+            return grid('28px 240px minmax(0, 1fr)', [
+                stepBadge(n),
+                vstack([text(title, { strong: true }), typeof helpText === 'string' ? help(helpText) : helpText], Gap.SPACING1X),
+                vstack(controls, Gap.SPACING3X)
+            ], Gap.SPACING4X);
+        }
+        renderSteps(state) {
+            const inbound = state.inbound;
             const ringOptions = RING_SECONDS.indexOf(inbound.ringSeconds) >= 0
                 ? RING_SECONDS
                 : RING_SECONDS.concat([inbound.ringSeconds]).sort((x, y) => x - y);
-            const ringDs = new core__namespace.ArrayDataSource(ringOptions.map((n) => ({ value: n, label: n + ' seconds' })));
-            const inboundSwitch = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Switch, { label: "Ring reps in the browser", value: inbound.inboundEnabled, action: (args) => {
-                        store.dispatch(Action.inboundFieldChange({ inboundEnabled: !!(args && args.value) }));
-                    } }),
-                !inbound.inboundEnabled && !inbound.flowSid &&
-                    weak$1('Off: phones do not ring; callers hear the no-answer message.'),
-                !inbound.inboundEnabled && !!inbound.flowSid &&
-                    jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S, children: OFF_STILL_ROUTED_WARNING }),
-                weak$1('Open phones pick up a change within an hour, or at once after a reload.')
-            ]);
-            const ringTime = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Ring time" }),
-                jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: ringDs, valueMember: "value", displayMember: "label", selectedValue: inbound.ringSeconds, onSelectionChanged: (args) => {
-                        const n = Number(args && args.value);
-                        if (n > 0)
-                            store.dispatch(Action.inboundFieldChange({ ringSeconds: n }));
-                    }, rootStyle: { width: '200px' } })
-            ]);
-            const message = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "No-answer message" }),
-                jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.noAnswerMessage, placeholder: inbound.voicemailOn ? DEFAULT_VOICEMAIL_GREETING : DEFAULT_NO_ANSWER_MESSAGE, maxLength: NO_ANSWER_MAX_LENGTH, rowCount: 3, onTextChanged: (args) => {
-                        store.dispatch(Action.inboundFieldChange({
-                            noAnswerMessage: ((args && args.text) || '').slice(0, NO_ANSWER_MAX_LENGTH)
-                        }));
-                    }, rootStyle: { width: '100%' } })
-            ]);
             const vmOptions = VOICEMAIL_SECONDS.indexOf(inbound.voicemailMaxSeconds) >= 0
                 ? VOICEMAIL_SECONDS
                 : VOICEMAIL_SECONDS.concat([inbound.voicemailMaxSeconds]).sort((x, y) => x - y);
-            const vmDs = new core__namespace.ArrayDataSource(vmOptions.map((n) => ({ value: n, label: voicemailLengthLabel(n) })));
-            const voicemail = vstack$1(component__namespace.StackPanel.GapSize.S, [
-                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                    jsxRuntime.jsx(component__namespace.Switch, { label: "Voicemail", value: inbound.voicemailOn, action: (args) => {
-                            store.dispatch(Action.inboundFieldChange({ voicemailOn: !!(args && args.value) }));
-                        } }),
-                    weak$1(inbound.voicemailOn
-                        ? 'After the no-answer message, callers can leave a voicemail. It is transcribed and logged as a Phone Call.'
-                        : 'Off: callers hear the no-answer message and the call ends.')
-                ]),
-                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                    jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Longest voicemail" }),
-                    jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: vmDs, valueMember: "value", displayMember: "label", selectedValue: inbound.voicemailMaxSeconds, enabled: inbound.voicemailOn, onSelectionChanged: (args) => {
+            const showNotice = inbound.recordInbound && inbound.recordingNoticeOn;
+            const recording = [
+                switchControl('Record inbound calls', inbound.recordInbound, (v) => setField({ recordInbound: v })),
+                switchControl('Play a recording notice first', inbound.recordingNoticeOn, (v) => setField({ recordingNoticeOn: v }), inbound.recordInbound),
+                showNotice ? field('Notice text', jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.recordingNotice, placeholder: DEFAULT_RECORDING_NOTICE, maxLength: RECORDING_NOTICE_MAX_LENGTH, rowCount: 2, onTextChanged: (args) => {
+                        setField({ recordingNotice: ((args && args.text) || '').slice(0, RECORDING_NOTICE_MAX_LENGTH) });
+                    }, rootStyle: { width: '100%' } }), help('Have your legal counsel approve the wording.')) : null
+            ];
+            const ring = [
+                field('Ring for', jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(ringOptions.map((n) => ({ value: n, label: n + ' seconds' }))), valueMember: "value", displayMember: "label", selectedValue: inbound.ringSeconds, onSelectionChanged: (args) => {
+                        const n = Number(args && args.value);
+                        if (n > 0)
+                            setField({ ringSeconds: n });
+                    }, rootStyle: { width: '200px' } }))
+            ];
+            const noAnswer = [
+                field('Message', jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.noAnswerMessage, placeholder: inbound.voicemailOn ? DEFAULT_VOICEMAIL_GREETING : DEFAULT_NO_ANSWER_MESSAGE, maxLength: NO_ANSWER_MAX_LENGTH, rowCount: 2, onTextChanged: (args) => {
+                        setField({ noAnswerMessage: ((args && args.text) || '').slice(0, NO_ANSWER_MAX_LENGTH) });
+                    }, rootStyle: { width: '100%' } })),
+                hstack([
+                    switchControl('Take a voicemail', inbound.voicemailOn, (v) => setField({ voicemailOn: v })),
+                    text('up to', { weak: true, small: true }),
+                    jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(vmOptions.map((n) => ({ value: n, label: voicemailLengthLabel(n) }))), valueMember: "value", displayMember: "label", selectedValue: inbound.voicemailMaxSeconds, enabled: inbound.voicemailOn, ariaLabel: "Longest voicemail", onSelectionChanged: (args) => {
                             const n = Number(args && args.value);
                             if (n > 0)
-                                store.dispatch(Action.inboundFieldChange({ voicemailMaxSeconds: n }));
-                        }, rootStyle: { width: '200px' } })
-                ])
-            ]);
+                                setField({ voicemailMaxSeconds: n });
+                        }, rootStyle: { width: '160px' } })
+                ], Gap.SPACING3X, { wrap: true }),
+                help(inbound.voicemailOn
+                    ? 'After the message, callers can leave a voicemail. It is transcribed and logged as a Phone Call.'
+                    : 'Off: callers hear the message and the call ends.')
+            ];
             const ownerChoices = [{ value: '', label: 'Not set' }].concat(inbound.employees.map((e) => ({ value: e.id, label: e.name })));
-            const fallbackOwner = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Unrouted calls and voicemails go to" }),
-                jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(ownerChoices), valueMember: "value", displayMember: "label", selectedValue: inbound.fallbackOwnerId, onSelectionChanged: (args) => {
-                        const v = args && args.value != null ? String(args.value) : '';
-                        store.dispatch(Action.inboundFieldChange({ fallbackOwnerId: v }));
-                    }, rootStyle: { width: '320px' } }),
-                weak$1('Also used when a number has no rep, or its rep is inactive. Not set: those calls are not logged.')
-            ]);
-            const showNotice = inbound.recordInbound && inbound.recordingNoticeOn;
-            const recording = vstack$1(component__namespace.StackPanel.GapSize.S, [
-                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Recording" }),
-                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                    jsxRuntime.jsx(component__namespace.Switch, { label: "Record inbound calls", value: inbound.recordInbound, action: (args) => {
-                            store.dispatch(Action.inboundFieldChange({ recordInbound: !!(args && args.value) }));
-                        } }),
-                    weak$1('Recordings are transcribed and summarised like outbound calls.')
-                ]),
-                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                    jsxRuntime.jsx(component__namespace.Switch, { label: "Play a recording notice first", value: inbound.recordingNoticeOn, enabled: inbound.recordInbound, action: (args) => {
-                            store.dispatch(Action.inboundFieldChange({ recordingNoticeOn: !!(args && args.value) }));
-                        } }),
-                    weak$1('Callers hear this before the phone rings.')
-                ]),
-                showNotice && vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                    jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Recording notice" }),
-                    jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.recordingNotice, placeholder: DEFAULT_RECORDING_NOTICE, maxLength: RECORDING_NOTICE_MAX_LENGTH, rowCount: 2, enabled: showNotice, onTextChanged: (args) => {
-                            store.dispatch(Action.inboundFieldChange({
-                                recordingNotice: ((args && args.text) || '').slice(0, RECORDING_NOTICE_MAX_LENGTH)
-                            }));
-                        }, rootStyle: { width: '100%' } })
-                ])
-            ]);
-            const saveButton = new component__namespace.Button({
-                label: inbound.saving ? 'Publishing…' : 'Save & publish',
-                type: component__namespace.Button.Type.PRIMARY,
-                enabled: !busy,
-                action: () => { saveInbound(); }
-            });
-            const errors = (inbound.lastPublish && inbound.lastPublish.errors) || [];
-            const failure = publishFailureText(inbound);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, rootStyle: { maxWidth: '560px' }, children: [
-                    item$1(inboundSwitch),
-                    item$1(ringTime),
-                    item$1(message),
-                    item$1(voicemail),
-                    item$1(fallbackOwner),
-                    item$1(recording),
-                    item$1(saveButton),
-                    item$1(inbound.saveError ? jsxRuntime.jsx(ErrorText, { message: friendlyError(inbound.saveError) }) : false),
-                    item$1(vstack$1(component__namespace.StackPanel.GapSize.XXS, [
-                        jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: statusLine(inbound) }),
-                        failure && jsxRuntime.jsx(ErrorText, { message: failure }),
-                        ...errors.map((e) => (jsxRuntime.jsx(ErrorText, { message: (e.phoneNumber ? formatPhone(e.phoneNumber) + ': ' : '') + e.message })))
-                    ]))
-                ].filter(Boolean) }));
+            const nameOfOwner = (id) => (ownerChoices.find((o) => o.value === id) || { label: id }).label;
+            const savedOwner = inbound.saved ? inbound.saved.fallbackOwnerId : inbound.fallbackOwnerId;
+            const owner = [
+                field('Owner', jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(ownerChoices), valueMember: "value", displayMember: "label", selectedValue: inbound.fallbackOwnerId, onSelectionChanged: (args) => {
+                        setField({ fallbackOwnerId: args && args.value != null ? String(args.value) : '' });
+                    }, rootStyle: { width: '320px' } })),
+                !inbound.fallbackOwnerId
+                    ? dotText('warn', 'Not set: calls and voicemails that reach no rep are not logged.', undefined, { small: true })
+                    : savedOwner !== inbound.fallbackOwnerId
+                        ? dotText('warn', 'Was "' + nameOfOwner(savedOwner) + '"' +
+                            (savedOwner ? '' : ': those calls were not logged') + '. Save to apply.', undefined, { small: true })
+                        : null,
+                help('Also used when a number has no rep, or its rep is inactive.')
+            ];
+            return card([
+                cardTitle('What a caller experiences'),
+                help('In call order. Off at the top: every number hears the no-answer message instead.'),
+                divider(),
+                this.stepRow(1, 'Recording notice', 'Plays before the phone rings.', recording),
+                divider(),
+                this.stepRow(2, 'Ring the rep', hstack([
+                    help('The rep under Rings in'),
+                    button('Phones & reps', () => { goToSection('phones'); }, { link: true, small: true })
+                ], Gap.SPACING1X, { wrap: true }), ring),
+                divider(),
+                this.stepRow(3, 'No answer', 'When the rep does not pick up in time.', noAnswer),
+                divider(),
+                this.stepRow(4, 'Logged to', 'Owner of calls and voicemails that reach no rep.', owner)
+            ], { label: 'What a caller experiences', gap: Gap.SPACING3X });
         }
-        renderRouting(inbound) {
-            const busy = inbound.saving || inbound.publishing;
-            const table = inbound.routes.length === 0
-                ? jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: 'No numbers have reps yet. Assign reps on Phones & reps.' })
-                : new component__namespace.DataGrid({
-                    dataSource: new core__namespace.ArrayDataSource(inbound.routes),
-                    columns: this.buildColumns(),
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    stripedRows: true,
-                    dataRowHeight: 48,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                });
-            return vstack$1(component__namespace.StackPanel.GapSize.S, [
-                table,
-                weak$1('The primary rep on Phones & reps is the one who rings.'),
-                new component__namespace.Button({
-                    label: inbound.publishing ? 'Publishing…' : 'Publish again',
-                    enabled: !busy,
-                    action: () => { publishRouting(); }
-                })
-            ]);
+        routingColumns(state) {
+            const CT = component__namespace.DataGrid.ColumnType;
+            const presence = state.presence;
+            const byEmployee = {};
+            presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
+            const nowMs = Date.now() + presence.clockSkewMs;
+            const also = {};
+            (state.console.assignments || []).forEach((a) => {
+                if (!a.phoneSid)
+                    return;
+                (also[a.phoneSid] = also[a.phoneSid] || []).push(String(a.employeeId) + '|' + (a.employeeName || ''));
+            });
+            const row = (args) => args?.cell?.row?.dataItem;
+            return [
+                { type: CT.TEMPLATED, name: 'number', label: 'Number', stretchFactor: 3,
+                    content: (args) => text(formatPhone(row(args)?.phoneNumber), { strong: true }) },
+                { type: CT.TEMPLATED, name: 'rings', label: 'Rings', stretchFactor: 3,
+                    content: (args) => text(row(args)?.employeeName || '') },
+                { type: CT.TEMPLATED, name: 'also', label: 'Also assigned', stretchFactor: 3,
+                    content: (args) => {
+                        const r = row(args);
+                        if (!r || state.console.assignments === null)
+                            return text('—', { weak: true });
+                        const names = (also[r.phoneSid] || [])
+                            .filter((v) => v.split('|')[0] !== String(r.employeeId))
+                            .map((v) => v.split('|').slice(1).join('|'))
+                            .filter(Boolean);
+                        return names.length ? text(names.join(', ')) : text('—', { weak: true });
+                    } },
+                { type: CT.TEMPLATED, name: 'phone', label: 'Rep\'s phone', stretchFactor: 4,
+                    content: (args) => {
+                        if (!presence.loaded)
+                            return text(presence.error ? '—' : 'Loading…', { weak: true });
+                        const id = row(args)?.employeeId;
+                        const p = id == null ? undefined : byEmployee[String(id)];
+                        const s = presenceTone(p);
+                        return dotText(s.tone, s.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
+                    } }
+            ];
+        }
+        renderRouting(state) {
+            const inbound = state.inbound;
+            const sig = state.health.signals.routingChanged;
+            const since = !sig ? (state.health.loading ? 'Checking…' : 'Not checked')
+                : sig.severity === 'ok' ? 'No change: ' + lower(sig.detail)
+                    : sig.detail;
+            const sinceTone = !sig || sig.severity === 'unknown' ? 'off'
+                : sig.severity === 'ok' ? 'ok' : sig.severity === 'problem' ? 'problem' : 'warn';
+            return card([
+                grid('minmax(0, 1fr) auto', [
+                    cardTitle('Routing'),
+                    button('Change in Phones & reps', () => { goToSection('phones'); }, { link: true, small: true })
+                ], Gap.SPACING3X),
+                hstack([text('Since last publish:', { weak: true, small: true }), dotText(sinceTone, since, undefined, { small: true })], Gap.SPACING2X, { wrap: true }),
+                inbound.routes.length === 0
+                    ? text('No numbers have reps yet. Assign reps on Phones & reps.', { weak: true })
+                    : new component__namespace.DataGrid({
+                        dataSource: new core__namespace.ArrayDataSource(inbound.routes),
+                        columns: this.routingColumns(state),
+                        columnStretch: true,
+                        highlightRowsOnHover: true,
+                        dataRowHeight: 48,
+                        headerRowHeight: 40,
+                        rootStyle: { width: '100%' }
+                    })
+            ], { label: 'Routing' });
         }
         render() {
-            const inbound = store.getState().inbound;
-            const description = (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Calls to your Twilio numbers ring the number's primary rep in the browser. NetSuite publishes one Twilio Studio flow for all numbers." }));
+            const state = store.getState();
+            const inbound = state.inbound;
+            const header = pageHeader('Inbound calls', 'How calls to your Twilio numbers reach reps.');
             if (inbound.loading || (!inbound.loaded && !inbound.loadError)) {
-                return vstack$1(component__namespace.StackPanel.GapSize.L, [
-                    description,
-                    new component__namespace.Loader({
-                        label: 'Loading inbound settings…',
-                        indeterminate: true
-                    })
-                ]);
+                return vstack([
+                    header,
+                    card([skeleton('lines', 2, 'Loading inbound settings…')]),
+                    card([skeleton('lines', 6)]),
+                    card([skeleton('table', 3)])
+                ], Gap.SPACING4X);
             }
             if (!inbound.loaded) {
-                return vstack$1(component__namespace.StackPanel.GapSize.L, [
-                    description,
-                    jsxRuntime.jsx(ErrorText, { message: friendlyError(inbound.loadError || 'Could not load inbound settings') }),
-                    new component__namespace.Button({
-                        label: 'Retry',
-                        startIcon: core__namespace.SystemIcon.REFRESH,
-                        action: () => { loadInbound(); }
-                    })
-                ]);
+                return vstack([header, problemCard('Couldn\'t load inbound settings', friendlyError(inbound.loadError || 'Could not load inbound settings') + ' Nothing was changed.', [
+                        button('Retry', () => { loadInbound(); }, { primary: true, small: true }),
+                        button('Check the connection', () => { goToSection('account'); }, { link: true, small: true })
+                    ])], Gap.SPACING4X);
             }
-            return vstack$1(component__namespace.StackPanel.GapSize.XL, [
-                description,
-                this.renderSettings(inbound),
-                this.renderRouting(inbound)
-            ]);
+            return vstack([
+                header,
+                this.renderStatusBar(state),
+                this.renderSteps(state),
+                this.renderRouting(state)
+            ], Gap.SPACING4X);
+        }
+    }
+
+    const CONSENT_TEXT = 'Publishing creates a Twilio Function named ctc-outbound in your Twilio ' +
+        'account and points your TwiML App\'s Voice URL at it. Your current ' +
+        'Voice URL is saved so you can restore it.';
+    const REPUBLISH_WARNING = 'A newer version is available. Republish to update.';
+    const NOTICE_OFF_PUBLISHED_NOTE = 'The Function stays in place; calls connect without a notice. Use ' +
+        'Unpublish and remove to restore your previous Voice URL.';
+    const VOICE_URL_WARNING = 'Your TwiML App\'s Voice URL no longer points at the published Function.';
+    const STEP_STATUS = {
+        ok: { check: 'pass', text: 'Done' },
+        skipped: { check: 'info_disabled', text: 'Skipped' },
+        failed: { check: 'fail', text: 'Failed' },
+        pending: { check: 'info_enabled', text: 'Pending' }
+    };
+    const outboundStatusLine = (outbound) => {
+        if (!outbound.published)
+            return 'Not published yet';
+        const live = outbound.publishedNoticeVersion
+            ? 'notice v' + outbound.publishedNoticeVersion
+            : 'no notice';
+        if (outbound.changesPending)
+            return 'Live: ' + live + ' · Saved changes not published yet';
+        const when = new Date(outbound.publishedAt);
+        const whenText = !outbound.publishedAt
+            ? ''
+            : isNaN(when.getTime()) ? outbound.publishedAt : when.toLocaleString();
+        return 'Published' + (whenText ? ' ' + whenText : '') +
+            (outbound.publishedNoticeVersion ? ' · notice v' + outbound.publishedNoticeVersion : '');
+    };
+    function noticeHeadline(o) {
+        const when = o.publishedAt && !isNaN(Date.parse(o.publishedAt)) ? '· ' + new Date(o.publishedAt).toLocaleString() : '';
+        if (!o.published)
+            return { tone: 'off', label: 'Not published', extra: '' };
+        if (o.functionExists === false)
+            return { tone: 'problem', label: o.functionMessage || 'The Function is missing in Twilio', extra: '' };
+        if (o.voiceUrlMatches === false)
+            return { tone: 'problem', label: 'The Twilio app does not point at it', extra: when };
+        if (o.pending)
+            return { tone: 'warn', label: 'Published · the Twilio build is still running', extra: when };
+        if (o.needsRepublish)
+            return { tone: 'warn', label: 'Republish needed', extra: when };
+        if (o.changesPending)
+            return { tone: 'warn', label: 'Saved changes are not live yet', extra: when };
+        const live = o.publishedNoticeVersion ? 'version ' + o.publishedNoticeVersion + ' live' : 'no notice plays';
+        return { tone: 'ok', label: 'Published · ' + live + (o.voiceUrlMatches ? ' · Twilio app points at it' : ''), extra: when };
+    }
+    const stepLine = (step) => {
+        const s = STEP_STATUS[step.status];
+        return grid('18px minmax(0, 1fr) auto', [
+            jsxRuntime.jsx(StatusIcon, { status: s.check, size: component__namespace.Image.Size.S }),
+            text(step.label, { small: true }),
+            help(step.status === 'failed' && step.detail ? 'Failed · ' + step.detail
+                : step.detail ? s.text + ' · ' + step.detail : s.text)
+        ], Gap.SPACING2X);
+    };
+    class OutboundNotice extends core.PureComponent {
+        componentDidMount() {
+            const outbound = store.getState().outbound;
+            if (!outbound.loaded && !outbound.loading) {
+                loadOutbound();
+            }
+        }
+        renderLeft(outbound, busy) {
+            const max = outbound.maxLength;
+            return vstack([
+                jsxRuntime.jsx(component__namespace.Switch, { label: "Play a notice before the call connects", value: outbound.noticeOn, enabled: !busy, action: (args) => {
+                        store.dispatch(Action.outboundFieldChange({ noticeOn: !!(args && args.value) }));
+                    } }),
+                help('The person called hears it after they answer; the rep hears ringing. Recording starts after ' +
+                    'the notice, so the notice is not in the transcript. Every outbound call is recorded.'),
+                outbound.noticeOn ? field('Notice', jsxRuntime.jsx(component__namespace.TextArea, { text: outbound.noticeText, placeholder: outbound.defaultText, maxLength: max, rowCount: 3, enabled: !busy, onTextChanged: (args) => {
+                        store.dispatch(Action.outboundFieldChange({
+                            noticeText: ((args && args.text) || '').slice(0, max)
+                        }));
+                    }, rootStyle: { width: '100%' } }), help('Have your legal counsel approve the wording.')) : null,
+                !outbound.published && outbound.noticeOn ? help(CONSENT_TEXT) : null,
+                outbound.published && !outbound.noticeOn ? help(NOTICE_OFF_PUBLISHED_NOTE) : null
+            ], Gap.SPACING3X);
+        }
+        renderRight(outbound, busy) {
+            const steps = outbound.steps || [];
+            return vstack([
+                text('Last publish', { strong: true, small: true }),
+                steps.length
+                    ? vstack(steps.map(stepLine), Gap.SPACING1X)
+                    : help(outbound.published
+                        ? outboundStatusLine(outbound) + '. The steps of a publish show here.'
+                        : 'Nothing published yet. The steps show here after Save & publish.'),
+                outbound.pending && !outbound.publishing ? hstack([
+                    help('The Twilio build is still running.'),
+                    button('Check again', () => { resumePublishOutbound(); }, {
+                        small: true, enabled: !busy, icon: core__namespace.SystemIcon.REFRESH
+                    })
+                ], Gap.SPACING2X, { wrap: true }) : null,
+                outbound.published && outbound.functionUrl ? help('Function URL: ' + outbound.functionUrl) : null,
+                outbound.published && outbound.voiceUrlMatches === false ? dotText('problem', VOICE_URL_WARNING, undefined, { small: true }) : null,
+                outbound.published && outbound.needsRepublish ? dotText('warn', REPUBLISH_WARNING, undefined, { small: true }) : null,
+                help('A SuiteApp update that changes the function code shows "Republish needed" here and on Overview.')
+            ], Gap.SPACING2X);
+        }
+        renderActions(outbound, busy) {
+            const saveOnly = !outbound.noticeOn && !outbound.published;
+            const working = outbound.saving || outbound.publishing;
+            const items = [
+                button(saveOnly ? (working ? 'Saving…' : 'Save') : (working ? 'Publishing…' : 'Save & publish'), () => { saveAndPublishOutbound(!saveOnly); }, { primary: true, enabled: !busy })
+            ];
+            if (outbound.published && outbound.confirmUnpublish) {
+                items.push(text('This restores the previous Voice URL and deletes the Function.', { small: true }));
+                items.push(button(outbound.unpublishing ? 'Unpublishing…' : 'Confirm unpublish', () => { unpublishOutbound(); }, {
+                    danger: true, small: true, enabled: !busy
+                }));
+                items.push(button('Cancel', () => { store.dispatch(Action.outboundConfirmUnpublish(false)); }, {
+                    small: true, enabled: !busy
+                }));
+            }
+            else if (outbound.published) {
+                items.push(button(outbound.unpublishing ? 'Unpublishing…' : 'Unpublish and remove…', () => {
+                    store.dispatch(Action.outboundConfirmUnpublish(true));
+                }, { danger: true, enabled: !busy }));
+            }
+            items.push(help(saveOnly
+                ? 'The notice is off and nothing is published: Save keeps the setting in NetSuite only.'
+                : 'Save & publish updates the Twilio Function and points the Twilio app at it (15–30 s).'));
+            return hstack(items, Gap.SPACING2X, { wrap: true, growLast: true });
+        }
+        render() {
+            const outbound = store.getState().outbound;
+            if (outbound.loading || (!outbound.loaded && !outbound.loadError)) {
+                return card([cardTitle('Recording notice'), skeleton('lines', 4, 'Loading recording notice…')], { label: 'Recording notice' });
+            }
+            if (!outbound.loaded) {
+                return problemCard('Couldn\'t load the recording notice', friendlyError(outbound.loadError || 'Could not load the outbound recording notice') +
+                    ' Nothing was changed.', [button('Retry', () => { loadOutbound(); }, { primary: true, small: true })]);
+            }
+            const busy = outbound.saving || outbound.publishing || outbound.unpublishing;
+            const head = noticeHeadline(outbound);
+            return vstack([
+                card([
+                    hstack([cardTitle('Recording notice'), dotText(head.tone, head.label, head.extra)], Gap.SPACING3X, {
+                        justification: component__namespace.StackPanel.Justification.SPACE_BETWEEN, wrap: true
+                    }),
+                    grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderLeft(outbound, busy), this.renderRight(outbound, busy)], Gap.SPACING5X),
+                    outbound.error ? errorLine(friendlyError(outbound.error)) : null
+                ], { label: 'Recording notice', gap: Gap.SPACING4X }),
+                this.renderActions(outbound, busy)
+            ], Gap.SPACING3X);
         }
     }
 
@@ -3773,190 +4300,35 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
-    const CONSENT_TEXT = 'Publishing creates a Twilio Function named ctc-outbound in your Twilio ' +
-        'account and points your TwiML App\'s Voice URL at it. Your current ' +
-        'Voice URL is saved so you can restore it.';
-    const REPUBLISH_WARNING = 'A newer version is available. Republish to update.';
-    const NOTICE_OFF_PUBLISHED_NOTE = 'The Function stays in place; calls connect without a notice. Use ' +
-        'Unpublish and remove to restore your previous Voice URL.';
-    const VOICE_URL_WARNING = 'Your TwiML App\'s Voice URL no longer points at the published Function.';
-    const STEP_STATUS = {
-        ok: { check: 'pass', text: 'Done' },
-        skipped: { check: 'info_disabled', text: 'Skipped' },
-        failed: { check: 'fail', text: 'Failed' },
-        pending: { check: 'info_enabled', text: 'Pending' }
-    };
-    const outboundStatusLine = (outbound) => {
-        if (!outbound.published)
-            return 'Not published yet';
-        const live = outbound.publishedNoticeVersion
-            ? 'notice v' + outbound.publishedNoticeVersion
-            : 'no notice';
-        if (outbound.changesPending)
-            return 'Live: ' + live + ' · Saved changes not published yet';
-        const when = new Date(outbound.publishedAt);
-        const whenText = !outbound.publishedAt
-            ? ''
-            : isNaN(when.getTime()) ? outbound.publishedAt : when.toLocaleString();
-        return 'Published' + (whenText ? ' ' + whenText : '') +
-            (outbound.publishedNoticeVersion ? ' · notice v' + outbound.publishedNoticeVersion : '');
-    };
-    const item = (node) => node ? jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }) : false;
-    const vstack = (gap, nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: gap, children: nodes.map(item).filter(Boolean) }));
-    const hstack = (nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: nodes.map(item).filter(Boolean) }));
-    const weak = (text) => (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }));
-    const stepRow = (step) => {
-        const s = STEP_STATUS[step.status];
-        return (jsxRuntime.jsx(CheckRow, { check: {
-                label: step.label + ' — ' + s.text,
-                status: s.check,
-                detail: step.status === 'failed' ? step.detail : undefined
-            } }));
-    };
-    class OutboundNotice extends core.PureComponent {
-        componentDidMount() {
-            const outbound = store.getState().outbound;
-            if (!outbound.loaded && !outbound.loading) {
-                loadOutbound();
-            }
-        }
-        renderButtons(outbound, busy) {
-            const saveOnly = !outbound.noticeOn && !outbound.published;
-            const working = outbound.saving || outbound.publishing;
-            const saveButton = new component__namespace.Button({
-                label: saveOnly
-                    ? (working ? 'Saving…' : 'Save')
-                    : (working ? 'Publishing…' : 'Save & publish'),
-                type: component__namespace.Button.Type.PRIMARY,
-                enabled: !busy,
-                action: () => { saveAndPublishOutbound(!saveOnly); }
-            });
-            if (!outbound.published)
-                return hstack([saveButton]);
-            if (outbound.confirmUnpublish) {
-                return vstack(component__namespace.StackPanel.GapSize.XXS, [
-                    weak('This restores the previous Voice URL and deletes the Function.'),
-                    hstack([
-                        jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", enabled: !busy, action: () => { store.dispatch(Action.outboundConfirmUnpublish(false)); } }),
-                        jsxRuntime.jsx(component__namespace.Button, { label: "Confirm unpublish", type: component__namespace.Button.Type.DANGER, enabled: !busy, action: () => { unpublishOutbound(); } })
-                    ])
-                ]);
-            }
-            return hstack([
-                saveButton,
-                jsxRuntime.jsx(component__namespace.Button, { label: outbound.unpublishing ? 'Unpublishing…' : 'Unpublish and remove', type: component__namespace.Button.Type.DANGER, enabled: !busy, action: () => { store.dispatch(Action.outboundConfirmUnpublish(true)); } })
-            ]);
-        }
-        renderSettings(outbound) {
-            const busy = outbound.saving || outbound.publishing || outbound.unpublishing;
-            const max = outbound.maxLength;
-            const steps = outbound.steps || [];
-            const noticeSwitch = vstack(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Switch, { label: "Play a recording notice on outbound calls", value: outbound.noticeOn, enabled: !busy, action: (args) => {
-                        store.dispatch(Action.outboundFieldChange({ noticeOn: !!(args && args.value) }));
-                    } }),
-                weak('The person you call hears this after they answer, before the call ' +
-                    'connects and before recording starts.')
-            ]);
-            const noticeText = outbound.noticeOn && vstack(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Notice" }),
-                jsxRuntime.jsx(component__namespace.TextArea, { text: outbound.noticeText, placeholder: outbound.defaultText, maxLength: max, rowCount: 2, enabled: !busy, onTextChanged: (args) => {
-                        store.dispatch(Action.outboundFieldChange({
-                            noticeText: ((args && args.text) || '').slice(0, max)
-                        }));
-                    }, rootStyle: { width: '100%' } }),
-                weak(outbound.noticeText.length + ' / ' + max + ' characters'),
-                weak('Have your legal counsel approve the wording.')
-            ]);
-            const pending = outbound.pending && !outbound.publishing && vstack(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: 'Publishing… the Twilio build is still running' }),
-                new component__namespace.Button({
-                    label: 'Check again',
-                    startIcon: core__namespace.SystemIcon.REFRESH,
-                    enabled: !busy,
-                    action: () => { resumePublishOutbound(); }
-                })
-            ]);
-            const status = vstack(component__namespace.StackPanel.GapSize.XXS, [
-                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: outboundStatusLine(outbound) }),
-                outbound.published && !!outbound.functionUrl &&
-                    weak('Function URL: ' + outbound.functionUrl),
-                outbound.published && outbound.needsRepublish &&
-                    jsxRuntime.jsx(CheckRow, { check: { label: REPUBLISH_WARNING, status: 'warn' } }),
-                outbound.published && outbound.voiceUrlMatches === false &&
-                    jsxRuntime.jsx(CheckRow, { check: { label: VOICE_URL_WARNING, status: 'warn' } })
-            ]);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, rootStyle: { maxWidth: '560px' }, children: [
-                    item(noticeSwitch),
-                    item(noticeText),
-                    item(!outbound.published && outbound.noticeOn && weak(CONSENT_TEXT)),
-                    item(outbound.published && !outbound.noticeOn && weak(NOTICE_OFF_PUBLISHED_NOTE)),
-                    item(this.renderButtons(outbound, busy)),
-                    item(outbound.error ? jsxRuntime.jsx(ErrorText, { message: outbound.error }) : false),
-                    item(pending),
-                    item(steps.length > 0 && vstack(component__namespace.StackPanel.GapSize.XS, steps.map(stepRow))),
-                    item(status)
-                ].filter(Boolean) }));
-        }
-        render() {
-            const outbound = store.getState().outbound;
-            const heading = jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Outbound recording notice" });
-            if (outbound.loading || (!outbound.loaded && !outbound.loadError)) {
-                return vstack(component__namespace.StackPanel.GapSize.S, [
-                    heading,
-                    new component__namespace.Loader({
-                        label: 'Loading recording notice…',
-                        indeterminate: true
-                    })
-                ]);
-            }
-            if (!outbound.loaded) {
-                return vstack(component__namespace.StackPanel.GapSize.S, [
-                    heading,
-                    jsxRuntime.jsx(ErrorText, { message: outbound.loadError || 'Could not load the outbound recording notice' }),
-                    new component__namespace.Button({
-                        label: 'Retry',
-                        startIcon: core__namespace.SystemIcon.REFRESH,
-                        action: () => { loadOutbound(); }
-                    })
-                ]);
-            }
-            return vstack(component__namespace.StackPanel.GapSize.S, [
-                heading,
-                this.renderSettings(outbound)
-            ]);
-        }
-    }
-
     const TWILIO_DOCS = {
         twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
         phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
         intelService: 'https://www.twilio.com/docs/voice/intelligence'
     };
-    const FIELD_SPECS = [
-        {
+    const VOICE_FIELD_SPECS = {
+        twimlAppSid: {
             field: 'twimlAppSid',
             label: 'TwiML Application',
             helpText: 'Outbound calls use this app. When you publish the recording ' +
-                'notice, the wizard points its Voice URL at a Twilio Function in your account.',
+                'notice, the console points its Voice URL at a Twilio Function in your account.',
             docUrl: TWILIO_DOCS.twimlApp
         },
-        {
+        phoneNumber: {
             field: 'phoneNumber',
-            label: 'Default outbound caller-ID',
-            helpText: 'Number reps see as their outbound caller ID. Specific ' +
-                'rep-to-number assignments override this default.',
+            label: 'Default caller ID',
+            helpText: 'Reps who ring for no number call out from this number. A rep ' +
+                'who rings for a number calls out from that number (Phones & reps).',
             docUrl: TWILIO_DOCS.phoneNumber
         },
-        {
+        intelServiceSid: {
             field: 'intelServiceSid',
-            label: 'Conversational Intelligence',
-            helpText: 'Optional. The Voice Intelligence service ID that ' +
-                'produces transcripts and AI summaries.',
+            label: 'Intelligence service',
+            helpText: 'Twilio Conversational Intelligence, in your Twilio account. ' +
+                'It turns call recordings into transcripts.',
             docUrl: TWILIO_DOCS.intelService,
             allowEmpty: true
         }
-    ];
+    };
     const listKeyFor = (field) => {
         switch (field) {
             case 'twimlAppSid': return 'twimlApps';
@@ -3964,33 +4336,28 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             case 'intelServiceSid': return 'intelServices';
         }
     };
-    const handleEdit = (spec) => {
-        const state = store.getState();
-        const snap = (state.console.snapshot || {});
-        const current = snap[spec.field] || '';
-        store.dispatch(Action.voiceFieldEdit(spec.field, current));
+    const startVoiceEdit = (spec) => {
+        const snap = (store.getState().console.snapshot || {});
+        store.dispatch(Action.voiceFieldEdit(spec.field, snap[spec.field] || ''));
         loadVoiceLists();
     };
-    const handleCancel = () => {
+    const cancelVoiceEdit = () => {
         store.dispatch(Action.voiceFieldEdit(null, null));
     };
-    const handlePendingChange = (args) => {
+    const onPendingChange = (args) => {
         const value = (args && args.value) || null;
-        const state = store.getState();
-        store.dispatch(Action.voiceFieldEdit(state.console.voiceEditing, value));
+        store.dispatch(Action.voiceFieldEdit(store.getState().console.voiceEditing, value));
     };
     const optionsFor = (field, list) => list.map((it) => {
         if (field === 'phoneNumber') {
             return {
                 value: it.phoneNumber || '',
-                label: formatPhone(it.phoneNumber) +
-                    (it.friendlyName ? '  —  ' + it.friendlyName : '')
+                label: formatPhone(it.phoneNumber) + (it.friendlyName ? '  —  ' + it.friendlyName : '')
             };
         }
         return {
             value: it.sid || '',
-            label: (it.friendlyName || '(unnamed)') +
-                (it.sid ? '  [' + it.sid + ']' : '')
+            label: (it.friendlyName || '(unnamed)') + (it.sid ? '  [' + it.sid + ']' : '')
         };
     });
     const effectiveValue = (spec, options, pending) => {
@@ -4000,7 +4367,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return null;
         return options.length > 0 ? options[0].value : null;
     };
-    const handleSave = (spec) => {
+    const saveVoiceEdit = (spec) => {
         const c = store.getState().console;
         const list = c.voiceLists[listKeyFor(spec.field)];
         if (!list)
@@ -4013,204 +4380,284 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             saveVoiceField(spec.field, '');
         }
     };
-    class VoicePage extends core.PureComponent {
-        buildColumns() {
-            const CT = component__namespace.DataGrid.ColumnType;
-            return [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'field',
-                    label: 'Field',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.label || '',
-                            type: component__namespace.Text.Type.STRONG
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'docs',
-                    label: 'Docs',
-                    stretchFactor: 1,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row?.docUrl)
-                            return new component__namespace.Text({ text: '' });
-                        return new component__namespace.Link({
-                            content: 'Twilio docs ↗',
-                            url: row.docUrl,
-                            target: component__namespace.Link.Target.BLANK
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'description',
-                    label: 'Description',
-                    stretchFactor: 3,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.helpText || '',
-                            type: component__namespace.Text.Type.WEAK,
-                            size: component__namespace.Text.Size.S
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'value',
-                    label: 'Current value',
-                    stretchFactor: 3,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row)
-                            return new component__namespace.Text({ text: '' });
-                        const state = store.getState();
-                        const c = state.console;
-                        const snap = (c.snapshot || {});
-                        const isEditing = c.voiceEditing === row.field;
-                        if (!isEditing) {
-                            const value = snap[row.field];
-                            if (value) {
-                                return new component__namespace.Text({
-                                    text: row.field === 'phoneNumber' ? formatPhone(value) : value
-                                });
-                            }
-                            return new component__namespace.Text({
-                                text: '(not configured)',
-                                type: component__namespace.Text.Type.WEAK
-                            });
-                        }
-                        const listKey = listKeyFor(row.field);
-                        const list = c.voiceLists[listKey];
-                        if (list === null || c.voiceListsLoading) {
-                            return new component__namespace.Loader({
-                                label: 'Loading from Twilio…',
-                                indeterminate: true
-                            });
-                        }
-                        const listError = c.voiceListErrors[listKey];
-                        if (listError) {
-                            return new component__namespace.Text({
-                                text: '✕ The Twilio list did not load: ' + friendlyError(listError),
-                                type: component__namespace.Text.Type.STRONG,
-                                size: component__namespace.Text.Size.S
-                            });
-                        }
-                        if (list.length === 0) {
-                            return new component__namespace.Text({
-                                text: '(no items found in Twilio for this account)',
-                                type: component__namespace.Text.Type.WEAK
-                            });
-                        }
-                        const normalized = optionsFor(row.field, list);
-                        const ds = new core__namespace.ArrayDataSource(normalized);
-                        return new component__namespace.Dropdown({
-                            dataSource: ds,
-                            valueMember: 'value',
-                            displayMember: 'label',
-                            selectedValue: effectiveValue(row, normalized, c.voicePendingValue),
-                            allowEmpty: !!row.allowEmpty,
-                            placeholder: row.allowEmpty ? '(none)' : 'Select…',
-                            onSelectionChanged: handlePendingChange
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'action',
-                    label: 'Action',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row)
-                            return new component__namespace.Text({ text: '' });
-                        const state = store.getState();
-                        const c = state.console;
-                        const isEditing = c.voiceEditing === row.field;
-                        if (!isEditing) {
-                            return new component__namespace.Button({
-                                label: 'Change',
-                                action: () => { handleEdit(row); }
-                            });
-                        }
-                        const listKey = listKeyFor(row.field);
-                        const list = c.voiceLists[listKey];
-                        const saving = c.voiceSaving;
-                        if (list === null || c.voiceListsLoading) {
-                            return new component__namespace.Button({
-                                label: 'Cancel',
-                                action: handleCancel
-                            });
-                        }
-                        if (c.voiceListErrors[listKey]) {
-                            return new component__namespace.StackPanel({
-                                orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-                                itemGap: component__namespace.StackPanel.GapSize.S,
-                                items: [
-                                    new component__namespace.Button({
-                                        label: 'Retry',
-                                        startIcon: core__namespace.SystemIcon.REFRESH,
-                                        action: () => { loadVoiceLists(); }
-                                    }),
-                                    new component__namespace.Button({
-                                        label: 'Cancel',
-                                        action: handleCancel
-                                    })
-                                ]
-                            });
-                        }
-                        if (list.length === 0) {
-                            return new component__namespace.Button({
-                                label: 'Cancel',
-                                action: handleCancel
-                            });
-                        }
-                        const saveBtn = new component__namespace.Button({
-                            label: saving ? 'Saving…' : 'Save',
-                            type: component__namespace.Button.Type.PRIMARY,
-                            enabled: !saving,
-                            action: () => { handleSave(row); }
-                        });
-                        const cancelBtn = new component__namespace.Button({
-                            label: 'Cancel',
-                            enabled: !saving,
-                            action: handleCancel
-                        });
-                        return new component__namespace.StackPanel({
-                            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-                            itemGap: component__namespace.StackPanel.GapSize.S,
-                            items: [saveBtn, cancelBtn]
-                        });
-                    }
-                }
-            ];
+    function voiceValueControl(spec, viewText) {
+        const c = store.getState().console;
+        const snap = (c.snapshot || {});
+        if (c.voiceEditing !== spec.field) {
+            const value = snap[spec.field];
+            if (value) {
+                return new component__namespace.Text({
+                    text: viewText || (spec.field === 'phoneNumber' ? formatPhone(value) : value)
+                });
+            }
+            return new component__namespace.Text({ text: '(not set)', type: component__namespace.Text.Type.WEAK });
+        }
+        const listKey = listKeyFor(spec.field);
+        const list = c.voiceLists[listKey];
+        if (list === null || c.voiceListsLoading) {
+            return new component__namespace.Loader({ label: 'Loading from Twilio…', indeterminate: true });
+        }
+        const listError = c.voiceListErrors[listKey];
+        if (listError) {
+            return new component__namespace.Text({
+                text: '✕ The Twilio list did not load: ' + friendlyError(listError),
+                type: component__namespace.Text.Type.STRONG,
+                size: component__namespace.Text.Size.S
+            });
+        }
+        if (list.length === 0) {
+            return new component__namespace.Text({ text: '(none found in this Twilio account)', type: component__namespace.Text.Type.WEAK });
+        }
+        const options = optionsFor(spec.field, list);
+        return new component__namespace.Dropdown({
+            dataSource: new core__namespace.ArrayDataSource(options),
+            valueMember: 'value',
+            displayMember: 'label',
+            selectedValue: effectiveValue(spec, options, c.voicePendingValue),
+            allowEmpty: !!spec.allowEmpty,
+            placeholder: spec.allowEmpty ? '(none)' : 'Select…',
+            onSelectionChanged: onPendingChange,
+            rootStyle: { width: '100%' }
+        });
+    }
+    function voiceActionControl(spec) {
+        const c = store.getState().console;
+        const small = component__namespace.Button.Size.SMALL;
+        if (c.voiceEditing !== spec.field) {
+            return new component__namespace.Button({
+                label: 'Change',
+                size: small,
+                enabled: !c.voiceSaving,
+                action: () => { startVoiceEdit(spec); }
+            });
+        }
+        const listKey = listKeyFor(spec.field);
+        const list = c.voiceLists[listKey];
+        const cancel = new component__namespace.Button({ label: 'Cancel', size: small, enabled: !c.voiceSaving, action: cancelVoiceEdit });
+        if (list === null || c.voiceListsLoading || list.length === 0)
+            return cancel;
+        const row = (items) => new component__namespace.StackPanel({
+            orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
+            itemGap: component__namespace.StackPanel.GapSize.SPACING2X,
+            items
+        });
+        if (c.voiceListErrors[listKey]) {
+            return row([
+                new component__namespace.Button({
+                    label: 'Retry', size: small, startIcon: core__namespace.SystemIcon.REFRESH,
+                    action: () => { loadVoiceLists(); }
+                }),
+                cancel
+            ]);
+        }
+        return row([
+            new component__namespace.Button({
+                label: c.voiceSaving ? 'Saving…' : 'Save',
+                size: small,
+                type: component__namespace.Button.Type.PRIMARY,
+                enabled: !c.voiceSaving,
+                action: () => { saveVoiceEdit(spec); }
+            }),
+            cancel
+        ]);
+    }
+
+    const kv$1 = (label, value, action) => grid('180px minmax(0, 1fr) auto', [text(label, { strong: true, small: true }), value, action || text('')], Gap.SPACING4X);
+    const settingRow = (label, spec, helpText, viewText) => kv$1(label, vstack([voiceValueControl(spec, viewText), help(helpText)], Gap.SPACING1X), voiceActionControl(spec));
+    class OutboundPage extends core.PureComponent {
+        componentDidMount() {
+            const c = store.getState().console;
+            if (c.phonesByPhone === null && !c.phonesLoading)
+                loadPhonesData();
         }
         render() {
             const state = store.getState();
             const c = state.console;
-            const columns = this.buildColumns();
-            const rowsDs = new core__namespace.ArrayDataSource(FIELD_SPECS);
-            const items = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Manage TwiML application, default outbound caller-ID number, and optional Conversational Intelligence service. Changes save immediately and apply to the next call placed." }) })),
-                c.voiceError && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(c.voiceError) }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
-                        dataSource: rowsDs,
-                        columns,
-                        columnStretch: true,
-                        highlightRowsOnHover: true,
-                        stripedRows: true,
-                        dataRowHeight: 80,
-                        headerRowHeight: 40,
-                        rootStyle: { width: '100%' }
-                    }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(OutboundNotice, { tick: this.props.tick }) }))
-            ].filter(Boolean);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: items }));
+            const snap = (c.snapshot || {});
+            const n = (c.phonesNumbers || []).find((x) => x.phoneNumber === snap.phoneNumber);
+            const callerIdText = snap.phoneNumber
+                ? formatPhone(snap.phoneNumber) + (n && n.friendlyName ? ' · ' + n.friendlyName : '')
+                : undefined;
+            const path = [
+                cardTitle('Call path'),
+                settingRow('Twilio app', VOICE_FIELD_SPECS.twimlAppSid, 'Outbound calls use this app; publishing the recording notice points it at our dial function. ' +
+                    'While the notice is published, unpublish it before you change the app.'),
+                divider(),
+                settingRow('Default caller ID', VOICE_FIELD_SPECS.phoneNumber, 'Each rep calls out from the number that rings them. Reps that ring for no number use this one.', callerIdText),
+                divider(),
+                kv$1('Who calls out from what', callerIdList(state), button('Phones & reps', () => { goToSection('phones'); }, { link: true, small: true }))
+            ];
+            if (c.voiceError)
+                path.push(errorLine(friendlyError(c.voiceError)));
+            return vstack([
+                pageHeader('Outbound calls', 'How reps\' calls leave NetSuite, and what the person called hears first.'),
+                card(path, { label: 'Call path', gap: Gap.SPACING3X }),
+                jsxRuntime.jsx(OutboundNotice, { tick: this.props.tick })
+            ], Gap.SPACING4X);
+        }
+    }
+
+    function backlogRows(v) {
+        return [
+            { status: 'Logged', tone: 'neutral', count: v.logged,
+                next: 'Waiting for Twilio\'s transcript. Checked every 15 minutes; closed as "No transcript" after 24 hours.' },
+            { status: 'Processing', tone: 'info', count: v.processing,
+                next: 'Being summarised now. A summary that stalls for 30 minutes is retried, up to 3 times.' },
+            { status: 'Failed', tone: 'problem', count: v.failed, link: true,
+                next: 'Summary failed 3 times. The transcript is kept; the call is not retried again.' },
+            { status: 'No transcript', tone: 'neutral', count: v.noTranscript,
+                next: 'Closed: no recording, or Twilio produced no transcript within 24 hours. Logged as calls without a summary.' },
+            { status: 'Recording cleanup due', tone: 'neutral', count: v.cleanupPending,
+                next: 'Recordings Twilio did not delete on the first try. Retried on the next run.' }
+        ];
+    }
+    const kv = (label, value, action = null) => grid('150px minmax(0, 1fr) auto', [text(label, { strong: true, small: true }), value, action || text('')], Gap.SPACING4X);
+    const signalOf = (state, key) => state.health.signals[key];
+    class TranscriptsPage extends core.PureComponent {
+        componentDidMount() {
+            const h = store.getState().health;
+            if (!h.loaded && !h.loading)
+                loadHealth();
+        }
+        signalState(state, sig) {
+            const h = state.health;
+            if (sig && sig.value)
+                return null;
+            if (h.loading && !h.loaded)
+                return skeleton('lines', 3, 'Checking…');
+            if (h.error && !sig) {
+                return vstack([
+                    errorLine('Not checked: ' + friendlyError(h.error)),
+                    button('Retry', () => { loadHealth(); }, { primary: true, small: true })
+                ], Gap.SPACING2X);
+            }
+            return text(sig ? sig.detail : 'Not checked yet.', { weak: true });
+        }
+        renderTranscription(state) {
+            const c = state.console;
+            const sig = signalOf(state, 'intelligence');
+            const v = (sig && sig.value);
+            const spec = VOICE_FIELD_SPECS.intelServiceSid;
+            const auto = !v || !v.serviceSid ? { tone: 'off', label: 'No service' }
+                : v.autoTranscribe === true ? { tone: 'ok', label: 'On' }
+                    : v.autoTranscribe === false ? { tone: 'problem', label: 'Off' }
+                        : { tone: 'off', label: 'Not checked' };
+            const rows = [
+                cardTitle('Transcription · Twilio'),
+                kv('Service', vstack([
+                    voiceValueControl(spec, v && v.friendlyName ? v.friendlyName : undefined),
+                    help('Twilio Conversational Intelligence, in your Twilio account.')
+                ], Gap.SPACING1X), voiceActionControl(spec)),
+                divider(),
+                kv('Auto-transcribe', vstack([
+                    dotText(auto.tone, auto.label),
+                    help('Twilio transcribes every recording in the account, voicemails included. Off would stop all transcripts.'),
+                    sig && sig.severity !== 'ok' && sig.detail ? text(sig.detail, { small: true }) : null
+                ], Gap.SPACING1X)),
+                divider(),
+                kv('Recordings', vstack([
+                    text('Deleted from Twilio after the transcript is saved in NetSuite.'),
+                    help('Outbound calls are always recorded. Inbound recording is set under Inbound calls.')
+                ], Gap.SPACING1X))
+            ];
+            if (c.voiceError)
+                rows.push(errorLine(friendlyError(c.voiceError)));
+            return card(rows, { label: 'Transcription', fill: true, gap: Gap.SPACING2X });
+        }
+        renderAi(state) {
+            const sig = signalOf(state, 'aiQuota');
+            const n = sig && typeof sig.value === 'number' ? sig.value : null;
+            const tone = !sig ? 'off' : sig.severity === 'problem' ? 'problem' : sig.severity === 'warn' ? 'warn' : 'ok';
+            const pending = this.signalState(state, sig);
+            return card([
+                cardTitle('AI analysis · NetSuite N/llm'),
+                n !== null ? metric(n.toLocaleString(), n === 1 ? 'AI analysis left' : 'AI analyses left') : pending,
+                n !== null && tone !== 'ok' ? dotText(tone, sig ? sig.detail : '') : null,
+                help('Read live with llm.getRemainingUsage(): the N/llm requests the account has left (one per analysed call). This is not script governance units.'),
+                help('Below 10, calls are still transcribed by Twilio but not analysed until more requests are available. Analysis runs in NetSuite with N/llm (Cohere Command A), not in Twilio; no extra licence.')
+            ], { label: 'AI analysis', fill: true });
+        }
+        backlogColumns() {
+            const CT = component__namespace.DataGrid.ColumnType;
+            const row = (args) => args?.cell?.row?.dataItem;
+            return [
+                { type: CT.TEMPLATED, name: 'status', label: 'Status', stretchFactor: 3,
+                    content: (args) => { const r = row(args); return r ? chip(r.status, r.tone) : text(''); } },
+                { type: CT.TEMPLATED, name: 'calls', label: 'Calls', stretchFactor: 1,
+                    content: (args) => text(String(row(args)?.count ?? '')) },
+                { type: CT.TEMPLATED, name: 'next', label: 'What happens next', stretchFactor: 8,
+                    content: (args) => text(row(args)?.next || '', { small: true }) },
+                { type: CT.TEMPLATED, name: 'link', label: '', stretchFactor: 3,
+                    content: (args) => {
+                        const r = row(args);
+                        return r && r.link && r.count > 0 ? extLink('Open in Call Central', CALL_CENTRAL_URL) : text('');
+                    } }
+            ];
+        }
+        renderBacklog(state) {
+            const sig = signalOf(state, 'transcriptBacklog');
+            const v = (sig && sig.value);
+            const open = v ? v.logged + v.processing + v.failed : 0;
+            const body = [
+                grid('minmax(0, 1fr) auto', [
+                    cardTitle('Transcript backlog'),
+                    v ? help(open + (open === 1 ? ' call' : ' calls') + ' in progress · last ' + (v.windowDays || 7) + ' days') : null
+                ], Gap.SPACING3X)
+            ];
+            if (!v) {
+                body.push(this.signalState(state, sig));
+            }
+            else {
+                if (sig && sig.severity === 'problem')
+                    body.push(dotText('problem', sig.detail));
+                body.push(new component__namespace.DataGrid({
+                    dataSource: new core__namespace.ArrayDataSource(backlogRows(v)),
+                    columns: this.backlogColumns(),
+                    columnStretch: true,
+                    highlightRowsOnHover: true,
+                    dataRowHeight: 56,
+                    headerRowHeight: 40,
+                    rootStyle: { width: '100%' }
+                }));
+            }
+            return card(body, { label: 'Transcript backlog' });
+        }
+        jobRow(label, j, helpText) {
+            let status;
+            if (!j || !j.lastStatus || j.minutesSinceLastRun === null) {
+                status = dotText('off', j && j.lastStatus ? runStatusText(j.lastStatus) : 'No run yet');
+            }
+            else {
+                const ago = agoParts(j.minutesSinceLastRun);
+                status = dotText(jobTone(j), runStatusText(j.lastStatus) + ' ' + ago.value + ' ' + ago.unit, j.failedRecent > 0 ? '· ' + j.failedRecent + ' recent ' + (j.failedRecent === 1 ? 'run' : 'runs') + ' failed' : '');
+            }
+            return grid('200px minmax(0, 1fr)', [text(label, { strong: true, small: true }),
+                vstack([status, help(helpText)], Gap.SPACING1X)], Gap.SPACING4X);
+        }
+        renderJobs(state) {
+            const sig = signalOf(state, 'pollerRuns');
+            const v = (sig && sig.value);
+            const body = [cardTitle('Background jobs')];
+            if (!v) {
+                body.push(this.signalState(state, sig));
+            }
+            else {
+                body.push(this.jobRow('Transcript check', v.transcripts, 'Every 15 minutes. Also retries failed saves and deletes finished recordings.'));
+                body.push(divider());
+                body.push(this.jobRow('Missed-call sync', v.reconcile, 'Every 15 minutes. Logs calls that rang no rep (missed, too short, no answer, voicemail) so Call Central is complete.'));
+                if (sig && sig.severity !== 'ok' && sig.detail)
+                    body.push(dotText(sig.severity === 'problem' ? 'problem' : 'warn', sig.detail));
+            }
+            return card(body, { label: 'Background jobs', gap: Gap.SPACING2X });
+        }
+        render() {
+            const state = store.getState();
+            return vstack([
+                pageHeader('Transcripts & AI', 'Twilio transcribes the calls. NetSuite (N/llm) does the AI analysis: summary, satisfaction, tone and follow-ups. Below: both, and the background jobs that connect them.', healthCheckAside()),
+                grid('minmax(0, 3fr) minmax(0, 2fr)', [this.renderTranscription(state), this.renderAi(state)], Gap.SPACING3X, { stretch: true }),
+                this.renderBacklog(state),
+                this.renderJobs(state)
+            ], Gap.SPACING4X);
         }
     }
 
@@ -4224,6 +4671,14 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             failedChecks: [],
             saved: false
         }));
+    }
+    function editCredentialsField(key, value) {
+        const creds = store.getState().credentials;
+        if (creds.saving)
+            return;
+        if (!creds.editing)
+            startCredentialsEdit();
+        store.dispatch(Action.credentialsUpdate({ [key]: value, saved: false }));
     }
     function cancelCredentialsEdit() {
         if (store.getState().credentials.saving)
@@ -4271,189 +4726,105 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
-    const TWILIO_CREDS_DOCS = {
-        accountSid: 'https://www.twilio.com/docs/iam/api/account',
-        apiKeySid: 'https://www.twilio.com/docs/iam/api-keys',
-        apiSecret: 'https://www.twilio.com/docs/iam/api-keys'
-    };
-    class CredentialsPage extends core.PureComponent {
-        handleOpenSecrets = () => {
-            try {
-                window.open('/app/common/scripting/secrets/settings.nl', '_blank');
-            }
-            catch (e) { }
-        };
-        renderChangeForm(creds) {
-            const item = (node) => (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }));
-            if (!creds.editing) {
-                const out = [];
-                if (creds.saved) {
-                    out.push(item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "\u2713 Saved. The connection test passed with the new API key." })));
-                }
-                out.push(item(new component__namespace.Button({
-                    label: 'Change API key',
-                    startIcon: core__namespace.SystemIcon.EDIT,
-                    action: () => { startCredentialsEdit(); }
-                })));
-                return out;
-            }
-            const field = (label, value, placeholder, key) => [
-                (jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: label }) })),
-                (jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(component__namespace.TextBox, { text: value, placeholder: placeholder, enabled: !creds.saving, onTextChanged: (args) => {
-                            store.dispatch(Action.credentialsUpdate({ [key]: (args && args.text) || '' }));
-                        }, rootStyle: { width: '100%' } }) }))
+    const CONNECTION_CHECK_IDS = ['twilio_reachable', 'jwt_mint', 'secret_resolves'];
+    const ROTATION_STEPS = [
+        'In the Twilio Console (Account › API keys & tokens), create a new Standard API key. Copy its SID and secret: Twilio shows the secret only once.',
+        'In NetSuite (Setup › Company › API Secrets), create a new secret with that value. Allow the same scripts and domains as the current secret: CTC Setup Wizard API, CTC Token Generator and CTC Poll Transcripts. Note its script ID (custsecret_…).',
+        'Paste the new API Key SID and the new secret\'s script ID here and click Save & test.',
+        'When the test passes and open phones have renewed (within an hour, or after a reload of phone mode), delete the old key in Twilio and the old secret in NetSuite.'
+    ];
+    function connectionStatus(checks, at) {
+        const mine = (checks || []).filter((c) => CONNECTION_CHECK_IDS.indexOf(String(c.id)) >= 0);
+        const when = timeOfDay(at);
+        const extra = when ? '· tested ' + when : '';
+        if (!mine.length)
+            return { tone: 'off', label: 'Not tested', extra: '' };
+        if (mine.every((c) => c.status === 'pass'))
+            return { tone: 'ok', label: 'Connected', extra };
+        return { tone: 'problem', label: 'Not connected', extra };
+    }
+    class AccountPage extends core.PureComponent {
+        renderConnection(state) {
+            const c = state.console;
+            const creds = state.credentials;
+            const snap = (c.snapshot || {});
+            const keySid = creds.editing ? creds.apiKeySid : (snap.apiKeySid || '');
+            const secretId = creds.editing ? creds.apiSecretId : (snap.apiSecretId || '');
+            const dirty = creds.editing &&
+                (creds.apiKeySid.trim() !== (snap.apiKeySid || '') || creds.apiSecretId.trim() !== (snap.apiSecretId || ''));
+            const testing = !!c.preflightRefreshing || (c.loading && c.preflight === null);
+            const status = testing
+                ? { tone: 'info', label: 'Testing…', extra: '' }
+                : connectionStatus(c.preflight, c.preflightAt);
+            const failedConnection = (c.preflight || [])
+                .filter((ch) => CONNECTION_CHECK_IDS.indexOf(String(ch.id)) >= 0 && ch.status !== 'pass');
+            const rows = [
+                hstack([cardTitle('Connection'), dotText(status.tone, status.label, status.extra)], Gap.SPACING3X, {
+                    justification: component__namespace.StackPanel.Justification.SPACE_BETWEEN, wrap: true
+                }),
+                field('Account SID', jsxRuntime.jsx(component__namespace.TextBox, { text: snap.accountSid || '', enabled: false, classList: ['ctc-mono'], rootStyle: { width: '100%' } }), 'The Twilio account itself. To move to another account, re-run setup below.'),
+                field('API Key SID', jsxRuntime.jsx(component__namespace.TextBox, { text: keySid, placeholder: "SK\u2026", enabled: !creds.saving, classList: ['ctc-mono'], onTextChanged: (args) => {
+                        editCredentialsField('apiKeySid', (args && args.text) || '');
+                    }, rootStyle: { width: '100%' } }), 'The key NetSuite signs call tokens with. A rotated key has a new SID: paste it here.'),
+                field('API Key Secret (script ID)', jsxRuntime.jsx(component__namespace.TextBox, { text: secretId, placeholder: "custsecret_\u2026", enabled: !creds.saving, classList: ['ctc-mono'], onTextChanged: (args) => {
+                        editCredentialsField('apiSecretId', (args && args.text) || '');
+                    }, rootStyle: { width: '100%' } }), vstack([
+                    help('The NetSuite API Secret that holds the key\'s secret. NetSuite never shows the value here.'),
+                    extLink('Open NetSuite API Secrets', API_SECRETS_URL)
+                ], Gap.SPACING1X)),
+                hstack([
+                    button(creds.saving ? 'Testing…' : 'Save & test', () => { saveCredentials(); }, {
+                        primary: true,
+                        enabled: !creds.saving && !!dirty && creds.apiKeySid.trim() !== '' && creds.apiSecretId.trim() !== ''
+                    }),
+                    dirty ? button('Discard', () => { cancelCredentialsEdit(); }, { enabled: !creds.saving }) : null,
+                    button(testing ? 'Testing…' : 'Test connection', () => { rerunPreflight(); }, { enabled: !testing }),
+                    help('Save & test calls Twilio with the new key first and saves it only when the test passes. A failed test keeps the old key.')
+                ], Gap.SPACING2X, { wrap: true, growLast: true })
             ];
-            const out = [
-                item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Enter the new key's SID and the script ID of the NetSuite API Secret that holds its secret. Click-to-Call tests the connection with the new values first. If the test fails, nothing is saved and the current key stays in use." })),
-                item(jsxRuntime.jsx(component__namespace.GridPanel, { columns: "220px 1fr", rows: "auto auto", columnGap: component__namespace.GridPanel.GapSize.M, rowGap: component__namespace.GridPanel.GapSize.S, rootStyle: { maxWidth: '640px' }, children: [
-                        ...field('New API Key SID', creds.apiKeySid, 'SK…', 'apiKeySid'),
-                        ...field('New API Key Secret script ID', creds.apiSecretId, 'custsecret_…', 'apiSecretId')
-                    ] })),
-                item(new component__namespace.StackPanel({
-                    orientation: component__namespace.StackPanel.Orientation.HORIZONTAL,
-                    itemGap: component__namespace.StackPanel.GapSize.S,
-                    items: [
-                        new component__namespace.Button({
-                            label: creds.saving ? 'Testing connection…' : 'Test and save',
-                            type: component__namespace.Button.Type.PRIMARY,
-                            enabled: !creds.saving &&
-                                creds.apiKeySid.trim() !== '' && creds.apiSecretId.trim() !== '',
-                            action: () => { saveCredentials(); }
-                        }),
-                        new component__namespace.Button({
-                            label: 'Cancel',
-                            enabled: !creds.saving,
-                            action: () => { cancelCredentialsEdit(); }
-                        })
-                    ]
-                }))
-            ];
+            if (creds.saved)
+                rows.push(text('✓ Saved. The connection test passed with the new key.', { strong: true }));
             if (creds.error) {
-                out.push(item(jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: '✕ ' + friendlyError(creds.error) })));
-                buildFailedCheckLines(creds.failedChecks).forEach((line) => { out.push(item(line)); });
+                rows.push(errorLine(friendlyError(creds.error)));
+                buildFailedCheckLines(creds.failedChecks).forEach((line) => { rows.push(line); });
             }
-            return out;
+            if (c.preflightError)
+                rows.push(errorLine('The connection test did not run: ' + friendlyError(c.preflightError)));
+            if (!testing && failedConnection.length) {
+                buildFailedCheckLines(failedConnection).forEach((line) => { rows.push(line); });
+            }
+            return card(rows, { label: 'Connection', fill: true, gap: Gap.SPACING4X });
         }
-        buildColumns() {
-            const CT = component__namespace.DataGrid.ColumnType;
-            return [
-                {
-                    type: CT.TEMPLATED,
-                    name: 'field',
-                    label: 'Field',
-                    stretchFactor: 2,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.label || '',
-                            type: component__namespace.Text.Type.STRONG
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'docs',
-                    label: 'Docs',
-                    stretchFactor: 1,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (!row?.docUrl)
-                            return new component__namespace.Text({ text: '' });
-                        return new component__namespace.Link({
-                            content: 'Twilio docs ↗',
-                            url: row.docUrl,
-                            target: component__namespace.Link.Target.BLANK
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'description',
-                    label: 'Description',
-                    stretchFactor: 4,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        return new component__namespace.Text({
-                            text: row?.help || '',
-                            type: component__namespace.Text.Type.WEAK,
-                            size: component__namespace.Text.Size.S
-                        });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED,
-                    name: 'value',
-                    label: 'Value',
-                    stretchFactor: 3,
-                    content: (args) => {
-                        const row = args?.cell?.row?.dataItem;
-                        if (row?.value) {
-                            return new component__namespace.Text({ text: row.value });
-                        }
-                        return new component__namespace.Text({
-                            text: '(not configured)',
-                            type: component__namespace.Text.Type.WEAK
-                        });
-                    }
-                }
-            ];
+        renderRotation() {
+            return card([
+                cardTitle('Rotate the API key'),
+                help('A Twilio secret is shown once and cannot be regenerated. Rotation means a new key with a new SID.'),
+                vstack(ROTATION_STEPS.map((s, i) => text((i + 1) + '. ' + s, { small: true })), Gap.SPACING2X),
+                help('Open phones pick up the new key at their next token renewal, within an hour. Calls in progress are not affected.'),
+                extLink('Twilio docs', 'https://www.twilio.com/docs/iam/api-keys')
+            ], { label: 'Rotate the API key', fill: true });
+        }
+        renderDangerZone(state) {
+            const snap = (state.console.snapshot || {});
+            const paused = snap.active === false;
+            const row = (title, helpText, control) => grid('minmax(0, 1fr) auto', [
+                vstack([text(title, { strong: true }), help(helpText)], Gap.SPACING1X),
+                control
+            ], Gap.SPACING4X);
+            return card([
+                cardTitle('Danger zone', { danger: true }),
+                row('Pause calling', 'Reps cannot place or receive calls until you resume. Calls in progress finish normally. Twilio settings are kept.', jsxRuntime.jsx(PauseControl, { pauseLabel: "Pause calling\u2026", danger: true, tick: this.props.tick })),
+                divider(),
+                row('Re-run setup', 'Walk through the 5 setup steps again with the current values filled in. Use it to move to another Twilio account. Available while calling is paused.', button('Re-run setup', () => { goToStep(1); }, { enabled: paused, icon: core__namespace.SystemIcon.REFRESH }))
+            ], { variant: 'danger', label: 'Danger zone' });
         }
         render() {
             const state = store.getState();
-            const snap = (state.console.snapshot || {});
-            const changeForm = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: this.renderChangeForm(state.credentials) }) }));
-            const rows = [
-                {
-                    label: 'Account SID',
-                    value: snap.accountSid || '',
-                    help: 'Your Twilio Account SID. Public — safe to display.',
-                    docUrl: TWILIO_CREDS_DOCS.accountSid
-                },
-                {
-                    label: 'API Key SID',
-                    value: snap.apiKeySid || '',
-                    help: 'Identifies which Twilio API Key the wizard uses. ' +
-                        'Public — the matching Secret stays in NetSuite\'s ' +
-                        'API Secrets vault.',
-                    docUrl: TWILIO_CREDS_DOCS.apiKeySid
-                },
-                {
-                    label: 'API Key Secret pointer',
-                    value: snap.apiSecretId || '',
-                    help: 'NetSuite script-id (custsecret_…) of the API Secret. ' +
-                        'The secret value itself never leaves NetSuite\'s vault.',
-                    docUrl: TWILIO_CREDS_DOCS.apiSecret
-                }
-            ];
-            const columns = this.buildColumns();
-            const rowsDs = new core__namespace.ArrayDataSource(rows);
-            const openSecretsButton = (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Open NetSuite API Secrets", type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.LOCK, action: this.handleOpenSecrets, rootStyle: {
-                        backgroundColor: '#2D4458',
-                        color: '#FFFFFF',
-                        borderColor: '#2D4458'
-                    } }) }));
-            const items = [
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "The Account SID + API Key SID are public identifiers \u2014 they're safe to display here. The actual API Secret value is held opaque by NetSuite's API Secrets vault (Setup > Company > API Secrets) and never travels through the SPA." }) })),
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.DataGrid({
-                        dataSource: rowsDs,
-                        columns,
-                        columnStretch: true,
-                        highlightRowsOnHover: true,
-                        stripedRows: true,
-                        dataRowHeight: 64,
-                        headerRowHeight: 40,
-                        rootStyle: { width: '100%' }
-                    }) })),
-                changeForm,
-                openSecretsButton,
-                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XS, rootStyle: {
-                            padding: '12px 16px',
-                            border: '1px solid #E2E3E5',
-                            borderRadius: '4px',
-                            background: '#F7F8F9'
-                        }, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "API key rotation guide" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '1. In the Twilio Console (Account › API keys & tokens), create a new Standard API key. Copy its secret at once: Twilio shows a key\'s secret only when you create the key, and you cannot change the secret of an existing key.' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '2. In NetSuite (Setup › Company › API Secrets), create a new secret with that value. Give it the same allowed scripts and allowed domains as the current secret. The allowed scripts must include CTC Setup Wizard API, CTC Token Generator and CTC Poll Transcripts: NetSuite does not let a script read this list, so the test cannot check it for the other two. Note its script ID (custsecret_…).' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '3. On this page, click "Change API key". Enter the new API Key SID (SK…, a new SID) and the new secret\'s script ID, then click "Test and save". If the test fails, the current key stays in use.' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '4. Reload phone mode, then place a test call. A phone that stays open keeps its old-key token until it renews (up to 1 hour).' }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { size: component__namespace.Text.Size.S, children: '5. Wait until open phones renew (up to 1 hour), or ask reps to reload phone mode. Then delete the old API key in the Twilio Console, and then the old secret in NetSuite API Secrets.' }) })] }) }))
-            ].filter(Boolean);
-            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: items }));
+            return vstack([
+                pageHeader('Twilio account', 'The Twilio account and API key NetSuite uses for calls, recordings and transcripts.'),
+                grid('minmax(0, 3fr) minmax(0, 2fr)', [this.renderConnection(state), this.renderRotation()], Gap.SPACING3X, { stretch: true }),
+                this.renderDangerZone(state)
+            ], Gap.SPACING4X);
         }
     }
 
@@ -4485,10 +4856,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         });
         const navItems = [
             item('overview', 'Overview', core__namespace.SystemIcon.CARD_VIEW),
-            item('phones', 'Phones & reps', core__namespace.SystemIcon.GROUPS, { badge: assignmentBadge }),
-            item('inbound', 'Inbound calls', core__namespace.SystemIcon.CALL),
-            item('voice', 'Voice config', core__namespace.SystemIcon.SETTINGS),
-            item('credentials', 'Credentials', core__namespace.SystemIcon.LOCK)
+            item('phones', 'Phones & reps', core__namespace.SystemIcon.CALL, { badge: assignmentBadge }),
+            item('inbound', 'Inbound calls', core__namespace.SystemIcon.ARROW_DIAGONAL_DOWN),
+            item('outbound', 'Outbound calls', core__namespace.SystemIcon.ARROW_DIAGONAL_UP),
+            item('transcripts', 'Transcripts & AI', core__namespace.SystemIcon.AI_SPARKLE),
+            item('health', 'Health', core__namespace.SystemIcon.PERFORMANCE),
+            item('account', 'Twilio account', core__namespace.SystemIcon.CREDENTIALS)
         ];
         if (canRerun) {
             navItems.push(item('re-run', 'Re-run wizard', core__namespace.SystemIcon.REFRESH, { separatorTop: true }));
@@ -4515,7 +4888,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     };
 
     const RailContentShell = (props) => {
-        return (jsxRuntime.jsx(component__namespace.ScrollPanel, { orientation: component__namespace.ScrollPanel.Orientation.VERTICAL, children: jsxRuntime.jsx(component__namespace.ContentPanel, { horizontalAlignment: component__namespace.ContentPanel.HorizontalAlignment.STRETCH, outerGap: {
+        return (jsxRuntime.jsx(component__namespace.ScrollPanel, { orientation: component__namespace.ScrollPanel.Orientation.VERTICAL, children: jsxRuntime.jsx(component__namespace.ContentPanel, { classList: (props.classList || []), horizontalAlignment: component__namespace.ContentPanel.HorizontalAlignment.STRETCH, outerGap: {
                     start: component__namespace.ContentPanel.GapSize.XXL,
                     end: component__namespace.ContentPanel.GapSize.XXL,
                     vertical: component__namespace.ContentPanel.GapSize.M
@@ -4566,29 +4939,71 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         return banner;
     };
 
-    const subtitleFor = (section) => {
-        switch (section) {
-            case 'overview': return 'Overview';
-            case 'phones': return 'Phones & reps';
-            case 'inbound': return 'Inbound calls';
-            case 'voice': return 'Voice config';
-            case 'credentials': return 'Credentials';
-        }
+    const CONSOLE_CLASS = 'ctc-console';
+    const TOKENS = {
+        surface: '#F6F5F2',
+        card: '#FFFFFF',
+        border: '#E5E2DD',
+        divider: '#F1EFEA',
+        text: '#161513',
+        muted: '#5C5955',
+        radius: '12px',
+        dangerBorder: '#E7C3BF',
+        dangerText: '#9A2A23'
     };
+    const S = '.' + CONSOLE_CLASS;
+    const CSS = [
+        S + '{background:' + TOKENS.surface + ';min-height:100%}',
+        'div:has(> div > ' + S + '){background:' + TOKENS.surface + '}',
+        S + ' .ctc-card{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.border +
+            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important;box-sizing:border-box}',
+        S + ' .ctc-card-flush{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.border +
+            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important;overflow:hidden}',
+        S + ' .ctc-card-danger{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.dangerBorder +
+            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important}',
+        S + ' .ctc-danger-title{color:' + TOKENS.dangerText + ' !important}',
+        S + ' .ctc-fill{height:100%}',
+        S + ' .ctc-chip-neutral,' + S + ' .ctc-chip-info,' + S + ' .ctc-chip-warn,' + S + ' .ctc-chip-problem,' +
+            S + ' .ctc-chip-ok{border:0 !important;border-radius:999px !important;font-weight:600 !important}',
+        S + ' .ctc-chip-neutral{background:#F1EFEA !important;color:#5C5955 !important}',
+        S + ' .ctc-chip-info{background:#E8F0F8 !important;color:#1F3550 !important}',
+        S + ' .ctc-chip-warn{background:#FFF3D6 !important;color:#8A5A00 !important}',
+        S + ' .ctc-chip-problem{background:#FCE9E7 !important;color:#9A2A23 !important}',
+        S + ' .ctc-chip-ok{background:#E4F3EB !important;color:#1F6B49 !important}',
+        S + ' .ctc-step{width:22px;height:22px;min-width:22px;padding:0 !important;border:0 !important;' +
+            'border-radius:999px !important;background:#E8F0F8 !important;color:#1F3550 !important;' +
+            'font-weight:700 !important;display:inline-flex !important;align-items:center;justify-content:center}',
+        S + ' .ctc-dot-ok{color:#2E9E6B !important}',
+        S + ' .ctc-dot-warn{color:#E9A62A !important}',
+        S + ' .ctc-dot-problem{color:#B4432F !important}',
+        S + ' .ctc-dot-off{color:#B9B5AE !important}',
+        S + ' .ctc-dot-info{color:#9DB4CF !important}',
+        S + ' .ctc-mono{font-family:"SF Mono",Menlo,monospace !important;font-size:12px !important}'
+    ].join('\n');
+    const STYLE_ID = 'ctc-console-styles';
+    function ensureConsoleStyles() {
+        try {
+            if (typeof document === 'undefined' || document.getElementById(STYLE_ID))
+                return;
+            const el = document.createElement('style');
+            el.id = STYLE_ID;
+            el.textContent = CSS;
+            (document.head || document.documentElement).appendChild(el);
+        }
+        catch (e) {
+        }
+    }
+
     const ConsoleShell = (props) => {
+        ensureConsoleStyles();
         const state = store.getState();
         const snap = state.console.snapshot;
         const isPaused = snap?.active === false;
-        const subtitle = subtitleFor(state.selectedSection);
         const contentItems = [
-            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.XXS, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 2, rootAttributes: {
-                                    'data-ctc-page-heading': '',
-                                    'aria-label': 'Click-to-Call Admin Console: ' + subtitle
-                                }, children: "Click-to-Call Admin Console" }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: subtitle }) })] }) })),
             isPaused && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PausedBanner, { tick: props.tick }) })),
             (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children }))
         ].filter(Boolean);
-        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, { tick: props.tick }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: contentItems }) }) })] }));
+        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, { tick: props.tick }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { classList: [CONSOLE_CLASS], children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.SPACING4X, children: contentItems }) }) })] }));
     };
 
     const STEPS = [
@@ -4697,8 +5112,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 case 'overview': return jsxRuntime.jsx(OverviewPage, { tick: tick });
                 case 'phones': return jsxRuntime.jsx(PhonesPage, { tick: tick });
                 case 'inbound': return jsxRuntime.jsx(InboundPage, { tick: tick });
-                case 'voice': return jsxRuntime.jsx(VoicePage, { tick: tick });
-                case 'credentials': return jsxRuntime.jsx(CredentialsPage, { tick: tick });
+                case 'outbound': return jsxRuntime.jsx(OutboundPage, { tick: tick });
+                case 'transcripts': return jsxRuntime.jsx(TranscriptsPage, { tick: tick });
+                case 'health': return jsxRuntime.jsx(HealthPage, { tick: tick });
+                case 'account': return jsxRuntime.jsx(AccountPage, { tick: tick });
                 default: return jsxRuntime.jsx(OverviewPage, { tick: tick });
             }
         }

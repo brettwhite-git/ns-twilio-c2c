@@ -57,7 +57,7 @@ export async function loadConsole(): Promise<void> {
         .then((payload) => {
             const checks = payload && (payload as { checks?: unknown[] }).checks;
             if (Array.isArray(checks)) {
-                store.dispatch(Action.consolePatch({ preflight: checks }));
+                store.dispatch(Action.consolePatch({ preflight: checks, preflightAt: new Date().toISOString() }));
             } else {
                 store.dispatch(Action.consolePatch({
                     preflightError: errorOf(payload, 'Preflight did not return any checks')
@@ -72,6 +72,31 @@ export async function loadConsole(): Promise<void> {
 
     await Promise.all([snapshotTask, assignmentsTask, preflightTask]);
     store.dispatch(Action.consoleLoadSuccess({}));
+}
+
+/**
+ * Run preflight again (Health "Re-run preflight", Twilio account "Test
+ * connection"). One run at a time; a failed run sets preflightError and
+ * keeps the previous checks.
+ */
+export async function rerunPreflight(): Promise<void> {
+    if ((store.getState() as AppState).console.preflightRefreshing) return;
+    store.dispatch(Action.consolePatch({ preflightRefreshing: true, preflightError: null }));
+    try {
+        const payload = await wizardCall('wizardRunPreflight', {});
+        const checks = payload && (payload as { checks?: unknown[] }).checks;
+        if (Array.isArray(checks)) {
+            store.dispatch(Action.consolePatch({ preflight: checks, preflightAt: new Date().toISOString() }));
+        } else {
+            store.dispatch(Action.consolePatch({
+                preflightError: errorOf(payload, 'Preflight did not return any checks')
+            }));
+        }
+    } catch (e) {
+        store.dispatch(Action.consolePatch({ preflightError: thrownText(e, 'Preflight did not run') }));
+    } finally {
+        store.dispatch(Action.consolePatch({ preflightRefreshing: false }));
+    }
 }
 
 /** Mark the cached snapshot active / paused at once (the banner and rail follow). */

@@ -35,8 +35,10 @@ import Step5 from './components/steps/Step5';
 import OverviewPage from './components/page/OverviewPage';
 import PhonesPage from './components/page/PhonesPage';
 import InboundPage from './components/page/InboundPage';
-import VoicePage from './components/page/VoicePage';
-import CredentialsPage from './components/page/CredentialsPage';
+import OutboundPage from './components/page/OutboundPage';
+import TranscriptsPage from './components/page/TranscriptsPage';
+import HealthPage from './components/page/HealthPage';
+import AccountPage from './components/page/AccountPage';
 import {ConsoleShell} from './components/shared/ConsoleShell';
 import {StepperShell} from './components/shared/StepperShell';
 
@@ -147,8 +149,10 @@ export default class App extends PureComponent<unknown, AppInternalState> {
             case 'overview':    return <OverviewPage tick={tick} />;
             case 'phones':      return <PhonesPage tick={tick} />;
             case 'inbound':     return <InboundPage tick={tick} />;
-            case 'voice':       return <VoicePage tick={tick} />;
-            case 'credentials': return <CredentialsPage tick={tick} />;
+            case 'outbound':    return <OutboundPage tick={tick} />;
+            case 'transcripts': return <TranscriptsPage tick={tick} />;
+            case 'health':      return <HealthPage tick={tick} />;
+            case 'account':     return <AccountPage tick={tick} />;
             default:            return <OverviewPage tick={tick} />;
         }
     }
