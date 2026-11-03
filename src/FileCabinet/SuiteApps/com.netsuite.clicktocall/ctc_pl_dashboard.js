@@ -26,7 +26,7 @@
  * UI state lives in classes on #ctc-pl-root (`ctc-pl-show-tasks`,
  * `ctc-pl-show-missed`, `ctc-pl-no-fu`, `ctc-pl-fu-all`,
  * `ctc-pl-no-missed`); CSS responds. The period refresh logic lives once, in the
- * onclick of the hidden #ctc-pl-refresh button; the period chips and the
+ * onclick of the hidden #ctc-pl-refresh button; the period dropdown and the
  * Try again buttons set its data-range and call .click() on it.
  *
  * Narrow portlet columns (<= 560 px) switch layout through a container query
@@ -57,7 +57,9 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         approve: 'M5 12l5 5L20 7',
         dismiss: 'M6 6l12 12M18 6L6 18',
         followUp: 'M9 11l3 3 8-8M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h9',
-        report: 'M3 20h18M7 16v-5M12 16V6M17 16v-8'
+        report: 'M3 20h18M7 16v-5M12 16V6M17 16v-8',
+        calendar: 'M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z',
+        chevronDown: 'M6 9l6 6 6-6'
     };
 
     const strokeSvg = (d, size, width, cls, aria) => '<svg' + (cls ? ' class="' + cls + '"' : '') +
@@ -362,21 +364,14 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             "}).catch(function(e){alert('Bulk approve error: '+e.message);b.disabled=false});";
     };
 
-    // Period chip: mark it active, carry the range to the Reporting Central
-    // link, then run the shared refresh (hidden #ctc-pl-refresh).
-    const buildChipOnclick = (range) => {
-        return "var b=this,rg='" + escapeJs(range) + "';" +
-            "var cs=document.querySelectorAll('.ctc-pl-chip');" +
-            "for(var i=0;i<cs.length;i++){" +
-                "var on=cs[i]===b;" +
-                "if(on){cs[i].classList.add('ctc-pl-chip-active')}else{cs[i].classList.remove('ctc-pl-chip-active')}" +
-                "cs[i].setAttribute('aria-pressed',on?'true':'false')" +
-            "}" +
-            "var R=document.getElementById('ctc-pl-root');if(R){R.setAttribute('data-range',rg)}" +
-            "var a=document.getElementById('ctc-pl-report');if(a){a.href=a.getAttribute('data-base')+encodeURIComponent(rg)}" +
-            "var a2=document.getElementById('ctc-pl-fu-report');if(a2){a2.href=a2.getAttribute('data-base')+encodeURIComponent(rg)}" +
-            "var f=document.getElementById('ctc-pl-refresh');if(f){f.setAttribute('data-range',rg);f.click()}";
-    };
+    // Period dropdown: carry the range to the Reporting Central links,
+    // then run the shared refresh (hidden #ctc-pl-refresh).
+    const PERIOD_ONCHANGE =
+        "var rg=this.value||'today';" +
+        "var R=document.getElementById('ctc-pl-root');if(R){R.setAttribute('data-range',rg)}" +
+        "var a=document.getElementById('ctc-pl-report');if(a){a.href=a.getAttribute('data-base')+encodeURIComponent(rg)}" +
+        "var a2=document.getElementById('ctc-pl-fu-report');if(a2){a2.href=a2.getAttribute('data-base')+encodeURIComponent(rg)}" +
+        "var f=document.getElementById('ctc-pl-refresh');if(f){f.setAttribute('data-range',rg);f.click()}";
 
     const RETRY_JS = "var f=document.getElementById('ctc-pl-refresh');if(f){f.click()}";
 
@@ -721,17 +716,18 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         '</div>';
     };
 
-    const buildChipsHtml = (restletUrl) => {
-        return '<div class="ctc-pl-seg" role="group" aria-label="Period">' +
-            RANGES.map((c, i) => {
-                const active = i === 0;
-                const cls = 'ctc-pl-chip' + (active ? ' ctc-pl-chip-active' : '');
-                // Without the RESTlet a period switch cannot load data.
-                return restletUrl
-                    ? '<button class="' + cls + '" type="button" data-range="' + c.range + '" aria-pressed="' + active + '" onclick="' + escapeHtml(buildChipOnclick(c.range)) + '">' + c.label + '</button>'
-                    : '<button class="' + cls + '" type="button" data-range="' + c.range + '" aria-pressed="' + active + '" disabled>' + c.label + '</button>';
-            }).join('') +
-        '</div>';
+    // The period: one outlined dropdown, the same family as the Reporting
+    // Central button (32 px, 8 px radius). Without the RESTlet a period
+    // switch cannot load data, so it is disabled.
+    const buildPeriodHtml = (restletUrl) => {
+        return '<span class="ctc-pl-period-wrap">' +
+            strokeSvg(PATH.calendar, 14, '2', 'ctc-pl-period-ico') +
+            '<select class="ctc-pl-period" id="ctc-pl-period" aria-label="Period"' +
+                (restletUrl ? ' onchange="' + escapeHtml(PERIOD_ONCHANGE) + '"' : ' disabled') + '>' +
+                RANGES.map((c, i) => '<option value="' + c.range + '"' + (i === 0 ? ' selected' : '') + '>' + c.label + '</option>').join('') +
+            '</select>' +
+            strokeSvg(PATH.chevronDown, 14, '2', 'ctc-pl-period-chev') +
+        '</span>';
     };
 
     // Build a single follow-up row (S2): text, meta line, Dismiss ×, Approve.
@@ -803,7 +799,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             ? // uir-no-link: NetSuite's portlet link colour rule skips it.
             '<a class="ctc-pl-report ctc-pl-press uir-no-link" id="ctc-pl-report" href="' + escapeHtml(reportBase + 'today') + '" data-base="' + escapeHtml(reportBase) + '">' +
                 strokeSvg(PATH.report, 14, '2') +
-                '<span class="ctc-pl-report-long">Reporting Central</span><span class="ctc-pl-report-short">Reporting</span>' +
+                '<span class="ctc-pl-report-long">Call Central</span><span class="ctc-pl-report-short">Call Central</span>' +
               '</a>' +
               // A hairline between the two actions.
               '<span class="ctc-pl-head-divider" aria-hidden="true"></span>'
@@ -838,7 +834,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             rows.forEach((r) => { if (r.id && r.duration) callLengths[String(r.id)] = fmtLen(r.duration); });
             const taskRows = flatTasks.map((x) => buildTaskRowHtml(x.task, x.call, restletUrl, callLengths));
             const fuReportHtml = fuReportBase
-                ? '<a class="ctc-pl-fu-link" id="ctc-pl-fu-report" href="' + escapeHtml(fuReportBase + 'today') + '" data-base="' + escapeHtml(fuReportBase) + '">See all in Reporting Central ↗</a>'
+                ? '<a class="ctc-pl-fu-link" id="ctc-pl-fu-report" href="' + escapeHtml(fuReportBase + 'today') + '" data-base="' + escapeHtml(fuReportBase) + '">See all in Call Central ↗</a>'
                 : '';
             tasksHtml = '<div id="ctc-pl-tasks-container" class="ctc-pl-tasks">' + taskRows.join('') + '</div>' +
                 buildStateHtml('All caught up', 'No follow-ups are waiting for you.', '', ' id="ctc-pl-tasks-empty"') +
@@ -886,10 +882,13 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
 /* Header */
 .ctc-pl-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 16px; padding: 18px 22px 14px; }
-.ctc-pl-seg { display: inline-flex; padding: 2px; border-radius: 8px; background: #F4F2EE; }
-.ctc-pl-chip { height: 28px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; font-size: 12.5px; font-weight: 500; color: #5C5955; }
-.ctc-pl-chip:hover:not(:disabled) { color: #161513; }
-.ctc-pl-chip.ctc-pl-chip-active { background: #FFFFFF; box-shadow: 0 1px 2px rgba(22,21,19,0.10); color: #161513; }
+.ctc-pl-period-wrap { position: relative; display: inline-flex; align-items: center; }
+.ctc-pl-root select.ctc-pl-period { -webkit-appearance: none; appearance: none; height: 32px; margin: 0; padding: 0 30px 0 32px; border: 0; border-radius: 8px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #DCD9D3; color: #161513; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: background-color 120ms ease; }
+.ctc-pl-root select.ctc-pl-period:hover:not(:disabled) { background: #F6F5F2; }
+.ctc-pl-root select.ctc-pl-period:focus-visible { outline: none; box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 4px #74C0FC; }
+.ctc-pl-period-ico, .ctc-pl-period-chev { position: absolute; top: 50%; transform: translateY(-50%); color: #5C5955; pointer-events: none; }
+.ctc-pl-period-ico { left: 11px; }
+.ctc-pl-period-chev { right: 10px; }
 .ctc-pl-spacer { flex: 1; }
 /* Header actions: one button family (32 px, 8 px radius, 12.5 px / 600); Call is the one dark action. */
 .ctc-pl-root a.ctc-pl-report { height: 32px; padding: 0 12px 0 10px; border-radius: 8px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #DCD9D3; color: #161513; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; white-space: nowrap; transition: transform 140ms ease-out, background-color 120ms ease; }
@@ -1038,7 +1037,6 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 /* Narrow portlet column */
 @container ctcpl (max-width: 560px) {
     .ctc-pl-head { padding: 16px 16px 12px; gap: 10px; }
-    .ctc-pl-seg { order: 10; }
     .ctc-pl-report-long { display: none; }
     .ctc-pl-report-short { display: inline; }
     .ctc-pl-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0 16px; }
@@ -1089,7 +1087,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 
 <div class="ctc-pl-root${noFollowUps ? ' ctc-pl-no-fu' : ''}${allTasksShown ? ' ctc-pl-fu-all' : ''}${missedTotal ? '' : ' ctc-pl-no-missed'}" id="ctc-pl-root" data-range="today" data-fu-total="${fuCount}">
     <div class="ctc-pl-head">
-        ${buildChipsHtml(restletUrl)}
+        ${buildPeriodHtml(restletUrl)}
         <span class="ctc-pl-spacer"></span>
         ${reportHtml}
         ${callButtonHtml}

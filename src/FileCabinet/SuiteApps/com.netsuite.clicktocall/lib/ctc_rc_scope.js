@@ -21,7 +21,7 @@
 define(['N/query', 'N/format', 'N/runtime', 'N/log', './ctc_time'], (query, format, runtime, log, ctcTime) => {
 
     const RANGES = ['today', 'yesterday', 'last7', 'thisweek', 'lastweek', 'last30', 'thismonth', 'custom'];
-    const DEFAULT_RANGE = 'last7';
+    const DEFAULT_RANGE = 'thisweek';
     const RANGE_LABELS = {
         today: 'Today', yesterday: 'Yesterday', last7: 'Last 7 days', thisweek: 'This week', lastweek: 'Last week',
         last30: 'Last 30 days', thismonth: 'This month', custom: 'Custom range'

@@ -200,7 +200,7 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
 
     // ─── App bar & page header ─────────────────────────────────────────────
 
-    const CHEVRON_LEFT = 'M15 18l-6-6 6-6';
+    const HOME = 'M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z';
     const CALENDAR = 'M8 3v3M16 3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z';
 
     /**
@@ -212,10 +212,10 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
         const active = m.state.tab;
         const ini = initials(m.userName);
         return '<header class="rc-bar"><div class="rc-bar-in">' +
-            '<a class="rc-back" href="' + DASHBOARD_URL + '" aria-label="Back to Dashboard" title="Back to Dashboard">' +
-                svgIcon(CHEVRON_LEFT, { size: 16 }) + '</a>' +
-            '<span class="rc-brand">Reporting Central</span>' +
-            '<nav class="rc-nav" aria-label="Reporting Central">' + NAV.map((n) =>
+            '<span class="rc-brand">Call Central</span>' +
+            '<a class="rc-home" href="' + DASHBOARD_URL + '" aria-label="NetSuite home" title="NetSuite home">' +
+                svgIcon(HOME, { size: 17, width: 1.8 }) + '</a>' +
+            '<nav class="rc-nav" aria-label="Call Central">' + NAV.map((n) =>
                 '<a data-nav href="' + escapeHtml(buildUrl(m.base, m.state, { tab: n.tab })) + '"' +
                 (active === n.tab ? ' aria-current="page"' : '') + '>' + escapeHtml(n.label) + '</a>'
             ).join('') + '</nav>' +
@@ -230,8 +230,8 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
         '<option value="' + escapeHtml(value) + '"' + (selected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
 
     /**
-     * Header row: title + scope line; Time range, Owner (managers only),
-     * date chip. The selects sit in one GET form that carries the other
+     * Header row: title + scope line, then (right beside it) Time range,
+     * Owner (managers only), the date chip and the custom dates form. The selects sit in one GET form that carries the other
      * params; the client submits it on change ("Custom range…" opens the
      * custom dates form instead).
      * @param {Object} m - view model (state, base, range, owner, todayIso; scopeLine overrides the line)
@@ -263,7 +263,10 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
                 '<button type="button" class="rc-date-chip" id="rc-date-chip" aria-controls="rc-custom" aria-expanded="' +
                     (s.range === 'custom' ? 'true' : 'false') + '" aria-label="' + escapeHtml('Today is ' + today + '. Pick a custom range') +
                     '" title="Pick a custom range"><span>' + escapeHtml(today) + '</span>' + svgIcon(CALENDAR, { size: 18, width: 1.8 }) + '</button>' +
-            '</form></div>';
+            '</form>' +
+            // The custom dates open beside the date chip, on the same row.
+            buildCustomForm(m) +
+            '</div>';
     };
 
     /**
@@ -302,7 +305,7 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reporting Central</title>
+<title>Call Central</title>
 ${ctcFonts.buildFigtreeStyle({ preload: true })}
 <style>${shellCss()}${p.css || ''}</style>
 </head>
@@ -310,7 +313,6 @@ ${ctcFonts.buildFigtreeStyle({ preload: true })}
 ${buildAppBar(m)}
 <main class="rc-page">
 ${buildPageHeader(m)}
-${buildCustomForm(m)}
 ${p.body}
 </main>
 <script>window.CTC_RC = ${safeJsonEmbed(p.cfg || {})};</script>
@@ -344,8 +346,9 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: none; box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 4px var(--focus); }
   .rc-bar { background: var(--navy); color: #FFFFFF; }
   .rc-bar-in { max-width: 1600px; margin: 0 auto; padding: 0 24px; height: 52px; display: flex; align-items: center; gap: 20px; }
-  .rc-back { display: inline-flex; align-items: center; color: var(--band-muted); border-radius: 4px; }
-  .rc-back:hover { color: #FFFFFF; }
+  .rc-home { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin: 0 -8px 0 -6px; border-radius: 8px;
+    color: var(--band-muted); transition: background-color 120ms ease, color 120ms ease; }
+  .rc-home:hover { color: #FFFFFF; background: rgba(255,255,255,0.08); }
   .rc-brand { flex: none; font-size: 15px; font-weight: 700; white-space: nowrap; }
   .rc-nav { display: flex; gap: 2px; height: 52px; min-width: 0; overflow-x: auto; }
   .rc-nav a { display: flex; align-items: center; padding: 0 10px; font-size: 14px; font-weight: 500; color: var(--band-muted); text-decoration: none; white-space: nowrap; }
@@ -365,7 +368,7 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   body.rc-fit .rc-page > * { flex: none; }
   body.rc-fit .rc-content { flex: 1 1 auto; min-height: 560px; }
   body.rc-fit .rc-fill { flex: 1 1 0; min-height: 0; }
-  .rc-pagehead { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .rc-pagehead { display: flex; align-items: flex-end; justify-content: flex-start; gap: 16px 32px; flex-wrap: wrap; }
   .rc-titles h1 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
   .rc-scope { margin: 2px 0 0; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
   .rc-controls { margin: 0; display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
@@ -375,7 +378,7 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   .rc-date-chip { height: 36px; display: inline-flex; align-items: center; gap: 8px; padding: 0 4px 0 6px; border: 0; border-radius: 8px; background: transparent;
     font: 13px var(--font); color: var(--muted); cursor: pointer; font-variant-numeric: tabular-nums; }
   .rc-date-chip:hover { color: var(--ink); }
-  .rc-custom { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; font-size: 13px; color: var(--muted); }
+  .rc-custom { min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-left: -20px; font-size: 13px; color: var(--muted); }
   .rc-custom label { display: inline-flex; align-items: center; gap: 6px; }
   .rc-custom input { height: 32px; padding: 0 8px; border: 0; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--input); font: 13px var(--font); color: var(--ink); background: #FFFFFF; }
   .rc-hint { font-size: 12px; }
@@ -411,7 +414,7 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   @media (max-width: 720px) {
     .rc-bar-in, .rc-page { padding-left: 16px; padding-right: 16px; }
     .rc-who { display: none; }
-    .rc-custom { justify-content: flex-start; }
+    .rc-custom { margin-left: 0; }
   }
   @media (prefers-reduced-motion: reduce) {
     .rc-btn:active { transform: none; }
