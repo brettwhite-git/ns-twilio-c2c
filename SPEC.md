@@ -2,7 +2,7 @@
 
 A NetSuite SuiteApp (SDF, app id `com.netsuite.clicktocall`) that adds browser calling to NetSuite through Twilio. Reps call from Customer / Contact / Lead pages and take inbound calls in a dock on every page. Twilio records and transcribes the call. NetSuite's N/llm writes a summary, a satisfaction score, tone keywords and proposed follow-ups on the Phone Call record.
 
-**Principle: no middleware, no NetSuite webhook.** Everything runs in SuiteScript (Suitelets, RESTlet, User Events, a Scheduled Script, a Portlet, a UIF SPA) and on Twilio's managed platform (TwiML App + TwiML Bin, Studio, Voice, Recordings, Conversational Intelligence). NetSuite reaches Twilio; Twilio never calls NetSuite. NetSuite learns about calls from the browser (fast path) and from a 15-minute poller (safety net).
+**Principle: no middleware, no NetSuite webhook.** Everything runs in SuiteScript (Suitelets, RESTlet, User Events, a Scheduled Script, a Portlet, a UIF SPA) and on Twilio's managed platform (TwiML App + one Twilio Function service for outbound TwiML (or the older hand-made TwiML Bin until it is published), Studio, Voice, Recordings, Conversational Intelligence). NetSuite reaches Twilio; Twilio never calls NetSuite. NetSuite learns about calls from the browser (fast path) and from a 15-minute poller (safety net).
 
 **Status (2026-10-31):** sandbox `td3061543` (MFG 25.2 AI), branch `feat/telephony-dock`. Outbound, phone mode, dock, inbound routing and inbound recording are committed and live-tested. Call reconciliation (§7) and rep presence (§8) are built in the working tree, not yet committed or live-tested.
 
@@ -142,7 +142,8 @@ Windows with `window.opener` draw nothing.
 
 **Current behaviour.**
 - Call from a record (phone icon / Call button, VIEW and EDIT mode) or from the dialer. The anchor runs `device.connect({ params: { To, CallerId } })`; caller ID = `custrecord_ctc_phone_number` from the token response.
-- The TwiML App points at a hand-made **TwiML Bin** that does `<Dial record="record-from-answer-dual">`.
+- The TwiML App points at the outbound **Twilio Function** `https://{ctc-outbound domain}/dial` once the wizard has published it (§4a); before that, at a hand-made **TwiML Bin** that does `<Dial record="record-from-answer-dual">`. Both record the parent (browser) leg dual-channel.
+- `logCall` (outbound only) also writes `custevent_ctc_notice_played` and, when played, `custevent_ctc_notice_ver` (§4a). No extra Twilio call.
 - At hang-up the browser posts RESTlet `logCall` (`sendBeacon` on unload) with `startedAt` (epoch ms the call connected). The RESTlet creates a Phone Call (`record.Type.PHONE_CALL`) with `custevent_ctc_call_sid`, duration, entity / contact, status `Logged`, `custevent_ctc_inbound` for inbound, and `custevent_ctc_call_started` (ISO-8601 UTC): Twilio's `start_time` from the ownership check, else `startedAt` when within ±1 day of now, else now − duration. `starttime` / Reserve Time are not set.
 - **Ownership check** (`F/lib/ctc_call_ownership.js`, `verifyCallOwnership`): the RESTlet fetches the Twilio call (`F/lib/ctc_twilio_admin.js` `getCall`: `sid`, `from`, `to`, `callStatus`, `duration`, `start_time`, `parent_call_sid`). Outbound: `from` must be `client:<rep id>`; or, when `from` is a phone number (a dialed child leg), its `parent_call_sid` is fetched and the parent's `from` must be `client:<rep id>`. A caller ID alone (assigned number or the config caller ID) is not accepted. Inbound: the leg's `to` must be `client:<rep id>`. Failure → `forbidden` (`NOT_CALL_OWNER`, `CALL_NOT_FOUND`, `TWILIO_LOOKUP_FAILED`).
 - Duplicate `callSid` returns the existing record (`duplicate: true`).
@@ -156,7 +157,28 @@ Windows with `window.opener` draw nothing.
 
 **Key files.** `F/ctc_ue_phone_button.js`, `F/ctc_sl_softphone.js`, `F/ctc_rl_token.js`, `F/lib/ctc_call_ownership.js`.
 
-**Open gaps.** README / ARCHITECTURE show the Bin with `callerId="{{From}}"`; the browser sends `CallerId`, so the Bin text in the docs may be stale. No outbound recording notice (§12, §13).
+**Open gaps.** README / ARCHITECTURE show the Bin with `callerId="{{From}}"`; the browser sends `CallerId`, so the Bin text in the docs may be stale. The outbound recording notice (§4a) is built, not live-tested end to end through NetSuite.
+
+## 4a. Outbound recording notice (Twilio Function, built 2026-11-03, not live-tested)
+
+**Behaviour.** With the notice on, the person a rep calls hears a short notice after they answer and before the legs bridge; the rep hears ringing (`answerOnBridge`). The recording starts after the notice, so the notice is not in the recording (spike 2026-11-03). Recording stays on the parent (rep browser) leg, dual-channel: the transcript lookup, speaker channels and ownership check are unchanged. Off by default (`custrecord_ctc_out_notice_on` F) until counsel approves the wording. Default text: "This call is recorded and transcribed with AI." (max 300 characters; the Function speaks the whole word "AI" as "A I").
+
+**Twilio objects** (`F/lib/ctc_outbound_function.js`, fixed names, find-or-create): Serverless service `ctc-outbound` (IncludeCredentials false), environment `production` (DomainSuffix `prod`), functions `ctc-dial` (`/dial`) and `ctc-notice` (`/notice`), `Visibility=protected` (Twilio signature check), build `Runtime=node22`. Environment variables `NOTICE_ON` ('true'/'false'), `NOTICE_TEXT`, `NOTICE_VER`, `CALLER_ID_DEFAULT` (config caller ID, E.164).
+- `/dial`: `To` must match `^\+?[0-9]{7,15}$`, else `<Say>This number cannot be dialed.</Say>`. `<Dial answerOnBridge="true" record="record-from-answer-dual" callerId=CallerId || CALLER_ID_DEFAULT>`; `<Number url="https://{domain}/notice">` only when `NOTICE_ON` is 'true', else a plain `<Number>`.
+- `/notice`: `<Say>` of `NOTICE_TEXT`.
+- `FN_CODE_VERSION` (now '1') is stored on the config at publish; a different value after a SuiteApp upgrade = "Republish needed".
+
+**Publish sequence** (`publishOutbound`, wizard "Save & publish"): probe `GET serverless.twilio.com/v1/Services` (401 / 403 → "Your Twilio API key has no Serverless access. Add Serverless permissions to this key.") → service → environment (`domain_name`) → functions → upload one Version per function (hand-built multipart, `serverless-upload.twilio.com`) → build (both `FunctionVersions`, `Runtime`) → poll `.../Builds/{ZB}/Status` at most 10 times in the request (no sleep in SuiteScript; stops early under 200 units left) → variables (only changed values) → deployment → TwiML App `VoiceUrl=https://{domain}/dial`, `VoiceMethod=POST` → save. Upload and build are skipped when the code hash (cyrb53 of code version, runtime and both sources) is unchanged, the service is the stored one and the stored build still reports `completed`; variables and a new deployment still run. A build still running ends the request with `{ok:false, pending:true}` and the build SID in `custrecord_ctc_out_fn_pending_build`; publish with `{resume:true}` re-polls and finishes. **No half-publish:** the Voice URL changes only after a completed deployment; a failed step leaves the earlier deployment and Voice URL. Before the first change the TwiML App's current Voice URL is stored in `custrecord_ctc_out_prev_voiceurl` (never a `ctc-outbound` URL). Governance: first publish ≤ 29 Twilio calls (290 units) + config writes; text-only republish about 9 calls.
+
+**Unpublish and remove** (`unpublishOutbound`): restore the stored Voice URL (refused when the app still points at the Function and none is stored), `DELETE` the service (404 = already gone), clear the stored SIDs / domain / build / hash / previous URL / publish time / live version. Notice text, on/off and version stay. Uninstalling the SuiteApp cannot reach Twilio: the uninstall guide must list the manual clean-up.
+
+**Versions and consent log.** `custrecord_ctc_out_notice_ver` goes up by 1 on each save that changes the text or on/off. Publish stores the version it put live in `custrecord_ctc_out_pub_notice_ver` (0 when the notice is off). `logCall` (outbound only) sets `custevent_ctc_notice_played` = Function published AND live version > 0, and `custevent_ctc_notice_ver` = that live version: a saved but unpublished change does not count, because Twilio still runs the old one. The Phone Call panel shows "Recording notice played (v{n})" (§11).
+
+**Wizard API** (Administrator, POST): `wizardLoadOutbound` → `{ noticeOn, noticeText, noticeVersion, defaultText, maxLength, appSid, functionUrl, prevVoiceUrl, publishedAt, publishedCodeVersion, codeVersion, needsRepublish, published, pending, voiceUrlMatches, publishedNoticeVersion, changesPending, drift: { voiceUrl, functionCode } }` (one live GET of the TwiML App; `voiceUrlMatches` null when it cannot be read). `wizardSaveOutbound {noticeOn, noticeText}` (boolean; text trimmed, control characters removed, ≤ 300, blank or the default text stored blank = default) → the same state without the live read (`voiceUrlMatches` null, no `drift`). `wizardPublishOutbound {resume?}` → `{ ok, pending?, message?, steps: [{key, label, status: ok|skipped|failed|pending, detail}], state }`; step keys `probe, service, environment, functions, upload, build, variables, deployment, voiceUrl, save` (the list ends at a failed or pending step; on resume the first five are `skipped`). `wizardUnpublishOutbound` → `{ ok, message?, steps (voiceUrl, service, save), state }`. `wizardRunPreflight` also returns `drift: { voiceUrl, functionCode }` (`pass` / `fail` / `unknown`; `unknown` until published), not part of `allPassed`.
+
+**Marketplace requirements** (spec §9a): admin consent text before the first publish (UI), Administrator only, previous Voice URL kept; clean removal; code version drift → republish; runtime pinned (`RUNTIME`, a SuiteApp update when Twilio retires it); Serverless access probe; visible async steps with bounded polling and resume; idempotent find-or-create and hash skip; plain-JS Function source in the SuiteApp, `Visibility=protected`, no vendor hosting.
+
+**Cost.** Twilio Functions: 10,000 invocations a month free, then $0.0001 each; two invocations per answered call with the notice on (one with it off). No Studio charge.
 
 ---
 
@@ -190,7 +212,7 @@ Windows with `window.opener` draw nothing.
 
 ## 6. Recording, transcription & AI analysis
 
-**Recording.** Outbound: TwiML Bin `record-from-answer-dual`. Inbound: Studio `record: true`; Twilio attaches the recording to the **parent** call (caller leg). The poller and RESTlet find it through the child leg's `parent_call_sid`.
+**Recording.** Outbound: `record-from-answer-dual` from the outbound Function `/dial` (§4a) or the older TwiML Bin. Inbound: Studio `record: true`; Twilio attaches the recording to the **parent** call (caller leg). The poller and RESTlet find it through the child leg's `parent_call_sid`.
 
 **Transcription.** Twilio Conversational Intelligence service `custrecord_ctc_intel_service_sid` transcribes the recording. No code creates transcripts: the service must have auto-transcribe on (README setup step), which covers every recording in the account, voicemails included. The poller reads `intelligence.twilio.com/v2/Transcripts?SourceSid=<recording>` and `/Sentences`. Speaker labels: dual-channel channel 1 = parent leg; outbound rep = channel 1, inbound rep = channel 2.
 
@@ -315,7 +337,9 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 
 **Build.** `npm run typecheck`, `npm run lint`, `npm test`, `npm run bundle`; bundle is committed; CI checks bundle drift.
 
-**Open gaps.** Voice page and Step 3 say "The wizard registers this app's VoiceUrl" — no code does. Overview "TwiML VoiceUrl" drift row gets no data and always shows Pass.
+- **Outbound recording notice** (Voice page, §4a) — `wizardLoadOutbound`, `wizardSaveOutbound`, `wizardPublishOutbound` (`resume`), `wizardUnpublishOutbound`. The publish registers the TwiML App Voice URL.
+
+**Open gaps.** The server side of the outbound notice and of the "TwiML VoiceUrl" drift row is built (`wizardRunPreflight.drift`, `wizardLoadOutbound.drift`); the SPA must dispatch `consoleDriftSet` with it (the row still always shows Pass until then). Voice page / Step 3 wording about the VoiceUrl changes with the Voice page UI.
 
 ---
 
@@ -324,9 +348,10 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 **Today.** `customscript_ctc_ue_transcript_viewer` (VIEW and EDIT) injects a "Call Intelligence" panel above Primary Information: status pill, AI summary block, 4-column metrics (satisfaction, duration, tone keywords, recording), transcript, action items. Redundant CTC fields are hidden in VIEW mode.
 - **Pills:** Logged / Processing / Transcribed / No transcript / Failed, plus (reconciliation) `Missed` → coral "Missed call" (`#FCE9E7` / `#9A3A2C`, the portlet chip colours), `No answer` → grey "No answer", `Too short` → grey "Too short to summarize". A voicemail (`custevent_ctc_voicemail` T) adds a sky "Voicemail" pill (`#E8F3FC` / `#1B6097`) before the status pill.
 - **Voicemails are never scored** (2026-11-01): the AI writer leaves `custevent_ctc_satisfaction` empty on a voicemail (`writePhoneCallEnrichmentFields`); `loadHistoryRows` and `loadTaskGroups` read no score for a voicemail even when an older one is stored, so the Sat column shows "—" and the portlet / Reporting Central averages skip it; the record panel shows "Not scored".
+- **Outbound recording notice:** when `custevent_ctc_notice_played` is T on an outbound call, one small grey line under the header: "Recording notice played (v{n})" (no "(v{n})" when the version is blank). The two notice fields are hidden in VIEW mode.
 - **Unanswered calls** (status Missed / No answer / Too short, not a voicemail, no summary and no transcript): the panel shows the pills and one line instead of the summary, metrics and transcript: "The caller did not reach anyone and left no voicemail." / "The person you called did not pick up." / "The call lasted under 3 seconds, so there is nothing to summarize."
 
-**Phone Call fields** (`custevent_ctc_*`): `call_sid`, `call_started` (CLOBTEXT, ISO-8601 UTC, "Call started (UTC)", inline), `call_status`, `duration`, `inbound`, `processed`, `recording_sid`, `recording_url`, `recording_cleanup_pending`, `voicemail` (checkbox, voicemail marker), `analysis_claim` (CLOBTEXT, hidden, `<ISO>|<count>`, §6), `transcript`, `ai_summary`, `ai_brief`, `satisfaction`, `tone_keywords`, `action_items`.
+**Phone Call fields** (`custevent_ctc_*`): `call_sid`, `call_started` (CLOBTEXT, ISO-8601 UTC, "Call started (UTC)", inline), `call_status`, `duration`, `inbound`, `processed`, `recording_sid`, `recording_url`, `recording_cleanup_pending`, `voicemail` (checkbox, voicemail marker), `notice_played` (checkbox, outbound recording notice played, §4a), `notice_ver` (integer, live notice version), `analysis_claim` (CLOBTEXT, hidden, `<ISO>|<count>`, §6), `transcript`, `ai_summary`, `ai_brief`, `satisfaction`, `tone_keywords`, `action_items`.
 
 **Planned redesign (not built):** design canvas "Phone Call Record — Enhanced", https://claude.ai/artifact/TDtqWmXLx2rehn8YMVk7zt.
 
@@ -336,7 +361,7 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 
 ## Reference: custom records & config fields
 
-- `customrecord_ctc_config` (singleton, access NONENEEDED): `custrecord_ctc_account_sid`, `_api_key_sid`, `_api_secret_id`, `_twiml_app_sid`, `_phone_number` (caller ID), `_intel_service_sid`, `_active`, `_inbound_enabled`, `_ring_seconds`, `_noanswer_message`, `_studio_flow_sid`, `_routing_published_at`, `_record_inbound`, `_recording_notice_on`, `_recording_notice`, `_recon_watermark`, `_voicemail_on` (checkbox, default T), `_voicemail_max_seconds` (integer), `_fallback_owner` (employee) (all `custrecord_ctc_` prefix).
+- `customrecord_ctc_config` (singleton, access NONENEEDED): `custrecord_ctc_account_sid`, `_api_key_sid`, `_api_secret_id`, `_twiml_app_sid`, `_phone_number` (caller ID), `_intel_service_sid`, `_active`, `_inbound_enabled`, `_ring_seconds`, `_noanswer_message`, `_studio_flow_sid`, `_routing_published_at`, `_record_inbound`, `_recording_notice_on`, `_recording_notice`, `_recon_watermark`, `_voicemail_on` (checkbox, default T), `_voicemail_max_seconds` (integer), `_fallback_owner` (employee), outbound notice (§4a): `_out_notice_on` (checkbox, default F), `_out_notice` (CLOBTEXT), `_out_notice_ver` (integer), `_out_pub_notice_ver` (integer), `_out_fn_service`, `_out_fn_env`, `_out_fn_build`, `_out_fn_pending_build`, `_out_fn_domain`, `_out_fn_code_ver`, `_out_fn_hash`, `_out_prev_voiceurl`, `_out_published_at` (CLOBTEXT) (all `custrecord_ctc_` prefix).
 - `customrecord_ctc_rep_assignment`: `custrecord_ctc_ra_employee`, `_phone_sid`, `_phone_number`, `_label`, `_is_primary`.
 - `customrecord_ctc_orphan_call`: `custrecord_ctc_orphan_callsid`, `_recordingsid`, `_entityid`, `_entitytype`, `_userid`, `_phone`, `_direction`, `_retrycount`, `_contactid`, `_duration`.
 - `customrecord_ctc_proposed_task` (+ list `customlist_ctc_pt_status`; `allowuiaccess` F, access NONENEEDED; reviewed only in the portlet / Reporting Central): `custrecord_ctc_pt_phone_call`, `_text`, `_status`, `_proposed_due`, `_proposed_assignee`, `_reviewer`, `_reviewed_date`, `_created_task`, `_task_completed`, `_task_completed_date`.
@@ -355,7 +380,8 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 - 2026-10-30 — Inbound routing on Twilio Studio, not a NetSuite webhook and not a TwiML Bin pair.
 - 2026-10-31 — One Studio flow for all inbound numbers, generated and published by NetSuite; the primary rep rings.
 - 2026-10-31 — Inbound recording on (with optional notice before the ring).
-- 2026-10-31 — Outbound recording notice: optional, off by default. Recommended design: Studio whisper via `<Dial><Number url>` + one manual Bin edit per install. Pending a live spike.
+- 2026-10-31 — Outbound recording notice: optional, off by default. Recommended design: Studio whisper via `<Dial><Number url>` + one manual Bin edit per install. Pending a live spike. (Superseded 2026-11-02.)
+- 2026-11-02 — Outbound TwiML moves to one Twilio Function service (`ctc-outbound`) that the wizard publishes through the Serverless API (TwiML Bins have no REST API). Studio for inbound routing, one Function for outbound TwiML, NetSuite for everything else. Notice via `<Number url="/notice">` (spike 2026-11-03: the callee hears it, the recording starts after it). Default text "This call is recorded and transcribed with AI." (counsel to approve), off by default.
 - 2026-10-31 — Bounded waits for transcripts (1 h no recording, 24 h no transcript); 401/403/429 transient.
 - 2026-10-31 — Twilio is the source of truth for call history; reconciliation fills gaps, the browser stays the fast path.
 - 2026-11-01 — (Superseded the same day: no automatic screen-pop on Answer; the rep may be mid-task.) An inbound toast (shell, top level) plus system notification and title flash when the tab is away.
@@ -371,10 +397,10 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 
 ## 13. Open gaps & next work
 
-1. **Outbound recording notice spike** — callee hears the notice and the call bridges; notice inside / outside the recording; token params priority; `answerOnBridge`. Legal wording for all-party-consent states needs counsel.
+1. **Outbound recording notice** — spike done (2026-11-03); server side built (§4a): config fields, `lib/ctc_outbound_function.js`, wizard API actions, `logCall` consent fields, Phone Call panel line. Open: the Voice page UI and drift dispatch, a live publish from NetSuite, rep ringback during the notice, callee hang-up mid-notice, the dock "Recording" cue, the uninstall guide's manual clean-up, counsel on the wording.
 2. **New status chips UI** — `Missed` / `Too short` / `No answer` in the portlet, Reporting Central (Missed tab from status) and the Phone Call panel.
 3. **Phone Call record redesign** — build from the approved canvas (§11).
-4. **Wizard VoiceUrl claim** — Voice page / Step 3 say the wizard registers the TwiML App VoiceUrl; no code does. Overview "TwiML VoiceUrl" drift row always passes.
+4. **Wizard VoiceUrl claim** — the outbound publish now registers the TwiML App VoiceUrl (§4a), and `wizardRunPreflight` returns `drift.voiceUrl`; the SPA does not dispatch it yet, so the Overview row still always passes.
 5. **Identity / grant change** caught only at token renewal (up to 1 h).
 6. **Inactive primary rep** still routed in the flow (the call goes to no-answer / voicemail; reconciliation gives it to the fallback owner).
 7. **Inbound off** leaves numbers pointed at the flow.
@@ -410,3 +436,4 @@ UIF SPA `custspa_ctc_setup_wizard` (source `W/`, bundle `F/setup_wizard/`), serv
 - 2026-11-02 — Reporting Central redesign phase B: Calls tab = one list card (All · Connected · Missed · Outbound with counts, search, Export CSV), columns When / Company / Contact / Owner (team view) / Phone / Outcome / Satisfaction / Length (`ctcHtml.outcomeOf`, `ctcHtml.satBand`), call detail without a reload (wide side panel / narrow sheet, keyboard, `call=` deep link, follow-up review, Call back via the phone mode shell) + RESTlet `getCallDetail` (Reporting Central's owner scope); KPI strip off the Calls tab; `tab=missed` → Calls + Missed filter; `UNANSWERED_NOTE` moved to `lib/ctc_html.js`.
 - 2026-11-02 — Reporting Central redesign phase A: page split into `F/lib/ctc_rc_{scope,shell,calls,followups}.js`; navy app bar (Overview · Calls · Follow-ups; Missed reachable as `tab=missed`), page header with Time range / Owner selects + date chip + scope line; ranges last7 (new default), last30, thismonth added; manager team view scoped by Phone Call `assigned` (own calls keep the book); CSV Owner column in team view. Tab contents unchanged.
 - 2026-11-02 — Shown as **Call Central**: app bar brand, page title and the portlet button. The back arrow is replaced by a home button (house icon, NetSuite home) after the brand. Time range / Owner / date sit beside the page title; the custom dates open to the right of the date chip on the same row. Default range This week. Portlet period chips → one outlined dropdown.
+- 2026-11-03 — Outbound recording notice, server side (§4a): one Twilio Function service published by the wizard (Serverless API: hand-built multipart upload, node22 build with bounded polling + resume, variables, deployment, TwiML App Voice URL; unpublish restores the old URL and deletes the service). New config fields `custrecord_ctc_out_*`, Phone Call fields `custevent_ctc_notice_played` / `_notice_ver`, wizard actions `wizardLoadOutbound` / `wizardSaveOutbound` / `wizardPublishOutbound` / `wizardUnpublishOutbound`, `wizardRunPreflight.drift`. Not deployed, not live-tested.

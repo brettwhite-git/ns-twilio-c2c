@@ -58,9 +58,9 @@ const ROWS: RowSpec[] = [
         field: 'twimlAppSid',
         label: 'TwiML Application',
         description:
-            'The Twilio application that handles outbound call routing. ' +
-            'The wizard registers this app\'s VoiceUrl with the CTC ' +
-            'Suitelet on activate.',
+            'Outbound calls use this app. When you publish the recording ' +
+            'notice, the wizard points its Voice URL at a Twilio Function ' +
+            'in your account.',
         docUrl: TWILIO_DOCS.twimlApp,
         allowEmpty: false,
         listKey: 'twimlApps',

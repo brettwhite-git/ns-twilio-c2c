@@ -24,9 +24,10 @@ import type {
     InboundPublishError,
     InboundPublishResult,
     InboundSettings,
+    OutboundSnapshot,
     PresenceRow
 } from './InitialState';
-import type {InboundLoadPayload} from './Action';
+import type {InboundLoadPayload, OutboundFields, OutboundRequestPayload} from './Action';
 
 /** Copy a publish result into the inbound draft (flowSid/publishedAt on ok). */
 const applyPublish = (inbound: AppState['inbound'], publish: InboundPublishResult): void => {
@@ -242,6 +243,46 @@ export default function reducer(state: AppState, action: AppAction): AppState {
         [ActionType.PRESENCE_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
             d.presence.loading = false;
             d.presence.error = (a.payload as { error: string }).error;
+        })],
+
+        // ── Outbound recording notice ──────────────────────────────
+        [ActionType.OUTBOUND_LOAD_START, (s) => ImmutableUpdate.of(s, (d) => {
+            d.outbound.loading = true;
+            d.outbound.loadError = null;
+        })],
+        [ActionType.OUTBOUND_LOAD_SUCCESS, (s) => ImmutableUpdate.of(s, (d) => {
+            Object.assign(d.outbound, a.payload as OutboundSnapshot);
+            d.outbound.loading = false;
+            d.outbound.loaded = true;
+            d.outbound.loadError = null;
+        })],
+        [ActionType.OUTBOUND_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
+            d.outbound.loading = false;
+            d.outbound.loadError = (a.payload as { error: string }).error;
+        })],
+        [ActionType.OUTBOUND_FIELD_CHANGE, (s) => ImmutableUpdate.of(s, (d) => {
+            Object.assign(d.outbound, a.payload as Partial<OutboundFields>);
+        })],
+        [ActionType.OUTBOUND_REQUEST, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as OutboundRequestPayload;
+            const busy = p.phase === 'start';
+            if (p.op === 'save') d.outbound.saving = busy;
+            else if (p.op === 'publish') d.outbound.publishing = busy;
+            else d.outbound.unpublishing = busy;
+            if (busy) {
+                d.outbound.error = null;
+                d.outbound.confirmUnpublish = false;
+                // A new Save & publish starts a fresh step list.
+                if (p.op === 'save') d.outbound.steps = null;
+                return;
+            }
+            if (p.snapshot) Object.assign(d.outbound, p.snapshot);
+            if (p.pending !== undefined) d.outbound.pending = p.pending;
+            if (p.steps !== undefined) d.outbound.steps = p.steps;
+            d.outbound.error = p.error ?? null;
+        })],
+        [ActionType.OUTBOUND_CONFIRM_UNPUBLISH, (s) => ImmutableUpdate.of(s, (d) => {
+            d.outbound.confirmUnpublish = a.payload as boolean;
         })],
 
         // ── Voice section ──────────────────────────────────────────

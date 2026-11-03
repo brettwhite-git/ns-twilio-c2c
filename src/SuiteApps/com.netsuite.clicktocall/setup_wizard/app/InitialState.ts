@@ -180,6 +180,64 @@ export interface InboundState {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Outbound recording notice (Voice page) — server contract of
+// wizardLoadOutbound / wizardSaveOutbound / wizardPublishOutbound /
+// wizardUnpublishOutbound (ctc_sl_wizard_api.js)
+// ─────────────────────────────────────────────────────────────────────
+
+export type OutboundStepStatus = 'ok' | 'skipped' | 'failed' | 'pending';
+
+/** One step of a publish / unpublish run (service, build, Voice URL, ...). */
+export interface OutboundStep {
+    key: string;
+    label: string;
+    status: OutboundStepStatus;
+    detail: string;
+}
+
+/** Live check of the TwiML App's Voice URL against the published Function. */
+export type OutboundDrift = 'pass' | 'fail' | 'unknown';
+
+/** The load payload, normalised (also returned by save and as publish `state`). */
+export interface OutboundSnapshot {
+    noticeOn: boolean;
+    noticeText: string;
+    noticeVersion: number;
+    defaultText: string;
+    maxLength: number;
+    appSid: string;
+    functionUrl: string;
+    prevVoiceUrl: string;
+    publishedAt: string;
+    publishedCodeVersion: string;
+    codeVersion: string;
+    needsRepublish: boolean;
+    published: boolean;
+    /** The Twilio build was still running when publish returned. */
+    pending: boolean;
+    /** null = not checked. */
+    voiceUrlMatches: boolean | null;
+    driftVoiceUrl: OutboundDrift;
+}
+
+export interface OutboundState extends OutboundSnapshot {
+    /** True once wizardLoadOutbound returned; false forces a reload on mount. */
+    loaded: boolean;
+    loading: boolean;
+    loadError: string | null;
+
+    saving: boolean;
+    publishing: boolean;
+    unpublishing: boolean;
+    /** "Unpublish and remove" was clicked once; Cancel / Confirm shown. */
+    confirmUnpublish: boolean;
+    /** Last save / publish / unpublish error. */
+    error: string | null;
+    /** Steps of the last publish / unpublish this session. */
+    steps: OutboundStep[] | null;
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Rep phone presence — server contract of wizardLoadPresence
 // (ctc_sl_wizard_api.js; rows written by the token RESTlet's phoneHeartbeat)
 // ─────────────────────────────────────────────────────────────────────
@@ -249,6 +307,9 @@ export interface AppState {
 
     // Rep phone presence (Health "Phones" + Inbound routing "Phone")
     presence: PresenceState;
+
+    // Outbound recording notice (Voice page; Health "TwiML VoiceUrl")
+    outbound: OutboundState;
 }
 
 /**
@@ -347,6 +408,33 @@ const initialState: AppState = {
         error: null,
         items: [],
         clockSkewMs: 0
+    },
+    outbound: {
+        loaded: false,
+        loading: false,
+        loadError: null,
+        noticeOn: false,
+        noticeText: '',
+        noticeVersion: 0,
+        defaultText: '',
+        maxLength: 300,
+        appSid: '',
+        functionUrl: '',
+        prevVoiceUrl: '',
+        publishedAt: '',
+        publishedCodeVersion: '',
+        codeVersion: '',
+        needsRepublish: false,
+        published: false,
+        pending: false,
+        voiceUrlMatches: null,
+        driftVoiceUrl: 'unknown',
+        saving: false,
+        publishing: false,
+        unpublishing: false,
+        confirmUnpublish: false,
+        error: null,
+        steps: null
     }
 };
 

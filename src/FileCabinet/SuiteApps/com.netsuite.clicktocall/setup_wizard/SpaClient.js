@@ -50,6 +50,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
         PRESENCE_LOAD_SUCCESS: Symbol('presenceLoadSuccess'),
         PRESENCE_LOAD_FAILURE: Symbol('presenceLoadFailure'),
+        OUTBOUND_LOAD_START: Symbol('outboundLoadStart'),
+        OUTBOUND_LOAD_SUCCESS: Symbol('outboundLoadSuccess'),
+        OUTBOUND_LOAD_FAILURE: Symbol('outboundLoadFailure'),
+        OUTBOUND_FIELD_CHANGE: Symbol('outboundFieldChange'),
+        OUTBOUND_REQUEST: Symbol('outboundRequest'),
+        OUTBOUND_CONFIRM_UNPUBLISH: Symbol('outboundConfirmUnpublish'),
         VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
         VOICE_FIELD_SAVE: Symbol('voiceFieldSave'),
         DEACTIVATE_REQUEST: Symbol('deactivateRequest'),
@@ -147,6 +153,24 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         },
         presenceLoadFailure(error) {
             return { type: ActionType.PRESENCE_LOAD_FAILURE, payload: { error } };
+        },
+        outboundLoadStart() {
+            return { type: ActionType.OUTBOUND_LOAD_START, payload: null };
+        },
+        outboundLoadSuccess(snapshot) {
+            return { type: ActionType.OUTBOUND_LOAD_SUCCESS, payload: snapshot };
+        },
+        outboundLoadFailure(error) {
+            return { type: ActionType.OUTBOUND_LOAD_FAILURE, payload: { error } };
+        },
+        outboundFieldChange(changes) {
+            return { type: ActionType.OUTBOUND_FIELD_CHANGE, payload: changes };
+        },
+        outboundRequest(payload) {
+            return { type: ActionType.OUTBOUND_REQUEST, payload };
+        },
+        outboundConfirmUnpublish(open) {
+            return { type: ActionType.OUTBOUND_CONFIRM_UNPUBLISH, payload: open };
         },
         voiceFieldEdit(field, pendingValue = null) {
             return { type: ActionType.VOICE_FIELD_EDIT, payload: { field, pendingValue } };
@@ -364,6 +388,50 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     d.presence.loading = false;
                     d.presence.error = a.payload.error;
                 })],
+            [ActionType.OUTBOUND_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.outbound.loading = true;
+                    d.outbound.loadError = null;
+                })],
+            [ActionType.OUTBOUND_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    Object.assign(d.outbound, a.payload);
+                    d.outbound.loading = false;
+                    d.outbound.loaded = true;
+                    d.outbound.loadError = null;
+                })],
+            [ActionType.OUTBOUND_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.outbound.loading = false;
+                    d.outbound.loadError = a.payload.error;
+                })],
+            [ActionType.OUTBOUND_FIELD_CHANGE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    Object.assign(d.outbound, a.payload);
+                })],
+            [ActionType.OUTBOUND_REQUEST, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    const busy = p.phase === 'start';
+                    if (p.op === 'save')
+                        d.outbound.saving = busy;
+                    else if (p.op === 'publish')
+                        d.outbound.publishing = busy;
+                    else
+                        d.outbound.unpublishing = busy;
+                    if (busy) {
+                        d.outbound.error = null;
+                        d.outbound.confirmUnpublish = false;
+                        if (p.op === 'save')
+                            d.outbound.steps = null;
+                        return;
+                    }
+                    if (p.snapshot)
+                        Object.assign(d.outbound, p.snapshot);
+                    if (p.pending !== undefined)
+                        d.outbound.pending = p.pending;
+                    if (p.steps !== undefined)
+                        d.outbound.steps = p.steps;
+                    d.outbound.error = p.error ?? null;
+                })],
+            [ActionType.OUTBOUND_CONFIRM_UNPUBLISH, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.outbound.confirmUnpublish = a.payload;
+                })],
             [ActionType.VOICE_FIELD_EDIT, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
                     d.console.voiceEditing = p.field;
@@ -515,6 +583,33 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             error: null,
             items: [],
             clockSkewMs: 0
+        },
+        outbound: {
+            loaded: false,
+            loading: false,
+            loadError: null,
+            noticeOn: false,
+            noticeText: '',
+            noticeVersion: 0,
+            defaultText: '',
+            maxLength: 300,
+            appSid: '',
+            functionUrl: '',
+            prevVoiceUrl: '',
+            publishedAt: '',
+            publishedCodeVersion: '',
+            codeVersion: '',
+            needsRepublish: false,
+            published: false,
+            pending: false,
+            voiceUrlMatches: null,
+            driftVoiceUrl: 'unknown',
+            saving: false,
+            publishing: false,
+            unpublishing: false,
+            confirmUnpublish: false,
+            error: null,
+            steps: null
         }
     };
 
@@ -1160,9 +1255,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         {
             field: 'twimlAppSid',
             label: 'TwiML Application',
-            description: 'The Twilio application that handles outbound call routing. ' +
-                'The wizard registers this app\'s VoiceUrl with the CTC ' +
-                'Suitelet on activate.',
+            description: 'Outbound calls use this app. When you publish the recording ' +
+                'notice, the wizard points its Voice URL at a Twilio Function ' +
+                'in your account.',
             docUrl: TWILIO_DOCS$1.twimlApp,
             allowEmpty: false,
             listKey: 'twimlApps',
@@ -1581,6 +1676,175 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const STEP_STATUSES = ['ok', 'skipped', 'failed', 'pending'];
+    const DRIFT_STATUSES = ['pass', 'fail', 'unknown'];
+    const str = (v) => (v == null ? '' : String(v));
+    const errorText$1 = (e, fallback) => e instanceof Error && e.message ? e.message : fallback;
+    const failureText$1 = (result, fallback) => (result && (result.error || result.message)) || fallback;
+    const toSnapshot = (raw) => {
+        const drift = raw.drift && raw.drift.voiceUrl;
+        return {
+            noticeOn: raw.noticeOn === true,
+            noticeText: str(raw.noticeText),
+            noticeVersion: Number(raw.noticeVersion) || 0,
+            defaultText: str(raw.defaultText),
+            maxLength: Number(raw.maxLength) || 300,
+            appSid: str(raw.appSid),
+            functionUrl: str(raw.functionUrl),
+            prevVoiceUrl: str(raw.prevVoiceUrl),
+            publishedAt: str(raw.publishedAt),
+            publishedCodeVersion: str(raw.publishedCodeVersion),
+            codeVersion: str(raw.codeVersion),
+            needsRepublish: raw.needsRepublish === true,
+            published: raw.published === true,
+            pending: raw.pending === true,
+            voiceUrlMatches: typeof raw.voiceUrlMatches === 'boolean' ? raw.voiceUrlMatches : null,
+            driftVoiceUrl: DRIFT_STATUSES.indexOf(drift) >= 0
+                ? drift
+                : 'unknown'
+        };
+    };
+    const toSteps = (raw) => {
+        if (!Array.isArray(raw))
+            return [];
+        return raw.map((s) => {
+            const raw = (s && s.status);
+            const status = STEP_STATUSES.indexOf(raw) >= 0 ? raw : 'pending';
+            return {
+                key: str(s && s.key),
+                label: str(s && (s.label || s.key)),
+                status,
+                detail: str(s && s.detail)
+            };
+        });
+    };
+    const runFailureText = (result, steps, fallback) => {
+        if (result && (result.error || result.message))
+            return failureText$1(result, fallback);
+        const failed = steps.filter((s) => s.status === 'failed')[0];
+        if (failed)
+            return failed.detail ? failed.label + ': ' + failed.detail : failed.label;
+        return fallback;
+    };
+    const setDrift = (snapshot) => {
+        const current = (store.getState().console.drift || {});
+        store.dispatch(Action.consoleDriftSet({ ...current, voiceUrl: snapshot.driftVoiceUrl }));
+    };
+    async function loadOutbound() {
+        store.dispatch(Action.outboundLoadStart());
+        try {
+            const result = (await wizardCall('wizardLoadOutbound', {}));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.outboundLoadFailure(failureText$1(result, 'Could not load the outbound recording notice')));
+                return;
+            }
+            const snapshot = toSnapshot(result);
+            store.dispatch(Action.outboundLoadSuccess(snapshot));
+            setDrift(snapshot);
+        }
+        catch (e) {
+            store.dispatch(Action.outboundLoadFailure(errorText$1(e, 'Could not load the outbound recording notice')));
+        }
+    }
+    const AUTO_RESUME_TRIES = 6;
+    const AUTO_RESUME_DELAY_MS = 5000;
+    const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    async function runPublish(resume) {
+        store.dispatch(Action.outboundRequest({ op: 'publish', phase: 'start' }));
+        try {
+            const result = (await wizardCall('wizardPublishOutbound', resume ? { resume: true } : {}));
+            const steps = toSteps(result && result.steps);
+            const snapshot = result && result.state ? toSnapshot(result.state) : undefined;
+            const pending = !!result && (result.pending === true || (!!snapshot && snapshot.pending));
+            const failed = (!result || result.ok !== true) && !pending;
+            store.dispatch(Action.outboundRequest({
+                op: 'publish',
+                phase: 'done',
+                snapshot,
+                pending,
+                steps,
+                error: failed ? runFailureText(result, steps, 'Publish failed') : null
+            }));
+            if (snapshot)
+                setDrift(snapshot);
+            return pending && !steps.some((st) => st.status === 'failed');
+        }
+        catch (e) {
+            store.dispatch(Action.outboundRequest({
+                op: 'publish',
+                phase: 'done',
+                error: errorText$1(e, 'Publish failed')
+            }));
+            return false;
+        }
+    }
+    async function publishUntilSettled(resume) {
+        let pending = await runPublish(resume);
+        for (let i = 0; pending && i < AUTO_RESUME_TRIES; i++) {
+            await delay(AUTO_RESUME_DELAY_MS);
+            pending = await runPublish(true);
+        }
+    }
+    async function saveAndPublishOutbound(publish = true) {
+        const outbound = store.getState().outbound;
+        store.dispatch(Action.outboundRequest({ op: 'save', phase: 'start' }));
+        try {
+            const result = (await wizardCall('wizardSaveOutbound', {
+                noticeOn: outbound.noticeOn,
+                noticeText: outbound.noticeText
+            }));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.outboundRequest({
+                    op: 'save',
+                    phase: 'done',
+                    error: failureText$1(result, 'Save failed')
+                }));
+                return;
+            }
+            const snapshot = toSnapshot(result);
+            store.dispatch(Action.outboundRequest({ op: 'save', phase: 'done', snapshot }));
+            setDrift(snapshot);
+        }
+        catch (e) {
+            store.dispatch(Action.outboundRequest({
+                op: 'save',
+                phase: 'done',
+                error: errorText$1(e, 'Save failed')
+            }));
+            return;
+        }
+        if (publish)
+            await publishUntilSettled(false);
+    }
+    function resumePublishOutbound() {
+        return publishUntilSettled(true);
+    }
+    async function unpublishOutbound() {
+        store.dispatch(Action.outboundRequest({ op: 'unpublish', phase: 'start' }));
+        try {
+            const result = (await wizardCall('wizardUnpublishOutbound', {}));
+            const steps = toSteps(result && result.steps);
+            const snapshot = result && result.state ? toSnapshot(result.state) : undefined;
+            const failed = !result || result.ok !== true;
+            store.dispatch(Action.outboundRequest({
+                op: 'unpublish',
+                phase: 'done',
+                snapshot,
+                steps,
+                error: failed ? runFailureText(result, steps, 'Unpublish failed') : null
+            }));
+            if (snapshot)
+                setDrift(snapshot);
+        }
+        catch (e) {
+            store.dispatch(Action.outboundRequest({
+                op: 'unpublish',
+                phase: 'done',
+                error: errorText$1(e, 'Unpublish failed')
+            }));
+        }
+    }
+
     const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#14B981' };
     const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#F4C76A' };
     const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#9CA3AF' };
@@ -1644,6 +1908,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             case 'warn': return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
             case 'info_enabled': return { text: 'Enabled', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
             case 'info_disabled': return { text: 'Disabled', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            case 'unknown': return { text: 'Not checked', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+            case 'not_published': return { text: 'Not published', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
             default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
         }
     };
@@ -1656,9 +1922,40 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             default: return { icon: core__namespace.SystemIcon.STATUS_INFO, color: core__namespace.ImageConstant.Color.NEUTRAL };
         }
     };
+    const voiceUrlDriftRow = (drift, outbound) => {
+        const row = { label: 'TwiML VoiceUrl' };
+        if (outbound.loaded && !outbound.published) {
+            return { ...row, status: 'not_published', detail: '' };
+        }
+        if (drift.voiceUrl === 'pass')
+            return { ...row, status: 'pass', detail: '' };
+        if (drift.voiceUrl === 'fail') {
+            return { ...row, status: 'fail', detail: 'Voice URL does not point at the published Function.' };
+        }
+        return { ...row, status: 'unknown', detail: '' };
+    };
+    const outboundVersionRow = (outbound) => {
+        const row = { label: 'Outbound notice version' };
+        if (!outbound.loaded)
+            return { ...row, status: 'unknown', detail: '' };
+        if (!outbound.published)
+            return { ...row, status: 'not_published', detail: '' };
+        if (outbound.needsRepublish) {
+            return { ...row, status: 'warn', detail: 'A newer version is available. Republish on the Voice page.' };
+        }
+        return {
+            ...row,
+            status: 'pass',
+            detail: outbound.noticeVersion ? 'Notice v' + outbound.noticeVersion : ''
+        };
+    };
     class HealthChecks extends core.PureComponent {
         componentDidMount() {
             loadPresence();
+            const outbound = store.getState().outbound;
+            if (!outbound.loaded && !outbound.loading) {
+                loadOutbound();
+            }
         }
         buildPresenceColumns(nowMs) {
             const CT = component__namespace.DataGrid.ColumnType;
@@ -1821,7 +2118,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const drift = (c.drift || {});
             const refreshing = !!c.preflightRefreshing;
             const driftRows = [
-                { label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'pass', detail: drift.voiceUrl === 'fail' ? 'VoiceUrl does not match the wizard\'s expected Suitelet URL' : '' },
+                voiceUrlDriftRow(drift, state.outbound),
+                outboundVersionRow(state.outbound),
                 { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
                 { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
             ];
@@ -2301,9 +2599,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             : '';
         return 'Published ' + whenText + count;
     };
-    const item = (node) => node ? jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }) : false;
-    const vstack = (gap, nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: gap, children: nodes.map(item).filter(Boolean) }));
-    const weak = (text) => (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }));
+    const item$1 = (node) => node ? jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }) : false;
+    const vstack$1 = (gap, nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: gap, children: nodes.map(item$1).filter(Boolean) }));
+    const weak$1 = (text) => (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }));
     class InboundPage extends core.PureComponent {
         componentDidMount() {
             const inbound = store.getState().inbound;
@@ -2361,15 +2659,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 ? RING_SECONDS
                 : RING_SECONDS.concat([inbound.ringSeconds]).sort((x, y) => x - y);
             const ringDs = new core__namespace.ArrayDataSource(ringOptions.map((n) => ({ value: n, label: n + ' seconds' })));
-            const inboundSwitch = vstack(component__namespace.StackPanel.GapSize.XXS, [
+            const inboundSwitch = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                 jsxRuntime.jsx(component__namespace.Switch, { label: "Ring reps in the browser", value: inbound.inboundEnabled, action: (args) => {
                         store.dispatch(Action.inboundFieldChange({ inboundEnabled: !!(args && args.value) }));
                     } }),
                 !inbound.inboundEnabled &&
-                    weak('Off: phones do not ring; callers hear the no-answer message.'),
-                weak('Open phones pick up a change within an hour, or at once after a reload.')
+                    weak$1('Off: phones do not ring; callers hear the no-answer message.'),
+                weak$1('Open phones pick up a change within an hour, or at once after a reload.')
             ]);
-            const ringTime = vstack(component__namespace.StackPanel.GapSize.XXS, [
+            const ringTime = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                 jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Ring time" }),
                 jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: ringDs, valueMember: "value", displayMember: "label", selectedValue: inbound.ringSeconds, onSelectionChanged: (args) => {
                         const n = Number(args && args.value);
@@ -2377,7 +2675,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                             store.dispatch(Action.inboundFieldChange({ ringSeconds: n }));
                     }, rootStyle: { width: '200px' } })
             ]);
-            const message = vstack(component__namespace.StackPanel.GapSize.XXS, [
+            const message = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                 jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "No-answer message" }),
                 jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.noAnswerMessage, placeholder: inbound.voicemailOn ? DEFAULT_VOICEMAIL_GREETING : DEFAULT_NO_ANSWER_MESSAGE, maxLength: NO_ANSWER_MAX_LENGTH, rowCount: 3, onTextChanged: (args) => {
                         store.dispatch(Action.inboundFieldChange({
@@ -2389,16 +2687,16 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 ? VOICEMAIL_SECONDS
                 : VOICEMAIL_SECONDS.concat([inbound.voicemailMaxSeconds]).sort((x, y) => x - y);
             const vmDs = new core__namespace.ArrayDataSource(vmOptions.map((n) => ({ value: n, label: voicemailLengthLabel(n) })));
-            const voicemail = vstack(component__namespace.StackPanel.GapSize.S, [
-                vstack(component__namespace.StackPanel.GapSize.XXS, [
+            const voicemail = vstack$1(component__namespace.StackPanel.GapSize.S, [
+                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                     jsxRuntime.jsx(component__namespace.Switch, { label: "Voicemail", value: inbound.voicemailOn, action: (args) => {
                             store.dispatch(Action.inboundFieldChange({ voicemailOn: !!(args && args.value) }));
                         } }),
-                    weak(inbound.voicemailOn
+                    weak$1(inbound.voicemailOn
                         ? 'After the no-answer message, callers can leave a voicemail. It is transcribed and logged as a Phone Call.'
                         : 'Off: callers hear the no-answer message and the call ends.')
                 ]),
-                vstack(component__namespace.StackPanel.GapSize.XXS, [
+                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                     jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Longest voicemail" }),
                     jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: vmDs, valueMember: "value", displayMember: "label", selectedValue: inbound.voicemailMaxSeconds, enabled: inbound.voicemailOn, onSelectionChanged: (args) => {
                             const n = Number(args && args.value);
@@ -2408,30 +2706,30 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 ])
             ]);
             const ownerChoices = [{ value: '', label: 'Not set' }].concat(inbound.employees.map((e) => ({ value: e.id, label: e.name })));
-            const fallbackOwner = vstack(component__namespace.StackPanel.GapSize.XXS, [
+            const fallbackOwner = vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                 jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Unrouted calls and voicemails go to" }),
                 jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(ownerChoices), valueMember: "value", displayMember: "label", selectedValue: inbound.fallbackOwnerId, onSelectionChanged: (args) => {
                         const v = args && args.value != null ? String(args.value) : '';
                         store.dispatch(Action.inboundFieldChange({ fallbackOwnerId: v }));
                     }, rootStyle: { width: '320px' } }),
-                weak('Also used when a number has no rep, or its rep is inactive. Not set: those calls are not logged.')
+                weak$1('Also used when a number has no rep, or its rep is inactive. Not set: those calls are not logged.')
             ]);
             const showNotice = inbound.recordInbound && inbound.recordingNoticeOn;
-            const recording = vstack(component__namespace.StackPanel.GapSize.S, [
+            const recording = vstack$1(component__namespace.StackPanel.GapSize.S, [
                 jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Recording" }),
-                vstack(component__namespace.StackPanel.GapSize.XXS, [
+                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                     jsxRuntime.jsx(component__namespace.Switch, { label: "Record inbound calls", value: inbound.recordInbound, action: (args) => {
                             store.dispatch(Action.inboundFieldChange({ recordInbound: !!(args && args.value) }));
                         } }),
-                    weak('Recordings are transcribed and summarised like outbound calls.')
+                    weak$1('Recordings are transcribed and summarised like outbound calls.')
                 ]),
-                vstack(component__namespace.StackPanel.GapSize.XXS, [
+                vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                     jsxRuntime.jsx(component__namespace.Switch, { label: "Play a recording notice first", value: inbound.recordingNoticeOn, enabled: inbound.recordInbound, action: (args) => {
                             store.dispatch(Action.inboundFieldChange({ recordingNoticeOn: !!(args && args.value) }));
                         } }),
-                    weak('Callers hear this before the phone rings.')
+                    weak$1('Callers hear this before the phone rings.')
                 ]),
-                showNotice && vstack(component__namespace.StackPanel.GapSize.XXS, [
+                showNotice && vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                     jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Recording notice" }),
                     jsxRuntime.jsx(component__namespace.TextArea, { text: inbound.recordingNotice, placeholder: DEFAULT_RECORDING_NOTICE, maxLength: RECORDING_NOTICE_MAX_LENGTH, rowCount: 2, enabled: showNotice, onTextChanged: (args) => {
                             store.dispatch(Action.inboundFieldChange({
@@ -2448,15 +2746,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             });
             const errors = (inbound.lastPublish && inbound.lastPublish.errors) || [];
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, rootStyle: { maxWidth: '560px' }, children: [
-                    item(inboundSwitch),
-                    item(ringTime),
-                    item(message),
-                    item(voicemail),
-                    item(fallbackOwner),
-                    item(recording),
-                    item(saveButton),
-                    item(inbound.saveError ? jsxRuntime.jsx(ErrorText, { message: inbound.saveError }) : false),
-                    item(vstack(component__namespace.StackPanel.GapSize.XXS, [
+                    item$1(inboundSwitch),
+                    item$1(ringTime),
+                    item$1(message),
+                    item$1(voicemail),
+                    item$1(fallbackOwner),
+                    item$1(recording),
+                    item$1(saveButton),
+                    item$1(inbound.saveError ? jsxRuntime.jsx(ErrorText, { message: inbound.saveError }) : false),
+                    item$1(vstack$1(component__namespace.StackPanel.GapSize.XXS, [
                         jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: statusLine(inbound) }),
                         ...errors.map((e) => (jsxRuntime.jsx(ErrorText, { message: formatPhone(e.phoneNumber) + ': ' + e.message })))
                     ]))
@@ -2476,9 +2774,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     headerRowHeight: 40,
                     rootStyle: { width: '100%' }
                 });
-            return vstack(component__namespace.StackPanel.GapSize.S, [
+            return vstack$1(component__namespace.StackPanel.GapSize.S, [
                 table,
-                weak('The primary rep on Phones & reps is the one who rings.'),
+                weak$1('The primary rep on Phones & reps is the one who rings.'),
                 new component__namespace.Button({
                     label: 'Publish again',
                     enabled: !busy,
@@ -2490,7 +2788,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const inbound = store.getState().inbound;
             const description = (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: "Calls to your Twilio numbers ring the number's primary rep in the browser. NetSuite publishes one Twilio Studio flow for all numbers." }));
             if (inbound.loading || (!inbound.loaded && !inbound.loadError)) {
-                return vstack(component__namespace.StackPanel.GapSize.L, [
+                return vstack$1(component__namespace.StackPanel.GapSize.L, [
                     description,
                     new component__namespace.Loader({
                         label: 'Loading inbound settings…',
@@ -2499,7 +2797,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 ]);
             }
             if (!inbound.loaded) {
-                return vstack(component__namespace.StackPanel.GapSize.L, [
+                return vstack$1(component__namespace.StackPanel.GapSize.L, [
                     description,
                     jsxRuntime.jsx(ErrorText, { message: inbound.loadError || 'Could not load inbound settings' }),
                     new component__namespace.Button({
@@ -2509,7 +2807,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     })
                 ]);
             }
-            return vstack(component__namespace.StackPanel.GapSize.XL, [
+            return vstack$1(component__namespace.StackPanel.GapSize.XL, [
                 description,
                 this.renderSettings(inbound),
                 this.renderRouting(inbound)
@@ -2570,6 +2868,156 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const CONSENT_TEXT = 'Publishing creates a Twilio Function named ctc-outbound in your Twilio ' +
+        'account and points your TwiML App\'s Voice URL at it. Your current ' +
+        'Voice URL is saved so you can restore it.';
+    const REPUBLISH_WARNING = 'A newer version is available. Republish to update.';
+    const NOTICE_OFF_PUBLISHED_NOTE = 'The Function stays in place; calls connect without a notice. Use ' +
+        'Unpublish and remove to restore your previous Voice URL.';
+    const VOICE_URL_WARNING = 'Your TwiML App\'s Voice URL no longer points at the published Function.';
+    const STEP_STATUS = {
+        ok: { check: 'pass', text: 'Done' },
+        skipped: { check: 'info_disabled', text: 'Skipped' },
+        failed: { check: 'fail', text: 'Failed' },
+        pending: { check: 'info_enabled', text: 'Pending' }
+    };
+    const outboundStatusLine = (outbound) => {
+        if (!outbound.published)
+            return 'Not published yet';
+        const when = new Date(outbound.publishedAt);
+        const whenText = !outbound.publishedAt
+            ? ''
+            : isNaN(when.getTime()) ? outbound.publishedAt : when.toLocaleString();
+        return 'Published' + (whenText ? ' ' + whenText : '') +
+            (outbound.noticeVersion ? ' · notice v' + outbound.noticeVersion : '');
+    };
+    const item = (node) => node ? jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: node }) : false;
+    const vstack = (gap, nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: gap, children: nodes.map(item).filter(Boolean) }));
+    const hstack = (nodes) => (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: nodes.map(item).filter(Boolean) }));
+    const weak = (text) => (jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: text }));
+    const stepRow = (step) => {
+        const s = STEP_STATUS[step.status];
+        return (jsxRuntime.jsx(CheckRow, { check: {
+                label: step.label + ' — ' + s.text,
+                status: s.check,
+                detail: step.status === 'failed' ? step.detail : undefined
+            } }));
+    };
+    class OutboundNotice extends core.PureComponent {
+        componentDidMount() {
+            const outbound = store.getState().outbound;
+            if (!outbound.loaded && !outbound.loading) {
+                loadOutbound();
+            }
+        }
+        renderButtons(outbound, busy) {
+            const saveOnly = !outbound.noticeOn && !outbound.published;
+            const working = outbound.saving || outbound.publishing;
+            const saveButton = new component__namespace.Button({
+                label: saveOnly
+                    ? (working ? 'Saving…' : 'Save')
+                    : (working ? 'Publishing…' : 'Save & publish'),
+                type: component__namespace.Button.Type.PRIMARY,
+                enabled: !busy,
+                action: () => { saveAndPublishOutbound(!saveOnly); }
+            });
+            if (!outbound.published)
+                return hstack([saveButton]);
+            if (outbound.confirmUnpublish) {
+                return vstack(component__namespace.StackPanel.GapSize.XXS, [
+                    weak('This restores the previous Voice URL and deletes the Function.'),
+                    hstack([
+                        jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", enabled: !busy, action: () => { store.dispatch(Action.outboundConfirmUnpublish(false)); } }),
+                        jsxRuntime.jsx(component__namespace.Button, { label: "Confirm unpublish", type: component__namespace.Button.Type.DANGER, enabled: !busy, action: () => { unpublishOutbound(); } })
+                    ])
+                ]);
+            }
+            return hstack([
+                saveButton,
+                jsxRuntime.jsx(component__namespace.Button, { label: outbound.unpublishing ? 'Unpublishing…' : 'Unpublish and remove', type: component__namespace.Button.Type.DANGER, enabled: !busy, action: () => { store.dispatch(Action.outboundConfirmUnpublish(true)); } })
+            ]);
+        }
+        renderSettings(outbound) {
+            const busy = outbound.saving || outbound.publishing || outbound.unpublishing;
+            const max = outbound.maxLength;
+            const steps = outbound.steps || [];
+            const noticeSwitch = vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Switch, { label: "Play a recording notice on outbound calls", value: outbound.noticeOn, enabled: !busy, action: (args) => {
+                        store.dispatch(Action.outboundFieldChange({ noticeOn: !!(args && args.value) }));
+                    } }),
+                weak('The person you call hears this after they answer, before the call ' +
+                    'connects and before recording starts.')
+            ]);
+            const noticeText = outbound.noticeOn && vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: "Notice" }),
+                jsxRuntime.jsx(component__namespace.TextArea, { text: outbound.noticeText, placeholder: outbound.defaultText, maxLength: max, rowCount: 2, enabled: !busy, onTextChanged: (args) => {
+                        store.dispatch(Action.outboundFieldChange({
+                            noticeText: ((args && args.text) || '').slice(0, max)
+                        }));
+                    }, rootStyle: { width: '100%' } }),
+                weak(outbound.noticeText.length + ' / ' + max + ' characters'),
+                weak('Have your legal counsel approve the wording.')
+            ]);
+            const pending = outbound.pending && !outbound.publishing && vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: 'Publishing… the Twilio build is still running' }),
+                new component__namespace.Button({
+                    label: 'Check again',
+                    startIcon: core__namespace.SystemIcon.REFRESH,
+                    enabled: !busy,
+                    action: () => { resumePublishOutbound(); }
+                })
+            ]);
+            const status = vstack(component__namespace.StackPanel.GapSize.XXS, [
+                jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, children: outboundStatusLine(outbound) }),
+                outbound.published && !!outbound.functionUrl &&
+                    weak('Function URL: ' + outbound.functionUrl),
+                outbound.published && outbound.needsRepublish &&
+                    jsxRuntime.jsx(CheckRow, { check: { label: REPUBLISH_WARNING, status: 'warn' } }),
+                outbound.published && outbound.voiceUrlMatches === false &&
+                    jsxRuntime.jsx(CheckRow, { check: { label: VOICE_URL_WARNING, status: 'warn' } })
+            ]);
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, rootStyle: { maxWidth: '560px' }, children: [
+                    item(noticeSwitch),
+                    item(noticeText),
+                    item(!outbound.published && outbound.noticeOn && weak(CONSENT_TEXT)),
+                    item(outbound.published && !outbound.noticeOn && weak(NOTICE_OFF_PUBLISHED_NOTE)),
+                    item(this.renderButtons(outbound, busy)),
+                    item(outbound.error ? jsxRuntime.jsx(ErrorText, { message: outbound.error }) : false),
+                    item(pending),
+                    item(steps.length > 0 && vstack(component__namespace.StackPanel.GapSize.XS, steps.map(stepRow))),
+                    item(status)
+                ].filter(Boolean) }));
+        }
+        render() {
+            const outbound = store.getState().outbound;
+            const heading = jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Outbound recording notice" });
+            if (outbound.loading || (!outbound.loaded && !outbound.loadError)) {
+                return vstack(component__namespace.StackPanel.GapSize.S, [
+                    heading,
+                    new component__namespace.Loader({
+                        label: 'Loading recording notice…',
+                        indeterminate: true
+                    })
+                ]);
+            }
+            if (!outbound.loaded) {
+                return vstack(component__namespace.StackPanel.GapSize.S, [
+                    heading,
+                    jsxRuntime.jsx(ErrorText, { message: outbound.loadError || 'Could not load the outbound recording notice' }),
+                    new component__namespace.Button({
+                        label: 'Retry',
+                        startIcon: core__namespace.SystemIcon.REFRESH,
+                        action: () => { loadOutbound(); }
+                    })
+                ]);
+            }
+            return vstack(component__namespace.StackPanel.GapSize.S, [
+                heading,
+                this.renderSettings(outbound)
+            ]);
+        }
+    }
+
     const TWILIO_DOCS = {
         twimlApp: 'https://www.twilio.com/docs/usage/api/applications',
         phoneNumber: 'https://www.twilio.com/docs/phone-numbers/api/incomingphonenumber-resource',
@@ -2579,8 +3027,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         {
             field: 'twimlAppSid',
             label: 'TwiML Application',
-            helpText: 'The Twilio application that handles outbound call routing. ' +
-                'The wizard registers this app\'s VoiceUrl with the CTC Suitelet.',
+            helpText: 'Outbound calls use this app. When you publish the recording ' +
+                'notice, the wizard points its Voice URL at a Twilio Function in your account.',
             docUrl: TWILIO_DOCS.twimlApp
         },
         {
@@ -2808,7 +3256,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         dataRowHeight: 80,
                         headerRowHeight: 40,
                         rootStyle: { width: '100%' }
-                    }) }))
+                    }) })),
+                (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(OutboundNotice, { tick: this.props.tick }) }))
             ].filter(Boolean);
             return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: items }));
         }

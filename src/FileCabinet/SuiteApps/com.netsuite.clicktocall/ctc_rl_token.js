@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -553,6 +553,19 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
             phoneCall.setValue({ fieldId: 'custevent_ctc_processed', value: false });
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_status', value: utils.CALL_STATUS.LOGGED });
             if (inbound) phoneCall.setValue({ fieldId: 'custevent_ctc_inbound', value: true });
+            // Outbound recording notice (consent log): from config only, no
+            // Twilio call. Played = the outbound Function is published and its
+            // last publish put a notice live; the version is that publish's.
+            if (!inbound) {
+                try {
+                    const notice = outboundFn.noticeForCall(ctcConfig.loadOutboundConfig());
+                    phoneCall.setValue({ fieldId: 'custevent_ctc_notice_played', value: notice.played });
+                    if (notice.played) phoneCall.setValue({ fieldId: 'custevent_ctc_notice_ver', value: notice.version });
+                } catch (noticeErr) {
+                    log.error({ title: 'CTC logCall — notice config read failed',
+                                details: (noticeErr && noticeErr.message) || String(noticeErr) });
+                }
+            }
             phoneCall.setValue({ fieldId: 'custevent_ctc_call_started', value: callStartedIso(auth.call, body.startedAt, duration) });
 
             // Numeric-id guard: Phone Call's `company` and `contact` fields

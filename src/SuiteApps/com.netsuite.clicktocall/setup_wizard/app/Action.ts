@@ -21,6 +21,8 @@ import type {
     InboundRoute,
     InboundEmployee,
     InboundSettings,
+    OutboundSnapshot,
+    OutboundStep,
     PresenceRow
 } from './InitialState';
 
@@ -71,6 +73,14 @@ const ActionType = {
     PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
     PRESENCE_LOAD_SUCCESS: Symbol('presenceLoadSuccess'),
     PRESENCE_LOAD_FAILURE: Symbol('presenceLoadFailure'),
+
+    // Outbound recording notice (Voice page)
+    OUTBOUND_LOAD_START: Symbol('outboundLoadStart'),
+    OUTBOUND_LOAD_SUCCESS: Symbol('outboundLoadSuccess'),
+    OUTBOUND_LOAD_FAILURE: Symbol('outboundLoadFailure'),
+    OUTBOUND_FIELD_CHANGE: Symbol('outboundFieldChange'),
+    OUTBOUND_REQUEST: Symbol('outboundRequest'),
+    OUTBOUND_CONFIRM_UNPUBLISH: Symbol('outboundConfirmUnpublish'),
 
     // Voice section
     VOICE_FIELD_EDIT: Symbol('voiceFieldEdit'),
@@ -264,6 +274,57 @@ interface PresenceLoadFailureAction {
     payload: { error: string };
 }
 
+interface OutboundLoadStartAction {
+    type: typeof ActionType.OUTBOUND_LOAD_START;
+    payload: null;
+}
+
+interface OutboundLoadSuccessAction {
+    type: typeof ActionType.OUTBOUND_LOAD_SUCCESS;
+    payload: OutboundSnapshot;
+}
+
+interface OutboundLoadFailureAction {
+    type: typeof ActionType.OUTBOUND_LOAD_FAILURE;
+    payload: { error: string };
+}
+
+/** Form values of the outbound notice (edited in place; sent by Save & publish). */
+export interface OutboundFields {
+    noticeOn: boolean;
+    noticeText: string;
+}
+
+interface OutboundFieldChangeAction {
+    type: typeof ActionType.OUTBOUND_FIELD_CHANGE;
+    payload: Partial<OutboundFields>;
+}
+
+/**
+ * One server round trip of the outbound notice: 'start' sets the busy
+ * flag for `op`; 'done' clears it and applies whatever came back
+ * (a new snapshot, the step list, an error).
+ */
+export interface OutboundRequestPayload {
+    op: 'save' | 'publish' | 'unpublish';
+    phase: 'start' | 'done';
+    snapshot?: OutboundSnapshot;
+    /** Publish only: the Twilio build is still running ("Check again"). */
+    pending?: boolean;
+    steps?: OutboundStep[];
+    error?: string | null;
+}
+
+interface OutboundRequestAction {
+    type: typeof ActionType.OUTBOUND_REQUEST;
+    payload: OutboundRequestPayload;
+}
+
+interface OutboundConfirmUnpublishAction {
+    type: typeof ActionType.OUTBOUND_CONFIRM_UNPUBLISH;
+    payload: boolean;
+}
+
 interface VoiceFieldEditAction {
     type: typeof ActionType.VOICE_FIELD_EDIT;
     payload: {
@@ -348,6 +409,12 @@ export type AppAction =
     | PresenceLoadStartAction
     | PresenceLoadSuccessAction
     | PresenceLoadFailureAction
+    | OutboundLoadStartAction
+    | OutboundLoadSuccessAction
+    | OutboundLoadFailureAction
+    | OutboundFieldChangeAction
+    | OutboundRequestAction
+    | OutboundConfirmUnpublishAction
     | VoiceFieldEditAction
     | VoiceFieldSaveAction
     | DeactivateRequestAction
@@ -462,6 +529,25 @@ const Action = {
     },
     presenceLoadFailure(error: string): PresenceLoadFailureAction {
         return { type: ActionType.PRESENCE_LOAD_FAILURE, payload: { error } };
+    },
+
+    outboundLoadStart(): OutboundLoadStartAction {
+        return { type: ActionType.OUTBOUND_LOAD_START, payload: null };
+    },
+    outboundLoadSuccess(snapshot: OutboundSnapshot): OutboundLoadSuccessAction {
+        return { type: ActionType.OUTBOUND_LOAD_SUCCESS, payload: snapshot };
+    },
+    outboundLoadFailure(error: string): OutboundLoadFailureAction {
+        return { type: ActionType.OUTBOUND_LOAD_FAILURE, payload: { error } };
+    },
+    outboundFieldChange(changes: Partial<OutboundFields>): OutboundFieldChangeAction {
+        return { type: ActionType.OUTBOUND_FIELD_CHANGE, payload: changes };
+    },
+    outboundRequest(payload: OutboundRequestPayload): OutboundRequestAction {
+        return { type: ActionType.OUTBOUND_REQUEST, payload };
+    },
+    outboundConfirmUnpublish(open: boolean): OutboundConfirmUnpublishAction {
+        return { type: ActionType.OUTBOUND_CONFIRM_UNPUBLISH, payload: open };
     },
 
     voiceFieldEdit(

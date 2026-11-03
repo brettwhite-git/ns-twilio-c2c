@@ -37,7 +37,9 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
             transcript:   rec.getValue({ fieldId: 'custevent_ctc_transcript' }) || '',
             recordingUrl: rec.getValue({ fieldId: 'custevent_ctc_recording_url' }) || '',
             voicemail:    isChecked(rec.getValue({ fieldId: 'custevent_ctc_voicemail' })),
-            inbound:      isChecked(rec.getValue({ fieldId: 'custevent_ctc_inbound' }))
+            inbound:      isChecked(rec.getValue({ fieldId: 'custevent_ctc_inbound' })),
+            noticePlayed: isChecked(rec.getValue({ fieldId: 'custevent_ctc_notice_played' })),
+            noticeVer:    rec.getValue({ fieldId: 'custevent_ctc_notice_ver' })
         };
 
         const html = buildViewerHtml(data);
@@ -56,7 +58,8 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
                 'custevent_ctc_ai_summary', 'custevent_ctc_satisfaction',
                 'custevent_ctc_tone_keywords', 'custevent_ctc_action_items',
                 'custevent_ctc_duration', 'custevent_ctc_recording_url',
-                'custevent_ctc_transcript'
+                'custevent_ctc_transcript', 'custevent_ctc_notice_played',
+                'custevent_ctc_notice_ver'
             ];
             fieldsToHide.forEach((fid) => {
                 const f = context.form.getField({ id: fid });
@@ -152,6 +155,13 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 
         const note = (!data.voicemail && !data.transcript && !data.summary && UNANSWERED_NOTE[data.status]) || '';
 
+        // Outbound recording notice (consent log), one small line.
+        const noticeVer = parseInt(data.noticeVer, 10);
+        const noticeLine = data.noticePlayed && !data.inbound
+            ? '<div class="ctc-section ctc-notice-line">' +
+              escapeHtml('Recording notice played' + (noticeVer > 0 ? ' (v' + noticeVer + ')' : '')) + '</div>'
+            : '';
+
         const actionBlock = data.actionItems
             ? '<hr class="ctc-divider"><div class="ctc-section"><div class="ctc-section-title">Action Items</div><div class="ctc-action-block">' + actionItemsHtml + '</div></div>'
             : '';
@@ -163,6 +173,7 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 #ctc-viewer .ctc-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em; }
 #ctc-viewer .ctc-pills { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 #ctc-viewer .ctc-note { color: #5C5955; line-height: 1.5; }
+#ctc-viewer .ctc-notice-line { font-size: 12px; color: #666; margin-top: -4px; }
 #ctc-viewer .ctc-status-pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 #ctc-viewer .ctc-section { margin-bottom: 14px; }
 #ctc-viewer .ctc-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #888; margin-bottom: 6px; }
@@ -185,6 +196,7 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 #ctc-viewer .ctc-metrics-row > div:not(:last-child) { border-right: 1px solid #e8e8e8; padding-right: 16px; }
 </style>
 <div class="ctc-header"><span>Call Intelligence</span>${buildPills(data)}</div>
+${noticeLine}
 ${note ? '<div class="ctc-section ctc-note">' + escapeHtml(note) + '</div>' : `<div class="ctc-section">
 <div class="ctc-section-title">AI Summary</div>
 <div class="ctc-summary">${safeSummary || '<span class="ctc-muted">No summary available</span>'}</div>

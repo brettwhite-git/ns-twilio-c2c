@@ -29,8 +29,8 @@
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         './lib/ctc_config', './lib/ctc_twilio_admin',
-        './lib/ctc_twilio_jwt', './lib/ctc_inbound_routing'],
-       (runtime, record, search, log, crypto, query, config, twilio, jwt, routing) => {
+        './lib/ctc_twilio_jwt', './lib/ctc_inbound_routing', './lib/ctc_outbound_function'],
+       (runtime, record, search, log, crypto, query, config, twilio, jwt, routing, outbound) => {
 
     /* ------------------------------------------------------------------ */
     /* Suitelet entry point                                               */
@@ -538,6 +538,12 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         catch (e) { return { error: 'config_not_found' }; }
     };
 
+    // The outbound actions also need the outbound notice fields.
+    const loadOutboundConfigOrError = () => {
+        try { return config.loadOutboundConfig(); }
+        catch (e) { return { error: 'config_not_found' }; }
+    };
+
     /* ------------------------------------------------------------------ */
     /* Action: wizardListEmployees (Step 4 employee picker)               */
     /* ------------------------------------------------------------------ */
@@ -990,7 +996,17 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         }
 
         const allPassed = checks.every(function (c) { return c.status === 'pass'; });
-        return { checks: checks, allPassed: allPassed };
+
+        // Health "Drift detection" rows (not part of allPassed): the
+        // TwiML App Voice URL vs the published outbound Function URL.
+        // One Twilio GET (10 units). 'unknown' until the Function is published.
+        let drift = { voiceUrl: 'unknown', functionCode: 'unknown' };
+        try { drift = outbound.outboundStatus(Object.assign({}, cfg, config.loadOutboundConfig())).drift; }
+        catch (e) {
+            log.error({ title: 'CTC Wizard — outbound drift check failed',
+                        details: e && e.message ? e.message : String(e) });
+        }
+        return { checks: checks, allPassed: allPassed, drift: drift };
     };
 
     /* ------------------------------------------------------------------ */
@@ -1362,6 +1378,162 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Actions: outbound recording notice (Twilio Function)               */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Outbound state payload (wizardLoadOutbound and the `state` of the
+     * other outbound actions):
+     *   { noticeOn, noticeText, noticeVersion, defaultText, maxLength,
+     *     appSid, functionUrl, prevVoiceUrl, publishedAt,
+     *     publishedCodeVersion, codeVersion, needsRepublish, published,
+     *     pending, voiceUrlMatches, publishedNoticeVersion, changesPending,
+     *     drift?: { voiceUrl, functionCode } }
+     * live true: one Twilio GET of the TwiML App (voiceUrlMatches, drift).
+     * live false: no Twilio call; voiceUrlMatches is null and there is no
+     * drift key.
+     */
+    const outboundState = (cfg, live) => {
+        const noticeOn = cfg.outNoticeOn === true;
+        const noticeVersion = cfg.outNoticeVersion || 1;
+        const publishedNoticeVersion = cfg.outPublishedNoticeVersion || 0;
+        const published = outbound.isPublished(cfg);
+        const st = live ? outbound.outboundStatus(cfg) : null;
+        const state = {
+            noticeOn: noticeOn,
+            noticeText: cfg.outNoticeText || config.DEFAULT_OUTBOUND_NOTICE,
+            noticeVersion: noticeVersion,
+            defaultText: config.DEFAULT_OUTBOUND_NOTICE,
+            maxLength: config.MAX_OUTBOUND_NOTICE_LENGTH || 300,
+            appSid: cfg.twimlAppSid || '',
+            functionUrl: outbound.functionUrl(cfg.outFnDomain),
+            prevVoiceUrl: cfg.outPrevVoiceUrl || '',
+            publishedAt: cfg.outPublishedAt || '',
+            publishedCodeVersion: cfg.outFnCodeVersion || '',
+            codeVersion: outbound.FN_CODE_VERSION,
+            needsRepublish: outbound.needsRepublish(cfg),
+            published: published,
+            pending: !!cfg.outFnPendingBuild,
+            voiceUrlMatches: st ? st.voiceUrlMatches : null,
+            publishedNoticeVersion: publishedNoticeVersion,
+            // Saved notice settings differ from what Twilio runs now.
+            changesPending: published && (noticeOn ? noticeVersion : 0) !== publishedNoticeVersion
+        };
+        if (st) state.drift = st.drift;
+        return state;
+    };
+
+    /** wizardLoadOutbound {} → outbound state (live). */
+    const wizardLoadOutbound = () => {
+        const cfg = loadOutboundConfigOrError();
+        if (cfg.error) return { ok: false, error: cfg.error };
+        return outboundState(cfg, true);
+    };
+
+    /**
+     * Validate the wizardSaveOutbound payload. Returns
+     * { values: { noticeOn, noticeText } } or { error, message }.
+     * noticeText '' means the default notice.
+     */
+    const validateOutboundPayload = (payload) => {
+        const p = payload || {};
+        const max = config.MAX_OUTBOUND_NOTICE_LENGTH || 300;
+        if (typeof p.noticeOn !== 'boolean') {
+            return { error: 'invalid_notice_on', message: 'noticeOn must be true or false.' };
+        }
+        if (p.noticeText != null && typeof p.noticeText !== 'string') {
+            return { error: 'invalid_notice_text', message: 'The notice must be text.' };
+        }
+        const text = cleanSpokenText(p.noticeText);
+        if (text.length > max) {
+            return { error: 'notice_text_too_long',
+                     message: 'The notice must be ' + max + ' characters or fewer.' };
+        }
+        return { values: { noticeOn: p.noticeOn,
+                           noticeText: text === config.DEFAULT_OUTBOUND_NOTICE ? '' : text } };
+    };
+
+    /**
+     * wizardSaveOutbound { noticeOn, noticeText } → outbound state (no
+     * Twilio call). Blank text (or the default text) is stored blank and
+     * means the default notice. noticeVersion goes up by 1 when the
+     * spoken text or on/off changes. Publish to make it live.
+     */
+    const wizardSaveOutbound = (payload) => {
+        const v = validateOutboundPayload(payload);
+        if (v.error) return { ok: false, error: v.error, message: v.message };
+
+        const cfg = loadOutboundConfigOrError();
+        if (cfg.error) return { ok: false, error: cfg.error };
+
+        const newText = v.values.noticeText || config.DEFAULT_OUTBOUND_NOTICE;
+        const oldText = cfg.outNoticeText || config.DEFAULT_OUTBOUND_NOTICE;
+        const changed = newText !== oldText || v.values.noticeOn !== (cfg.outNoticeOn === true);
+        const version = (cfg.outNoticeVersion || 1) + (changed ? 1 : 0);
+
+        record.submitFields({
+            type: 'customrecord_ctc_config',
+            id: cfg.id,
+            values: {
+                custrecord_ctc_out_notice_on: v.values.noticeOn,
+                custrecord_ctc_out_notice: v.values.noticeText,
+                custrecord_ctc_out_notice_ver: version
+            }
+        });
+
+        log.audit({
+            title: 'CTC Wizard — outbound notice saved',
+            details: 'noticeOn=' + v.values.noticeOn + ' textLength=' + newText.length +
+                     ' version=' + version + ' changed=' + changed
+        });
+
+        return outboundState(Object.assign({}, cfg, {
+            outNoticeOn: v.values.noticeOn,
+            outNoticeText: newText,
+            outNoticeVersion: version
+        }), false);
+    };
+
+    /**
+     * wizardPublishOutbound { resume?: boolean } →
+     *   { ok, pending?, message?, steps: [{ key, label, status, detail }], state }
+     * resume: finish a build that an earlier request left running.
+     */
+    const wizardPublishOutbound = (payload) => {
+        const cfg = loadOutboundConfigOrError();
+        if (cfg.error) return { ok: false, error: cfg.error };
+        let res;
+        try { res = outbound.publishOutbound(cfg, { resume: !!(payload && payload.resume === true) }); }
+        catch (e) {
+            log.error({ title: 'CTC Wizard — publishOutbound threw', details: errText(e) });
+            res = { ok: false, message: errText(e), steps: [] };
+        }
+        const after = loadOutboundConfigOrError();
+        const out = { ok: res.ok === true, steps: res.steps || [],
+                      state: outboundState(after.error ? cfg : after, true) };
+        if (res.pending) out.pending = true;
+        if (res.message) out.message = res.message;
+        return out;
+    };
+
+    /** wizardUnpublishOutbound {} → { ok, message?, steps, state } */
+    const wizardUnpublishOutbound = () => {
+        const cfg = loadOutboundConfigOrError();
+        if (cfg.error) return { ok: false, error: cfg.error };
+        let res;
+        try { res = outbound.unpublishOutbound(cfg); }
+        catch (e) {
+            log.error({ title: 'CTC Wizard — unpublishOutbound threw', details: errText(e) });
+            res = { ok: false, message: errText(e), steps: [] };
+        }
+        const after = loadOutboundConfigOrError();
+        const out = { ok: res.ok === true, steps: res.steps || [],
+                      state: outboundState(after.error ? cfg : after, true) };
+        if (res.message) out.message = res.message;
+        return out;
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Action: wizardLoadPresence (Health + Inbound calls "Phones")       */
     /* ------------------------------------------------------------------ */
 
@@ -1465,7 +1637,11 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardLoadInbound:       wizardLoadInbound,
         wizardSaveInbound:       wizardSaveInbound,
         wizardPublishRouting:    wizardPublishRouting,
-        wizardLoadPresence:      wizardLoadPresence
+        wizardLoadPresence:      wizardLoadPresence,
+        wizardLoadOutbound:      wizardLoadOutbound,
+        wizardSaveOutbound:      wizardSaveOutbound,
+        wizardPublishOutbound:   wizardPublishOutbound,
+        wizardUnpublishOutbound: wizardUnpublishOutbound
     };
 
     return { onRequest };

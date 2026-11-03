@@ -35,6 +35,9 @@ define(['N/https', 'N/encode', 'N/log'],
     const ACCOUNT_SID_RE = /^AC[0-9a-f]{32}$/;
     const PHONE_SID_RE = /^PN[0-9a-f]{32}$/;
     const FLOW_SID_RE = /^FW[0-9a-f]{32}$/;
+    const APP_SID_RE = /^AP[0-9a-f]{32}$/;
+    // A TwiML App Voice URL we write: https, no spaces or quotes.
+    const VOICE_URL_RE = /^https:\/\/[^\s"'<>]+$/;
 
     // Twilio's REST API list endpoints default to 50 per page; the wizard
     // caps at 100 numbers / 100 TwiML apps / 100 Intel services per
@@ -421,6 +424,140 @@ define(['N/https', 'N/encode', 'N/log'],
         return finish(created, true);
     };
 
+    const CREDENTIALS_ERROR = 'Twilio rejected the credentials. The ' +
+        'API Key Secret in NetSuite API Secrets may be ' +
+        'empty or invalid. Open Setup > Company > API ' +
+        'Secrets and paste the secret value.';
+
+    /** Map an N/https response to the shared envelope. */
+    const toEnvelope = (response) => {
+        const status = response.code;
+        let body;
+        try { body = JSON.parse(response.body || '{}'); }
+        catch (e) { body = {}; }
+        if (status >= 200 && status < 300) return { ok: true, status: status, body: body };
+        if (status === 401) {
+            return { ok: false, status: 401, errorCode: 'EMPTY_SECRET_OR_INVALID',
+                     errorMessage: CREDENTIALS_ERROR };
+        }
+        return { ok: false, status: status,
+                 errorCode: body && body.code ? body.code : status,
+                 errorMessage: twilioErrorMessage(body, status) };
+    };
+
+    const networkError = (e) => ({
+        ok: false,
+        status: 'NETWORK_ERROR',
+        errorCode: 'NETWORK_ERROR',
+        errorMessage: (e && e.message ? e.message : String(e))
+    });
+
+    /**
+     * POST a body that the caller already encoded (a multipart body, or a
+     * form body with a repeated key). Same envelope as httpPostForm.
+     */
+    const httpPostBody = (url, secureAuthHeader, body, contentType) => {
+        try {
+            return toEnvelope(https.post({
+                url: url,
+                body: body,
+                headers: {
+                    Authorization: secureAuthHeader,
+                    Accept: 'application/json',
+                    'Content-Type': contentType
+                }
+            }));
+        } catch (e) {
+            return networkError(e);
+        }
+    };
+
+    /** DELETE with the same envelope (Twilio answers 204, empty body). */
+    const httpDelete = (url, secureAuthHeader) => {
+        try {
+            return toEnvelope(https.delete({
+                url: url,
+                headers: { Authorization: secureAuthHeader, Accept: 'application/json' }
+            }));
+        } catch (e) {
+            return networkError(e);
+        }
+    };
+
+    const appGuard = (cfg, appSid) => {
+        const accountSid = cfg && cfg.accountSid;
+        if (typeof accountSid !== 'string' || !ACCOUNT_SID_RE.test(accountSid)) {
+            return { ok: false, status: 'INVALID_SID', errorCode: 'INVALID_ACCOUNT_SID',
+                     errorMessage: 'The Account SID in the configuration is not valid' };
+        }
+        if (typeof appSid !== 'string' || !APP_SID_RE.test(appSid)) {
+            return { ok: false, status: 'INVALID_SID', errorCode: 'INVALID_APP_SID',
+                     errorMessage: 'The TwiML App SID is not valid' };
+        }
+        return null;
+    };
+
+    /**
+     * GET /2010-04-01/Accounts/{AC}/Applications/{AP}.json
+     * Returns { ok: true, status, application: { sid, friendlyName,
+     * voiceUrl, voiceMethod } } or the error envelope.
+     */
+    const getApplication = (cfg, appSid) => {
+        const bad = appGuard(cfg, appSid);
+        if (bad) return bad;
+        let auth;
+        try { auth = buildSecureAuthHeader(cfg); }
+        catch (e) {
+            return { ok: false, status: 'CONFIG_ERROR', errorCode: 'CONFIG_ERROR',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid + '/Applications/' + appSid + '.json';
+        const result = httpGetJson(url, auth);
+        log.audit({
+            title: 'CTC Outbound — get TwiML App',
+            details: 'app=' + maskSid(appSid) + ' status=' + result.status + ' ok=' + result.ok
+        });
+        if (!result.ok) return result;
+        const b = result.body || {};
+        return {
+            ok: true,
+            status: result.status,
+            application: {
+                sid: b.sid,
+                friendlyName: b.friendly_name || '',
+                voiceUrl: b.voice_url || '',
+                voiceMethod: b.voice_method || ''
+            }
+        };
+    };
+
+    /**
+     * Point the TwiML App's Voice URL at `voiceUrl` (method POST).
+     * POST /2010-04-01/Accounts/{AC}/Applications/{AP}.json
+     */
+    const setApplicationVoiceUrl = (cfg, appSid, voiceUrl) => {
+        const bad = appGuard(cfg, appSid);
+        if (bad) return bad;
+        if (typeof voiceUrl !== 'string' || !VOICE_URL_RE.test(voiceUrl)) {
+            return { ok: false, status: 'INVALID_URL', errorCode: 'INVALID_VOICE_URL',
+                     errorMessage: 'The Voice URL is not a valid https URL' };
+        }
+        let auth;
+        try { auth = buildSecureAuthHeader(cfg); }
+        catch (e) {
+            return { ok: false, status: 'CONFIG_ERROR', errorCode: 'CONFIG_ERROR',
+                     errorMessage: e && e.message ? e.message : String(e) };
+        }
+        const url = TWILIO_API_BASE + '/' + cfg.accountSid + '/Applications/' + appSid + '.json';
+        const result = httpPostForm(url, auth, { VoiceUrl: voiceUrl, VoiceMethod: 'POST' });
+        log.audit({
+            title: 'CTC Outbound — set TwiML App voice URL',
+            details: 'app=' + maskSid(appSid) + ' status=' + result.status + ' ok=' + result.ok
+        });
+        if (!result.ok) return result;
+        return { ok: true, status: result.status, appSid: appSid, voiceUrl: voiceUrl };
+    };
+
     /**
      * Point one phone number's incoming-call webhook at the Studio flow.
      * POST /2010-04-01/Accounts/{AC}/IncomingPhoneNumbers/{PN}.json
@@ -475,6 +612,11 @@ define(['N/https', 'N/encode', 'N/log'],
         listIntelServices: listIntelServices,
         getCall: getCall,
         httpPostForm: httpPostForm,
+        httpGetJson: httpGetJson,
+        httpPostBody: httpPostBody,
+        httpDelete: httpDelete,
+        getApplication: getApplication,
+        setApplicationVoiceUrl: setApplicationVoiceUrl,
         upsertStudioFlow: upsertStudioFlow,
         setNumberVoiceUrl: setNumberVoiceUrl,
         DEFAULT_FLOW_NAME: DEFAULT_FLOW_NAME

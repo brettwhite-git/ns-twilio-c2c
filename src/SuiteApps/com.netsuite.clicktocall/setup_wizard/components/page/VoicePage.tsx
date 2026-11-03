@@ -10,6 +10,8 @@
  * Spike (2026-05-28) — DataGrid layout. The three voice fields now render in
  * a single DataGrid. The Value + Action cells switch into edit mode for the
  * row whose field matches state.console.voiceEditing.
+ *
+ * Below the grid: the Outbound recording notice section (OutboundNotice).
  */
 
 import {PureComponent} from '@uif-js/core';
@@ -20,6 +22,7 @@ import {Action} from '../../app/Action';
 import {loadVoiceLists, saveVoiceField} from '../../app/effects/voice';
 import type {AppState, ConsoleState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
+import OutboundNotice from './OutboundNotice';
 
 type VoiceField = NonNullable<ConsoleState['voiceEditing']>;
 type VoiceListKey = 'twimlApps' | 'phoneNumbers' | 'intelServices';
@@ -58,8 +61,8 @@ const FIELD_SPECS: VoiceFieldSpec[] = [
     {
         field: 'twimlAppSid',
         label: 'TwiML Application',
-        helpText: 'The Twilio application that handles outbound call routing. ' +
-            'The wizard registers this app\'s VoiceUrl with the CTC Suitelet.',
+        helpText: 'Outbound calls use this app. When you publish the recording ' +
+            'notice, the wizard points its Voice URL at a Twilio Function in your account.',
         docUrl: TWILIO_DOCS.twimlApp
     },
     {
@@ -329,6 +332,11 @@ export default class VoicePage extends PureComponent<PageTickProps, unknown> {
                         headerRowHeight: 40,
                         rootStyle: { width: '100%' }
                     } as never) as never}
+                </component.StackPanel.Item>
+            ),
+            (
+                <component.StackPanel.Item>
+                    <OutboundNotice tick={this.props.tick} />
                 </component.StackPanel.Item>
             )
         ].filter(Boolean);

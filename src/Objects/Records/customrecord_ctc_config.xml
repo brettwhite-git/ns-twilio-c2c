@@ -157,5 +157,97 @@
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_notice_on">
+            <label>Play Outbound Recording Notice</label>
+            <description>When checked (and the outbound Twilio Function is published), the person a rep calls hears the outbound recording notice after they answer and before the call is connected and recorded. Not checked by default.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultchecked>F</defaultchecked>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_notice">
+            <label>Outbound Recording Notice</label>
+            <description>Spoken to the called party on outbound calls, 300 characters or fewer. Blank means the built-in notice.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_notice_ver">
+            <label>Outbound Notice Version</label>
+            <description>Version of the outbound notice settings. The Setup Wizard adds 1 each time the notice text or the on/off setting changes. Blank means 1.</description>
+            <fieldtype>INTEGER</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_pub_notice_ver">
+            <label>Outbound Notice Version Live</label>
+            <description>Notice version that the last successful publish put live in Twilio. Blank or 0 means no notice plays. Written by the Setup Wizard; logCall copies it to the Phone Call.</description>
+            <fieldtype>INTEGER</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_fn_service">
+            <label>Outbound Function Service SID</label>
+            <description>SID (ZS...) of the Twilio Serverless service ctc-outbound that serves the outbound TwiML. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_fn_env">
+            <label>Outbound Function Environment SID</label>
+            <description>SID (ZE...) of the production environment of the ctc-outbound service. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_fn_build">
+            <label>Outbound Function Build SID</label>
+            <description>SID (ZB...) of the build that is deployed. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_fn_pending_build">
+            <label>Outbound Function Pending Build SID</label>
+            <description>SID (ZB...) of a build that was still running when a publish request ended. The next publish with resume finishes it. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_fn_domain">
+            <label>Outbound Function Domain</label>
+            <description>Domain of the ctc-outbound environment (for example ctc-outbound-1234-prod.twil.io). The TwiML App Voice URL is https://DOMAIN/dial. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_fn_code_ver">
+            <label>Outbound Function Code Version</label>
+            <description>Function code version (FN_CODE_VERSION) at the last publish. When it differs from the installed SuiteApp, the Setup Wizard asks for a republish.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_fn_hash">
+            <label>Outbound Function Code Hash</label>
+            <description>Hash of the Function code and runtime at the last publish. An unchanged hash skips the upload and build.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_prev_voiceurl">
+            <label>Previous TwiML App Voice URL</label>
+            <description>Voice URL of the TwiML App before the first publish of the outbound Function. Unpublish restores it.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_out_published_at">
+            <label>Outbound Function Published At</label>
+            <description>ISO 8601 time of the last successful publish of the outbound Function. Written by the Setup Wizard.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
     </customrecordcustomfields>
 </customrecordtype>

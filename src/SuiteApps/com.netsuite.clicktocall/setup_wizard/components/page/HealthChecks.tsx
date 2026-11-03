@@ -4,7 +4,8 @@
  * Recent activity block were removed; Deactivate lives in the quick
  * actions). Three sub-blocks stacked vertically:
  *   1. Preflight    — re-run button + DataGrid of check rows
- *   2. Drift        — DataGrid of 3 client-computed detector rows
+ *   2. Drift        — DataGrid of 4 detector rows (VoiceUrl + outbound
+ *                     notice version from wizardLoadOutbound)
  *   3. Phones       — read-only DataGrid of each rep's browser phone
  *                     (wizardLoadPresence) + Refresh button
  *
@@ -19,8 +20,9 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadPresence} from '../../app/effects/presence';
+import {loadOutbound} from '../../app/effects/outbound';
 import {wizardCall} from '../../services/wizardApi';
-import type {AppState, PresenceRow, PresenceState} from '../../app/InitialState';
+import type {AppState, OutboundState, PresenceRow, PresenceState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import {ErrorText} from '../shared/ErrorText';
 import {buildLastSeenCell, buildPhoneStatusCell} from '../shared/phoneStatus';
@@ -53,6 +55,8 @@ const statusToBadge = (status: string): { text: string; palette: { bg: string; f
         case 'warn': return { text: 'Warn', palette: { bg: '#FFF3CD', fg: '#856404', border: '#FFE69C' } };
         case 'info_enabled': return { text: 'Enabled', palette: { bg: '#CCE5FF', fg: '#004085', border: '#9FCDFF' } };
         case 'info_disabled': return { text: 'Disabled', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+        case 'unknown': return { text: 'Not checked', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
+        case 'not_published': return { text: 'Not published', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
         default: return { text: status || '—', palette: { bg: '#E2E3E5', fg: '#383D41', border: '#C7CACE' } };
     }
 };
@@ -67,9 +71,49 @@ const statusIcon = (status: string): { icon: unknown; color: unknown } => {
     }
 };
 
+/**
+ * The 'TwiML VoiceUrl' drift row: does the TwiML App's Voice URL point at
+ * the published outbound Function (drift.voiceUrl from wizardLoadOutbound)?
+ * 'unknown' shows as a neutral "Not checked", never as a pass.
+ */
+export const voiceUrlDriftRow = (drift: DriftSnapshot, outbound: OutboundState): CheckItem => {
+    const row = { label: 'TwiML VoiceUrl' };
+    if (outbound.loaded && !outbound.published) {
+        return { ...row, status: 'not_published', detail: '' };
+    }
+    if (drift.voiceUrl === 'pass') return { ...row, status: 'pass', detail: '' };
+    if (drift.voiceUrl === 'fail') {
+        return { ...row, status: 'fail', detail: 'Voice URL does not point at the published Function.' };
+    }
+    return { ...row, status: 'unknown', detail: '' };
+};
+
+/**
+ * The 'Outbound notice version' row: is the published Function the
+ * SuiteApp's current code version (needsRepublish from wizardLoadOutbound)?
+ */
+export const outboundVersionRow = (outbound: OutboundState): CheckItem => {
+    const row = { label: 'Outbound notice version' };
+    if (!outbound.loaded) return { ...row, status: 'unknown', detail: '' };
+    if (!outbound.published) return { ...row, status: 'not_published', detail: '' };
+    if (outbound.needsRepublish) {
+        return { ...row, status: 'warn', detail: 'A newer version is available. Republish on the Voice page.' };
+    }
+    return {
+        ...row,
+        status: 'pass',
+        detail: outbound.noticeVersion ? 'Notice v' + outbound.noticeVersion : ''
+    };
+};
+
 export default class HealthChecks extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
         loadPresence();
+        // The VoiceUrl drift row comes from the outbound notice load.
+        const outbound = (store.getState() as AppState).outbound;
+        if (!outbound.loaded && !outbound.loading) {
+            loadOutbound();
+        }
     }
 
     private buildPresenceColumns(nowMs: number): unknown[] {
@@ -247,7 +291,8 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
         const refreshing = !!c.preflightRefreshing;
 
         const driftRows: CheckItem[] = [
-            { label: 'TwiML VoiceUrl', status: drift.voiceUrl || 'pass', detail: drift.voiceUrl === 'fail' ? 'VoiceUrl does not match the wizard\'s expected Suitelet URL' : '' },
+            voiceUrlDriftRow(drift, state.outbound),
+            outboundVersionRow(state.outbound),
             { label: 'Phone numbers', status: drift.phoneNumbers || 'pass', detail: drift.phoneNumbers === 'fail' ? 'A configured Twilio number is missing from the account' : '' },
             { label: 'Intel Service', status: drift.intelService || 'info_enabled', detail: '' }
         ];
@@ -328,7 +373,7 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
         );
 
         /*
-         * Drift content — same flat-array pattern. driftRows always has 3
+         * Drift content — same flat-array pattern. driftRows always has 4
          * entries so always renders the DataGrid.
          */
         const driftContent: core.VDom.Node[] = [];
