@@ -56,6 +56,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
         PRESENCE_LOAD_SUCCESS: Symbol('presenceLoadSuccess'),
         PRESENCE_LOAD_FAILURE: Symbol('presenceLoadFailure'),
+        HEALTH_LOAD_START: Symbol('healthLoadStart'),
+        HEALTH_LOAD_SUCCESS: Symbol('healthLoadSuccess'),
+        HEALTH_LOAD_FAILURE: Symbol('healthLoadFailure'),
         OUTBOUND_LOAD_START: Symbol('outboundLoadStart'),
         OUTBOUND_LOAD_SUCCESS: Symbol('outboundLoadSuccess'),
         OUTBOUND_LOAD_FAILURE: Symbol('outboundLoadFailure'),
@@ -179,6 +182,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         },
         presenceLoadFailure(error) {
             return { type: ActionType.PRESENCE_LOAD_FAILURE, payload: { error } };
+        },
+        healthLoadStart() {
+            return { type: ActionType.HEALTH_LOAD_START, payload: null };
+        },
+        healthLoadSuccess(payload) {
+            return { type: ActionType.HEALTH_LOAD_SUCCESS, payload };
+        },
+        healthLoadFailure(error) {
+            return { type: ActionType.HEALTH_LOAD_FAILURE, payload: { error } };
         },
         outboundLoadStart() {
             return { type: ActionType.OUTBOUND_LOAD_START, payload: null };
@@ -477,6 +489,23 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     d.presence.loading = false;
                     d.presence.error = a.payload.error;
                 })],
+            [ActionType.HEALTH_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.health.loading = true;
+                    d.health.error = null;
+                })],
+            [ActionType.HEALTH_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    const p = a.payload;
+                    d.health.loading = false;
+                    d.health.loaded = true;
+                    d.health.error = null;
+                    d.health.checkedAt = p.checkedAt;
+                    d.health.signals = p.signals;
+                    d.health.attention = p.attention;
+                })],
+            [ActionType.HEALTH_LOAD_FAILURE, (s) => core.ImmutableUpdate.of(s, (d) => {
+                    d.health.loading = false;
+                    d.health.error = a.payload.error;
+                })],
             [ActionType.OUTBOUND_LOAD_START, (s) => core.ImmutableUpdate.of(s, (d) => {
                     d.outbound.loading = true;
                     d.outbound.loadError = null;
@@ -705,6 +734,14 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             error: null,
             items: [],
             clockSkewMs: 0
+        },
+        health: {
+            loaded: false,
+            loading: false,
+            error: null,
+            checkedAt: '',
+            signals: {},
+            attention: []
         },
         outbound: {
             loaded: false,
@@ -2409,6 +2446,61 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const SEVERITIES = ['ok', 'warn', 'problem', 'unknown'];
+    const toSeverity = (v) => (SEVERITIES.indexOf(v) !== -1 ? v : 'unknown');
+    const toAction = (v) => {
+        const a = (v || null);
+        if (!a || typeof a.label !== 'string' || typeof a.route !== 'string')
+            return undefined;
+        return { label: a.label, route: a.route };
+    };
+    const toSignal = (raw) => {
+        const r = (raw || {});
+        const out = {
+            key: String(r.key ?? ''),
+            title: String(r.title ?? ''),
+            value: r.value ?? null,
+            severity: toSeverity(r.severity),
+            detail: String(r.detail ?? '')
+        };
+        const action = toAction(r.action);
+        if (action)
+            out.action = action;
+        return out;
+    };
+    const toAttention = (raw) => {
+        const s = toSignal(raw);
+        const item = { key: s.key, title: s.title, severity: s.severity, detail: s.detail };
+        if (s.action)
+            item.action = s.action;
+        return item;
+    };
+    async function loadHealth() {
+        if (store.getState().health.loading)
+            return;
+        store.dispatch(Action.healthLoadStart());
+        try {
+            const result = (await wizardCall('wizardLoadHealth', {}));
+            if (!result || result.ok !== true) {
+                store.dispatch(Action.healthLoadFailure((result && (result.message || result.error)) || 'Could not load the health checks'));
+                return;
+            }
+            const signals = {};
+            Object.keys(result.signals || {}).forEach((k) => {
+                signals[k] = toSignal(result.signals[k]);
+            });
+            const attention = Array.isArray(result.attention) ? result.attention.map(toAttention) : [];
+            store.dispatch(Action.healthLoadSuccess({
+                checkedAt: String(result.checkedAt || ''),
+                signals,
+                attention
+            }));
+        }
+        catch (e) {
+            store.dispatch(Action.healthLoadFailure(e instanceof Error && e.message ? e.message : 'Could not load the health checks'));
+        }
+    }
+
     const PHONE_STATUS_RECEIVING = { label: 'Receiving calls', color: '#14B981' };
     const PHONE_STATUS_NOT_RECEIVING = { label: 'Not receiving calls', color: '#F4C76A' };
     const PHONE_STATUS_OFFLINE = { label: 'Offline', color: '#9CA3AF' };
@@ -2526,7 +2618,16 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             detail: outbound.publishedNoticeVersion ? 'Notice v' + outbound.publishedNoticeVersion : ''
         };
     };
-    const phoneNumbersDriftRow = (c) => {
+    const signalRow = (label, sig) => {
+        if (!sig || sig.severity === 'unknown')
+            return null;
+        const status = sig.severity === 'ok' ? 'pass' : sig.severity === 'problem' ? 'fail' : 'warn';
+        return { label, status, detail: sig.detail };
+    };
+    const phoneNumbersDriftRow = (c, health) => {
+        const fromSignal = signalRow('Phone numbers', health && health.signals.numberRouting);
+        if (fromSignal)
+            return fromSignal;
         const row = { label: 'Phone numbers' };
         const numbers = c.phonesNumbers;
         if (c.phonesListError) {
@@ -2563,7 +2664,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
         return { ...row, status: 'fail', detail: 'Not in the Twilio account: ' + missing.join(', ') };
     };
-    const intelDriftRow = (c) => {
+    const intelDriftRow = (c, health) => {
+        const fromSignal = signalRow('Intelligence service', health && health.signals.intelligence);
+        if (fromSignal)
+            return fromSignal;
         const row = { label: 'Intelligence service' };
         const snap = (c.snapshot || {});
         if (c.snapshot && !snap.intelServiceSid) {
@@ -2580,6 +2684,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     class HealthChecks extends core.PureComponent {
         componentDidMount() {
             loadPresence();
+            loadHealth();
             const outbound = store.getState().outbound;
             if (!outbound.loaded && !outbound.loading) {
                 loadOutbound();
@@ -2756,8 +2861,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const driftRows = [
                 voiceUrlDriftRow(drift, state.outbound),
                 outboundVersionRow(state.outbound),
-                phoneNumbersDriftRow(c),
-                intelDriftRow(c)
+                phoneNumbersDriftRow(c, state.health),
+                intelDriftRow(c, state.health)
             ];
             const columns = this.buildCheckColumns();
             const phonesContent = this.buildPhonesContent(state.presence);
@@ -2916,9 +3021,40 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             }
             return out;
         }
+        handleAttentionAction = (route) => {
+            const r = parseHash(route);
+            if (r && r.kind === 'section')
+                this.handleNav(r.section);
+        };
+        renderAttention(items) {
+            if (!items.length)
+                return null;
+            const rows = [
+                jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Heading, { level: 3, children: "Needs attention" }) })
+            ];
+            items.forEach((item) => {
+                const action = item.action;
+                rows.push(jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, alignment: component__namespace.StackPanel.Alignment.CENTER, children: [
+                            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: new component__namespace.Image({
+                                    image: item.severity === 'problem'
+                                        ? core__namespace.SystemIcon.STATUS_ERROR_FILLED
+                                        : core__namespace.SystemIcon.STATUS_WARNING_FILLED,
+                                    size: component__namespace.Image.Size.S,
+                                    color: item.severity === 'problem'
+                                        ? core__namespace.ImageConstant.Color.DANGER
+                                        : core__namespace.ImageConstant.Color.WARNING,
+                                    presentation: true
+                                }) })),
+                            (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.STRONG, children: item.title }) })),
+                            action ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: action.label, action: () => this.handleAttentionAction(action.route) }) })) : null
+                        ].filter(Boolean) }) }));
+            });
+            return (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, children: rows }) }));
+        }
         render() {
             const state = store.getState();
             const c = state.console;
+            const attention = this.renderAttention(state.health.attention);
             const snap = (c.snapshot || {});
             const assignments = (c.assignments || []);
             const preflight = (c.preflight || []);
@@ -2937,7 +3073,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 : snap.active === false ? core__namespace.SystemIcon.STATUS_WARNING_FILLED
                     : core__namespace.SystemIcon.STATUS_INFO_FILLED;
             const statusTone = snap.active === true ? 'success' : snap.active === false ? 'warning' : 'info';
-            return (jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr 1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Status", metric: statusLabel, description: snap.active === false
+            return (jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.L, children: [
+                    attention,
+                    (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "1fr 1fr 1fr 1fr", rows: "auto", columnGap: component__namespace.GridPanel.GapSize.M, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Status", metric: statusLabel, description: snap.active === false
                                             ? 'Reps cannot place calls'
                                             : 'Reps can place calls', icon: statusIcon, tone: statusTone }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(StatCard, { title: "Phone numbers", metric: assignmentsPending ? '…' : String(phonesConfigured), description: assignmentsPending ? 'Loading…'
                                             : phonesConfigured === 0
@@ -2951,7 +3089,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                                                 : '—', description: preflightPending ? 'Running checks…'
                                             : preflightTotal > 0
                                                 ? 'See checks below'
-                                                : c.preflightError ? 'Did not run' : 'Not yet run' }) })] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
+                                                : c.preflightError ? 'Did not run' : 'Not yet run' }) })] }) })),
+                    (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.S, rootStyle: {
                                 border: '1px solid #E2E3E5',
                                 borderRadius: '8px',
                                 padding: '18px 22px',
@@ -2960,7 +3099,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Text, { type: component__namespace.Text.Type.WEAK, size: component__namespace.Text.Size.S, children: "Common admin tasks \u2014 full screens still available via the left rail." }) })),
                                 (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Manage phone numbers", startIcon: core__namespace.SystemIcon.CALL, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Reassign reps", startIcon: core__namespace.SystemIcon.GROUPS, action: () => this.handleNav('phones') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Update voice config", startIcon: core__namespace.SystemIcon.SETTINGS, action: () => this.handleNav('voice') }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "API key rotation guide", startIcon: core__namespace.SystemIcon.LOCK, action: () => this.handleNav('credentials') }) }), snap.active === false ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: c.reactivating ? 'Reactivating…' : 'Reactivate', type: component__namespace.Button.Type.PRIMARY, startIcon: core__namespace.SystemIcon.PLAY, enabled: !c.reactivating, action: this.handleReactivate }) })) : c.pendingDeactivateConfirm ? (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsxs(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.HORIZONTAL, itemGap: component__namespace.StackPanel.GapSize.S, children: [jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Cancel", enabled: !c.deactivating, action: this.handleCancelDeactivate }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: c.deactivating ? 'Deactivating…' : 'Confirm deactivate', type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, enabled: !c.deactivating, action: this.handleDeactivate }) })] }) })) : (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(component__namespace.Button, { label: "Deactivate", type: component__namespace.Button.Type.DANGER, startIcon: core__namespace.SystemIcon.STOP, action: this.handleRequestDeactivate }) }))] }) })),
                                 ...this.renderActionErrors(c)
-                            ] }) }), jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(HealthChecks, { tick: this.props.tick }) })] }));
+                            ] }) })),
+                    (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(HealthChecks, { tick: this.props.tick }) }))
+                ].filter(Boolean) }));
         }
     }
 

@@ -196,7 +196,10 @@ define(['N/https', 'N/encode', 'N/log'],
                     sid: n.sid,
                     phoneNumber: n.phone_number,
                     friendlyName: n.friendly_name,
-                    capabilities: n.capabilities
+                    capabilities: n.capabilities,
+                    // Where Twilio sends the number's calls (health:
+                    // is it on the published routing flow?).
+                    voiceUrl: n.voice_url || ''
                 };
             }),
             hasMore: !!(result.body && result.body.next_page_uri)
@@ -205,6 +208,7 @@ define(['N/https', 'N/encode', 'N/log'],
 
     /**
      * GET intelligence.twilio.com/v2/Services — list Intel services.
+     * Items: { sid, friendlyName, languageCode, autoTranscribe }.
      */
     const listIntelServices = (cfg) => {
         const url = TWILIO_INTEL_BASE + '/Services?PageSize=' + LIST_PAGE_SIZE;
@@ -224,7 +228,10 @@ define(['N/https', 'N/encode', 'N/log'],
                 return {
                     sid: s.sid,
                     friendlyName: s.friendly_name,
-                    languageCode: s.language_code
+                    languageCode: s.language_code,
+                    // true / false from Twilio; null when Twilio did not
+                    // send the field. Off = recordings are not transcribed.
+                    autoTranscribe: typeof s.auto_transcribe === 'boolean' ? s.auto_transcribe : null
                 };
             })
         };

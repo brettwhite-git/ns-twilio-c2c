@@ -249,5 +249,12 @@
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_routing_state">
+            <label>Inbound Routing State</label>
+            <description>JSON written after each inbound routing publish: result (ok, partial or failed), hashes of the published routing, routed numbers and reps, flow revision and times. The Setup Wizard health check compares it with the current rep assignments. Do not edit.</description>
+            <fieldtype>CLOBTEXT</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
     </customrecordcustomfields>
 </customrecordtype>

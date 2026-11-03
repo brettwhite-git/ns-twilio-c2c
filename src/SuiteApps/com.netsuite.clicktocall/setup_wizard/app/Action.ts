@@ -26,7 +26,9 @@ import type {
     InboundSettings,
     OutboundSnapshot,
     OutboundStep,
-    PresenceRow
+    PresenceRow,
+    HealthSignal,
+    HealthAttentionItem
 } from './InitialState';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -82,6 +84,11 @@ const ActionType = {
     PRESENCE_LOAD_START: Symbol('presenceLoadStart'),
     PRESENCE_LOAD_SUCCESS: Symbol('presenceLoadSuccess'),
     PRESENCE_LOAD_FAILURE: Symbol('presenceLoadFailure'),
+
+    // Health read model (wizardLoadHealth)
+    HEALTH_LOAD_START: Symbol('healthLoadStart'),
+    HEALTH_LOAD_SUCCESS: Symbol('healthLoadSuccess'),
+    HEALTH_LOAD_FAILURE: Symbol('healthLoadFailure'),
 
     // Outbound recording notice (Voice page)
     OUTBOUND_LOAD_START: Symbol('outboundLoadStart'),
@@ -334,6 +341,27 @@ interface PresenceLoadFailureAction {
     payload: { error: string };
 }
 
+export interface HealthLoadPayload {
+    checkedAt: string;
+    signals: Record<string, HealthSignal>;
+    attention: HealthAttentionItem[];
+}
+
+interface HealthLoadStartAction {
+    type: typeof ActionType.HEALTH_LOAD_START;
+    payload: null;
+}
+
+interface HealthLoadSuccessAction {
+    type: typeof ActionType.HEALTH_LOAD_SUCCESS;
+    payload: HealthLoadPayload;
+}
+
+interface HealthLoadFailureAction {
+    type: typeof ActionType.HEALTH_LOAD_FAILURE;
+    payload: { error: string };
+}
+
 interface OutboundLoadStartAction {
     type: typeof ActionType.OUTBOUND_LOAD_START;
     payload: null;
@@ -485,6 +513,9 @@ export type AppAction =
     | PresenceLoadStartAction
     | PresenceLoadSuccessAction
     | PresenceLoadFailureAction
+    | HealthLoadStartAction
+    | HealthLoadSuccessAction
+    | HealthLoadFailureAction
     | OutboundLoadStartAction
     | OutboundLoadSuccessAction
     | OutboundLoadFailureAction
@@ -623,6 +654,16 @@ const Action = {
     },
     presenceLoadFailure(error: string): PresenceLoadFailureAction {
         return { type: ActionType.PRESENCE_LOAD_FAILURE, payload: { error } };
+    },
+
+    healthLoadStart(): HealthLoadStartAction {
+        return { type: ActionType.HEALTH_LOAD_START, payload: null };
+    },
+    healthLoadSuccess(payload: HealthLoadPayload): HealthLoadSuccessAction {
+        return { type: ActionType.HEALTH_LOAD_SUCCESS, payload };
+    },
+    healthLoadFailure(error: string): HealthLoadFailureAction {
+        return { type: ActionType.HEALTH_LOAD_FAILURE, payload: { error } };
     },
 
     outboundLoadStart(): OutboundLoadStartAction {

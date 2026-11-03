@@ -280,9 +280,64 @@ define(['N/search', 'N/record', 'N/log'], (search, record, log) => {
         return Object.assign(cfg, readOutbound(cfg.id));
     };
 
+    // Inbound routing state (2026-11-03, Phase 1 health read model): a JSON
+    // record of the last publish attempt, written by
+    // lib/ctc_inbound_routing.publishRouting and read by lib/ctc_health.
+    // Like the outbound fields, it is read with record.load and is NEVER a
+    // loadConfig search column (a new column broke the phone path once).
+    const ROUTING_STATE_FIELD = 'custrecord_ctc_routing_state';
+
+    /**
+     * Read the stored routing state. record.load (2 units); never throws.
+     *   { ok: true, state: Object }   the stored JSON object
+     *   { ok: true, state: null }     nothing stored yet (never published
+     *                                 since change tracking was added)
+     *   { ok: false, error }          the field or the JSON is unreadable
+     * @param {string|number} id - config record internal id
+     */
+    const readRoutingState = (id) => {
+        let raw;
+        try {
+            const rec = record.load({ type: 'customrecord_ctc_config', id: id });
+            raw = rec.getValue({ fieldId: ROUTING_STATE_FIELD });
+        } catch (e) {
+            log.error({ title: 'CTC config — routing state unreadable', details: (e && e.message) || String(e) });
+            return { ok: false, error: 'routing_state_unreadable' };
+        }
+        const s = raw == null ? '' : String(raw).trim();
+        if (!s) return { ok: true, state: null };
+        try {
+            const parsed = JSON.parse(s);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { ok: true, state: parsed };
+        } catch (e) { /* falls through */ }
+        log.error({ title: 'CTC config — routing state is not a JSON object', details: 'length=' + s.length });
+        return { ok: false, error: 'routing_state_invalid' };
+    };
+
+    /**
+     * Store the routing state JSON. record.submitFields (2 units). Never
+     * throws: a failed write must not change a publish result.
+     * @returns {boolean} true when saved
+     */
+    const writeRoutingState = (id, state) => {
+        try {
+            record.submitFields({
+                type: 'customrecord_ctc_config',
+                id: id,
+                values: { [ROUTING_STATE_FIELD]: JSON.stringify(state) }
+            });
+            return true;
+        } catch (e) {
+            log.error({ title: 'CTC config — routing state not saved', details: (e && e.message) || String(e) });
+            return false;
+        }
+    };
+
     return {
         loadOutboundConfig,
         loadConfig,
+        readRoutingState,
+        writeRoutingState,
         DEFAULT_RING_SECONDS,
         MIN_RING_SECONDS,
         MAX_RING_SECONDS,

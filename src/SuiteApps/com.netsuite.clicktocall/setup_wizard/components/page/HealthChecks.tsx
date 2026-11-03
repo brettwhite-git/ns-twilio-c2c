@@ -5,7 +5,8 @@
  * actions). Three sub-blocks stacked vertically:
  *   1. Preflight    — re-run button + DataGrid of check rows
  *   2. Drift        — DataGrid of 4 detector rows (VoiceUrl + outbound
- *                     notice version from wizardLoadOutbound)
+ *                     notice version from wizardLoadOutbound; Phone
+ *                     numbers + Intelligence service from wizardLoadHealth)
  *   3. Phones       — read-only DataGrid of each rep's browser phone
  *                     (wizardLoadPresence) + Refresh button
  *
@@ -21,8 +22,9 @@ import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
 import {loadPresence} from '../../app/effects/presence';
 import {loadOutbound} from '../../app/effects/outbound';
+import {loadHealth} from '../../app/effects/health';
 import {wizardCall} from '../../services/wizardApi';
-import type {AppState, OutboundState, PresenceRow, PresenceState} from '../../app/InitialState';
+import type {AppState, HealthSignal, HealthState, OutboundState, PresenceRow, PresenceState} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import {ErrorText} from '../shared/ErrorText';
 import {buildLastSeenCell, buildPhoneStatusCell} from '../shared/phoneStatus';
@@ -133,12 +135,27 @@ export const outboundVersionRow = (outbound: OutboundState): CheckItem => {
 };
 
 /**
- * The 'Phone numbers' drift row: are the default caller ID and every
- * assigned number still in the Twilio account? Computed from data the
- * console already has (the Phones & reps Twilio list); without that
- * list the row is a neutral "Not checked", never a pass.
+ * A health signal (wizardLoadHealth) as a drift row status, or null when
+ * the signal is missing or 'unknown' (the caller then falls back to the
+ * data the console already has).
  */
-export const phoneNumbersDriftRow = (c: AppState['console']): CheckItem => {
+export const signalRow = (label: string, sig: HealthSignal | undefined): CheckItem | null => {
+    if (!sig || sig.severity === 'unknown') return null;
+    const status = sig.severity === 'ok' ? 'pass' : sig.severity === 'problem' ? 'fail' : 'warn';
+    return { label, status, detail: sig.detail };
+};
+
+/**
+ * The 'Phone numbers' drift row: are the default caller ID and every
+ * routed number still in the Twilio account, and (inbound on) on the
+ * routing flow? Uses the health signal numberRouting (one Twilio list
+ * read by wizardLoadHealth). Without it, computed from data the console
+ * already has (the Phones & reps Twilio list); without that list the
+ * row is a neutral "Not checked", never a pass.
+ */
+export const phoneNumbersDriftRow = (c: AppState['console'], health?: HealthState): CheckItem => {
+    const fromSignal = signalRow('Phone numbers', health && health.signals.numberRouting);
+    if (fromSignal) return fromSignal;
     const row = { label: 'Phone numbers' };
     const numbers = c.phonesNumbers as TwilioNumber[] | null;
     if (c.phonesListError) {
@@ -173,10 +190,13 @@ export const phoneNumbersDriftRow = (c: AppState['console']): CheckItem => {
 
 /**
  * The 'Intelligence service' drift row: is the saved service in the
- * Twilio account? Only with real data (the Voice page's Twilio list);
- * else a neutral "Not checked".
+ * Twilio account with auto-transcribe on? Uses the health signal
+ * intelligence (wizardLoadHealth). Without it, only with real data (the
+ * Voice page's Twilio list); else a neutral "Not checked".
  */
-export const intelDriftRow = (c: AppState['console']): CheckItem => {
+export const intelDriftRow = (c: AppState['console'], health?: HealthState): CheckItem => {
+    const fromSignal = signalRow('Intelligence service', health && health.signals.intelligence);
+    if (fromSignal) return fromSignal;
     const row = { label: 'Intelligence service' };
     const snap = (c.snapshot || {}) as ConfigSnapshot;
     if (c.snapshot && !snap.intelServiceSid) {
@@ -194,6 +214,9 @@ export const intelDriftRow = (c: AppState['console']): CheckItem => {
 export default class HealthChecks extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
         loadPresence();
+        // Health read model: Phone numbers + Intelligence rows here, and
+        // the Overview "Needs attention" list.
+        loadHealth();
         // The VoiceUrl drift row comes from the outbound notice load.
         const outbound = (store.getState() as AppState).outbound;
         if (!outbound.loaded && !outbound.loading) {
@@ -385,8 +408,8 @@ export default class HealthChecks extends PureComponent<PageTickProps, unknown> 
         const driftRows: CheckItem[] = [
             voiceUrlDriftRow(drift, state.outbound),
             outboundVersionRow(state.outbound),
-            phoneNumbersDriftRow(c),
-            intelDriftRow(c)
+            phoneNumbersDriftRow(c, state.health),
+            intelDriftRow(c, state.health)
         ];
 
         const columns = this.buildCheckColumns();

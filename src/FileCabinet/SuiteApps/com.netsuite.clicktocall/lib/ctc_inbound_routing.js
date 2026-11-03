@@ -11,6 +11,10 @@
  *   publishRouting: create/update the flow, store its SID on the config
  *   record, point each routed number's VoiceUrl at the flow, and only
  *   when every number is pointed store the publish time.
+ *   Every attempt (ok / partial / failed) also stores the routing state
+ *   JSON (custrecord_ctc_routing_state, buildRoutingState): the hashes of
+ *   what was published, so lib/ctc_health can tell "routing changed after
+ *   the last publish" with no Twilio call (routingHashes on read).
  *
  * Flow shape (per route n):
  *   Trigger ─incomingCall─▶ split_dialed ─To == route n─▶ ring_n
@@ -50,10 +54,15 @@
  */
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/search', 'N/record', 'N/runtime', 'N/log',
-        './ctc_config', './ctc_twilio_admin'],
-       (search, record, runtime, log, config, twilio) => {
+        './ctc_config', './ctc_twilio_admin', './ctc_hash'],
+       (search, record, runtime, log, config, twilio, hash) => {
 
     const MAX_ROUTES = 50;
+    // Bump when buildFlowDefinition's output changes for the same inputs,
+    // so the health read model says "update available", not "routing
+    // changed" (it is part of flowHash and stored in the routing state).
+    const FLOW_BUILDER_VERSION = '1';
+    const ROUTING_STATE_VERSION = 1;
     const FLOW_FRIENDLY_NAME = 'CTC Inbound Routing';
     // Units kept in reserve before each number update (https.post = 10).
     const MIN_USAGE_PER_NUMBER = 100;
@@ -380,6 +389,126 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
 
     const errMessage = (e) => (e && e.message ? e.message : String(e));
 
+    /** Pure. buildFlowDefinition options from a loadConfig() result. */
+    const flowOptions = (cfg) => ({
+        ringSeconds: cfg.ringSeconds,
+        noAnswerMessage: cfg.noAnswerMessage,
+        recordInbound: cfg.recordInbound === true,
+        recordingNoticeOn: cfg.recordingNoticeOn === true,
+        recordingNotice: cfg.recordingNotice,
+        voicemailOn: cfg.voicemailOn === true,
+        voicemailMaxSeconds: cfg.voicemailMaxSeconds
+    });
+
+    /**
+     * Pure. Hashes of the routing that NetSuite would publish now.
+     *   routesHash  "who rings which number": the routes in order,
+     *               [[phoneSid, e164, employeeId], ...].
+     *   flowHash    everything Twilio runs: FLOW_BUILDER_VERSION + the
+     *               flow definition (ring time, messages, recording,
+     *               notice, voicemail) + the routed phone SIDs, sorted.
+     *               '' when the definition cannot be built (> MAX_ROUTES).
+     * The definition has no time stamp (the CommitMessage time is outside
+     * it), so the same inputs always give the same hashes.
+     *
+     * @param {Array<{phoneSid: string, phoneNumber: string, employeeId: string}>} routes
+     * @param {Object} cfg - loadConfig() result (inbound settings)
+     * @returns {{builderVersion: string, routesHash: string, flowHash: string}}
+     */
+    const routingHashes = (routes, cfg) => {
+        const list = Array.isArray(routes) ? routes : [];
+        const routesHash = hash.hashString(JSON.stringify(list.map((r) =>
+            [String(r.phoneSid || ''), String(r.phoneNumber || ''), String(r.employeeId || '')])));
+        let flowHash = '';
+        try {
+            const definition = buildFlowDefinition(list, flowOptions(cfg || {}));
+            const sids = list.map((r) => String(r.phoneSid || '')).sort().join(',');
+            flowHash = hash.hashString(FLOW_BUILDER_VERSION + '|' + JSON.stringify(definition) + '|' + sids);
+        } catch (e) {
+            flowHash = '';
+        }
+        return { builderVersion: FLOW_BUILDER_VERSION, routesHash: routesHash, flowHash: flowHash };
+    };
+
+    /**
+     * Pure. The routing state JSON stored after a publish attempt.
+     *
+     *   { v, builderVersion, flowHash, routesHash,
+     *     routes: [{ phoneSid, employeeId }], flowSid, revision,
+     *     result: 'ok' | 'partial' | 'failed', message, failedNumbers: [e164],
+     *     at: <ISO time of this attempt>, publishedAt: <ISO time of the
+     *     last attempt where every number was pointed, '' if none> }
+     *
+     * ok / partial describe what is live now (the flow was published), so
+     * they store the new hashes and routes. failed keeps the previous
+     * hashes, routes, flow SID and revision (they still describe what is
+     * live) and records only result, message and time.
+     *
+     * @param {Object|null} prev - the stored state, or null
+     * @param {{result: string, at: string, message?: string,
+     *          routes?: Array<Object>, hashes?: Object, flowSid?: string,
+     *          revision?: *, failedNumbers?: string[]}} attempt
+     * @returns {Object}
+     */
+    const buildRoutingState = (prev, attempt) => {
+        const p = prev && typeof prev === 'object' ? prev : {};
+        const a = attempt || { result: 'failed', at: '' };
+        if (a.result === 'failed') {
+            return {
+                v: ROUTING_STATE_VERSION,
+                builderVersion: p.builderVersion || '',
+                flowHash: p.flowHash || '',
+                routesHash: p.routesHash || '',
+                routes: Array.isArray(p.routes) ? p.routes : [],
+                flowSid: p.flowSid || '',
+                revision: p.revision == null ? null : p.revision,
+                result: 'failed',
+                message: a.message || '',
+                failedNumbers: [],
+                at: a.at,
+                publishedAt: p.publishedAt || ''
+            };
+        }
+        const h = a.hashes || {};
+        return {
+            v: ROUTING_STATE_VERSION,
+            builderVersion: h.builderVersion || FLOW_BUILDER_VERSION,
+            flowHash: h.flowHash || '',
+            routesHash: h.routesHash || '',
+            routes: (a.routes || []).map((r) => ({ phoneSid: String(r.phoneSid || ''),
+                                                   employeeId: String(r.employeeId || '') })),
+            flowSid: a.flowSid || '',
+            revision: a.revision == null ? null : a.revision,
+            result: a.result === 'ok' ? 'ok' : 'partial',
+            message: a.message || '',
+            failedNumbers: a.result === 'ok' ? [] : (a.failedNumbers || []),
+            at: a.at,
+            publishedAt: a.result === 'ok' ? a.at : (p.publishedAt || '')
+        };
+    };
+
+    /**
+     * Store the routing state for this attempt. Reads the previous state
+     * only for partial / failed (record.load, 2 units); writes once
+     * (submitFields, 2 units). Never throws and never changes the publish
+     * result: the state is for the health read model only.
+     */
+    const saveRoutingState = (cfg, attempt) => {
+        try {
+            let prev = null;
+            if (attempt.result !== 'ok') {
+                const read = config.readRoutingState(cfg.id);
+                prev = read && read.ok ? read.state : null;
+            }
+            const saved = config.writeRoutingState(cfg.id, buildRoutingState(prev, attempt));
+            if (!saved) {
+                log.error({ title: 'CTC Inbound — routing state not saved', details: 'result=' + attempt.result });
+            }
+        } catch (e) {
+            log.error({ title: 'CTC Inbound — routing state not saved', details: errMessage(e) });
+        }
+    };
+
     /**
      * Publish the inbound routing flow and point the routed numbers at it.
      *
@@ -395,6 +524,10 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
      *                           could not be saved); message says why.
      * Inbound off: { ok:false, skipped:'inbound_off' } with no Twilio call
      * (the numbers keep pointing at the flow; SPEC Inbound).
+     *
+     * After every attempt except inbound off and "Configuration not found",
+     * the routing state JSON is stored (saveRoutingState: ok / partial /
+     * failed; 2-4 units). Its write never changes the result.
      *
      * @returns {{ok: boolean, skipped?: string, partial?: boolean,
      *            message?: string, flowSid?: string, publishedAt?: string,
@@ -412,14 +545,17 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
 
         if (!cfg.inboundEnabled) return { ok: false, skipped: 'inbound_off' };
 
-        const failed = (message) => ({
-            ok: false,
-            message: message,
-            flowSid: cfg.studioFlowSid || '',
-            publishedAt: cfg.routingPublishedAt || '',
-            numbersUpdated: 0,
-            errors: []
-        });
+        const failed = (message) => {
+            saveRoutingState(cfg, { result: 'failed', message: message, at: new Date().toISOString() });
+            return {
+                ok: false,
+                message: message,
+                flowSid: cfg.studioFlowSid || '',
+                publishedAt: cfg.routingPublishedAt || '',
+                numbersUpdated: 0,
+                errors: []
+            };
+        };
 
         let routes;
         try { routes = loadRoutes(); }
@@ -432,15 +568,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
                           MAX_ROUTES + '.');
         }
 
-        const definition = buildFlowDefinition(routes, {
-            ringSeconds: cfg.ringSeconds,
-            noAnswerMessage: cfg.noAnswerMessage,
-            recordInbound: cfg.recordInbound === true,
-            recordingNoticeOn: cfg.recordingNoticeOn === true,
-            recordingNotice: cfg.recordingNotice,
-            voicemailOn: cfg.voicemailOn === true,
-            voicemailMaxSeconds: cfg.voicemailMaxSeconds
-        });
+        const definition = buildFlowDefinition(routes, flowOptions(cfg));
 
         const flow = twilio.upsertStudioFlow(cfg, cfg.studioFlowSid, definition, FLOW_FRIENDLY_NAME);
         if (!flow.ok) {
@@ -502,26 +630,42 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
                      ' errors=' + errors.length
         });
 
+        // What is live now (ok / partial): stored in the routing state.
+        const live = {
+            routes: routes,
+            hashes: routingHashes(routes, cfg),
+            flowSid: flowSid,
+            revision: flow.revision
+        };
+
         // 3a. Partial: the flow is live, some numbers are not on it. The
         // previous published time stays (a partial publish never looks complete).
         if (errors.length > 0) {
             const n = errors.length;
+            const message = 'Routing is only partly published: ' + n +
+                            (n === 1 ? ' number was' : ' numbers were') +
+                            ' not updated. Publish again.';
+            const failedNumbers = errors.map((e) => e.phoneNumber);
+            saveRoutingState(cfg, Object.assign({ result: 'partial', message: message,
+                failedNumbers: failedNumbers, at: new Date().toISOString() }, live));
             return {
                 ok: false,
                 partial: true,
-                message: 'Routing is only partly published: ' + n +
-                         (n === 1 ? ' number was' : ' numbers were') +
-                         ' not updated. Publish again.',
+                message: message,
                 flowSid: flowSid,
                 publishedAt: cfg.routingPublishedAt || '',
                 numbersUpdated: numbersUpdated,
                 errors: errors,
-                failedNumbers: errors.map((e) => e.phoneNumber)
+                failedNumbers: failedNumbers
             };
         }
 
         // 3b. Every number points at the flow: only now record the publish time.
+        // The routing state is written after it, on its own (a failed state
+        // write never changes the result). If the publish time cannot be
+        // saved, the state still says 'ok': every number is on the flow.
         const publishedAt = new Date().toISOString();
+        const okState = Object.assign({ result: 'ok', at: publishedAt }, live);
         try {
             record.submitFields({
                 type: 'customrecord_ctc_config',
@@ -530,6 +674,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
             });
         } catch (e) {
             log.error({ title: 'CTC Inbound — save publish time failed', details: errMessage(e) });
+            saveRoutingState(cfg, okState);
             return {
                 ok: false,
                 message: 'Every number points at the flow, but NetSuite could not save ' +
@@ -541,6 +686,7 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
             };
         }
 
+        saveRoutingState(cfg, okState);
         return {
             ok: true,
             flowSid: flowSid,
@@ -552,10 +698,14 @@ define(['N/search', 'N/record', 'N/runtime', 'N/log',
 
     return {
         MAX_ROUTES,
+        FLOW_BUILDER_VERSION,
         toE164,
         routesFromAssignments,
         loadRoutes,
         buildFlowDefinition,
+        flowOptions,
+        routingHashes,
+        buildRoutingState,
         publishRouting
     };
 });

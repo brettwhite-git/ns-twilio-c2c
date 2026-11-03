@@ -31,6 +31,7 @@ import type {
     PresenceRow
 } from './InitialState';
 import type {
+    HealthLoadPayload,
     InboundLoadPayload,
     InboundRoutesPayload,
     OutboundFields,
@@ -301,6 +302,25 @@ export default function reducer(state: AppState, action: AppAction): AppState {
         [ActionType.PRESENCE_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
             d.presence.loading = false;
             d.presence.error = (a.payload as { error: string }).error;
+        })],
+
+        // ── Health read model ──────────────────────────────────────
+        [ActionType.HEALTH_LOAD_START, (s) => ImmutableUpdate.of(s, (d) => {
+            d.health.loading = true;
+            d.health.error = null;
+        })],
+        [ActionType.HEALTH_LOAD_SUCCESS, (s) => ImmutableUpdate.of(s, (d) => {
+            const p = a.payload as HealthLoadPayload;
+            d.health.loading = false;
+            d.health.loaded = true;
+            d.health.error = null;
+            d.health.checkedAt = p.checkedAt;
+            d.health.signals = p.signals;
+            d.health.attention = p.attention;
+        })],
+        [ActionType.HEALTH_LOAD_FAILURE, (s) => ImmutableUpdate.of(s, (d) => {
+            d.health.loading = false;
+            d.health.error = (a.payload as { error: string }).error;
         })],
 
         // ── Outbound recording notice ──────────────────────────────

@@ -3,6 +3,8 @@
  *
  * Phase 4 (2026-05-28) — JSX rewrite of components/sections/overview.ts.
  * Three blocks stacked vertically:
+ *   0. Needs attention   — problem / warn signals from wizardLoadHealth
+ *                          (title + one action button); hidden when none
  *   1. Stat-card grid    — 4 KPI cards (status, phones, reps, preflight)
  *   2. Quick actions     — row of 5 deep-link buttons
  *   3. Health checks     — preflight, drift, phones (HealthChecks)
@@ -13,9 +15,9 @@ import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {Action} from '../../app/Action';
-import {goToSection} from '../../app/effects/navigation';
+import {goToSection, parseHash} from '../../app/effects/navigation';
 import {deactivate, reactivate} from '../../app/effects/console';
-import type {AppState, SectionName} from '../../app/InitialState';
+import type {AppState, HealthAttentionItem, SectionName} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import HealthChecks from './HealthChecks';
 import {formatPhone} from '../shared/formatPhone';
@@ -176,9 +178,80 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
         return out;
     }
 
+    /** Open the page a health action names (a hash like '#/inbound'). */
+    private handleAttentionAction = (route: string): void => {
+        const r = parseHash(route);
+        if (r && r.kind === 'section') this.handleNav(r.section);
+    };
+
+    /**
+     * "Needs attention": one row per problem / warn signal (title + its
+     * action button). Nothing when the health load has not landed or all
+     * signals are ok / unknown. Phase 2 redesigns this block.
+     */
+    private renderAttention(items: HealthAttentionItem[]): core.VDom.Node | null {
+        if (!items.length) return null;
+        const rows: core.VDom.Node[] = [
+            <component.StackPanel.Item>
+                <component.Heading level={3}>Needs attention</component.Heading>
+            </component.StackPanel.Item>
+        ];
+        items.forEach((item) => {
+            const action = item.action;
+            rows.push(
+                <component.StackPanel.Item>
+                    <component.StackPanel
+                        orientation={component.StackPanel.Orientation.HORIZONTAL}
+                        itemGap={component.StackPanel.GapSize.S}
+                        alignment={component.StackPanel.Alignment.CENTER}
+                    >
+                        {[
+                            (<component.StackPanel.Item>
+                                {new component.Image({
+                                    image: item.severity === 'problem'
+                                        ? core.SystemIcon.STATUS_ERROR_FILLED
+                                        : core.SystemIcon.STATUS_WARNING_FILLED,
+                                    size: component.Image.Size.S,
+                                    color: item.severity === 'problem'
+                                        ? core.ImageConstant.Color.DANGER
+                                        : core.ImageConstant.Color.WARNING,
+                                    presentation: true
+                                } as never) as never}
+                            </component.StackPanel.Item>),
+                            (<component.StackPanel.Item>
+                                <component.Text type={component.Text.Type.STRONG}>
+                                    {item.title}
+                                </component.Text>
+                            </component.StackPanel.Item>),
+                            action ? (
+                                <component.StackPanel.Item>
+                                    <component.Button
+                                        label={action.label}
+                                        action={(): void => this.handleAttentionAction(action.route)}
+                                    />
+                                </component.StackPanel.Item>
+                            ) : null
+                        ].filter(Boolean) as never}
+                    </component.StackPanel>
+                </component.StackPanel.Item>
+            );
+        });
+        return (
+            <component.StackPanel.Item>
+                <component.StackPanel
+                    orientation={component.StackPanel.Orientation.VERTICAL}
+                    itemGap={component.StackPanel.GapSize.S}
+                >
+                    {rows as never}
+                </component.StackPanel>
+            </component.StackPanel.Item>
+        );
+    }
+
     render(): core.VDom.Node {
         const state = store.getState() as AppState;
         const c = state.console;
+        const attention = this.renderAttention(state.health.attention);
         const snap = (c.snapshot || {}) as ConsoleSnapshot;
         const assignments = (c.assignments || []) as AssignmentRow[];
         const preflight = (c.preflight || []) as CheckRow[];
@@ -206,8 +279,10 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                 orientation={component.StackPanel.Orientation.VERTICAL}
                 itemGap={component.StackPanel.GapSize.L}
             >
-                {/* Stat cards row */}
-                <component.StackPanel.Item>
+                {[
+                attention,
+                /* Stat cards row */
+                (<component.StackPanel.Item>
                     <component.GridPanel
                         columns="1fr 1fr 1fr 1fr"
                         rows="auto"
@@ -258,10 +333,10 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                             />
                         </component.GridPanel.Item>
                     </component.GridPanel>
-                </component.StackPanel.Item>
+                </component.StackPanel.Item>),
 
-                {/* Quick actions — wrapped in a soft bordered card to match the wireframe */}
-                <component.StackPanel.Item>
+                /* Quick actions — wrapped in a soft bordered card to match the wireframe */
+                (<component.StackPanel.Item>
                     <component.StackPanel
                         orientation={component.StackPanel.Orientation.VERTICAL}
                         itemGap={component.StackPanel.GapSize.S}
@@ -363,12 +438,13 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
                         ...this.renderActionErrors(c)
                         ] as never}
                     </component.StackPanel>
-                </component.StackPanel.Item>
+                </component.StackPanel.Item>),
 
-                {/* Health checks — preflight, drift, phones */}
-                <component.StackPanel.Item>
+                /* Health checks — preflight, drift, phones */
+                (<component.StackPanel.Item>
                     <HealthChecks tick={this.props.tick} />
-                </component.StackPanel.Item>
+                </component.StackPanel.Item>)
+                ].filter(Boolean) as never}
             </component.StackPanel>
         );
     }

@@ -210,12 +210,45 @@ TRANSCRIPT:
      */
     const QUOTA_RESERVE_THRESHOLD = 10;
 
+    /** A finite number, else null. */
+    const usageNumber = (v) => {
+        if (v === null || v === undefined || v === '') return null;
+        const n = Number(v);
+        return isFinite(n) ? n : null;
+    };
+
+    /**
+     * Remaining N/llm usage (requests left in the current period), or null
+     * when the runtime cannot tell. NetSuite 2026.2 deprecates
+     * llm.getRemainingFreeUsage() for llm.getRemainingUsage(): use the new
+     * function when it exists and gives a number, else the old one. Oracle
+     * publishes no pool size, so there is no "of N".
+     * Throws only when the old function throws (callers catch).
+     * @returns {number|null}
+     */
+    const remainingUsage = () => {
+        if (typeof llm.getRemainingUsage === 'function') {
+            try {
+                const n = usageNumber(llm.getRemainingUsage());
+                if (n !== null) return n;
+            } catch (e) {
+                log.error({ title: 'CTC LLM getRemainingUsage failed; trying getRemainingFreeUsage',
+                            details: (e && e.message) || String(e) });
+            }
+        }
+        if (typeof llm.getRemainingFreeUsage === 'function') {
+            return usageNumber(llm.getRemainingFreeUsage());
+        }
+        return null;
+    };
+
     /**
      * @returns {boolean} true if remaining quota is above the reserve
      */
     const hasQuota = () => {
         try {
-            return llm.getRemainingFreeUsage() >= QUOTA_RESERVE_THRESHOLD;
+            const n = remainingUsage();
+            return n !== null && n >= QUOTA_RESERVE_THRESHOLD;
         } catch (e) {
             log.error({ title: 'CTC LLM quota check failed', details: (e && e.message) || String(e) });
             return false;
@@ -306,6 +339,7 @@ TRANSCRIPT:
         DEFAULT_MODEL_PARAMS,
         FALLBACK_ANALYSIS,
         QUOTA_RESERVE_THRESHOLD,
+        remainingUsage,
         hasQuota,
         buildDateLine,
         buildAnalysisPrompt,

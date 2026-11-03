@@ -29,8 +29,9 @@
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         './lib/ctc_config', './lib/ctc_twilio_admin',
-        './lib/ctc_twilio_jwt', './lib/ctc_inbound_routing', './lib/ctc_outbound_function'],
-       (runtime, record, search, log, crypto, query, config, twilio, jwt, routing, outbound) => {
+        './lib/ctc_twilio_jwt', './lib/ctc_inbound_routing', './lib/ctc_outbound_function',
+        './lib/ctc_health'],
+       (runtime, record, search, log, crypto, query, config, twilio, jwt, routing, outbound, health) => {
 
     /* ------------------------------------------------------------------ */
     /* Suitelet entry point                                               */
@@ -1945,6 +1946,26 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Action: wizardLoadHealth (Overview "Needs attention" + drift rows) */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Health read model (lib/ctc_health.js). Read only: no writes, no
+     * publish. About 104 units (4 Twilio GETs at most).
+     *
+     * wizardLoadHealth {} →
+     *   { ok: true, checkedAt, signals: { transcriptBacklog, pollerRuns,
+     *       aiQuota, repPhones, numberRouting, routingChanged,
+     *       outboundNotice, intelligence, fallbackOwner },
+     *     attention: [{ key, title, severity, detail, action? }] }
+     *   signal = { key, title, value, severity: 'ok'|'warn'|'problem'|'unknown',
+     *              detail, action?: { label, route } }
+     *   { ok: false, error: 'config_not_found' } when there is no config.
+     * A signal whose read fails is 'unknown'; the action still answers.
+     */
+    const wizardLoadHealth = () => health.loadHealth({ loadPresence: wizardLoadPresence });
+
+    /* ------------------------------------------------------------------ */
     /* Action dispatch table                                              */
     /* ------------------------------------------------------------------ */
 
@@ -1966,6 +1987,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardSaveInbound:       wizardSaveInbound,
         wizardPublishRouting:    wizardPublishRouting,
         wizardLoadPresence:      wizardLoadPresence,
+        wizardLoadHealth:        wizardLoadHealth,
         wizardLoadOutbound:      wizardLoadOutbound,
         wizardSaveOutbound:      wizardSaveOutbound,
         wizardPublishOutbound:   wizardPublishOutbound,

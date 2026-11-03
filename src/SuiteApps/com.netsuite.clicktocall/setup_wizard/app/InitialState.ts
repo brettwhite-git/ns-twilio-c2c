@@ -331,6 +331,48 @@ export interface PresenceState {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Health read model — server contract of wizardLoadHealth
+// (ctc_sl_wizard_api.js → lib/ctc_health.js). Phase 1: the Overview
+// "Needs attention" list and the Phone numbers / Intelligence drift rows.
+// ─────────────────────────────────────────────────────────────────────
+
+export type HealthSeverity = 'ok' | 'warn' | 'problem' | 'unknown';
+
+export interface HealthAction {
+    label: string;
+    /** SPA hash route, e.g. '#/inbound'. */
+    route: string;
+}
+
+export interface HealthSignal {
+    key: string;
+    title: string;
+    /** Signal-specific data (see lib/ctc_health.js); null when unknown. */
+    value: unknown;
+    severity: HealthSeverity;
+    detail: string;
+    action?: HealthAction;
+}
+
+export interface HealthAttentionItem {
+    key: string;
+    title: string;
+    severity: HealthSeverity;
+    detail: string;
+    action?: HealthAction;
+}
+
+export interface HealthState {
+    loaded: boolean;
+    loading: boolean;
+    error: string | null;
+    checkedAt: string;
+    signals: Record<string, HealthSignal>;
+    /** Problem signals first, then warn signals. */
+    attention: HealthAttentionItem[];
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Credentials (console) — API key rotation form (wizardSaveCredentials)
 // ─────────────────────────────────────────────────────────────────────
 
@@ -395,6 +437,9 @@ export interface AppState {
 
     // Rep phone presence (Health "Phones" + Inbound routing "Phone")
     presence: PresenceState;
+
+    // Health read model (Overview "Needs attention" + drift rows)
+    health: HealthState;
 
     // Outbound recording notice (Voice page; Health "TwiML VoiceUrl")
     outbound: OutboundState;
@@ -513,6 +558,14 @@ const initialState: AppState = {
         error: null,
         items: [],
         clockSkewMs: 0
+    },
+    health: {
+        loaded: false,
+        loading: false,
+        error: null,
+        checkedAt: '',
+        signals: {},
+        attention: []
     },
     outbound: {
         loaded: false,
