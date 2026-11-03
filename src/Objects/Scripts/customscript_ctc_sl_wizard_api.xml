@@ -38,7 +38,8 @@
             <title>CTC Setup Wizard API</title>
             <isdeployed>T</isdeployed>
             <status>RELEASED</status>
-            <loglevel>DEBUG</loglevel>
+            <!-- Release: ERROR (SAFE HIGH-10, see ctc_rl_token.xml). -->
+            <loglevel>ERROR</loglevel>
             <allroles>T</allroles>
             <isonline>F</isonline>
         </scriptdeployment>

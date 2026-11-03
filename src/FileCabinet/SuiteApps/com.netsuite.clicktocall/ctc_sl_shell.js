@@ -108,7 +108,9 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     const onRequest = (context) => {
         const params = (context.request && context.request.parameters) || {};
         const framePath = safeFramePath(params.u);
-        const softphoneUrl = resolveSuitelet('customscript_ctc_sl_softphone', 'customdeploy_ctc_sl_softphone', { entryPoint: 'dashboard' });
+        // ifrmcntnr=T: NetSuite's flag for a Suitelet shown in an iframe
+        // (SAFE pitfall 103).
+        const softphoneUrl = resolveSuitelet('customscript_ctc_sl_softphone', 'customdeploy_ctc_sl_softphone', { entryPoint: 'dashboard', ifrmcntnr: 'T' });
         const shellBase = resolveSuitelet('customscript_ctc_sl_shell', 'customdeploy_ctc_sl_shell');
         ctcHtml.setNoStoreHeaders(context.response);
         context.response.write(buildHtml({

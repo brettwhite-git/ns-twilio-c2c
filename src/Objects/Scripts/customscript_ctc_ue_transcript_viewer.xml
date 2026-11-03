@@ -9,6 +9,7 @@
         <scriptdeployment scriptid="customdeploy_ctc_ue_transcript_viewer">
             <isdeployed>T</isdeployed>
             <status>RELEASED</status>
+            <loglevel>ERROR</loglevel>
             <recordtype>PHONECALL</recordtype>
             <allroles>T</allroles>
         </scriptdeployment>

@@ -556,9 +556,8 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
      *
      * U9b — second attempt (this code): use SuiteQL via N/query. The
      *   modern query API respects more record-body fields than N/search
-     *   does, including `issalesrep`. Verified working via MCP query:
-     *   3 sales reps returned on td3061543 (Burt Brocus, Ed Sullivan,
-     *   Tracie Windbourne).
+     *   does, including `issalesrep`. Verified working via MCP query
+     *   (sales reps returned on the development account).
      *
      * Returns `[{ id, name, email }, ...]`.
      */

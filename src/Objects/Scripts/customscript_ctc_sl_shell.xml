@@ -1,5 +1,5 @@
 <suitelet scriptid="customscript_ctc_sl_shell">
-    <name>CTC Phone Mode Shell (test)</name>
+    <name>CTC Phone Mode Shell</name>
     <scriptfile>[/SuiteApps/com.netsuite.clicktocall/ctc_sl_shell.js]</scriptfile>
     <notifyadmins>F</notifyadmins>
     <notifyemails></notifyemails>

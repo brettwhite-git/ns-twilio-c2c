@@ -28,6 +28,8 @@
             <title>CTC Poll Transcripts</title>
             <isdeployed>T</isdeployed>
             <status>SCHEDULED</status>
+            <!-- AUDIT: errors plus the run summaries operators need. -->
+            <loglevel>AUDIT</loglevel>
             <recurrence>
                 <daily>
                     <everyxdays>1</everyxdays>
@@ -43,6 +45,8 @@
             <title>CTC Poll Reconcile Calls</title>
             <isdeployed>T</isdeployed>
             <status>SCHEDULED</status>
+            <!-- AUDIT: errors plus the run summaries operators need. -->
+            <loglevel>AUDIT</loglevel>
             <recurrence>
                 <daily>
                     <everyxdays>1</everyxdays>

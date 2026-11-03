@@ -12,6 +12,8 @@
             <title>CTC Sales Dashboard</title>
             <isdeployed>T</isdeployed>
             <status>RELEASED</status>
+            <!-- Release: ERROR (SAFE HIGH-10, see ctc_rl_token.xml). -->
+            <loglevel>ERROR</loglevel>
             <allroles>T</allroles>
             <!-- No runasrole — least-privilege. Portlet runs as the viewing user.
                  customrecord_ctc_proposed_task is accesstype=NONENEEDED so any role
