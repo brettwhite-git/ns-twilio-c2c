@@ -44,13 +44,13 @@ export const PauseControl = (props: PauseControlProps): core.VDom.Node => {
     } else if (c.pendingDeactivateConfirm) {
         out.push(hstack([
             text(PAUSE_CONFIRM_TEXT, { small: true }),
-            button('Confirm pause', () => { deactivate(); }, { small: true }),
+            button('Confirm pause', () => { deactivate(); }, { small: true, danger: true }),
             // deactivateSuccess clears pendingDeactivateConfirm in the reducer.
             button('Cancel', () => { store.dispatch(Action.deactivateSuccess()); }, { small: true })
         ], Gap.SPACING2X, { wrap: true }));
     } else {
         out.push(button(props.pauseLabel || 'Pause calling', () => { store.dispatch(Action.deactivateRequest()); }, {
-            danger: !!props.danger
+            quietDanger: !!props.danger
         }));
     }
 

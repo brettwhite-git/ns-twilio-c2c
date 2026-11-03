@@ -35,9 +35,9 @@ import {countInboundChanges} from '../shared/consoleModel';
 import type {Tone} from '../shared/consoleModel';
 import {
     button, card, cardTitle, divider, dotText, errorLine, field, grid, help, hstack, pageHeader, problemCard,
-    skeleton, stepBadge, text, vstack, Gap
+    skeleton, stepBadge, table, text, vstack, Gap
 } from '../shared/ui';
-import type {Child} from '../shared/ui';
+import type {Child, Column} from '../shared/ui';
 import {presenceTone} from './PhonesPage';
 
 export const DEFAULT_NO_ANSWER_MESSAGE =
@@ -59,10 +59,6 @@ export const voicemailLengthLabel = (seconds: number): string => {
     const minutes = seconds / 60;
     return minutes + (minutes === 1 ? ' minute' : ' minutes');
 };
-
-interface CellArgs {
-    cell?: { row?: { dataItem?: InboundRoute } };
-}
 
 /**
  * The failure line of the last publish this session, or '' when it
@@ -324,8 +320,7 @@ export default class InboundPage extends PureComponent<PageTickProps, InboundPag
         ], { label: 'What a caller experiences', gap: Gap.SPACING3X });
     }
 
-    private routingColumns(state: AppState): unknown[] {
-        const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
+    private routingColumns(state: AppState): Array<Column<InboundRoute>> {
         const presence = state.presence;
         const byEmployee: Record<string, PresenceRow> = {};
         presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
@@ -335,30 +330,24 @@ export default class InboundPage extends PureComponent<PageTickProps, InboundPag
             if (!a.phoneSid) return;
             (also[a.phoneSid] = also[a.phoneSid] || []).push(String(a.employeeId) + '|' + (a.employeeName || ''));
         });
-        const row = (args: CellArgs): InboundRoute | undefined => args?.cell?.row?.dataItem;
         return [
-            { type: CT.TEMPLATED, name: 'number', label: 'Number', stretchFactor: 3,
-              content: (args: CellArgs): unknown => text(formatPhone(row(args)?.phoneNumber), { strong: true }) },
-            { type: CT.TEMPLATED, name: 'rings', label: 'Rings', stretchFactor: 3,
-              content: (args: CellArgs): unknown => text(row(args)?.employeeName || '') },
-            { type: CT.TEMPLATED, name: 'also', label: 'Also assigned', stretchFactor: 3,
-              content: (args: CellArgs): unknown => {
-                  const r = row(args);
-                  if (!r || state.console.assignments === null) return text('—', { weak: true });
-                  const names = (also[r.phoneSid] || [])
-                      .filter((v) => v.split('|')[0] !== String(r.employeeId))
-                      .map((v) => v.split('|').slice(1).join('|'))
-                      .filter(Boolean);
-                  return names.length ? text(names.join(', ')) : text('—', { weak: true });
-              } },
-            { type: CT.TEMPLATED, name: 'phone', label: 'Rep\'s phone', stretchFactor: 4,
-              content: (args: CellArgs): unknown => {
-                  if (!presence.loaded) return text(presence.error ? '—' : 'Loading…', { weak: true });
-                  const id = row(args)?.employeeId;
-                  const p = id == null ? undefined : byEmployee[String(id)];
-                  const s = presenceTone(p);
-                  return dotText(s.tone, s.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
-              } }
+            { name: 'number', label: 'Number', stretch: 3, cell: (r) => text(formatPhone(r.phoneNumber), { strong: true }) },
+            { name: 'rings', label: 'Rings', stretch: 3, cell: (r) => text(r.employeeName || '') },
+            { name: 'also', label: 'Also assigned', stretch: 3, cell: (r) => {
+                if (state.console.assignments === null) return text('—', { weak: true });
+                const names = (also[r.phoneSid] || [])
+                    .filter((v) => v.split('|')[0] !== String(r.employeeId))
+                    .map((v) => v.split('|').slice(1).join('|'))
+                    .filter(Boolean);
+                return names.length ? text(names.join(', ')) : text('—', { weak: true });
+            } },
+            { name: 'phone', label: 'Rep\'s phone', stretch: 4, cell: (r) => {
+                if (!presence.loaded) return text(presence.error ? '—' : 'Loading…', { weak: true });
+                const id = r.employeeId;
+                const p = id == null ? undefined : byEmployee[String(id)];
+                const st = presenceTone(p);
+                return dotText(st.tone, st.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
+            } }
         ];
     }
 
@@ -379,15 +368,7 @@ export default class InboundPage extends PureComponent<PageTickProps, InboundPag
                 Gap.SPACING2X, { wrap: true }),
             inbound.routes.length === 0
                 ? text('No numbers have reps yet. Assign reps on Phones & reps.', { weak: true })
-                : new component.DataGrid({
-                    dataSource: new core.ArrayDataSource(inbound.routes),
-                    columns: this.routingColumns(state),
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    dataRowHeight: 48,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                } as never)
+                : table<InboundRoute>(inbound.routes, this.routingColumns(state))
         ], { label: 'Routing' });
     }
 

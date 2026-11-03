@@ -8,7 +8,7 @@
  *                    Numbers routed (numberRouting), Reps receiving now
  *                    (repPhones), Waiting for transcripts
  *                    (transcriptBacklog), Missed-call sync (pollerRuns).
- *   Call Central     link to the Reporting Central Suitelet.
+ *   Call Central     button: opens the Reporting Central Suitelet in a new tab.
  *   Needs attention  wizardLoadHealth `attention` (problem, then warn;
  *                    unknown never listed): title, detail, action button
  *                    (opens the page in the app). Empty: "Nothing needs
@@ -34,7 +34,7 @@ import type {
     BacklogValue, KpiView, NumberRoutingValue, PollerRunsValue, RepPhonesValue, Tone
 } from '../shared/consoleModel';
 import {
-    button, card, cardTitle, chip, divider, dot, dotText, errorLine, extLink, grid, help, hstack,
+    button, card, cardTitle, chip, divider, dot, dotText, errorLine, grid, help, hstack, openButton,
     pageHeader, skeleton, text, vstack, Gap
 } from '../shared/ui';
 import type {Child} from '../shared/ui';
@@ -102,7 +102,8 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
             grid('auto minmax(0, 1fr) auto', [
                 dot(tone),
                 vstack([
-                    new component.Text({ text: title, size: component.Text.Size.L, weight: component.Text.Weight.BOLD } as never),
+                    new component.Text({ text: title, size: component.Text.Size.L, weight: component.Text.Weight.BOLD,
+                        classList: ['ctc-t-status'] } as never),
                     text(statusLine(snap.active, inboundOn, c.preflight as CheckResult[] | null, c.preflightAt,
                         running, !!c.preflightError), { weak: true, small: true })
                 ], Gap.SPACING1X),
@@ -133,17 +134,18 @@ export default class OverviewPage extends PureComponent<PageTickProps, unknown> 
         return card([
             grid('auto minmax(0, 1fr) auto', [
                 new component.Image({
-                    image: core.SystemIcon.CHART_BAR,
+                    image: core.SystemIcon.INSIGHT,
                     size: component.Image.Size.M,
                     color: core.ImageConstant.Color.INFO,
-                    presentation: true
+                    presentation: true,
+                    classList: ['ctc-icon-tile']
                 } as never),
                 vstack([
                     text('Call Central', { strong: true }),
                     text('Calls, follow-ups and missed calls for the whole team. Reps see their own view from the dashboard.',
                         { weak: true, small: true })
                 ], Gap.SPACING1X),
-                extLink('Open Call Central', CALL_CENTRAL_URL)
+                openButton('Open Call Central', CALL_CENTRAL_URL)
             ], Gap.SPACING3X)
         ], { label: 'Call Central' });
     }

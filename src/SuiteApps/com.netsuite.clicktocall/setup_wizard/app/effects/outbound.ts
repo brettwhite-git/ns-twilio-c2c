@@ -15,6 +15,8 @@
  *   wizardUnpublishOutbound {} → {ok, steps, state}
  *
  * Notice off and not published: "Save" calls only wizardSaveOutbound.
+ * Every snapshot also resets the saved baseline (savedNoticeOn / Text)
+ * in the reducer; a publish run is wrapped in op 'run' (publishRunning).
  *
  * Every payload that carries the load shape also refreshes the Health
  * "TwiML VoiceUrl" drift row (console.drift.voiceUrl).
@@ -186,11 +188,29 @@ async function publishUntilSettled(resume: boolean): Promise<void> {
 }
 
 /**
+ * Mark a whole publish run (save, publish, the automatic "Check again"
+ * tries and the waits between them) so the page stays in "Publishing…"
+ * and every control stays disabled until it ends.
+ */
+async function asPublishRun(work: () => Promise<void>): Promise<void> {
+    store.dispatch(Action.outboundRequest({ op: 'run', phase: 'start' }));
+    try {
+        await work();
+    } finally {
+        store.dispatch(Action.outboundRequest({ op: 'run', phase: 'done' }));
+    }
+}
+
+/**
  * Save the form values, then (publish = true) publish the Function.
  * The page passes publish = false when the notice is off and nothing is
  * published yet: there is nothing to put in Twilio.
  */
-export async function saveAndPublishOutbound(publish = true): Promise<void> {
+export function saveAndPublishOutbound(publish = true): Promise<void> {
+    return publish ? asPublishRun(() => saveThenPublish(true)) : saveThenPublish(false);
+}
+
+async function saveThenPublish(publish: boolean): Promise<void> {
     const outbound = (store.getState() as AppState).outbound;
     store.dispatch(Action.outboundRequest({ op: 'save', phase: 'start' }));
     try {
@@ -222,10 +242,10 @@ export async function saveAndPublishOutbound(publish = true): Promise<void> {
 
 /** "Check again" while the Twilio build is still running. */
 export function resumePublishOutbound(): Promise<void> {
-    return publishUntilSettled(true);
+    return asPublishRun(() => publishUntilSettled(true));
 }
 
-/** Unpublish and remove: restore the previous Voice URL, delete the Function. */
+/** Remove from Twilio: restore the previous Voice URL, delete the Function. */
 export async function unpublishOutbound(): Promise<void> {
     store.dispatch(Action.outboundRequest({ op: 'unpublish', phase: 'start' }));
     try {

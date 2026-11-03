@@ -144,10 +144,11 @@ export function voiceValueControl(spec: VoiceFieldSpec, viewText?: string): unkn
         const value = snap[spec.field];
         if (value) {
             return new component.Text({
-                text: viewText || (spec.field === 'phoneNumber' ? formatPhone(value) : value)
-            });
+                text: viewText || (spec.field === 'phoneNumber' ? formatPhone(value) : value),
+                classList: ['ctc-t-body']
+            } as never);
         }
-        return new component.Text({ text: '(not set)', type: component.Text.Type.WEAK });
+        return new component.Text({ text: '(not set)', type: component.Text.Type.WEAK, classList: ['ctc-t-muted'] } as never);
     }
 
     const listKey = listKeyFor(spec.field);
@@ -160,11 +161,14 @@ export function voiceValueControl(spec: VoiceFieldSpec, viewText?: string): unkn
         return new component.Text({
             text: '✕ The Twilio list did not load: ' + friendlyError(listError),
             type: component.Text.Type.STRONG,
-            size: component.Text.Size.S
-        });
+            size: component.Text.Size.S,
+            classList: ['ctc-t-strong-small']
+        } as never);
     }
     if (list.length === 0) {
-        return new component.Text({ text: '(none found in this Twilio account)', type: component.Text.Type.WEAK });
+        return new component.Text({
+            text: '(none found in this Twilio account)', type: component.Text.Type.WEAK, classList: ['ctc-t-muted']
+        } as never);
     }
     const options = optionsFor(spec.field, list);
     return new component.Dropdown({

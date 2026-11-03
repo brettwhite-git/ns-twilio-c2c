@@ -178,7 +178,11 @@ define(['N/query', 'N/search', 'N/log',
             noTranscript: num(c.noTranscript),
             transcribed: num(c.transcribed),
             cleanupPending: num(c.cleanupPending),
-            stuck: num(c.stuck)
+            stuck: num(c.stuck),
+            // Calls that got an AI analysis since monthStart (UTC month):
+            // the Click-to-Call share of the N/llm usage (AI quota meter).
+            analysedThisMonth: num(c.analysedThisMonth),
+            monthStart: String(c.monthStart || '')
         };
         if (value.stuck > 0) {
             return signal('transcriptBacklog', value, 'problem',
@@ -576,6 +580,9 @@ define(['N/query', 'N/search', 'N/log',
      */
     const readTranscriptBacklog = (nowMs) => {
         const since = new Date(nowMs - BACKLOG_WINDOW_MS).toISOString();
+        const now = new Date(nowMs);
+        const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+        const earliest = monthStart < since ? monthStart : since;
         const stuckBefore = new Date(nowMs - STUCK_AFTER_MS).toISOString();
         const status = 'TO_CHAR(custevent_ctc_call_status)';
         const started = 'TO_CHAR(custevent_ctc_call_started)';
@@ -588,12 +595,13 @@ define(['N/query', 'N/search', 'N/log',
             inWindow('No transcript') + ' AS notranscript, ' +
             inWindow('Transcribed') + ' AS transcribed, ' +
             "SUM(CASE WHEN custevent_ctc_recording_cleanup_pending = 'T' THEN 1 ELSE 0 END) AS cleanuppending, " +
-            "SUM(CASE WHEN custevent_ctc_processed = 'F' AND " + started + ' < ? THEN 1 ELSE 0 END) AS stuck ' +
+            "SUM(CASE WHEN custevent_ctc_processed = 'F' AND " + started + ' < ? THEN 1 ELSE 0 END) AS stuck, ' +
+            'SUM(CASE WHEN custevent_ctc_ai_brief IS NOT NULL AND ' + started + ' >= ? THEN 1 ELSE 0 END) AS analysed ' +
             'FROM phonecall ' +
             'WHERE custevent_ctc_call_sid IS NOT NULL ' +
             '  AND (' + started + " >= ? OR custevent_ctc_processed = 'F' " +
             "       OR custevent_ctc_recording_cleanup_pending = 'T')";
-        const params = [since, since, since, since, since, stuckBefore, since];
+        const params = [since, since, since, since, since, stuckBefore, monthStart, earliest];
         const rows = query.runSuiteQL({ query: sql, params: params }).asMappedResults();
         const r = rows[0] || {};
         return {
@@ -603,7 +611,9 @@ define(['N/query', 'N/search', 'N/log',
             noTranscript: num(r.notranscript),
             transcribed: num(r.transcribed),
             cleanupPending: num(r.cleanuppending),
-            stuck: num(r.stuck)
+            stuck: num(r.stuck),
+            analysedThisMonth: num(r.analysed),
+            monthStart: monthStart
         };
     };
 

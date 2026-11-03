@@ -28,6 +28,8 @@ import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {goToSection, goToStep, isConfigActive, registerRailSync} from '../../app/effects/navigation';
 import type {AppState, SectionName} from '../../app/InitialState';
+import {RAIL_CLASS, RAIL_TITLE_CLASS, ensureConsoleStyles} from './consoleStyles';
+import {vstack, Gap} from './ui';
 
 interface DrawerLike {
     selectedValue: unknown;
@@ -68,7 +70,18 @@ interface NavRailProps {
     tick?: number;
 }
 
+/**
+ * Rail title (canvas: "Click-to-Call" above Overview). The drawer's own
+ * header slot, not an item: not clickable, never selected. The stylesheet
+ * hides it when the rail is collapsed (consoleStyles RAIL_TITLE_CLASS).
+ */
+const railTitle = (): unknown => vstack([
+    new component.Text({ text: 'Click-to-Call', classList: [RAIL_TITLE_CLASS] } as never)
+], Gap.NONE, { classList: ['ctc-rail-head'] });
+
 export const NavRail = (_props: NavRailProps): core.VDom.Node => {
+    // The rail also shows in the stepper (re-run), before ConsoleShell has run.
+    ensureConsoleStyles();
     const state = store.getState() as AppState;
     const assignments = state.console.assignments;
     const assignmentBadge = assignments ? String(assignments.length) : undefined;
@@ -107,6 +120,9 @@ export const NavRail = (_props: NavRailProps): core.VDom.Node => {
         selectedValue: selectedVal,
         width: 240,
         visualStyle: component.NavigationDrawer.VisualStyle.DARK,
+        classList: [RAIL_CLASS],
+        header: railTitle(),
+        headerAlignment: component.NavigationDrawer.HeaderAlignment.STRETCH,
         onSelectedValueChanged: (args: { value?: string }): void => {
             const value = args && args.value;
             if (!value) return;

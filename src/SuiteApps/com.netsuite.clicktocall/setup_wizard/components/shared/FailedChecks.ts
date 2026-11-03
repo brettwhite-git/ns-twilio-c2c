@@ -14,7 +14,9 @@ export const buildFailedCheckLines = (checks: CheckResult[]): unknown[] =>
             text: '✕ ' + (c.label || c.id || 'Check') +
                 (c.detail ? ': ' + c.detail : '') +
                 (c.repairHint ? ' → ' + c.repairHint : ''),
-            size: component.Text.Size.S
-        }));
+            size: component.Text.Size.S,
+            // Console type scale: 12px (consoleStyles.ts; no effect outside the console).
+            classList: ['ctc-t-small']
+        } as never));
 
 export default buildFailedCheckLines;

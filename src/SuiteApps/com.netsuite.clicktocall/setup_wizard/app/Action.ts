@@ -394,7 +394,8 @@ interface OutboundFieldChangeAction {
  * (a new snapshot, the step list, an error).
  */
 export interface OutboundRequestPayload {
-    op: 'save' | 'publish' | 'unpublish';
+    /** 'run' = a whole publish run (save + publish + automatic "Check again"). */
+    op: 'save' | 'publish' | 'unpublish' | 'run';
     phase: 'start' | 'done';
     snapshot?: OutboundSnapshot;
     /** Publish only: the Twilio build is still running ("Check again"). */

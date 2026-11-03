@@ -6,6 +6,8 @@
  *   Setup checks  wizardRunPreflight rows (Check · Result · Status), "N of M pass"
  *   Drift checks  NetSuite vs. live Twilio (HealthChecks.ts row builders +
  *                 the routingChanged signal), "N needs action"
+ *                 Both side by side, same height; rows grow with the text
+ *                 (ui.listTable).
  *   Rep phones    wizardLoadPresence: Rep, Status, Last seen, Browser,
  *                 Incoming calls, Last error; Refresh
  *   Versions      the versions the console can read (dial function code,
@@ -31,8 +33,8 @@ import {friendlyError} from '../shared/friendlyError';
 import {exactTime, relativeTime} from '../shared/phoneStatus';
 import {timeOfDay} from '../shared/consoleModel';
 import {
-    button, card, cardTitle, chip, dotText, errorLine, grid, help, hstack, pageHeader, problemCard, skeleton,
-    text, vstack, Gap
+    button, card, cardTitle, chip, dotText, errorLine, grid, help, hstack, listTable, pageHeader, problemCard, skeleton,
+    table, text, vstack, Gap
 } from '../shared/ui';
 import type {Child} from '../shared/ui';
 import {presenceTone} from './PhonesPage';
@@ -68,41 +70,28 @@ interface Row extends CheckItem {
     link?: HealthAction;
 }
 
-interface CellArgs<T> {
-    cell?: { row?: { dataItem?: T } };
-}
-
-const CT = (): Record<string, unknown> =>
-    (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
-
-function checkGrid(rows: Row[]): unknown {
-    const row = (args: CellArgs<Row>): Row | undefined => args?.cell?.row?.dataItem;
-    return new component.DataGrid({
-        dataSource: new core.ArrayDataSource(rows),
-        columns: [
-            { type: CT().TEMPLATED, name: 'check', label: 'Check', stretchFactor: 4,
-              content: (args: CellArgs<Row>): unknown => text(row(args)?.label || '(unlabeled check)') },
-            { type: CT().TEMPLATED, name: 'result', label: 'Result', stretchFactor: 5,
-              content: (args: CellArgs<Row>): unknown => {
-                  const r = row(args);
-                  const link = r && r.link;
-                  return vstack([
-                      text(r?.detail || '—', { weak: true, small: true }),
-                      link ? button(link.label, () => { openHealthAction(link); }, { link: true, small: true }) : null
-                  ], Gap.NONE);
-              } },
-            { type: CT().TEMPLATED, name: 'status', label: 'Status', stretchFactor: 2,
-              content: (args: CellArgs<Row>): unknown => {
-                  const b = statusToBadge(row(args)?.status || 'unknown');
-                  return chip(b.text, b.tone);
-              } }
-        ],
-        columnStretch: true,
-        highlightRowsOnHover: true,
-        dataRowHeight: 64,
-        headerRowHeight: 40,
-        rootStyle: { width: '100%' }
-    } as never);
+/**
+ * Check · Result · Status. A UIF GridPanel table (ui.listTable), not a
+ * DataGrid: DataGrid rows have a fixed height and clipped long preflight
+ * results; these rows grow to fit the wrapped text.
+ */
+function checkList(rows: Row[]): core.VDom.Node {
+    // Status: at least 72px, wider only for a long chip ("Not published").
+    return listTable('minmax(0, 40fr) minmax(0, 45fr) minmax(72px, auto)', [
+        { label: 'Check' }, { label: 'Result' }, { label: 'Status', end: true }
+    ], rows.map((r) => {
+        const link = r.link;
+        const b = statusToBadge(r.status || 'unknown');
+        return [
+            text(r.label || '(unlabeled check)', { strong: true }),
+            // START alignment: the link sits under the text, not centred.
+            vstack([
+                text(r.detail || '—', { weak: true }),
+                link ? button(link.label, () => { openHealthAction(link); }, { link: true, small: true }) : null
+            ], Gap.NONE, { alignment: component.StackPanel.Alignment.START }),
+            chip(b.text, b.tone)
+        ];
+    }));
 }
 
 export default class HealthPage extends PureComponent<PageTickProps, unknown> {
@@ -129,8 +118,8 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
         if (c.preflightError) body.push(errorLine('The checks did not run: ' + friendlyError(c.preflightError)));
         if (checks === null) body.push(running ? skeleton('table', 5, 'Running checks…') : help('Click Run checks.'));
         else if (!checks.length) body.push(text('No checks returned.', { weak: true }));
-        else body.push(checkGrid(checks));
-        return card(body, { label: 'Setup checks' });
+        else body.push(checkList(checks));
+        return card(body, { label: 'Setup checks', fill: true });
     }
 
     private renderDrift(state: AppState): core.VDom.Node {
@@ -153,14 +142,13 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
                 help('NetSuite vs. live Twilio')
             ], Gap.SPACING2X, { wrap: true }),
             state.health.error ? errorLine('Some checks did not load: ' + friendlyError(state.health.error)) : null,
-            checkGrid(rows)
-        ], { label: 'Drift checks' });
+            checkList(rows)
+        ], { label: 'Drift checks', fill: true });
     }
 
     private renderPhones(state: AppState): core.VDom.Node {
         const presence = state.presence;
         const nowMs = Date.now() + presence.clockSkewMs;
-        const row = (args: CellArgs<PresenceRow>): PresenceRow | undefined => args?.cell?.row?.dataItem;
         const body: Child[] = [
             grid('auto minmax(0, 1fr) auto', [
                 cardTitle('Rep phones'),
@@ -178,41 +166,22 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
         } else if (presence.items.length === 0) {
             body.push(text('No rep has opened a phone yet.', { weak: true }));
         } else {
-            body.push(new component.DataGrid({
-                dataSource: new core.ArrayDataSource(presence.items),
-                columns: [
-                    { type: CT().TEMPLATED, name: 'rep', label: 'Rep', stretchFactor: 3,
-                      content: (a: CellArgs<PresenceRow>): unknown => text(row(a)?.employeeName || '(unnamed rep)') },
-                    { type: CT().TEMPLATED, name: 'status', label: 'Status', stretchFactor: 3,
-                      content: (a: CellArgs<PresenceRow>): unknown => {
-                          const s = presenceTone(row(a));
-                          return dotText(s.tone, s.label);
-                      } },
-                    { type: CT().TEMPLATED, name: 'seen', label: 'Last seen', stretchFactor: 2,
-                      content: (a: CellArgs<PresenceRow>): unknown => {
-                          const iso = row(a)?.lastSeen || '';
-                          const title = exactTime(iso);
-                          return new component.Text({
-                              text: relativeTime(iso, nowMs),
-                              rootAttributes: title ? { title } : {}
-                          } as never);
-                      } },
-                    { type: CT().TEMPLATED, name: 'client', label: 'Browser', stretchFactor: 3,
-                      content: (a: CellArgs<PresenceRow>): unknown => text(row(a)?.client || '—', { weak: !row(a)?.client }) },
-                    { type: CT().TEMPLATED, name: 'incoming', label: 'Incoming calls', stretchFactor: 2,
-                      content: (a: CellArgs<PresenceRow>): unknown => {
-                          const r = row(a);
-                          return !r || !r.state ? text('—', { weak: true }) : text(r.incomingGranted ? 'Allowed' : 'Off');
-                      } },
-                    { type: CT().TEMPLATED, name: 'error', label: 'Last error', stretchFactor: 4,
-                      content: (a: CellArgs<PresenceRow>): unknown => text(row(a)?.lastError || '—', { weak: true, small: true }) }
-                ],
-                columnStretch: true,
-                highlightRowsOnHover: true,
-                dataRowHeight: 48,
-                headerRowHeight: 40,
-                rootStyle: { width: '100%' }
-            } as never));
+            body.push(table<PresenceRow>(presence.items, [
+                { name: 'rep', label: 'Rep', stretch: 3, cell: (r) => text(r.employeeName || '(unnamed rep)', { strong: true }) },
+                { name: 'status', label: 'Status', stretch: 3, cell: (r) => {
+                    const s = presenceTone(r);
+                    return dotText(s.tone, s.label);
+                } },
+                { name: 'seen', label: 'Last seen', stretch: 2, cell: (r) => {
+                    const iso = r.lastSeen || '';
+                    return text(relativeTime(iso, nowMs), { title: exactTime(iso) || undefined });
+                } },
+                { name: 'client', label: 'Browser', stretch: 3, cell: (r) => text(r.client || '—', { weak: !r.client }) },
+                { name: 'incoming', label: 'Incoming calls', stretch: 2,
+                  cell: (r) => (!r.state ? text('—', { weak: true }) : text(r.incomingGranted ? 'Allowed' : 'Off')) },
+                { name: 'error', label: 'Last error', stretch: 4,
+                  cell: (r) => (r.lastError ? help(r.lastError) : text('—', { weak: true })) }
+            ]));
         }
         return card(body, { label: 'Rep phones' });
     }
@@ -250,7 +219,9 @@ export default class HealthPage extends PureComponent<PageTickProps, unknown> {
         }
         return vstack([
             header,
-            grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderSetup(state), this.renderDrift(state)], Gap.SPACING3X),
+            // stretch + card fill: both cards take the row height.
+            grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderSetup(state), this.renderDrift(state)], Gap.SPACING3X,
+                { stretch: true }),
             this.renderPhones(state),
             this.renderVersions(state)
         ], Gap.SPACING4X);

@@ -5,10 +5,14 @@
  *                                voiceField editor, moved here from Voice),
  *                                auto-transcribe (signal intelligence),
  *                                recordings.
- *   AI analysis · NetSuite N/llm "<n> AI analyses left" (signal aiQuota;
- *                                no total and no reset date: NetSuite
- *                                reports only the requests left).
- *   Transcript backlog           signal transcriptBacklog (last 7 days).
+ *   AI analysis · NetSuite N/llm "<n> AI analyses left" + UIF MeterBar
+ *                                (aiMeter: scaled to left + this month's
+ *                                Click-to-Call analyses; NetSuite reports
+ *                                no total and no reset date).
+ *   Transcript backlog           signal transcriptBacklog (last 7 days): a
+ *                                primer, then one row per status; chip
+ *                                colour by meaning (consoleModel
+ *                                BACKLOG_STATUS_TONE); a zero count is muted.
  *   Background jobs              signal pollerRuns (last run, status).
  * "Check now" reloads the health signals.
  */
@@ -22,46 +26,24 @@ import type {AppState, HealthSignal} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import {friendlyError} from '../shared/friendlyError';
 import {VOICE_FIELD_SPECS, voiceActionControl, voiceValueControl} from '../shared/voiceField';
-import {CALL_CENTRAL_URL, agoParts, jobTone, runStatusText} from '../shared/consoleModel';
-import type {BacklogValue, IntelligenceValue, JobRuns, PollerRunsValue, Tone} from '../shared/consoleModel';
+import {BACKLOG_PRIMER, CALL_CENTRAL_URL, agoParts, aiMeter, backlogRows, jobTone, runStatusText} from '../shared/consoleModel';
+import type {BacklogRow, BacklogValue, IntelligenceValue, JobRuns, PollerRunsValue, Tone} from '../shared/consoleModel';
 import {
-    button, card, cardTitle, chip, divider, dotText, errorLine, extLink, grid, help, metric, pageHeader,
-    skeleton, text, vstack, Gap
+    button, card, cardTitle, chip, divider, dotText, errorLine, extLink, grid, help, label, metric, num, pageHeader,
+    skeleton, table, text, vstack, Gap, ROW_TWO_LINES
 } from '../shared/ui';
 import type {Child} from '../shared/ui';
 import {healthCheckAside} from './HealthPage';
 
-interface BacklogRow {
-    status: string;
-    tone: 'neutral' | 'info' | 'problem';
-    count: number;
-    next: string;
-    link?: boolean;
-}
-
-interface CellArgs {
-    cell?: { row?: { dataItem?: BacklogRow } };
-}
-
-/** The backlog table rows (canvas copy), from the transcriptBacklog value. */
-export function backlogRows(v: BacklogValue): BacklogRow[] {
-    return [
-        { status: 'Logged', tone: 'neutral', count: v.logged,
-          next: 'Waiting for Twilio\'s transcript. Checked every 15 minutes; closed as "No transcript" after 24 hours.' },
-        { status: 'Processing', tone: 'info', count: v.processing,
-          next: 'Being summarised now. A summary that stalls for 30 minutes is retried, up to 3 times.' },
-        { status: 'Failed', tone: 'problem', count: v.failed, link: true,
-          next: 'Summary failed 3 times. The transcript is kept; the call is not retried again.' },
-        { status: 'No transcript', tone: 'neutral', count: v.noTranscript,
-          next: 'Closed: no recording, or Twilio produced no transcript within 24 hours. Logged as calls without a summary.' },
-        { status: 'Recording cleanup due', tone: 'neutral', count: v.cleanupPending,
-          next: 'Recordings Twilio did not delete on the first try. Retried on the next run.' }
-    ];
-}
+const METER_COLOR = {
+    ok: component.MeterBar.Color.SUCCESS,
+    warn: component.MeterBar.Color.WARNING,
+    problem: component.MeterBar.Color.ERROR
+};
 
 /** A key/value row (canvas `.kv`): label | value + help | action. */
-const kv = (label: string, value: Child, action: Child = null): core.VDom.Node =>
-    grid('150px minmax(0, 1fr) auto', [text(label, { strong: true, small: true }), value, action || text('')],
+const kv = (name: string, value: Child, action: Child = null): core.VDom.Node =>
+    grid('150px minmax(0, 1fr) auto', [label(name), value, action || text('')],
         Gap.SPACING4X);
 
 const signalOf = (state: AppState, key: string): HealthSignal | undefined => state.health.signals[key];
@@ -122,31 +104,29 @@ export default class TranscriptsPage extends PureComponent<PageTickProps, unknow
         const n = sig && typeof sig.value === 'number' ? sig.value as number : null;
         const tone: Tone = !sig ? 'off' : sig.severity === 'problem' ? 'problem' : sig.severity === 'warn' ? 'warn' : 'ok';
         const pending = this.signalState(state, sig);
+        const backlog = state.health.signals.transcriptBacklog;
+        const meter = aiMeter(n, backlog ? (backlog.value as BacklogValue | null) : null, Date.now());
         return card([
             cardTitle('AI analysis · NetSuite N/llm'),
             n !== null ? metric(n.toLocaleString(), n === 1 ? 'AI analysis left' : 'AI analyses left') : pending,
+            meter ? new component.MeterBar({
+                value: meter.value,
+                min: 0,
+                max: meter.max,
+                readOnly: true,
+                plotAreaSize: component.MeterBar.Size.MEDIUM,
+                indicatorBarSize: component.MeterBar.Size.MEDIUM,
+                indicatorBarColor: METER_COLOR[meter.tone],
+                rootStyle: { width: '100%' }
+            } as never) : null,
+            meter ? grid('minmax(0, 1fr) auto', [help(meter.usedText), help(meter.runwayText)], Gap.SPACING3X) : null,
             n !== null && tone !== 'ok' ? dotText(tone, sig ? sig.detail : '') : null,
-            help('Read live with llm.getRemainingUsage(): the N/llm requests the account has left (one per analysed call). This is not script governance units.'),
-            help('Below 10, calls are still transcribed by Twilio but not analysed until more requests are available. Analysis runs in NetSuite with N/llm (Cohere Command A), not in Twilio; no extra licence.')
+            help('NetSuite reports only the requests left, not a total, so the bar is scaled to what is left plus ' +
+                'what Click-to-Call used this month. Other scripts that use N/llm draw from the same requests. ' +
+                'One request per analysed call; this is not script governance units.'),
+            help('Below 10 left, calls are still transcribed but not analysed until more requests are available. ' +
+                'Analysis runs in NetSuite with N/llm (Cohere Command A), not in Twilio.')
         ], { label: 'AI analysis', fill: true });
-    }
-
-    private backlogColumns(): unknown[] {
-        const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
-        const row = (args: CellArgs): BacklogRow | undefined => args?.cell?.row?.dataItem;
-        return [
-            { type: CT.TEMPLATED, name: 'status', label: 'Status', stretchFactor: 3,
-              content: (args: CellArgs): unknown => { const r = row(args); return r ? chip(r.status, r.tone) : text(''); } },
-            { type: CT.TEMPLATED, name: 'calls', label: 'Calls', stretchFactor: 1,
-              content: (args: CellArgs): unknown => text(String(row(args)?.count ?? '')) },
-            { type: CT.TEMPLATED, name: 'next', label: 'What happens next', stretchFactor: 8,
-              content: (args: CellArgs): unknown => text(row(args)?.next || '', { small: true }) },
-            { type: CT.TEMPLATED, name: 'link', label: '', stretchFactor: 3,
-              content: (args: CellArgs): unknown => {
-                  const r = row(args);
-                  return r && r.link && r.count > 0 ? extLink('Open in Call Central', CALL_CENTRAL_URL) : text('');
-              } }
-        ];
     }
 
     private renderBacklog(state: AppState): core.VDom.Node {
@@ -157,26 +137,25 @@ export default class TranscriptsPage extends PureComponent<PageTickProps, unknow
             grid('minmax(0, 1fr) auto', [
                 cardTitle('Transcript backlog'),
                 v ? help(open + (open === 1 ? ' call' : ' calls') + ' in progress · last ' + (v.windowDays || 7) + ' days') : null
-            ], Gap.SPACING3X)
+            ], Gap.SPACING3X),
+            help(BACKLOG_PRIMER)
         ];
         if (!v) {
             body.push(this.signalState(state, sig));
         } else {
             if (sig && sig.severity === 'problem') body.push(dotText('problem', sig.detail));
-            body.push(new component.DataGrid({
-                dataSource: new core.ArrayDataSource(backlogRows(v)),
-                columns: this.backlogColumns(),
-                columnStretch: true,
-                highlightRowsOnHover: true,
-                dataRowHeight: 56,
-                headerRowHeight: 40,
-                rootStyle: { width: '100%' }
-            } as never));
+            body.push(table<BacklogRow>(backlogRows(v), [
+                { name: 'status', label: 'Status', stretch: 3, cell: (r) => chip(r.status, r.tone) },
+                { name: 'calls', label: 'Calls', stretch: 1, numeric: true, cell: (r) => num(r.count, { muteZero: true }) },
+                { name: 'next', label: 'What happens next', stretch: 8, cell: (r) => help(r.next) },
+                { name: 'link', label: '', stretch: 3,
+                  cell: (r) => (r.link && r.count > 0 ? extLink('Open in Call Central', CALL_CENTRAL_URL) : text('')) }
+            ], { rowHeight: ROW_TWO_LINES }));
         }
         return card(body, { label: 'Transcript backlog' });
     }
 
-    private jobRow(label: string, j: JobRuns | undefined, helpText: string): core.VDom.Node {
+    private jobRow(name: string, j: JobRuns | undefined, helpText: string): core.VDom.Node {
         let status: Child;
         if (!j || !j.lastStatus || j.minutesSinceLastRun === null) {
             status = dotText('off', j && j.lastStatus ? runStatusText(j.lastStatus) : 'No run yet');
@@ -185,7 +164,7 @@ export default class TranscriptsPage extends PureComponent<PageTickProps, unknow
             status = dotText(jobTone(j), runStatusText(j.lastStatus) + ' ' + ago.value + ' ' + ago.unit,
                 j.failedRecent > 0 ? '· ' + j.failedRecent + ' recent ' + (j.failedRecent === 1 ? 'run' : 'runs') + ' failed' : '');
         }
-        return grid('200px minmax(0, 1fr)', [text(label, { strong: true, small: true }),
+        return grid('200px minmax(0, 1fr)', [label(name),
             vstack([status, help(helpText)], Gap.SPACING1X)], Gap.SPACING4X);
     }
 

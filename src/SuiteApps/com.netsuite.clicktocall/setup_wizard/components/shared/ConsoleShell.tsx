@@ -14,6 +14,8 @@
  * 2026-11-03 console rebuild: the shared "Click-to-Call Admin Console"
  * heading is gone (each page has its own header, as in the canvas); the
  * content panel carries the console style scope (consoleStyles.ts).
+ * The frame (GridPanel) and the ScrollPanel carry the surface colour too,
+ * so the #F6F5F2 surface fills the page height even when a page is short.
  */
 
 import * as core from '@uif-js/core';
@@ -23,7 +25,7 @@ import {NavRail} from './NavRail';
 import {RailContentShell} from './RailContentShell';
 import {PausedBanner} from './PausedBanner';
 import type {AppState} from '../../app/InitialState';
-import {CONSOLE_CLASS, ensureConsoleStyles} from './consoleStyles';
+import {CONSOLE_CLASS, CONSOLE_FRAME_CLASS, CONSOLE_SCROLL_CLASS, ensureConsoleStyles} from './consoleStyles';
 
 interface ConsoleShellProps {
     children?: core.VDom.Node | core.VDom.Node[];
@@ -57,12 +59,13 @@ export const ConsoleShell = (props: ConsoleShellProps): core.VDom.Node => {
             columns="auto 1fr"
             rows="100%"
             columnGap={component.GridPanel.GapSize.NONE}
+            classList={[CONSOLE_FRAME_CLASS] as never}
         >
             <component.GridPanel.Item>
                 <NavRail tick={props.tick} />
             </component.GridPanel.Item>
             <component.GridPanel.Item>
-                <RailContentShell classList={[CONSOLE_CLASS]}>
+                <RailContentShell classList={[CONSOLE_CLASS]} scrollClassList={[CONSOLE_SCROLL_CLASS]}>
                     <component.StackPanel
                         orientation={component.StackPanel.Orientation.VERTICAL}
                         itemGap={component.StackPanel.GapSize.SPACING4X}

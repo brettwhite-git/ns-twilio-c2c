@@ -293,10 +293,19 @@ export interface OutboundState extends OutboundSnapshot {
     loading: boolean;
     loadError: string | null;
 
+    /**
+     * The notice as last saved on the server (every load / save / publish /
+     * unpublish snapshot). The form differs from it = unsaved edits.
+     */
+    savedNoticeOn: boolean;
+    savedNoticeText: string;
+
     saving: boolean;
     publishing: boolean;
     unpublishing: boolean;
-    /** "Unpublish and remove" was clicked once; Cancel / Confirm shown. */
+    /** A whole publish run (save, publish, automatic "Check again") is in progress. */
+    publishRunning: boolean;
+    /** "Remove from Twilio…" was clicked once; Remove / Cancel shown. */
     confirmUnpublish: boolean;
     /** Last save / publish / unpublish error. */
     error: string | null;
@@ -603,9 +612,12 @@ const initialState: AppState = {
         changesPending: false,
         functionExists: null,
         functionMessage: '',
+        savedNoticeOn: false,
+        savedNoticeText: '',
         saving: false,
         publishing: false,
         unpublishing: false,
+        publishRunning: false,
         confirmUnpublish: false,
         error: null,
         steps: null

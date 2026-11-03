@@ -524,7 +524,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     d.outbound.loadError = null;
                 })],
             [ActionType.OUTBOUND_LOAD_SUCCESS, (s) => core.ImmutableUpdate.of(s, (d) => {
-                    Object.assign(d.outbound, a.payload);
+                    const snap = a.payload;
+                    const o = d.outbound;
+                    const unsaved = o.loaded && (o.noticeOn !== o.savedNoticeOn || o.noticeText !== o.savedNoticeText);
+                    const form = { noticeOn: o.noticeOn, noticeText: o.noticeText };
+                    Object.assign(d.outbound, snap);
+                    d.outbound.savedNoticeOn = snap.noticeOn;
+                    d.outbound.savedNoticeText = snap.noticeText;
+                    if (unsaved)
+                        Object.assign(d.outbound, form);
                     d.outbound.loading = false;
                     d.outbound.loaded = true;
                     d.outbound.loadError = null;
@@ -539,6 +547,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             [ActionType.OUTBOUND_REQUEST, (s) => core.ImmutableUpdate.of(s, (d) => {
                     const p = a.payload;
                     const busy = p.phase === 'start';
+                    if (p.op === 'run') {
+                        d.outbound.publishRunning = busy;
+                        return;
+                    }
                     if (p.op === 'save')
                         d.outbound.saving = busy;
                     else if (p.op === 'publish')
@@ -552,8 +564,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                             d.outbound.steps = null;
                         return;
                     }
-                    if (p.snapshot)
+                    if (p.snapshot) {
                         Object.assign(d.outbound, p.snapshot);
+                        d.outbound.savedNoticeOn = p.snapshot.noticeOn;
+                        d.outbound.savedNoticeText = p.snapshot.noticeText;
+                    }
                     if (p.pending !== undefined)
                         d.outbound.pending = p.pending;
                     if (p.steps !== undefined)
@@ -783,9 +798,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             changesPending: false,
             functionExists: null,
             functionMessage: '',
+            savedNoticeOn: false,
+            savedNoticeText: '',
             saving: false,
             publishing: false,
             unpublishing: false,
+            publishRunning: false,
             confirmUnpublish: false,
             error: null,
             steps: null
@@ -2355,7 +2373,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         text: '✕ ' + (c.label || c.id || 'Check') +
             (c.detail ? ': ' + c.detail : '') +
             (c.repairHint ? ' → ' + c.repairHint : ''),
-        size: component__namespace.Text.Size.S
+        size: component__namespace.Text.Size.S,
+        classList: ['ctc-t-small']
     }));
 
     const SP = component__namespace.StackPanel;
@@ -2388,21 +2407,46 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             : { vertical: component__namespace.Card.GapSize.SPACING4X, horizontal: component__namespace.Card.GapSize.SPACING4X };
         return (jsxRuntime.jsx(component__namespace.Card, { classList: classList, contentGap: pad, ariaLabel: opts.label, children: vstack(nodes, opts.gap ?? Gap.SPACING3X) }));
     }
+    function typeClass(opts) {
+        if (opts.strong && opts.small)
+            return 'ctc-t-strong-small';
+        if (opts.weak && opts.small)
+            return 'ctc-t-help';
+        if (opts.small)
+            return 'ctc-t-small';
+        if (opts.strong)
+            return 'ctc-t-strong';
+        if (opts.weak)
+            return 'ctc-t-muted';
+        return 'ctc-t-body';
+    }
     function text(t, opts = {}) {
         return new component__namespace.Text({
             text: t,
             type: opts.strong ? component__namespace.Text.Type.STRONG : opts.weak ? component__namespace.Text.Type.WEAK : component__namespace.Text.Type.DEFAULT,
             size: opts.small ? component__namespace.Text.Size.S : component__namespace.Text.Size.M,
-            classList: opts.classList || []
+            classList: [typeClass(opts)].concat(opts.classList || []),
+            ...(opts.title ? { rootAttributes: { title: opts.title } } : {})
         });
     }
     const help = (t) => text(t, { weak: true, small: true });
+    function label(t) {
+        return new component__namespace.Text({
+            text: t,
+            type: component__namespace.Text.Type.STRONG,
+            size: component__namespace.Text.Size.S,
+            classList: ['ctc-t-label']
+        });
+    }
+    function num(n, opts = {}) {
+        return text(n.toLocaleString(), { classList: ['ctc-num'].concat(opts.muteZero && n === 0 ? ['ctc-t-zero'] : []) });
+    }
     function cardTitle(t, opts = {}) {
         return new component__namespace.Heading({
             content: t,
             level: 2,
             type: component__namespace.Heading.Type.SMALL_HEADING,
-            classList: opts.danger ? ['ctc-danger-title'] : []
+            classList: opts.danger ? ['ctc-h2', 'ctc-danger-title'] : ['ctc-h2']
         });
     }
     function metric(value, unit) {
@@ -2424,11 +2468,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         });
     }
     function stepBadge(n) {
-        return new component__namespace.Badge({
-            content: String(n),
-            type: component__namespace.Badge.Type.SUBTLE,
-            classList: ['ctc-step']
-        });
+        return new component__namespace.Text({ text: String(n), classList: ['ctc-step'] });
     }
     function dot(tone) {
         return new component__namespace.Text({
@@ -2458,8 +2498,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             size: opts.small ? component__namespace.Button.Size.SMALL : component__namespace.Button.Size.MEDIUM,
             enabled: opts.enabled !== false,
             startIcon: opts.icon,
+            classList: opts.quietDanger ? ['ctc-btn-danger'] : undefined,
             action: (_args, sender) => { action(sender); }
         });
+    }
+    function openButton(label, url) {
+        return button(label, () => { window.open(url, '_blank', 'noopener'); }, { icon: core__namespace.SystemIcon.OPEN_NEW });
     }
     function extLink(label, url) {
         return new component__namespace.Link({
@@ -2468,9 +2512,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             target: component__namespace.Link.Target.BLANK
         });
     }
-    function field(label, control, helpText) {
+    function field(labelText, control, helpText) {
         return vstack([
-            new component__namespace.Text({ text: label, type: component__namespace.Text.Type.STRONG, size: component__namespace.Text.Size.S }),
+            label(labelText),
             control,
             helpText ? (typeof helpText === 'string' ? help(helpText) : helpText) : null
         ], Gap.SPACING1X);
@@ -2526,6 +2570,53 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             alignment: SP.Alignment.END, justification: SP.Justification.SPACE_BETWEEN, wrap: true, growFirst: true
         });
     }
+    const ROW_ONE_LINE = 48;
+    const ROW_TWO_LINES = 60;
+    function table(rows, columns, opts = {}) {
+        const CT = component__namespace.DataGrid.ColumnType;
+        const gridColumn = component__namespace.GridColumn;
+        const right = gridColumn && gridColumn.HorizontalAlignment ? gridColumn.HorizontalAlignment.RIGHT : undefined;
+        return new component__namespace.DataGrid({
+            dataSource: new core__namespace.ArrayDataSource(rows),
+            columns: columns.map((c, i) => {
+                const align = c.numeric && right !== undefined
+                    ? { horizontalAlignment: right, headerHorizontalAlignment: right } : {};
+                return {
+                    type: CT.TEMPLATED,
+                    name: c.name,
+                    label: c.label,
+                    stretchFactor: c.stretch,
+                    classList: ['ctc-td'].concat(i === 0 ? ['ctc-td-first'] : [], c.numeric ? ['ctc-td-num'] : []),
+                    headerClassList: ['ctc-th'].concat(c.numeric ? ['ctc-th-num'] : []),
+                    ...align,
+                    content: (args) => {
+                        const r = args && args.cell && args.cell.row ? args.cell.row.dataItem : undefined;
+                        return r ? c.cell(r) : text('');
+                    }
+                };
+            }),
+            columnStretch: true,
+            highlightRowsOnHover: true,
+            dataRowHeight: opts.rowHeight || ROW_ONE_LINE,
+            headerRowHeight: 40,
+            classList: ['ctc-table'],
+            rootStyle: { width: '100%' }
+        });
+    }
+    function listTable(columns, heads, rows) {
+        const align = (c) => (c.end ? SP.Alignment.END : SP.Alignment.START);
+        const cells = [];
+        heads.forEach((h) => {
+            cells.push(vstack([label(h.label)], Gap.NONE, { alignment: align(h), classList: ['ctc-lth'] }));
+        });
+        rows.forEach((row) => {
+            row.forEach((cell, i) => {
+                const h = heads[i] || { label: '' };
+                cells.push(vstack([cell], Gap.SPACING1X, { alignment: align(h), classList: ['ctc-ltd'] }));
+            });
+        });
+        return vstack([grid(columns, cells, Gap.NONE, { stretch: true })], Gap.NONE, { classList: ['ctc-list'] });
+    }
 
     const PAUSE_CONFIRM_TEXT = 'Reps will not be able to call until you resume. Open phones stop within about a minute; ' +
         'calls in progress finish.';
@@ -2545,13 +2636,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         else if (c.pendingDeactivateConfirm) {
             out.push(hstack([
                 text(PAUSE_CONFIRM_TEXT, { small: true }),
-                button('Confirm pause', () => { deactivate(); }, { small: true }),
+                button('Confirm pause', () => { deactivate(); }, { small: true, danger: true }),
                 button('Cancel', () => { store.dispatch(Action.deactivateSuccess()); }, { small: true })
             ], Gap.SPACING2X, { wrap: true }));
         }
         else {
             out.push(button(props.pauseLabel || 'Pause calling', () => { store.dispatch(Action.deactivateRequest()); }, {
-                danger: !!props.danger
+                quietDanger: !!props.danger
             }));
         }
         if (c.deactivateError)
@@ -2612,6 +2703,52 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         if (isNaN(t))
             return '';
         return new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    }
+    function dateTime(iso) {
+        const t = Date.parse(iso || '');
+        return isNaN(t) ? '' : new Date(t).toLocaleString();
+    }
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    function aiMeter(remaining, backlog, nowMs) {
+        if (remaining === null || !isFinite(remaining) || remaining < 0)
+            return null;
+        const used = Math.max(0, (backlog && backlog.analysedThisMonth) || 0);
+        const startMs = backlog && backlog.monthStart ? Date.parse(backlog.monthStart) : NaN;
+        const since = isNaN(startMs) ? '' : new Date(startMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+        const tone = remaining < 10 ? 'problem' : remaining < 50 ? 'warn' : 'ok';
+        const usedText = used.toLocaleString() + (used === 1 ? ' call' : ' calls') +
+            ' analysed by Click-to-Call' + (since ? ' since ' + since : ' this month');
+        let runwayText;
+        if (!used || isNaN(startMs)) {
+            runwayText = 'No calls analysed this month yet.';
+        }
+        else {
+            const days = Math.max(1, (nowMs - startMs) / DAY_MS);
+            const runway = remaining / (used / days);
+            runwayText = runway > 365 ? 'Enough for more than a year at this month\'s rate.'
+                : 'Enough for about ' + Math.max(1, Math.floor(runway)).toLocaleString() + ' days at this month\'s rate.';
+        }
+        return { value: remaining, max: Math.max(remaining + used, 1), tone, usedText, runwayText };
+    }
+    const BACKLOG_STATUS_TONE = {
+        'Logged': 'info',
+        'Processing': 'info',
+        'Failed': 'problem',
+        'No transcript': 'neutral',
+        'Recording cleanup due': 'warn'
+    };
+    const BACKLOG_PRIMER = 'Calls from the last 7 days that still have work to do. Each call waits for Twilio\'s transcript. ' +
+        'Then NetSuite summarises it, and Click-to-Call deletes the recording in Twilio. ' +
+        'Most calls go from Logged to Transcribed within an hour.';
+    function backlogRows(v) {
+        const row = (status, count, next, link) => ({ status, tone: BACKLOG_STATUS_TONE[status], count: Math.max(0, Number(count) || 0), next, link });
+        return [
+            row('Logged', v.logged, 'Waiting for Twilio\'s transcript. Checked every 15 minutes; closed as "No transcript" after 24 hours.'),
+            row('Processing', v.processing, 'Being summarised now. A summary that stalls for 30 minutes is retried, up to 3 times.'),
+            row('Failed', v.failed, 'Summary failed 3 times. The transcript is kept; the call is not retried again.', true),
+            row('No transcript', v.noTranscript, 'Closed: no recording, or Twilio produced no transcript within 24 hours. Logged as calls without a summary.'),
+            row('Recording cleanup due', v.cleanupPending, 'Recordings Twilio did not delete on the first try. Retried on the next run.')
+        ];
     }
     function backlogKpi(v) {
         if (!v)
@@ -2742,6 +2879,82 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     }
     const CALL_CENTRAL_URL = '/app/site/hosting/scriptlet.nl?script=customscript_ctc_sl_reporting&deploy=customdeploy_ctc_sl_reporting';
     const API_SECRETS_URL = '/app/common/scripting/secrets/settings.nl';
+    const PUBLISH_NOTICE_HELP = 'Creates the ctc-outbound Function in your Twilio account and points your Twilio app at it. ' +
+        'Takes 15–30 seconds.';
+    const SAVE_OFF_HELP = 'Nothing is sent to Twilio while the notice is off.';
+    const NO_CHANGES_HELP = 'Callers hear the live version. Change the text or the switch to publish a new version.';
+    const PUBLISH_CHANGES_HELP = 'Takes 15–30 seconds. Calls in progress keep the old notice.';
+    const TURN_OFF_HELP = 'Calls connect without a notice. The Function stays in Twilio.';
+    const REPUBLISH_HELP = 'A newer version of the Function is available. Publish to update it. Takes 15–30 seconds.';
+    const FUNCTION_MISSING_HELP = 'The Function is missing in Twilio. Publish to create it again. Takes 15–30 seconds.';
+    const VOICE_URL_HELP = 'Your Twilio app no longer points at the Function. Publish to point it back. Takes 15–30 seconds.';
+    const PUBLISHING_LABEL = 'Publishing… (15–30 s)';
+    const REMOVE_CONFIRM_TEXT = 'Remove the Function now?';
+    function removeBody(prevVoiceUrl) {
+        return 'Deletes the ctc-outbound Function and points your Twilio app back at its previous Voice URL' +
+            (prevVoiceUrl ? ': ' + prevVoiceUrl : '') + '. Outbound calls keep working, without a notice.';
+    }
+    function outboundUnsaved(o) {
+        return o.loaded && (o.noticeOn !== o.savedNoticeOn || o.noticeText !== o.savedNoticeText);
+    }
+    function noticeStatus(o) {
+        const when = o.publishedAt && !isNaN(Date.parse(o.publishedAt)) ? '· ' + new Date(o.publishedAt).toLocaleString() : '';
+        const hears = (v) => (v ? 'version ' + v : 'no notice');
+        if (!o.published)
+            return { tone: 'off', label: 'Not live · calls connect without a notice', extra: '' };
+        if (o.functionExists === false) {
+            return { tone: 'problem', label: o.functionMessage || 'The Function is missing in Twilio', extra: '' };
+        }
+        if (o.voiceUrlMatches === false)
+            return { tone: 'problem', label: 'The Twilio app does not point at the Function', extra: when };
+        if (o.pending)
+            return { tone: 'warn', label: 'Published · the Twilio build is still running', extra: when };
+        if (o.needsRepublish)
+            return { tone: 'warn', label: 'Republish needed', extra: when };
+        if (outboundUnsaved(o))
+            return { tone: 'warn', label: 'Unsaved changes', extra: '' };
+        if (o.changesPending) {
+            return { tone: 'warn', label: 'Saved, not live yet · callers still hear ' + hears(o.publishedNoticeVersion), extra: '' };
+        }
+        return { tone: 'ok', label: o.publishedNoticeVersion
+                ? 'Live · callers hear version ' + o.publishedNoticeVersion
+                : 'Live · calls connect without a notice', extra: when };
+    }
+    function noticeActions(o) {
+        const unsaved = outboundUnsaved(o);
+        const running = o.publishRunning || o.publishing;
+        const busy = running || o.saving || o.unpublishing;
+        const out = (label, run, enabled, help, discard = false) => ({ primary: { label, run, enabled: enabled && !busy }, discard, help, removal: o.published });
+        if (running)
+            return out(PUBLISHING_LABEL, 'publish', false, PUBLISH_CHANGES_HELP);
+        if (!o.published) {
+            return o.noticeOn
+                ? out('Publish notice', 'publish', true, PUBLISH_NOTICE_HELP)
+                : out(o.saving ? 'Saving…' : 'Save', 'save', unsaved, SAVE_OFF_HELP);
+        }
+        const repair = o.functionExists === false ? FUNCTION_MISSING_HELP
+            : o.voiceUrlMatches === false ? VOICE_URL_HELP
+                : o.needsRepublish ? REPUBLISH_HELP : '';
+        const toPublish = unsaved || o.changesPending;
+        if (!o.noticeOn && (toPublish || o.publishedNoticeVersion > 0)) {
+            return out('Turn off notice', 'publish', true, TURN_OFF_HELP);
+        }
+        if (toPublish)
+            return out('Publish changes', 'publish', true, PUBLISH_CHANGES_HELP, unsaved && o.noticeOn);
+        if (repair)
+            return out('Publish changes', 'publish', true, repair);
+        return out('Publish changes', 'publish', false, NO_CHANGES_HELP);
+    }
+    function liveNotice(o) {
+        if (!o.published)
+            return null;
+        if (!o.publishedNoticeVersion)
+            return { quote: '', note: 'No notice plays. Calls connect at once.' };
+        if (o.publishedNoticeVersion === o.noticeVersion) {
+            return { quote: '\u201C' + (o.savedNoticeText || o.defaultText) + '\u201D', note: '' };
+        }
+        return { quote: '', note: 'Version ' + o.publishedNoticeVersion + '. The saved text is newer and is not live yet.' };
+    }
 
     const toRow = (raw) => {
         const r = (raw || {});
@@ -2892,7 +3105,19 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             pending = await runPublish(true);
         }
     }
-    async function saveAndPublishOutbound(publish = true) {
+    async function asPublishRun(work) {
+        store.dispatch(Action.outboundRequest({ op: 'run', phase: 'start' }));
+        try {
+            await work();
+        }
+        finally {
+            store.dispatch(Action.outboundRequest({ op: 'run', phase: 'done' }));
+        }
+    }
+    function saveAndPublishOutbound(publish = true) {
+        return publish ? asPublishRun(() => saveThenPublish(true)) : saveThenPublish(false);
+    }
+    async function saveThenPublish(publish) {
         const outbound = store.getState().outbound;
         store.dispatch(Action.outboundRequest({ op: 'save', phase: 'start' }));
         try {
@@ -2924,7 +3149,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             await publishUntilSettled(false);
     }
     function resumePublishOutbound() {
-        return publishUntilSettled(true);
+        return asPublishRun(() => publishUntilSettled(true));
     }
     async function unpublishOutbound() {
         store.dispatch(Action.outboundRequest({ op: 'unpublish', phase: 'start' }));
@@ -3067,6 +3292,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
 
     const idOf = (v) => Number(v && typeof v === 'object' ? v.id : v);
     const toIds = (values) => (values || []).map(idOf).filter((n) => !isNaN(n) && n > 0);
+    const digitsOf = (v) => String(v || '').replace(/[^0-9]/g, '');
     function presenceTone(row) {
         const s = phoneStatus(row);
         if (s === PHONE_STATUS_OFFLINE)
@@ -3104,10 +3330,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         const lines = [];
         plan.repIds.forEach((id) => {
             const out = plan.byRep[String(id)];
-            lines.push(text(nameOf(id), { strong: true, small: true }));
+            lines.push(text(nameOf(id), { strong: true }));
             lines.push(text(out && out.phoneNumber
                 ? formatPhone(out.phoneNumber) + (out.ringsThem ? ' · rings this rep' : ' · default (rings for no number)')
-                : 'No default caller ID set', { small: true }));
+                : 'No default caller ID set'));
         });
         return lines.length ? grid('auto minmax(0, 1fr)', lines, Gap.SPACING4X, { rowGap: Gap.SPACING2X })
             : text(rows.length ? 'No rep is assigned to a number yet.' : 'No numbers yet.', { weak: true });
@@ -3126,7 +3352,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 loadHealth();
         }
         buildColumns(nameOf, plan) {
-            const CT = component__namespace.DataGrid.ColumnType;
             const state = store.getState();
             const routingSig = state.health.signals.numberRouting;
             const routingValue = (routingSig && routingSig.value);
@@ -3134,85 +3359,48 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const byEmployee = {};
             presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
             const nowMs = Date.now() + presence.clockSkewMs;
-            const row = (args) => args?.cell?.row?.dataItem;
             const c = state.console;
             return [
-                {
-                    type: CT.TEMPLATED, name: 'number', label: 'Number', stretchFactor: 3,
-                    content: (args) => {
-                        const r = row(args);
-                        return vstack([
-                            text(formatPhone(r?.phoneNumber) || '(unknown)', { strong: true }),
-                            r && r.friendlyName ? help(r.friendlyName) : null
-                        ], Gap.NONE);
-                    }
-                },
-                {
-                    type: CT.TEMPLATED, name: 'rings', label: 'Rings', stretchFactor: 3,
-                    content: (args) => {
-                        const r = row(args);
-                        return r && r.ringId !== null ? text(nameOf(r.ringId)) : text('—', { weak: true });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED, name: 'also', label: 'Also assigned', stretchFactor: 3,
-                    content: (args) => {
-                        const r = row(args);
-                        const others = r ? r.employeeIds.filter((id) => id !== r.ringId) : [];
+                { name: 'number', label: 'Number', stretch: 3, cell: (r) => vstack([
+                        text(formatPhone(r.phoneNumber) || '(unknown)', { strong: true }),
+                        r.friendlyName && digitsOf(r.friendlyName) !== digitsOf(r.phoneNumber).slice(-10)
+                            && digitsOf(r.friendlyName) !== digitsOf(r.phoneNumber) ? help(r.friendlyName) : null
+                    ], Gap.NONE) },
+                { name: 'rings', label: 'Rings', stretch: 3,
+                    cell: (r) => (r.ringId !== null ? text(nameOf(r.ringId)) : text('—', { weak: true })) },
+                { name: 'also', label: 'Also assigned', stretch: 3, cell: (r) => {
+                        const others = r.employeeIds.filter((id) => id !== r.ringId);
                         return others.length ? text(others.map(nameOf).join(', ')) : text('—', { weak: true });
-                    }
-                },
-                {
-                    type: CT.TEMPLATED, name: 'routing', label: 'Routing', stretchFactor: 3,
-                    content: (args) => {
-                        const r = row(args);
-                        if (!r)
-                            return text('');
+                    } },
+                { name: 'routing', label: 'Routing', stretch: 3, cell: (r) => {
                         if (!routingValue && r.ringId !== null) {
                             return text(state.health.loading ? 'Checking…' : 'Not checked', { weak: true });
                         }
-                        const s = routingStatus(r, routingValue);
-                        return dotText(s.tone, s.label);
-                    }
-                },
-                {
-                    type: CT.TEMPLATED, name: 'phone', label: 'Rep\'s phone', stretchFactor: 4,
-                    content: (args) => {
-                        const r = row(args);
-                        if (!r || r.ringId === null)
+                        const st = routingStatus(r, routingValue);
+                        return dotText(st.tone, st.label);
+                    } },
+                { name: 'phone', label: 'Rep\'s phone', stretch: 4, cell: (r) => {
+                        if (r.ringId === null)
                             return text('—', { weak: true });
                         if (!presence.loaded)
                             return text(presence.error ? '—' : 'Loading…', { weak: true });
                         const p = byEmployee[String(r.ringId)];
-                        const s = presenceTone(p);
-                        return dotText(s.tone, s.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
-                    }
-                },
-                {
-                    type: CT.TEMPLATED, name: 'callsOut', label: 'Calls out from', stretchFactor: 4,
-                    content: (args) => {
-                        const r = row(args);
-                        if (!r || r.ringId === null)
+                        const st = presenceTone(p);
+                        return dotText(st.tone, st.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
+                    } },
+                { name: 'callsOut', label: 'Calls out from', stretch: 4, cell: (r) => {
+                        if (r.ringId === null)
                             return text('—', { weak: true });
                         const out = plan.byRep[String(r.ringId)];
                         const who = firstName(nameOf(r.ringId));
                         if (out && out.phoneNumber === r.phoneNumber)
                             return text(who + ', from this number');
                         return text(who + ', from ' + (out && out.phoneNumber ? formatPhone(out.phoneNumber) : 'the default'));
-                    }
-                },
-                {
-                    type: CT.TEMPLATED, name: 'action', label: 'Actions', stretchFactor: 2,
-                    content: (args) => {
-                        const r = row(args);
-                        if (!r)
-                            return text('');
-                        return button('Edit', () => { openPhonesEditor(r.phoneSid); }, {
-                            small: true,
-                            enabled: c.phonesSavingSid === null && c.phonesEditingSid !== r.phoneSid
-                        });
-                    }
-                }
+                    } },
+                { name: 'action', label: 'Actions', stretch: 2, cell: (r) => button('Edit', () => { openPhonesEditor(r.phoneSid); }, {
+                        small: true,
+                        enabled: c.phonesSavingSid === null && c.phonesEditingSid !== r.phoneSid
+                    }) }
             ];
         }
         renderEditor(row, employees, nameOf) {
@@ -3248,8 +3436,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const body = [
                 cardTitle('Editing ' + formatPhone(row.phoneNumber) + (row.friendlyName ? ' · ' + row.friendlyName : '')),
                 grid('minmax(0, 1fr) minmax(0, 1fr)', [
-                    vstack([text('Rings', { strong: true, small: true }), ringsPicker], Gap.SPACING1X),
-                    vstack([text('Also assigned', { strong: true, small: true }), alsoPicker], Gap.SPACING1X)
+                    vstack([label('Rings'), ringsPicker], Gap.SPACING1X),
+                    vstack([label('Also assigned'), alsoPicker], Gap.SPACING1X)
                 ], Gap.SPACING4X),
                 help(ALSO_ASSIGNED_HELP),
                 hstack([
@@ -3318,9 +3506,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 routingPublishErrors.length ? text('⚠ Inbound routing did not publish: ' +
                     routingPublishErrors.map((e) => e.message).join(' '), { strong: true, small: true }) : null
             ];
-            let table;
+            let numbersCard;
             if (rows.length === 0) {
-                table = c.phonesListError ? null : emptyCard('No phone numbers yet', 'Buy or port a number in the Twilio Console, then refresh here. Reps can call out before a number rings anyone.', [
+                numbersCard = c.phonesListError ? null : emptyCard('No phone numbers yet', 'Buy or port a number in the Twilio Console, then refresh here. Reps can call out before a number rings anyone.', [
                     button(refreshing ? 'Refreshing…' : 'Refresh from Twilio', () => { loadPhonesData(); }, {
                         small: true, enabled: !refreshing
                     }),
@@ -3328,16 +3516,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 ]);
             }
             else {
-                table = card([
-                    new component__namespace.DataGrid({
-                        dataSource: new core__namespace.ArrayDataSource(rows),
-                        columns: this.buildColumns(nameOf, plan),
-                        columnStretch: true,
-                        highlightRowsOnHover: true,
-                        dataRowHeight: 64,
-                        headerRowHeight: 40,
-                        rootStyle: { width: '100%' }
-                    }),
+                numbersCard = card([
+                    table(rows, this.buildColumns(nameOf, plan), { rowHeight: ROW_TWO_LINES }),
                     hstack([
                         dotText('ok', 'CTC routing: calls to the number reach the rep under Rings', undefined, { small: true }),
                         dotText('warn', 'Not routed: the number points somewhere else in Twilio', undefined, { small: true }),
@@ -3349,7 +3529,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 header,
                 this.renderCallerId(state, defaultNumber),
                 ...messages,
-                table,
+                numbersCard,
                 editingRow ? this.renderEditor(editingRow, employees, nameOf) : null
             ], Gap.SPACING4X);
         }
@@ -3376,35 +3556,21 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         loadPresence();
         loadOutbound();
     }
-    const CT = () => component__namespace.DataGrid.ColumnType;
-    function checkGrid(rows) {
-        const row = (args) => args?.cell?.row?.dataItem;
-        return new component__namespace.DataGrid({
-            dataSource: new core__namespace.ArrayDataSource(rows),
-            columns: [
-                { type: CT().TEMPLATED, name: 'check', label: 'Check', stretchFactor: 4,
-                    content: (args) => text(row(args)?.label || '(unlabeled check)') },
-                { type: CT().TEMPLATED, name: 'result', label: 'Result', stretchFactor: 5,
-                    content: (args) => {
-                        const r = row(args);
-                        const link = r && r.link;
-                        return vstack([
-                            text(r?.detail || '—', { weak: true, small: true }),
-                            link ? button(link.label, () => { openHealthAction(link); }, { link: true, small: true }) : null
-                        ], Gap.NONE);
-                    } },
-                { type: CT().TEMPLATED, name: 'status', label: 'Status', stretchFactor: 2,
-                    content: (args) => {
-                        const b = statusToBadge(row(args)?.status || 'unknown');
-                        return chip(b.text, b.tone);
-                    } }
-            ],
-            columnStretch: true,
-            highlightRowsOnHover: true,
-            dataRowHeight: 64,
-            headerRowHeight: 40,
-            rootStyle: { width: '100%' }
-        });
+    function checkList(rows) {
+        return listTable('minmax(0, 40fr) minmax(0, 45fr) minmax(72px, auto)', [
+            { label: 'Check' }, { label: 'Result' }, { label: 'Status', end: true }
+        ], rows.map((r) => {
+            const link = r.link;
+            const b = statusToBadge(r.status || 'unknown');
+            return [
+                text(r.label || '(unlabeled check)', { strong: true }),
+                vstack([
+                    text(r.detail || '—', { weak: true }),
+                    link ? button(link.label, () => { openHealthAction(link); }, { link: true, small: true }) : null
+                ], Gap.NONE, { alignment: component__namespace.StackPanel.Alignment.START }),
+                chip(b.text, b.tone)
+            ];
+        }));
     }
     class HealthPage extends core.PureComponent {
         componentDidMount() {
@@ -3434,8 +3600,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             else if (!checks.length)
                 body.push(text('No checks returned.', { weak: true }));
             else
-                body.push(checkGrid(checks));
-            return card(body, { label: 'Setup checks' });
+                body.push(checkList(checks));
+            return card(body, { label: 'Setup checks', fill: true });
         }
         renderDrift(state) {
             const c = state.console;
@@ -3457,13 +3623,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     help('NetSuite vs. live Twilio')
                 ], Gap.SPACING2X, { wrap: true }),
                 state.health.error ? errorLine('Some checks did not load: ' + friendlyError(state.health.error)) : null,
-                checkGrid(rows)
-            ], { label: 'Drift checks' });
+                checkList(rows)
+            ], { label: 'Drift checks', fill: true });
         }
         renderPhones(state) {
             const presence = state.presence;
             const nowMs = Date.now() + presence.clockSkewMs;
-            const row = (args) => args?.cell?.row?.dataItem;
             const body = [
                 grid('auto minmax(0, 1fr) auto', [
                     cardTitle('Rep phones'),
@@ -3484,41 +3649,22 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 body.push(text('No rep has opened a phone yet.', { weak: true }));
             }
             else {
-                body.push(new component__namespace.DataGrid({
-                    dataSource: new core__namespace.ArrayDataSource(presence.items),
-                    columns: [
-                        { type: CT().TEMPLATED, name: 'rep', label: 'Rep', stretchFactor: 3,
-                            content: (a) => text(row(a)?.employeeName || '(unnamed rep)') },
-                        { type: CT().TEMPLATED, name: 'status', label: 'Status', stretchFactor: 3,
-                            content: (a) => {
-                                const s = presenceTone(row(a));
-                                return dotText(s.tone, s.label);
-                            } },
-                        { type: CT().TEMPLATED, name: 'seen', label: 'Last seen', stretchFactor: 2,
-                            content: (a) => {
-                                const iso = row(a)?.lastSeen || '';
-                                const title = exactTime(iso);
-                                return new component__namespace.Text({
-                                    text: relativeTime(iso, nowMs),
-                                    rootAttributes: title ? { title } : {}
-                                });
-                            } },
-                        { type: CT().TEMPLATED, name: 'client', label: 'Browser', stretchFactor: 3,
-                            content: (a) => text(row(a)?.client || '—', { weak: !row(a)?.client }) },
-                        { type: CT().TEMPLATED, name: 'incoming', label: 'Incoming calls', stretchFactor: 2,
-                            content: (a) => {
-                                const r = row(a);
-                                return !r || !r.state ? text('—', { weak: true }) : text(r.incomingGranted ? 'Allowed' : 'Off');
-                            } },
-                        { type: CT().TEMPLATED, name: 'error', label: 'Last error', stretchFactor: 4,
-                            content: (a) => text(row(a)?.lastError || '—', { weak: true, small: true }) }
-                    ],
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    dataRowHeight: 48,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                }));
+                body.push(table(presence.items, [
+                    { name: 'rep', label: 'Rep', stretch: 3, cell: (r) => text(r.employeeName || '(unnamed rep)', { strong: true }) },
+                    { name: 'status', label: 'Status', stretch: 3, cell: (r) => {
+                            const s = presenceTone(r);
+                            return dotText(s.tone, s.label);
+                        } },
+                    { name: 'seen', label: 'Last seen', stretch: 2, cell: (r) => {
+                            const iso = r.lastSeen || '';
+                            return text(relativeTime(iso, nowMs), { title: exactTime(iso) || undefined });
+                        } },
+                    { name: 'client', label: 'Browser', stretch: 3, cell: (r) => text(r.client || '—', { weak: !r.client }) },
+                    { name: 'incoming', label: 'Incoming calls', stretch: 2,
+                        cell: (r) => (!r.state ? text('—', { weak: true }) : text(r.incomingGranted ? 'Allowed' : 'Off')) },
+                    { name: 'error', label: 'Last error', stretch: 4,
+                        cell: (r) => (r.lastError ? help(r.lastError) : text('—', { weak: true })) }
+                ]));
             }
             return card(body, { label: 'Rep phones' });
         }
@@ -3552,7 +3698,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             }
             return vstack([
                 header,
-                grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderSetup(state), this.renderDrift(state)], Gap.SPACING3X),
+                grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderSetup(state), this.renderDrift(state)], Gap.SPACING3X, { stretch: true }),
                 this.renderPhones(state),
                 this.renderVersions(state)
             ], Gap.SPACING4X);
@@ -3614,7 +3760,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 grid('auto minmax(0, 1fr) auto', [
                     dot(tone),
                     vstack([
-                        new component__namespace.Text({ text: title, size: component__namespace.Text.Size.L, weight: component__namespace.Text.Weight.BOLD }),
+                        new component__namespace.Text({ text: title, size: component__namespace.Text.Size.L, weight: component__namespace.Text.Weight.BOLD,
+                            classList: ['ctc-t-status'] }),
                         text(statusLine$1(snap.active, inboundOn, c.preflight, c.preflightAt, running, !!c.preflightError), { weak: true, small: true })
                     ], Gap.SPACING1X),
                     jsxRuntime.jsx(PauseControl, { tick: this.props.tick })
@@ -3641,16 +3788,17 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return card([
                 grid('auto minmax(0, 1fr) auto', [
                     new component__namespace.Image({
-                        image: core__namespace.SystemIcon.CHART_BAR,
+                        image: core__namespace.SystemIcon.INSIGHT,
                         size: component__namespace.Image.Size.M,
                         color: core__namespace.ImageConstant.Color.INFO,
-                        presentation: true
+                        presentation: true,
+                        classList: ['ctc-icon-tile']
                     }),
                     vstack([
                         text('Call Central', { strong: true }),
                         text('Calls, follow-ups and missed calls for the whole team. Reps see their own view from the dashboard.', { weak: true, small: true })
                     ], Gap.SPACING1X),
-                    extLink('Open Call Central', CALL_CENTRAL_URL)
+                    openButton('Open Call Central', CALL_CENTRAL_URL)
                 ], Gap.SPACING3X)
             ], { label: 'Call Central' });
         }
@@ -4001,7 +4149,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             ], { label: 'What a caller experiences', gap: Gap.SPACING3X });
         }
         routingColumns(state) {
-            const CT = component__namespace.DataGrid.ColumnType;
             const presence = state.presence;
             const byEmployee = {};
             presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
@@ -4012,16 +4159,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     return;
                 (also[a.phoneSid] = also[a.phoneSid] || []).push(String(a.employeeId) + '|' + (a.employeeName || ''));
             });
-            const row = (args) => args?.cell?.row?.dataItem;
             return [
-                { type: CT.TEMPLATED, name: 'number', label: 'Number', stretchFactor: 3,
-                    content: (args) => text(formatPhone(row(args)?.phoneNumber), { strong: true }) },
-                { type: CT.TEMPLATED, name: 'rings', label: 'Rings', stretchFactor: 3,
-                    content: (args) => text(row(args)?.employeeName || '') },
-                { type: CT.TEMPLATED, name: 'also', label: 'Also assigned', stretchFactor: 3,
-                    content: (args) => {
-                        const r = row(args);
-                        if (!r || state.console.assignments === null)
+                { name: 'number', label: 'Number', stretch: 3, cell: (r) => text(formatPhone(r.phoneNumber), { strong: true }) },
+                { name: 'rings', label: 'Rings', stretch: 3, cell: (r) => text(r.employeeName || '') },
+                { name: 'also', label: 'Also assigned', stretch: 3, cell: (r) => {
+                        if (state.console.assignments === null)
                             return text('—', { weak: true });
                         const names = (also[r.phoneSid] || [])
                             .filter((v) => v.split('|')[0] !== String(r.employeeId))
@@ -4029,14 +4171,13 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                             .filter(Boolean);
                         return names.length ? text(names.join(', ')) : text('—', { weak: true });
                     } },
-                { type: CT.TEMPLATED, name: 'phone', label: 'Rep\'s phone', stretchFactor: 4,
-                    content: (args) => {
+                { name: 'phone', label: 'Rep\'s phone', stretch: 4, cell: (r) => {
                         if (!presence.loaded)
                             return text(presence.error ? '—' : 'Loading…', { weak: true });
-                        const id = row(args)?.employeeId;
+                        const id = r.employeeId;
                         const p = id == null ? undefined : byEmployee[String(id)];
-                        const s = presenceTone(p);
-                        return dotText(s.tone, s.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
+                        const st = presenceTone(p);
+                        return dotText(st.tone, st.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
                     } }
             ];
         }
@@ -4056,15 +4197,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 hstack([text('Since last publish:', { weak: true, small: true }), dotText(sinceTone, since, undefined, { small: true })], Gap.SPACING2X, { wrap: true }),
                 inbound.routes.length === 0
                     ? text('No numbers have reps yet. Assign reps on Phones & reps.', { weak: true })
-                    : new component__namespace.DataGrid({
-                        dataSource: new core__namespace.ArrayDataSource(inbound.routes),
-                        columns: this.routingColumns(state),
-                        columnStretch: true,
-                        highlightRowsOnHover: true,
-                        dataRowHeight: 48,
-                        headerRowHeight: 40,
-                        rootStyle: { width: '100%' }
-                    })
+                    : table(inbound.routes, this.routingColumns(state))
             ], { label: 'Routing' });
         }
         render() {
@@ -4094,12 +4227,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
-    const CONSENT_TEXT = 'Publishing creates a Twilio Function named ctc-outbound in your Twilio ' +
-        'account and points your TwiML App\'s Voice URL at it. Your current ' +
-        'Voice URL is saved so you can restore it.';
     const REPUBLISH_WARNING = 'A newer version is available. Republish to update.';
-    const NOTICE_OFF_PUBLISHED_NOTE = 'The Function stays in place; calls connect without a notice. Use ' +
-        'Unpublish and remove to restore your previous Voice URL.';
     const VOICE_URL_WARNING = 'Your TwiML App\'s Voice URL no longer points at the published Function.';
     const STEP_STATUS = {
         ok: { check: 'pass', text: 'Done' },
@@ -4107,38 +4235,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         failed: { check: 'fail', text: 'Failed' },
         pending: { check: 'info_enabled', text: 'Pending' }
     };
-    const outboundStatusLine = (outbound) => {
-        if (!outbound.published)
-            return 'Not published yet';
-        const live = outbound.publishedNoticeVersion
-            ? 'notice v' + outbound.publishedNoticeVersion
-            : 'no notice';
-        if (outbound.changesPending)
-            return 'Live: ' + live + ' · Saved changes not published yet';
-        const when = new Date(outbound.publishedAt);
-        const whenText = !outbound.publishedAt
-            ? ''
-            : isNaN(when.getTime()) ? outbound.publishedAt : when.toLocaleString();
-        return 'Published' + (whenText ? ' ' + whenText : '') +
-            (outbound.publishedNoticeVersion ? ' · notice v' + outbound.publishedNoticeVersion : '');
-    };
-    function noticeHeadline(o) {
-        const when = o.publishedAt && !isNaN(Date.parse(o.publishedAt)) ? '· ' + new Date(o.publishedAt).toLocaleString() : '';
-        if (!o.published)
-            return { tone: 'off', label: 'Not published', extra: '' };
-        if (o.functionExists === false)
-            return { tone: 'problem', label: o.functionMessage || 'The Function is missing in Twilio', extra: '' };
-        if (o.voiceUrlMatches === false)
-            return { tone: 'problem', label: 'The Twilio app does not point at it', extra: when };
-        if (o.pending)
-            return { tone: 'warn', label: 'Published · the Twilio build is still running', extra: when };
-        if (o.needsRepublish)
-            return { tone: 'warn', label: 'Republish needed', extra: when };
-        if (o.changesPending)
-            return { tone: 'warn', label: 'Saved changes are not live yet', extra: when };
-        const live = o.publishedNoticeVersion ? 'version ' + o.publishedNoticeVersion + ' live' : 'no notice plays';
-        return { tone: 'ok', label: 'Published · ' + live + (o.voiceUrlMatches ? ' · Twilio app points at it' : ''), extra: when };
-    }
     const stepLine = (step) => {
         const s = STEP_STATUS[step.status];
         return grid('18px minmax(0, 1fr) auto', [
@@ -4148,6 +4244,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 : step.detail ? s.text + ' · ' + step.detail : s.text)
         ], Gap.SPACING2X);
     };
+    const isBusy = (o) => o.saving || o.publishing || o.publishRunning || o.unpublishing;
     class OutboundNotice extends core.PureComponent {
         componentDidMount() {
             const outbound = store.getState().outbound;
@@ -4167,56 +4264,68 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                         store.dispatch(Action.outboundFieldChange({
                             noticeText: ((args && args.text) || '').slice(0, max)
                         }));
-                    }, rootStyle: { width: '100%' } }), help('Have your legal counsel approve the wording.')) : null,
-                !outbound.published && outbound.noticeOn ? help(CONSENT_TEXT) : null,
-                outbound.published && !outbound.noticeOn ? help(NOTICE_OFF_PUBLISHED_NOTE) : null
+                    }, rootStyle: { width: '100%' } }), help('Have your legal counsel approve the wording.')) : null
             ], Gap.SPACING3X);
         }
         renderRight(outbound, busy) {
             const steps = outbound.steps || [];
+            const live = liveNotice(outbound);
+            const when = dateTime(outbound.publishedAt);
+            const liveBody = live ? [
+                live.quote ? text(live.quote, { classList: ['ctc-quote'] }) : null,
+                live.note ? text(live.note, { weak: true }) : null,
+                when ? help('Published ' + when) : null,
+                outbound.functionUrl ? help('Function URL: ' + outbound.functionUrl) : null
+            ] : [text('Nothing is live yet.', { weak: true })];
             return vstack([
-                text('Last publish', { strong: true, small: true }),
-                steps.length
-                    ? vstack(steps.map(stepLine), Gap.SPACING1X)
-                    : help(outbound.published
-                        ? outboundStatusLine(outbound) + '. The steps of a publish show here.'
-                        : 'Nothing published yet. The steps show here after Save & publish.'),
-                outbound.pending && !outbound.publishing ? hstack([
+                vstack([label('Live in Twilio'), ...liveBody], Gap.SPACING1X),
+                outbound.published && outbound.voiceUrlMatches === false ? dotText('problem', VOICE_URL_WARNING, undefined, { small: true }) : null,
+                outbound.published && outbound.needsRepublish ? dotText('warn', REPUBLISH_WARNING, undefined, { small: true }) : null,
+                steps.length ? vstack([label('Last publish'), vstack(steps.map(stepLine), Gap.SPACING1X)], Gap.SPACING1X) : null,
+                outbound.pending && !outbound.publishing && !outbound.publishRunning ? hstack([
                     help('The Twilio build is still running.'),
                     button('Check again', () => { resumePublishOutbound(); }, {
                         small: true, enabled: !busy, icon: core__namespace.SystemIcon.REFRESH
                     })
-                ], Gap.SPACING2X, { wrap: true }) : null,
-                outbound.published && outbound.functionUrl ? help('Function URL: ' + outbound.functionUrl) : null,
-                outbound.published && outbound.voiceUrlMatches === false ? dotText('problem', VOICE_URL_WARNING, undefined, { small: true }) : null,
-                outbound.published && outbound.needsRepublish ? dotText('warn', REPUBLISH_WARNING, undefined, { small: true }) : null,
-                help('A SuiteApp update that changes the function code shows "Republish needed" here and on Overview.')
-            ], Gap.SPACING2X);
+                ], Gap.SPACING2X, { wrap: true }) : null
+            ], Gap.SPACING3X);
         }
         renderActions(outbound, busy) {
-            const saveOnly = !outbound.noticeOn && !outbound.published;
-            const working = outbound.saving || outbound.publishing;
-            const items = [
-                button(saveOnly ? (working ? 'Saving…' : 'Save') : (working ? 'Publishing…' : 'Save & publish'), () => { saveAndPublishOutbound(!saveOnly); }, { primary: true, enabled: !busy })
+            const a = noticeActions(outbound);
+            return hstack([
+                button(a.primary.label, () => { saveAndPublishOutbound(a.primary.run === 'publish'); }, {
+                    primary: true, enabled: a.primary.enabled
+                }),
+                a.discard ? button('Discard changes', () => {
+                    store.dispatch(Action.outboundFieldChange({
+                        noticeOn: outbound.savedNoticeOn,
+                        noticeText: outbound.savedNoticeText
+                    }));
+                }, { enabled: !busy }) : null,
+                help(a.help)
+            ], Gap.SPACING2X, { wrap: true, growLast: true });
+        }
+        renderRemoval(outbound, busy) {
+            const action = outbound.confirmUnpublish || outbound.unpublishing
+                ? hstack([
+                    text(REMOVE_CONFIRM_TEXT, { strong: true }),
+                    button(outbound.unpublishing ? 'Removing…' : 'Remove', () => { unpublishOutbound(); }, {
+                        danger: true, small: true, enabled: !busy
+                    }),
+                    button('Cancel', () => { store.dispatch(Action.outboundConfirmUnpublish(false)); }, {
+                        small: true, enabled: !busy
+                    })
+                ], Gap.SPACING2X, { wrap: true })
+                : button('Remove from Twilio…', () => { store.dispatch(Action.outboundConfirmUnpublish(true)); }, {
+                    quietDanger: true, enabled: !busy
+                });
+            return [
+                divider(),
+                grid('minmax(0, 1fr) auto', [
+                    vstack([label('Remove from Twilio'), text(removeBody(outbound.prevVoiceUrl))], Gap.SPACING1X),
+                    action
+                ], Gap.SPACING4X)
             ];
-            if (outbound.published && outbound.confirmUnpublish) {
-                items.push(text('This restores the previous Voice URL and deletes the Function.', { small: true }));
-                items.push(button(outbound.unpublishing ? 'Unpublishing…' : 'Confirm unpublish', () => { unpublishOutbound(); }, {
-                    danger: true, small: true, enabled: !busy
-                }));
-                items.push(button('Cancel', () => { store.dispatch(Action.outboundConfirmUnpublish(false)); }, {
-                    small: true, enabled: !busy
-                }));
-            }
-            else if (outbound.published) {
-                items.push(button(outbound.unpublishing ? 'Unpublishing…' : 'Unpublish and remove…', () => {
-                    store.dispatch(Action.outboundConfirmUnpublish(true));
-                }, { danger: true, enabled: !busy }));
-            }
-            items.push(help(saveOnly
-                ? 'The notice is off and nothing is published: Save keeps the setting in NetSuite only.'
-                : 'Save & publish updates the Twilio Function and points the Twilio app at it (15–30 s).'));
-            return hstack(items, Gap.SPACING2X, { wrap: true, growLast: true });
         }
         render() {
             const outbound = store.getState().outbound;
@@ -4227,15 +4336,16 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 return problemCard('Couldn\'t load the recording notice', friendlyError(outbound.loadError || 'Could not load the outbound recording notice') +
                     ' Nothing was changed.', [button('Retry', () => { loadOutbound(); }, { primary: true, small: true })]);
             }
-            const busy = outbound.saving || outbound.publishing || outbound.unpublishing;
-            const head = noticeHeadline(outbound);
+            const busy = isBusy(outbound);
+            const head = noticeStatus(outbound);
             return vstack([
                 card([
                     hstack([cardTitle('Recording notice'), dotText(head.tone, head.label, head.extra)], Gap.SPACING3X, {
                         justification: component__namespace.StackPanel.Justification.SPACE_BETWEEN, wrap: true
                     }),
                     grid('minmax(0, 1fr) minmax(0, 1fr)', [this.renderLeft(outbound, busy), this.renderRight(outbound, busy)], Gap.SPACING5X),
-                    outbound.error ? errorLine(friendlyError(outbound.error)) : null
+                    outbound.error ? errorLine(friendlyError(outbound.error)) : null,
+                    ...(outbound.published ? this.renderRemoval(outbound, busy) : [])
                 ], { label: 'Recording notice', gap: Gap.SPACING4X }),
                 this.renderActions(outbound, busy)
             ], Gap.SPACING3X);
@@ -4387,10 +4497,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const value = snap[spec.field];
             if (value) {
                 return new component__namespace.Text({
-                    text: viewText || (spec.field === 'phoneNumber' ? formatPhone(value) : value)
+                    text: viewText || (spec.field === 'phoneNumber' ? formatPhone(value) : value),
+                    classList: ['ctc-t-body']
                 });
             }
-            return new component__namespace.Text({ text: '(not set)', type: component__namespace.Text.Type.WEAK });
+            return new component__namespace.Text({ text: '(not set)', type: component__namespace.Text.Type.WEAK, classList: ['ctc-t-muted'] });
         }
         const listKey = listKeyFor(spec.field);
         const list = c.voiceLists[listKey];
@@ -4402,11 +4513,14 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return new component__namespace.Text({
                 text: '✕ The Twilio list did not load: ' + friendlyError(listError),
                 type: component__namespace.Text.Type.STRONG,
-                size: component__namespace.Text.Size.S
+                size: component__namespace.Text.Size.S,
+                classList: ['ctc-t-strong-small']
             });
         }
         if (list.length === 0) {
-            return new component__namespace.Text({ text: '(none found in this Twilio account)', type: component__namespace.Text.Type.WEAK });
+            return new component__namespace.Text({
+                text: '(none found in this Twilio account)', type: component__namespace.Text.Type.WEAK, classList: ['ctc-t-muted']
+            });
         }
         const options = optionsFor(spec.field, list);
         return new component__namespace.Dropdown({
@@ -4462,8 +4576,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         ]);
     }
 
-    const kv$1 = (label, value, action) => grid('180px minmax(0, 1fr) auto', [text(label, { strong: true, small: true }), value, action || text('')], Gap.SPACING4X);
-    const settingRow = (label, spec, helpText, viewText) => kv$1(label, vstack([voiceValueControl(spec, viewText), help(helpText)], Gap.SPACING1X), voiceActionControl(spec));
+    const kv$1 = (name, value, action) => grid('180px minmax(0, 1fr) auto', [label(name), value, action || text('')], Gap.SPACING4X);
+    const settingRow = (name, spec, helpText, viewText) => kv$1(name, vstack([voiceValueControl(spec, viewText), help(helpText)], Gap.SPACING1X), voiceActionControl(spec));
     class OutboundPage extends core.PureComponent {
         componentDidMount() {
             const c = store.getState().console;
@@ -4481,7 +4595,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const path = [
                 cardTitle('Call path'),
                 settingRow('Twilio app', VOICE_FIELD_SPECS.twimlAppSid, 'Outbound calls use this app; publishing the recording notice points it at our dial function. ' +
-                    'While the notice is published, unpublish it before you change the app.'),
+                    'While the notice is published, remove it from Twilio before you change the app.'),
                 divider(),
                 settingRow('Default caller ID', VOICE_FIELD_SPECS.phoneNumber, 'Each rep calls out from the number that rings them. Reps that ring for no number use this one.', callerIdText),
                 divider(),
@@ -4497,21 +4611,12 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
-    function backlogRows(v) {
-        return [
-            { status: 'Logged', tone: 'neutral', count: v.logged,
-                next: 'Waiting for Twilio\'s transcript. Checked every 15 minutes; closed as "No transcript" after 24 hours.' },
-            { status: 'Processing', tone: 'info', count: v.processing,
-                next: 'Being summarised now. A summary that stalls for 30 minutes is retried, up to 3 times.' },
-            { status: 'Failed', tone: 'problem', count: v.failed, link: true,
-                next: 'Summary failed 3 times. The transcript is kept; the call is not retried again.' },
-            { status: 'No transcript', tone: 'neutral', count: v.noTranscript,
-                next: 'Closed: no recording, or Twilio produced no transcript within 24 hours. Logged as calls without a summary.' },
-            { status: 'Recording cleanup due', tone: 'neutral', count: v.cleanupPending,
-                next: 'Recordings Twilio did not delete on the first try. Retried on the next run.' }
-        ];
-    }
-    const kv = (label, value, action = null) => grid('150px minmax(0, 1fr) auto', [text(label, { strong: true, small: true }), value, action || text('')], Gap.SPACING4X);
+    const METER_COLOR = {
+        ok: component__namespace.MeterBar.Color.SUCCESS,
+        warn: component__namespace.MeterBar.Color.WARNING,
+        problem: component__namespace.MeterBar.Color.ERROR
+    };
+    const kv = (name, value, action = null) => grid('150px minmax(0, 1fr) auto', [label(name), value, action || text('')], Gap.SPACING4X);
     const signalOf = (state, key) => state.health.signals[key];
     class TranscriptsPage extends core.PureComponent {
         componentDidMount() {
@@ -4569,30 +4674,29 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             const n = sig && typeof sig.value === 'number' ? sig.value : null;
             const tone = !sig ? 'off' : sig.severity === 'problem' ? 'problem' : sig.severity === 'warn' ? 'warn' : 'ok';
             const pending = this.signalState(state, sig);
+            const backlog = state.health.signals.transcriptBacklog;
+            const meter = aiMeter(n, backlog ? backlog.value : null, Date.now());
             return card([
                 cardTitle('AI analysis · NetSuite N/llm'),
                 n !== null ? metric(n.toLocaleString(), n === 1 ? 'AI analysis left' : 'AI analyses left') : pending,
+                meter ? new component__namespace.MeterBar({
+                    value: meter.value,
+                    min: 0,
+                    max: meter.max,
+                    readOnly: true,
+                    plotAreaSize: component__namespace.MeterBar.Size.MEDIUM,
+                    indicatorBarSize: component__namespace.MeterBar.Size.MEDIUM,
+                    indicatorBarColor: METER_COLOR[meter.tone],
+                    rootStyle: { width: '100%' }
+                }) : null,
+                meter ? grid('minmax(0, 1fr) auto', [help(meter.usedText), help(meter.runwayText)], Gap.SPACING3X) : null,
                 n !== null && tone !== 'ok' ? dotText(tone, sig ? sig.detail : '') : null,
-                help('Read live with llm.getRemainingUsage(): the N/llm requests the account has left (one per analysed call). This is not script governance units.'),
-                help('Below 10, calls are still transcribed by Twilio but not analysed until more requests are available. Analysis runs in NetSuite with N/llm (Cohere Command A), not in Twilio; no extra licence.')
+                help('NetSuite reports only the requests left, not a total, so the bar is scaled to what is left plus ' +
+                    'what Click-to-Call used this month. Other scripts that use N/llm draw from the same requests. ' +
+                    'One request per analysed call; this is not script governance units.'),
+                help('Below 10 left, calls are still transcribed but not analysed until more requests are available. ' +
+                    'Analysis runs in NetSuite with N/llm (Cohere Command A), not in Twilio.')
             ], { label: 'AI analysis', fill: true });
-        }
-        backlogColumns() {
-            const CT = component__namespace.DataGrid.ColumnType;
-            const row = (args) => args?.cell?.row?.dataItem;
-            return [
-                { type: CT.TEMPLATED, name: 'status', label: 'Status', stretchFactor: 3,
-                    content: (args) => { const r = row(args); return r ? chip(r.status, r.tone) : text(''); } },
-                { type: CT.TEMPLATED, name: 'calls', label: 'Calls', stretchFactor: 1,
-                    content: (args) => text(String(row(args)?.count ?? '')) },
-                { type: CT.TEMPLATED, name: 'next', label: 'What happens next', stretchFactor: 8,
-                    content: (args) => text(row(args)?.next || '', { small: true }) },
-                { type: CT.TEMPLATED, name: 'link', label: '', stretchFactor: 3,
-                    content: (args) => {
-                        const r = row(args);
-                        return r && r.link && r.count > 0 ? extLink('Open in Call Central', CALL_CENTRAL_URL) : text('');
-                    } }
-            ];
         }
         renderBacklog(state) {
             const sig = signalOf(state, 'transcriptBacklog');
@@ -4602,7 +4706,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 grid('minmax(0, 1fr) auto', [
                     cardTitle('Transcript backlog'),
                     v ? help(open + (open === 1 ? ' call' : ' calls') + ' in progress · last ' + (v.windowDays || 7) + ' days') : null
-                ], Gap.SPACING3X)
+                ], Gap.SPACING3X),
+                help(BACKLOG_PRIMER)
             ];
             if (!v) {
                 body.push(this.signalState(state, sig));
@@ -4610,19 +4715,17 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             else {
                 if (sig && sig.severity === 'problem')
                     body.push(dotText('problem', sig.detail));
-                body.push(new component__namespace.DataGrid({
-                    dataSource: new core__namespace.ArrayDataSource(backlogRows(v)),
-                    columns: this.backlogColumns(),
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    dataRowHeight: 56,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                }));
+                body.push(table(backlogRows(v), [
+                    { name: 'status', label: 'Status', stretch: 3, cell: (r) => chip(r.status, r.tone) },
+                    { name: 'calls', label: 'Calls', stretch: 1, numeric: true, cell: (r) => num(r.count, { muteZero: true }) },
+                    { name: 'next', label: 'What happens next', stretch: 8, cell: (r) => help(r.next) },
+                    { name: 'link', label: '', stretch: 3,
+                        cell: (r) => (r.link && r.count > 0 ? extLink('Open in Call Central', CALL_CENTRAL_URL) : text('')) }
+                ], { rowHeight: ROW_TWO_LINES }));
             }
             return card(body, { label: 'Transcript backlog' });
         }
-        jobRow(label, j, helpText) {
+        jobRow(name, j, helpText) {
             let status;
             if (!j || !j.lastStatus || j.minutesSinceLastRun === null) {
                 status = dotText('off', j && j.lastStatus ? runStatusText(j.lastStatus) : 'No run yet');
@@ -4631,7 +4734,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 const ago = agoParts(j.minutesSinceLastRun);
                 status = dotText(jobTone(j), runStatusText(j.lastStatus) + ' ' + ago.value + ' ' + ago.unit, j.failedRecent > 0 ? '· ' + j.failedRecent + ' recent ' + (j.failedRecent === 1 ? 'run' : 'runs') + ' failed' : '');
             }
-            return grid('200px minmax(0, 1fr)', [text(label, { strong: true, small: true }),
+            return grid('200px minmax(0, 1fr)', [label(name),
                 vstack([status, help(helpText)], Gap.SPACING1X)], Gap.SPACING4X);
         }
         renderJobs(state) {
@@ -4828,6 +4931,107 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const CONSOLE_CLASS = 'ctc-console';
+    const CONSOLE_FRAME_CLASS = 'ctc-console-frame';
+    const CONSOLE_SCROLL_CLASS = 'ctc-console-scroll';
+    const RAIL_CLASS = 'ctc-rail';
+    const RAIL_TITLE_CLASS = 'ctc-rail-title';
+    const TOKENS = {
+        surface: '#F6F5F2',
+        card: '#FFFFFF',
+        border: '#E5E2DD',
+        divider: '#F1EFEA',
+        text: '#161513',
+        muted: '#5C5955',
+        faint: '#8B8780',
+        headerBg: '#FAFAF8',
+        radius: '12px',
+        dangerBorder: '#E7C3BF',
+        dangerText: '#9A2A23'
+    };
+    const S = '.' + CONSOLE_CLASS;
+    const T = TOKENS;
+    const type = (cls, size, weight, color, lineHeight = '1.45') => S + ' .' + cls + '{font-size:' + size + 'px !important;font-weight:' + weight + ' !important;color:' + color +
+        ' !important;line-height:' + lineHeight + ' !important}' +
+        S + ' .' + cls + ' *{font-size:inherit !important;font-weight:inherit !important;color:inherit !important;' +
+        'line-height:inherit !important}';
+    const CSS = [
+        S + '{background:' + T.surface + ';min-height:100%}',
+        '.' + CONSOLE_FRAME_CLASS + ',.' + CONSOLE_SCROLL_CLASS + '{background:' + T.surface + '}',
+        'div:has(> div > ' + S + '){background:' + T.surface + '}',
+        type('ctc-t-body', 13, 400, T.text),
+        type('ctc-t-strong', 13, 600, T.text),
+        type('ctc-t-muted', 13, 400, T.muted),
+        type('ctc-t-small', 12, 400, T.text),
+        type('ctc-t-strong-small', 12, 600, T.text),
+        type('ctc-t-help', 12, 400, T.muted),
+        type('ctc-t-label', 12, 600, T.muted),
+        type('ctc-h2', 15, 700, T.text, '1.35'),
+        type('ctc-t-status', 17, 700, T.text, '1.2'),
+        S + ' .ctc-h2{margin:0 !important}',
+        S + ' .ctc-num{font-variant-numeric:tabular-nums}',
+        S + ' .ctc-t-zero,' + S + ' .ctc-t-zero *{color:' + T.faint + ' !important}',
+        S + ' .ctc-quote{border-left:3px solid ' + T.border + ';padding-left:10px}',
+        S + ' .ctc-table .ctc-th{background:' + T.headerBg + ' !important;border-bottom:1px solid ' + T.border + ' !important}',
+        S + ' .ctc-table .ctc-th,' + S + ' .ctc-table .ctc-th *{font-size:12px !important;font-weight:600 !important;' +
+            'color:' + T.muted + ' !important}',
+        S + ' .ctc-table .ctc-td-first .ctc-t-body{font-weight:600 !important}',
+        S + ' .ctc-table .ctc-td-num,' + S + ' .ctc-table .ctc-th-num{text-align:right;font-variant-numeric:tabular-nums}',
+        S + ' .ctc-lth,' + S + ' .ctc-ltd{box-sizing:border-box;height:100%;justify-content:center !important}',
+        S + ' .ctc-lth{background:' + T.headerBg + ';border-bottom:1px solid ' + T.border + ';padding:9px 12px}',
+        S + ' .ctc-ltd{border-bottom:1px solid ' + T.divider + ';padding:10px 12px}',
+        S + ' .ctc-ltd .ctc-t-body,' + S + ' .ctc-ltd .ctc-t-help{overflow-wrap:anywhere}',
+        S + ' .ctc-card{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.border +
+            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important;box-sizing:border-box}',
+        S + ' .ctc-card-flush{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.border +
+            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important;overflow:hidden}',
+        S + ' .ctc-card-danger{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.dangerBorder +
+            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important}',
+        S + ' .ctc-danger-title{color:' + TOKENS.dangerText + ' !important}',
+        S + ' .ctc-fill{height:100%}',
+        S + ' .ctc-chip-neutral,' + S + ' .ctc-chip-info,' + S + ' .ctc-chip-warn,' + S + ' .ctc-chip-problem,' +
+            S + ' .ctc-chip-ok{border:0 !important;border-radius:999px !important;font-size:12px !important;' +
+            'font-weight:600 !important;white-space:nowrap}',
+        S + ' [class*="ctc-chip-"] *{font-size:12px !important;font-weight:600 !important;color:inherit !important}',
+        S + ' .ctc-chip-neutral{background:#F1EFEA !important;color:#5C5955 !important}',
+        S + ' .ctc-chip-info{background:#E8F0F8 !important;color:#1F3550 !important}',
+        S + ' .ctc-chip-warn{background:#FFF3D6 !important;color:#8A5A00 !important}',
+        S + ' .ctc-chip-problem{background:#FCE9E7 !important;color:#9A2A23 !important}',
+        S + ' .ctc-chip-ok{background:#E4F3EB !important;color:#1F6B49 !important}',
+        S + ' .ctc-step{width:24px;height:24px;min-width:24px;box-sizing:border-box;border-radius:999px;' +
+            'background:#1F3550;color:#FFFFFF !important;font-size:12px !important;font-weight:700 !important;' +
+            'line-height:24px !important;text-align:center;display:inline-block !important;' +
+            'font-variant-numeric:tabular-nums;margin-top:1px}',
+        S + ' .ctc-btn-danger{color:#9A2A23 !important;border-color:#E7C3BF !important;background:#FFFFFF !important}',
+        S + ' .ctc-btn-danger:hover{background:#FCF1EF !important}',
+        S + ' .ctc-icon-tile{width:36px;height:36px;border-radius:10px;background:#E8F0F8;' +
+            'display:inline-flex !important;align-items:center;justify-content:center}',
+        S + ' .ctc-dot-ok{color:#2E9E6B !important}',
+        S + ' .ctc-dot-warn{color:#E9A62A !important}',
+        S + ' .ctc-dot-problem{color:#B4432F !important}',
+        S + ' .ctc-dot-off{color:#B9B5AE !important}',
+        S + ' .ctc-dot-info{color:#9DB4CF !important}',
+        S + ' .ctc-mono{font-family:"SF Mono",Menlo,monospace !important;font-size:12px !important}',
+        '.' + RAIL_CLASS + ' .ctc-rail-head{container-type:inline-size;width:100%}',
+        '.' + RAIL_CLASS + ' .' + RAIL_TITLE_CLASS + '{display:block;font-size:11px !important;font-weight:700 !important;' +
+            'letter-spacing:0.06em;text-transform:uppercase;color:#9FB3C8 !important;padding:6px 10px 8px;' +
+            'white-space:nowrap;overflow:hidden;cursor:default;user-select:none;pointer-events:none}',
+        '@container (max-width: 120px){.' + RAIL_CLASS + ' .' + RAIL_TITLE_CLASS + '{display:none !important}}'
+    ].join('\n');
+    const STYLE_ID = 'ctc-console-styles';
+    function ensureConsoleStyles() {
+        try {
+            if (typeof document === 'undefined' || document.getElementById(STYLE_ID))
+                return;
+            const el = document.createElement('style');
+            el.id = STYLE_ID;
+            el.textContent = CSS;
+            (document.head || document.documentElement).appendChild(el);
+        }
+        catch (e) {
+        }
+    }
+
     let drawers = [];
     const railValueFor = (state) => state.mode === 'stepper' && !isConfigActive(state) ? 're-run' : state.selectedSection;
     const syncRailSelection = () => {
@@ -4846,7 +5050,11 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
         goToSection(value);
     };
+    const railTitle = () => vstack([
+        new component__namespace.Text({ text: 'Click-to-Call', classList: [RAIL_TITLE_CLASS] })
+    ], Gap.NONE, { classList: ['ctc-rail-head'] });
     const NavRail = (_props) => {
+        ensureConsoleStyles();
         const state = store.getState();
         const assignments = state.console.assignments;
         const assignmentBadge = assignments ? String(assignments.length) : undefined;
@@ -4872,6 +5080,9 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             selectedValue: selectedVal,
             width: 240,
             visualStyle: component__namespace.NavigationDrawer.VisualStyle.DARK,
+            classList: [RAIL_CLASS],
+            header: railTitle(),
+            headerAlignment: component__namespace.NavigationDrawer.HeaderAlignment.STRETCH,
             onSelectedValueChanged: (args) => {
                 const value = args && args.value;
                 if (!value)
@@ -4888,7 +5099,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     };
 
     const RailContentShell = (props) => {
-        return (jsxRuntime.jsx(component__namespace.ScrollPanel, { orientation: component__namespace.ScrollPanel.Orientation.VERTICAL, children: jsxRuntime.jsx(component__namespace.ContentPanel, { classList: (props.classList || []), horizontalAlignment: component__namespace.ContentPanel.HorizontalAlignment.STRETCH, outerGap: {
+        return (jsxRuntime.jsx(component__namespace.ScrollPanel, { orientation: component__namespace.ScrollPanel.Orientation.VERTICAL, classList: (props.scrollClassList || []), children: jsxRuntime.jsx(component__namespace.ContentPanel, { classList: (props.classList || []), horizontalAlignment: component__namespace.ContentPanel.HorizontalAlignment.STRETCH, outerGap: {
                     start: component__namespace.ContentPanel.GapSize.XXL,
                     end: component__namespace.ContentPanel.GapSize.XXL,
                     vertical: component__namespace.ContentPanel.GapSize.M
@@ -4939,61 +5150,6 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         return banner;
     };
 
-    const CONSOLE_CLASS = 'ctc-console';
-    const TOKENS = {
-        surface: '#F6F5F2',
-        card: '#FFFFFF',
-        border: '#E5E2DD',
-        divider: '#F1EFEA',
-        text: '#161513',
-        muted: '#5C5955',
-        radius: '12px',
-        dangerBorder: '#E7C3BF',
-        dangerText: '#9A2A23'
-    };
-    const S = '.' + CONSOLE_CLASS;
-    const CSS = [
-        S + '{background:' + TOKENS.surface + ';min-height:100%}',
-        'div:has(> div > ' + S + '){background:' + TOKENS.surface + '}',
-        S + ' .ctc-card{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.border +
-            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important;box-sizing:border-box}',
-        S + ' .ctc-card-flush{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.border +
-            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important;overflow:hidden}',
-        S + ' .ctc-card-danger{background:' + TOKENS.card + ' !important;border:1px solid ' + TOKENS.dangerBorder +
-            ' !important;border-radius:' + TOKENS.radius + ' !important;box-shadow:none !important}',
-        S + ' .ctc-danger-title{color:' + TOKENS.dangerText + ' !important}',
-        S + ' .ctc-fill{height:100%}',
-        S + ' .ctc-chip-neutral,' + S + ' .ctc-chip-info,' + S + ' .ctc-chip-warn,' + S + ' .ctc-chip-problem,' +
-            S + ' .ctc-chip-ok{border:0 !important;border-radius:999px !important;font-weight:600 !important}',
-        S + ' .ctc-chip-neutral{background:#F1EFEA !important;color:#5C5955 !important}',
-        S + ' .ctc-chip-info{background:#E8F0F8 !important;color:#1F3550 !important}',
-        S + ' .ctc-chip-warn{background:#FFF3D6 !important;color:#8A5A00 !important}',
-        S + ' .ctc-chip-problem{background:#FCE9E7 !important;color:#9A2A23 !important}',
-        S + ' .ctc-chip-ok{background:#E4F3EB !important;color:#1F6B49 !important}',
-        S + ' .ctc-step{width:22px;height:22px;min-width:22px;padding:0 !important;border:0 !important;' +
-            'border-radius:999px !important;background:#E8F0F8 !important;color:#1F3550 !important;' +
-            'font-weight:700 !important;display:inline-flex !important;align-items:center;justify-content:center}',
-        S + ' .ctc-dot-ok{color:#2E9E6B !important}',
-        S + ' .ctc-dot-warn{color:#E9A62A !important}',
-        S + ' .ctc-dot-problem{color:#B4432F !important}',
-        S + ' .ctc-dot-off{color:#B9B5AE !important}',
-        S + ' .ctc-dot-info{color:#9DB4CF !important}',
-        S + ' .ctc-mono{font-family:"SF Mono",Menlo,monospace !important;font-size:12px !important}'
-    ].join('\n');
-    const STYLE_ID = 'ctc-console-styles';
-    function ensureConsoleStyles() {
-        try {
-            if (typeof document === 'undefined' || document.getElementById(STYLE_ID))
-                return;
-            const el = document.createElement('style');
-            el.id = STYLE_ID;
-            el.textContent = CSS;
-            (document.head || document.documentElement).appendChild(el);
-        }
-        catch (e) {
-        }
-    }
-
     const ConsoleShell = (props) => {
         ensureConsoleStyles();
         const state = store.getState();
@@ -5003,7 +5159,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             isPaused && (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: jsxRuntime.jsx(PausedBanner, { tick: props.tick }) })),
             (jsxRuntime.jsx(component__namespace.StackPanel.Item, { children: props.children }))
         ].filter(Boolean);
-        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, { tick: props.tick }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { classList: [CONSOLE_CLASS], children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.SPACING4X, children: contentItems }) }) })] }));
+        return (jsxRuntime.jsxs(component__namespace.GridPanel, { columns: "auto 1fr", rows: "100%", columnGap: component__namespace.GridPanel.GapSize.NONE, classList: [CONSOLE_FRAME_CLASS], children: [jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(NavRail, { tick: props.tick }) }), jsxRuntime.jsx(component__namespace.GridPanel.Item, { children: jsxRuntime.jsx(RailContentShell, { classList: [CONSOLE_CLASS], scrollClassList: [CONSOLE_SCROLL_CLASS], children: jsxRuntime.jsx(component__namespace.StackPanel, { orientation: component__namespace.StackPanel.Orientation.VERTICAL, itemGap: component__namespace.StackPanel.GapSize.SPACING4X, children: contentItems }) }) })] }));
     };
 
     const STEPS = [

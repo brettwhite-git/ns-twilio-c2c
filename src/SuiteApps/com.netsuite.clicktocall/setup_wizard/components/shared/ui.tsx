@@ -9,7 +9,16 @@
  *   dotText()   UIF Text bullet (tone class) + UIF Text label
  *   field()     label Text + control + help Text (vertical StackPanel)
  *   pageHeader  UIF Heading (PAGE_TITLE, the page's focus target) + Text
+ *   table()     UIF DataGrid with the console table classes (every grid)
+ *   listTable() UIF GridPanel table whose rows grow to fit wrapped text
  *
+ * Type scale (canvas; classes in consoleStyles.ts — every Text gets one):
+ *   page title 24/700 (UIF PAGE_TITLE)   subtitle 13 #5C5955 (ctc-t-muted)
+ *   card title 15/700 #161513 (ctc-h2)   label 12/600 #5C5955 (ctc-t-label)
+ *   body 13/400 #161513 lh 1.45 (ctc-t-body, ctc-t-strong = 600)
+ *   help 12 #5C5955 lh 1.45 (ctc-t-help; ctc-t-small = 12 #161513)
+ *   table header 12/600 #5C5955 on #FAFAF8 · cells 13 · first column 600
+ *   chips 12/600
  * Every StackPanel / GridPanel child is wrapped in its own .Item and falsy
  * entries are dropped first (UIF rejects null children and empty lists).
  */
@@ -119,25 +128,60 @@ export function card(nodes: Child[], opts: {
     ) as core.VDom.Node;
 }
 
-export function text(t: string, opts: { weak?: boolean; strong?: boolean; small?: boolean; classList?: string[] } = {}): Child {
+export interface TextOpts {
+    weak?: boolean;
+    strong?: boolean;
+    small?: boolean;
+    classList?: string[];
+    /** Native tooltip (the full text of a shortened value). */
+    title?: string;
+}
+
+/** The type-scale class of a text (consoleStyles.ts). */
+export function typeClass(opts: TextOpts): string {
+    if (opts.strong && opts.small) return 'ctc-t-strong-small';
+    if (opts.weak && opts.small) return 'ctc-t-help';
+    if (opts.small) return 'ctc-t-small';
+    if (opts.strong) return 'ctc-t-strong';
+    if (opts.weak) return 'ctc-t-muted';
+    return 'ctc-t-body';
+}
+
+export function text(t: string, opts: TextOpts = {}): Child {
     return new component.Text({
         text: t,
         type: opts.strong ? component.Text.Type.STRONG : opts.weak ? component.Text.Type.WEAK : component.Text.Type.DEFAULT,
         size: opts.small ? component.Text.Size.S : component.Text.Size.M,
-        classList: opts.classList || []
+        classList: [typeClass(opts)].concat(opts.classList || []),
+        ...(opts.title ? { rootAttributes: { title: opts.title } } : {})
     } as never);
 }
 
-/** Muted help line (canvas .help: 12px muted). */
+/** Muted help line (canvas .help: 12px muted, line-height 1.45). */
 export const help = (t: string): Child => text(t, { weak: true, small: true });
 
-/** Card title (canvas .h2: 15px bold). */
+/** Subheader / row label inside a card (canvas .lbl: 12px semibold muted). */
+export function label(t: string): Child {
+    return new component.Text({
+        text: t,
+        type: component.Text.Type.STRONG,
+        size: component.Text.Size.S,
+        classList: ['ctc-t-label']
+    } as never);
+}
+
+/** Tabular number (table counts): 13px, tabular figures; muted when zero. */
+export function num(n: number, opts: { muteZero?: boolean } = {}): Child {
+    return text(n.toLocaleString(), { classList: ['ctc-num'].concat(opts.muteZero && n === 0 ? ['ctc-t-zero'] : []) });
+}
+
+/** Card title (canvas .h2: 15px bold, #161513). */
 export function cardTitle(t: string, opts: { danger?: boolean } = {}): Child {
     return new component.Heading({
         content: t,
         level: 2,
         type: component.Heading.Type.SMALL_HEADING,
-        classList: opts.danger ? ['ctc-danger-title'] : []
+        classList: opts.danger ? ['ctc-h2', 'ctc-danger-title'] : ['ctc-h2']
     } as never);
 }
 
@@ -164,13 +208,13 @@ export function chip(label: string, tone: Tone | 'neutral'): Child {
     } as never);
 }
 
-/** Numbered step circle (Inbound steps 1-4): UIF Badge + ctc-step. */
+/**
+ * Numbered step circle (Inbound steps 1-4): UIF Text + ctc-step. Not a
+ * Badge: Badge pads and sizes its label, so the number sat small and
+ * off-centre in the circle.
+ */
 export function stepBadge(n: number): Child {
-    return new component.Badge({
-        content: String(n),
-        type: component.Badge.Type.SUBTLE,
-        classList: ['ctc-step']
-    } as never);
+    return new component.Text({ text: String(n), classList: ['ctc-step'] } as never);
 }
 
 /** Coloured status dot. */
@@ -197,7 +241,10 @@ export function divider(): Child {
 
 export interface ButtonOpts {
     primary?: boolean;
+    /** Solid red: the final, confirming click of a destructive action. */
     danger?: boolean;
+    /** Outlined red text: opens a destructive action (canvas .btn-danger). */
+    quietDanger?: boolean;
     enabled?: boolean;
     icon?: unknown;
     small?: boolean;
@@ -216,8 +263,14 @@ export function button(label: string, action: (sender: unknown) => void, opts: B
         size: opts.small ? component.Button.Size.SMALL : component.Button.Size.MEDIUM,
         enabled: opts.enabled !== false,
         startIcon: opts.icon,
+        classList: opts.quietDanger ? ['ctc-btn-danger'] : undefined,
         action: (_args: unknown, sender: unknown): void => { action(sender); }
     } as never);
+}
+
+/** Button that opens a NetSuite page in a new tab (Call Central). */
+export function openButton(label: string, url: string): Child {
+    return button(label, () => { window.open(url, '_blank', 'noopener'); }, { icon: core.SystemIcon.OPEN_NEW });
 }
 
 /** Link to a NetSuite page in a new tab. */
@@ -236,9 +289,9 @@ export function extLink(label: string, url: string): Child {
  * 2026-11-03: Account SID, API Key SID and the notice text boxes went
  * missing). The control is a normal StackPanel child instead.
  */
-export function field(label: string, control: Child, helpText?: string | Child): core.VDom.Node {
+export function field(labelText: string, control: Child, helpText?: string | Child): core.VDom.Node {
     return vstack([
-        new component.Text({ text: label, type: component.Text.Type.STRONG, size: component.Text.Size.S } as never),
+        label(labelText),
         control,
         helpText ? (typeof helpText === 'string' ? help(helpText) : helpText) : null
     ], Gap.SPACING1X);
@@ -316,4 +369,95 @@ export function pageHeader(title: string, subtitle: string, aside: Child[] = [])
     return hstack([left, hstack(right, Gap.SPACING3X, { wrap: true })], Gap.SPACING4X, {
         alignment: SP.Alignment.END, justification: SP.Justification.SPACE_BETWEEN, wrap: true, growFirst: true
     });
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Tables
+// ─────────────────────────────────────────────────────────────────────
+
+/** Row heights: one line of cell text, or a value + a secondary line. */
+export const ROW_ONE_LINE = 48;
+export const ROW_TWO_LINES = 60;
+
+export interface Column<T> {
+    name: string;
+    label: string;
+    /** Share of the table width (DataGrid stretchFactor). */
+    stretch: number;
+    cell: (row: T) => Child;
+    /** Numbers: right-aligned, tabular figures. */
+    numeric?: boolean;
+}
+
+interface CellArgs<T> {
+    cell?: { row?: { dataItem?: T } };
+}
+
+type AlignEnum = { RIGHT?: unknown } | undefined;
+
+/**
+ * Every console DataGrid: one class on the grid, the header cells and the
+ * body cells (consoleStyles.ts: 12/600 muted header on #FAFAF8, 13px
+ * cells, first column 600, numbers right-aligned and tabular).
+ * Rows have a fixed height (DataGrid does not size rows to content): keep
+ * table text to one line, or two with ROW_TWO_LINES; text that can wrap
+ * further belongs in listTable().
+ */
+export function table<T>(rows: T[], columns: Array<Column<T>>, opts: { rowHeight?: number } = {}): Child {
+    const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
+    const gridColumn = (component as unknown as { GridColumn?: { HorizontalAlignment?: AlignEnum } }).GridColumn;
+    const right = gridColumn && gridColumn.HorizontalAlignment ? gridColumn.HorizontalAlignment.RIGHT : undefined;
+    return new component.DataGrid({
+        dataSource: new core.ArrayDataSource(rows),
+        columns: columns.map((c, i) => {
+            const align = c.numeric && right !== undefined
+                ? { horizontalAlignment: right, headerHorizontalAlignment: right } : {};
+            return {
+                type: CT.TEMPLATED,
+                name: c.name,
+                label: c.label,
+                stretchFactor: c.stretch,
+                classList: ['ctc-td'].concat(i === 0 ? ['ctc-td-first'] : [], c.numeric ? ['ctc-td-num'] : []),
+                headerClassList: ['ctc-th'].concat(c.numeric ? ['ctc-th-num'] : []),
+                ...align,
+                content: (args: CellArgs<T>): unknown => {
+                    const r = args && args.cell && args.cell.row ? args.cell.row.dataItem : undefined;
+                    return r ? c.cell(r) : text('');
+                }
+            };
+        }),
+        columnStretch: true,
+        highlightRowsOnHover: true,
+        dataRowHeight: opts.rowHeight || ROW_ONE_LINE,
+        headerRowHeight: 40,
+        classList: ['ctc-table'],
+        rootStyle: { width: '100%' }
+    } as never);
+}
+
+export interface ListColumn {
+    label: string;
+    /** Content at the end of the cell (status chips, numbers). */
+    end?: boolean;
+}
+
+/**
+ * A table whose rows grow to fit wrapped text (UIF GridPanel; DataGrid
+ * rows have a fixed height and clip). Same look as table(): header cells
+ * ctc-lth, body cells ctc-ltd; every cell of a row stretches to the row
+ * height so the row lines meet.
+ */
+export function listTable(columns: string, heads: ListColumn[], rows: Child[][]): core.VDom.Node {
+    const align = (c: ListColumn): unknown => (c.end ? SP.Alignment.END : SP.Alignment.START);
+    const cells: Child[] = [];
+    heads.forEach((h) => {
+        cells.push(vstack([label(h.label)], Gap.NONE, { alignment: align(h), classList: ['ctc-lth'] }));
+    });
+    rows.forEach((row) => {
+        row.forEach((cell, i) => {
+            const h = heads[i] || { label: '' };
+            cells.push(vstack([cell], Gap.SPACING1X, { alignment: align(h), classList: ['ctc-ltd'] }));
+        });
+    });
+    return vstack([grid(columns, cells, Gap.NONE, { stretch: true })], Gap.NONE, { classList: ['ctc-list'] });
 }

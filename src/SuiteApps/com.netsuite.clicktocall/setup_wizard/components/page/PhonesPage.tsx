@@ -40,10 +40,10 @@ import {PHONE_STATUS_NOT_RECEIVING, PHONE_STATUS_OFFLINE, phoneStatus, relativeT
 import {callerIdPlan, firstName, routingStatus, timeOfDay} from '../shared/consoleModel';
 import type {NumberRoutingValue, NumberRow, Tone} from '../shared/consoleModel';
 import {
-    button, card, cardTitle, dotText, emptyCard, errorLine, extLink, grid, help, hstack, pageHeader, problemCard,
-    skeleton, text, vstack, Gap
+    button, card, cardTitle, dotText, emptyCard, errorLine, extLink, grid, help, hstack, label, pageHeader, problemCard,
+    skeleton, table, text, vstack, Gap, ROW_TWO_LINES
 } from '../shared/ui';
-import type {Child} from '../shared/ui';
+import type {Child, Column} from '../shared/ui';
 
 interface EmployeeOption {
     id: number;
@@ -54,10 +54,6 @@ interface TableRow extends ByPhoneEntry {
     ringId: number | null;
 }
 
-interface CellArgs {
-    cell?: { row?: { dataItem?: TableRow } };
-}
-
 /** Employee id of a selection value (an item object or its id). */
 const idOf = (v: unknown): number =>
     Number(v && typeof v === 'object' ? (v as { id?: unknown }).id : v);
@@ -66,6 +62,8 @@ const toIds = (values: unknown[] | undefined): number[] =>
     (values || []).map(idOf).filter((n) => !isNaN(n) && n > 0);
 
 /** Rep's phone: presence status → dot tone. */
+
+const digitsOf = (v: unknown): string => String(v || '').replace(/[^0-9]/g, '');
 export function presenceTone(row: PresenceRow | undefined): { tone: Tone; label: string } {
     const s = phoneStatus(row);
     if (s === PHONE_STATUS_OFFLINE) return { tone: 'off', label: s.label };
@@ -112,10 +110,10 @@ export function callerIdList(state: AppState): Child {
     const lines: Child[] = [];
     plan.repIds.forEach((id) => {
         const out = plan.byRep[String(id)];
-        lines.push(text(nameOf(id), { strong: true, small: true }));
+        lines.push(text(nameOf(id), { strong: true }));
         lines.push(text(out && out.phoneNumber
             ? formatPhone(out.phoneNumber) + (out.ringsThem ? ' · rings this rep' : ' · default (rings for no number)')
-            : 'No default caller ID set', { small: true }));
+            : 'No default caller ID set'));
     });
     return lines.length ? grid('auto minmax(0, 1fr)', lines, Gap.SPACING4X, { rowGap: Gap.SPACING2X })
         : text(rows.length ? 'No rep is assigned to a number yet.' : 'No numbers yet.', { weak: true });
@@ -135,8 +133,7 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
         if (!state.health.loaded && !state.health.loading) loadHealth();
     }
 
-    private buildColumns(nameOf: (id: number) => string, plan: ReturnType<typeof callerIdPlan>): unknown[] {
-        const CT = (component.DataGrid as unknown as { ColumnType: Record<string, unknown> }).ColumnType;
+    private buildColumns(nameOf: (id: number) => string, plan: ReturnType<typeof callerIdPlan>): Array<Column<TableRow>> {
         const state = store.getState() as AppState;
         const routingSig = state.health.signals.numberRouting;
         const routingValue = (routingSig && routingSig.value) as NumberRoutingValue | null;
@@ -144,80 +141,46 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
         const byEmployee: Record<string, PresenceRow> = {};
         presence.items.forEach((p) => { byEmployee[p.employeeId] = p; });
         const nowMs = Date.now() + presence.clockSkewMs;
-        const row = (args: CellArgs): TableRow | undefined => args?.cell?.row?.dataItem;
         const c = state.console;
 
         return [
-            {
-                type: CT.TEMPLATED, name: 'number', label: 'Number', stretchFactor: 3,
-                content: (args: CellArgs): unknown => {
-                    const r = row(args);
-                    return vstack([
-                        text(formatPhone(r?.phoneNumber) || '(unknown)', { strong: true }),
-                        r && r.friendlyName ? help(r.friendlyName) : null
-                    ], Gap.NONE);
+            { name: 'number', label: 'Number', stretch: 3, cell: (r) => vstack([
+                text(formatPhone(r.phoneNumber) || '(unknown)', { strong: true }),
+                // Twilio's default friendly name is the number itself: skip it.
+                r.friendlyName && digitsOf(r.friendlyName) !== digitsOf(r.phoneNumber).slice(-10)
+                    && digitsOf(r.friendlyName) !== digitsOf(r.phoneNumber) ? help(r.friendlyName) : null
+            ], Gap.NONE) },
+            { name: 'rings', label: 'Rings', stretch: 3,
+              cell: (r) => (r.ringId !== null ? text(nameOf(r.ringId)) : text('—', { weak: true })) },
+            { name: 'also', label: 'Also assigned', stretch: 3, cell: (r) => {
+                const others = r.employeeIds.filter((id) => id !== r.ringId);
+                return others.length ? text(others.map(nameOf).join(', ')) : text('—', { weak: true });
+            } },
+            { name: 'routing', label: 'Routing', stretch: 3, cell: (r) => {
+                if (!routingValue && r.ringId !== null) {
+                    return text(state.health.loading ? 'Checking…' : 'Not checked', { weak: true });
                 }
-            },
-            {
-                type: CT.TEMPLATED, name: 'rings', label: 'Rings', stretchFactor: 3,
-                content: (args: CellArgs): unknown => {
-                    const r = row(args);
-                    return r && r.ringId !== null ? text(nameOf(r.ringId)) : text('—', { weak: true });
-                }
-            },
-            {
-                type: CT.TEMPLATED, name: 'also', label: 'Also assigned', stretchFactor: 3,
-                content: (args: CellArgs): unknown => {
-                    const r = row(args);
-                    const others = r ? r.employeeIds.filter((id) => id !== r.ringId) : [];
-                    return others.length ? text(others.map(nameOf).join(', ')) : text('—', { weak: true });
-                }
-            },
-            {
-                type: CT.TEMPLATED, name: 'routing', label: 'Routing', stretchFactor: 3,
-                content: (args: CellArgs): unknown => {
-                    const r = row(args);
-                    if (!r) return text('');
-                    if (!routingValue && r.ringId !== null) {
-                        return text(state.health.loading ? 'Checking…' : 'Not checked', { weak: true });
-                    }
-                    const s = routingStatus(r as NumberRow, routingValue);
-                    return dotText(s.tone, s.label);
-                }
-            },
-            {
-                type: CT.TEMPLATED, name: 'phone', label: 'Rep\'s phone', stretchFactor: 4,
-                content: (args: CellArgs): unknown => {
-                    const r = row(args);
-                    if (!r || r.ringId === null) return text('—', { weak: true });
-                    if (!presence.loaded) return text(presence.error ? '—' : 'Loading…', { weak: true });
-                    const p = byEmployee[String(r.ringId)];
-                    const s = presenceTone(p);
-                    return dotText(s.tone, s.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
-                }
-            },
-            {
-                type: CT.TEMPLATED, name: 'callsOut', label: 'Calls out from', stretchFactor: 4,
-                content: (args: CellArgs): unknown => {
-                    const r = row(args);
-                    if (!r || r.ringId === null) return text('—', { weak: true });
-                    const out = plan.byRep[String(r.ringId)];
-                    const who = firstName(nameOf(r.ringId));
-                    if (out && out.phoneNumber === r.phoneNumber) return text(who + ', from this number');
-                    return text(who + ', from ' + (out && out.phoneNumber ? formatPhone(out.phoneNumber) : 'the default'));
-                }
-            },
-            {
-                type: CT.TEMPLATED, name: 'action', label: 'Actions', stretchFactor: 2,
-                content: (args: CellArgs): unknown => {
-                    const r = row(args);
-                    if (!r) return text('');
-                    return button('Edit', () => { openPhonesEditor(r.phoneSid); }, {
-                        small: true,
-                        enabled: c.phonesSavingSid === null && c.phonesEditingSid !== r.phoneSid
-                    });
-                }
-            }
+                const st = routingStatus(r as NumberRow, routingValue);
+                return dotText(st.tone, st.label);
+            } },
+            { name: 'phone', label: 'Rep\'s phone', stretch: 4, cell: (r) => {
+                if (r.ringId === null) return text('—', { weak: true });
+                if (!presence.loaded) return text(presence.error ? '—' : 'Loading…', { weak: true });
+                const p = byEmployee[String(r.ringId)];
+                const st = presenceTone(p);
+                return dotText(st.tone, st.label, '· ' + relativeTime(p ? p.lastSeen : '', nowMs).toLowerCase());
+            } },
+            { name: 'callsOut', label: 'Calls out from', stretch: 4, cell: (r) => {
+                if (r.ringId === null) return text('—', { weak: true });
+                const out = plan.byRep[String(r.ringId)];
+                const who = firstName(nameOf(r.ringId));
+                if (out && out.phoneNumber === r.phoneNumber) return text(who + ', from this number');
+                return text(who + ', from ' + (out && out.phoneNumber ? formatPhone(out.phoneNumber) : 'the default'));
+            } },
+            { name: 'action', label: 'Actions', stretch: 2, cell: (r) => button('Edit', () => { openPhonesEditor(r.phoneSid); }, {
+                small: true,
+                enabled: c.phonesSavingSid === null && c.phonesEditingSid !== r.phoneSid
+            }) }
         ];
     }
 
@@ -282,8 +245,8 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
         const body: Child[] = [
             cardTitle('Editing ' + formatPhone(row.phoneNumber) + (row.friendlyName ? ' · ' + row.friendlyName : '')),
             grid('minmax(0, 1fr) minmax(0, 1fr)', [
-                vstack([text('Rings', { strong: true, small: true }), ringsPicker], Gap.SPACING1X),
-                vstack([text('Also assigned', { strong: true, small: true }), alsoPicker], Gap.SPACING1X)
+                vstack([label('Rings'), ringsPicker], Gap.SPACING1X),
+                vstack([label('Also assigned'), alsoPicker], Gap.SPACING1X)
             ], Gap.SPACING4X),
             help(ALSO_ASSIGNED_HELP),
             hstack([
@@ -364,10 +327,10 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
                 routingPublishErrors.map((e) => e.message).join(' '), { strong: true, small: true }) : null
         ];
 
-        let table: Child;
+        let numbersCard: Child;
         if (rows.length === 0) {
             // With a list error the message above says why; no "no numbers" claim then.
-            table = c.phonesListError ? null : emptyCard('No phone numbers yet',
+            numbersCard = c.phonesListError ? null : emptyCard('No phone numbers yet',
                 'Buy or port a number in the Twilio Console, then refresh here. Reps can call out before a number rings anyone.', [
                     button(refreshing ? 'Refreshing…' : 'Refresh from Twilio', () => { loadPhonesData(); }, {
                         small: true, enabled: !refreshing
@@ -375,16 +338,8 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
                     extLink('Twilio Console', 'https://console.twilio.com/')
                 ]);
         } else {
-            table = card([
-                new component.DataGrid({
-                    dataSource: new core.ArrayDataSource(rows),
-                    columns: this.buildColumns(nameOf, plan),
-                    columnStretch: true,
-                    highlightRowsOnHover: true,
-                    dataRowHeight: 64,
-                    headerRowHeight: 40,
-                    rootStyle: { width: '100%' }
-                } as never),
+            numbersCard = card([
+                table<TableRow>(rows, this.buildColumns(nameOf, plan), { rowHeight: ROW_TWO_LINES }),
                 hstack([
                     dotText('ok', 'CTC routing: calls to the number reach the rep under Rings', undefined, { small: true }),
                     dotText('warn', 'Not routed: the number points somewhere else in Twilio', undefined, { small: true }),
@@ -397,7 +352,7 @@ export default class PhonesPage extends PureComponent<PageTickProps, unknown> {
             header,
             this.renderCallerId(state, defaultNumber),
             ...messages,
-            table,
+            numbersCard,
             editingRow ? this.renderEditor(editingRow, employees, nameOf) : null
         ], Gap.SPACING4X);
     }

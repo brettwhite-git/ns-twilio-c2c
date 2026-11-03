@@ -5,8 +5,8 @@
  *      (shared voiceField editor: live Twilio list, partial save), and
  *      "Who calls out from what" (the caller-ID rule; Phones & reps link).
  *      The Intelligence service moved to Transcripts & AI.
- *   2. "Recording notice" card + Save / Unpublish row (OutboundNotice:
- *      save, publish, resume, unpublish — effects/outbound unchanged).
+ *   2. "Recording notice" card + its action row (OutboundNotice: save,
+ *      publish, resume, remove from Twilio).
  */
 
 import {PureComponent} from '@uif-js/core';
@@ -22,16 +22,16 @@ import {friendlyError} from '../shared/friendlyError';
 import {formatPhone} from '../shared/formatPhone';
 import {VOICE_FIELD_SPECS, voiceActionControl, voiceValueControl} from '../shared/voiceField';
 import type {VoiceFieldSpec} from '../shared/voiceField';
-import {button, card, cardTitle, divider, errorLine, grid, help, pageHeader, text, vstack, Gap} from '../shared/ui';
+import {button, card, cardTitle, divider, errorLine, grid, help, label, pageHeader, text, vstack, Gap} from '../shared/ui';
 import type {Child} from '../shared/ui';
 
 /** A canvas `.kv` row: label | value + help | action. */
-const kv = (label: string, value: Child, action: Child): core.VDom.Node =>
-    grid('180px minmax(0, 1fr) auto', [text(label, { strong: true, small: true }), value, action || text('')],
+const kv = (name: string, value: Child, action: Child): core.VDom.Node =>
+    grid('180px minmax(0, 1fr) auto', [label(name), value, action || text('')],
         Gap.SPACING4X);
 
-const settingRow = (label: string, spec: VoiceFieldSpec, helpText: string, viewText?: string): core.VDom.Node =>
-    kv(label, vstack([voiceValueControl(spec, viewText), help(helpText)], Gap.SPACING1X), voiceActionControl(spec));
+const settingRow = (name: string, spec: VoiceFieldSpec, helpText: string, viewText?: string): core.VDom.Node =>
+    kv(name, vstack([voiceValueControl(spec, viewText), help(helpText)], Gap.SPACING1X), voiceActionControl(spec));
 
 interface TwilioNumber {
     phoneNumber?: string;
@@ -57,7 +57,7 @@ export default class OutboundPage extends PureComponent<PageTickProps, unknown> 
             cardTitle('Call path'),
             settingRow('Twilio app', VOICE_FIELD_SPECS.twimlAppSid,
                 'Outbound calls use this app; publishing the recording notice points it at our dial function. ' +
-                'While the notice is published, unpublish it before you change the app.'),
+                'While the notice is published, remove it from Twilio before you change the app.'),
             divider(),
             settingRow('Default caller ID', VOICE_FIELD_SPECS.phoneNumber,
                 'Each rep calls out from the number that rings them. Reps that ring for no number use this one.',

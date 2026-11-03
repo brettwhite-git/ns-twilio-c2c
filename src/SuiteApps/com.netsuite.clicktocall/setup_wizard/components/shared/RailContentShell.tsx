@@ -22,12 +22,15 @@ interface RailContentShellProps {
     children?: core.VDom.Node | core.VDom.Node[];
     /** Classes on the content panel (the console passes its scope class). */
     classList?: string[];
+    /** Classes on the ScrollPanel (the console passes its surface class). */
+    scrollClassList?: string[];
 }
 
 export const RailContentShell = (props: RailContentShellProps): core.VDom.Node => {
     return (
         <component.ScrollPanel
             orientation={component.ScrollPanel.Orientation.VERTICAL}
+            classList={(props.scrollClassList || []) as never}
         >
             <component.ContentPanel
                 classList={(props.classList || []) as never}

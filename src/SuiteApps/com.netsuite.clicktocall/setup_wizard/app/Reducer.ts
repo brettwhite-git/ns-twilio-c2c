@@ -344,7 +344,15 @@ export default function reducer(state: AppState, action: AppAction): AppState {
             d.outbound.loadError = null;
         })],
         [ActionType.OUTBOUND_LOAD_SUCCESS, (s) => ImmutableUpdate.of(s, (d) => {
-            Object.assign(d.outbound, a.payload as OutboundSnapshot);
+            const snap = a.payload as OutboundSnapshot;
+            // A reload (e.g. Health "Run checks") keeps the admin's unsaved edits.
+            const o = d.outbound;
+            const unsaved = o.loaded && (o.noticeOn !== o.savedNoticeOn || o.noticeText !== o.savedNoticeText);
+            const form = { noticeOn: o.noticeOn, noticeText: o.noticeText };
+            Object.assign(d.outbound, snap);
+            d.outbound.savedNoticeOn = snap.noticeOn;
+            d.outbound.savedNoticeText = snap.noticeText;
+            if (unsaved) Object.assign(d.outbound, form);
             d.outbound.loading = false;
             d.outbound.loaded = true;
             d.outbound.loadError = null;
@@ -359,6 +367,10 @@ export default function reducer(state: AppState, action: AppAction): AppState {
         [ActionType.OUTBOUND_REQUEST, (s) => ImmutableUpdate.of(s, (d) => {
             const p = a.payload as OutboundRequestPayload;
             const busy = p.phase === 'start';
+            if (p.op === 'run') {
+                d.outbound.publishRunning = busy;
+                return;
+            }
             if (p.op === 'save') d.outbound.saving = busy;
             else if (p.op === 'publish') d.outbound.publishing = busy;
             else d.outbound.unpublishing = busy;
@@ -369,7 +381,11 @@ export default function reducer(state: AppState, action: AppAction): AppState {
                 if (p.op === 'save') d.outbound.steps = null;
                 return;
             }
-            if (p.snapshot) Object.assign(d.outbound, p.snapshot);
+            if (p.snapshot) {
+                Object.assign(d.outbound, p.snapshot);
+                d.outbound.savedNoticeOn = p.snapshot.noticeOn;
+                d.outbound.savedNoticeText = p.snapshot.noticeText;
+            }
             if (p.pending !== undefined) d.outbound.pending = p.pending;
             if (p.steps !== undefined) d.outbound.steps = p.steps;
             d.outbound.error = p.error ?? null;

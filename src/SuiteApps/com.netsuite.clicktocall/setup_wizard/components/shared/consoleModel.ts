@@ -6,7 +6,7 @@
  * Signal value shapes: lib/ctc_health.js build* functions.
  */
 
-import type {InboundSettings} from '../../app/InitialState';
+import type {InboundSettings, OutboundState} from '../../app/InitialState';
 
 /** Status colour of a dot or chip (canvas palette in consoleStyles.ts). */
 export type Tone = 'ok' | 'warn' | 'problem' | 'off' | 'info';
@@ -56,6 +56,102 @@ export interface BacklogValue {
     transcribed?: number;
     cleanupPending: number;
     stuck?: number;
+    /** Calls with an AI analysis since monthStart (UTC month start, ISO). */
+    analysedThisMonth?: number;
+    monthStart?: string;
+}
+
+/** AI quota meter (Transcripts & AI). */
+export interface AiMeter {
+    /** Requests left (the bar value). */
+    value: number;
+    /** Left + used by Click-to-Call this month (the bar scale). */
+    max: number;
+    tone: 'ok' | 'warn' | 'problem';
+    /** "1 analysed by Click-to-Call since Nov 1". */
+    usedText: string;
+    /** "Enough for more than a year at this month's rate." */
+    runwayText: string;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * The AI quota meter. NetSuite reports only the requests LEFT (no pool
+ * size, no reset date), so the bar is scaled to left + the calls
+ * Click-to-Call analysed this month: honest, and labelled as such.
+ * Below 50 warn, below 10 problem (the analysis reserve).
+ */
+export function aiMeter(remaining: number | null, backlog: BacklogValue | null, nowMs: number): AiMeter | null {
+    if (remaining === null || !isFinite(remaining) || remaining < 0) return null;
+    const used = Math.max(0, (backlog && backlog.analysedThisMonth) || 0);
+    const startMs = backlog && backlog.monthStart ? Date.parse(backlog.monthStart) : NaN;
+    const since = isNaN(startMs) ? '' : new Date(startMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    const tone = remaining < 10 ? 'problem' : remaining < 50 ? 'warn' : 'ok';
+    const usedText = used.toLocaleString() + (used === 1 ? ' call' : ' calls') +
+        ' analysed by Click-to-Call' + (since ? ' since ' + since : ' this month');
+    let runwayText: string;
+    if (!used || isNaN(startMs)) {
+        runwayText = 'No calls analysed this month yet.';
+    } else {
+        const days = Math.max(1, (nowMs - startMs) / DAY_MS);
+        const runway = remaining / (used / days);
+        runwayText = runway > 365 ? 'Enough for more than a year at this month\'s rate.'
+            : 'Enough for about ' + Math.max(1, Math.floor(runway)).toLocaleString() + ' days at this month\'s rate.';
+    }
+    return { value: remaining, max: Math.max(remaining + used, 1), tone, usedText, runwayText };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Transcript backlog (Transcripts & AI)
+// ─────────────────────────────────────────────────────────────────────
+
+export type BacklogStatus = 'Logged' | 'Processing' | 'Failed' | 'No transcript' | 'Recording cleanup due';
+
+/**
+ * One colour per backlog status, by meaning, wherever the status shows:
+ * waiting / in progress = info (blue), failed = problem (red), closed =
+ * neutral (grey), cleanup due = warn (amber).
+ */
+export const BACKLOG_STATUS_TONE: Record<BacklogStatus, 'info' | 'problem' | 'neutral' | 'warn'> = {
+    'Logged': 'info',
+    'Processing': 'info',
+    'Failed': 'problem',
+    'No transcript': 'neutral',
+    'Recording cleanup due': 'warn'
+};
+
+export interface BacklogRow {
+    status: BacklogStatus;
+    tone: 'info' | 'problem' | 'neutral' | 'warn';
+    count: number;
+    next: string;
+    /** "Open in Call Central" when the count is not zero. */
+    link?: boolean;
+}
+
+/** Primer under the backlog card title. */
+export const BACKLOG_PRIMER =
+    'Calls from the last 7 days that still have work to do. Each call waits for Twilio\'s transcript. ' +
+    'Then NetSuite summarises it, and Click-to-Call deletes the recording in Twilio. ' +
+    'Most calls go from Logged to Transcribed within an hour.';
+
+/** The backlog table rows (canvas copy), from the transcriptBacklog value. */
+export function backlogRows(v: BacklogValue): BacklogRow[] {
+    const row = (status: BacklogStatus, count: number, next: string, link?: boolean): BacklogRow =>
+        ({ status, tone: BACKLOG_STATUS_TONE[status], count: Math.max(0, Number(count) || 0), next, link });
+    return [
+        row('Logged', v.logged,
+            'Waiting for Twilio\'s transcript. Checked every 15 minutes; closed as "No transcript" after 24 hours.'),
+        row('Processing', v.processing,
+            'Being summarised now. A summary that stalls for 30 minutes is retried, up to 3 times.'),
+        row('Failed', v.failed,
+            'Summary failed 3 times. The transcript is kept; the call is not retried again.', true),
+        row('No transcript', v.noTranscript,
+            'Closed: no recording, or Twilio produced no transcript within 24 hours. Logged as calls without a summary.'),
+        row('Recording cleanup due', v.cleanupPending,
+            'Recordings Twilio did not delete on the first try. Retried on the next run.')
+    ];
 }
 
 export interface NumberRoutingValue {
@@ -271,3 +367,109 @@ export const CALL_CENTRAL_URL =
 
 /** NetSuite Setup › Company › API Secrets. */
 export const API_SECRETS_URL = '/app/common/scripting/secrets/settings.nl';
+
+// ─────────────────────────────────────────────────────────────────────
+// Outbound recording notice (Outbound calls)
+// ─────────────────────────────────────────────────────────────────────
+
+export const PUBLISH_NOTICE_HELP =
+    'Creates the ctc-outbound Function in your Twilio account and points your Twilio app at it. ' +
+    'Takes 15–30 seconds.';
+export const SAVE_OFF_HELP = 'Nothing is sent to Twilio while the notice is off.';
+export const NO_CHANGES_HELP =
+    'Callers hear the live version. Change the text or the switch to publish a new version.';
+export const PUBLISH_CHANGES_HELP = 'Takes 15–30 seconds. Calls in progress keep the old notice.';
+export const TURN_OFF_HELP = 'Calls connect without a notice. The Function stays in Twilio.';
+export const REPUBLISH_HELP =
+    'A newer version of the Function is available. Publish to update it. Takes 15–30 seconds.';
+export const FUNCTION_MISSING_HELP =
+    'The Function is missing in Twilio. Publish to create it again. Takes 15–30 seconds.';
+export const VOICE_URL_HELP =
+    'Your Twilio app no longer points at the Function. Publish to point it back. Takes 15–30 seconds.';
+export const PUBLISHING_LABEL = 'Publishing… (15–30 s)';
+export const REMOVE_CONFIRM_TEXT = 'Remove the Function now?';
+
+/** Body of the "Remove from Twilio" section (the previous Voice URL when known). */
+export function removeBody(prevVoiceUrl: string): string {
+    return 'Deletes the ctc-outbound Function and points your Twilio app back at its previous Voice URL' +
+        (prevVoiceUrl ? ': ' + prevVoiceUrl : '') + '. Outbound calls keep working, without a notice.';
+}
+
+/** The form differs from the notice as last saved. */
+export function outboundUnsaved(o: OutboundState): boolean {
+    return o.loaded && (o.noticeOn !== o.savedNoticeOn || o.noticeText !== o.savedNoticeText);
+}
+
+/** Header status of the recording notice: tone + headline (+ published time). */
+export function noticeStatus(o: OutboundState): { tone: Tone; label: string; extra: string } {
+    const when = o.publishedAt && !isNaN(Date.parse(o.publishedAt)) ? '· ' + new Date(o.publishedAt).toLocaleString() : '';
+    const hears = (v: number): string => (v ? 'version ' + v : 'no notice');
+    if (!o.published) return { tone: 'off', label: 'Not live · calls connect without a notice', extra: '' };
+    if (o.functionExists === false) {
+        return { tone: 'problem', label: o.functionMessage || 'The Function is missing in Twilio', extra: '' };
+    }
+    if (o.voiceUrlMatches === false) return { tone: 'problem', label: 'The Twilio app does not point at the Function', extra: when };
+    if (o.pending) return { tone: 'warn', label: 'Published · the Twilio build is still running', extra: when };
+    if (o.needsRepublish) return { tone: 'warn', label: 'Republish needed', extra: when };
+    if (outboundUnsaved(o)) return { tone: 'warn', label: 'Unsaved changes', extra: '' };
+    if (o.changesPending) {
+        return { tone: 'warn', label: 'Saved, not live yet · callers still hear ' + hears(o.publishedNoticeVersion), extra: '' };
+    }
+    return { tone: 'ok', label: o.publishedNoticeVersion
+        ? 'Live · callers hear version ' + o.publishedNoticeVersion
+        : 'Live · calls connect without a notice', extra: when };
+}
+
+export interface NoticeActions {
+    /** The one primary button. */
+    primary: {
+        label: string;
+        enabled: boolean;
+        /** save = save only; publish = save, then publish. */
+        run: 'save' | 'publish';
+    };
+    /** "Discard changes": reset the form to the saved notice. */
+    discard: boolean;
+    help: string;
+    /** The "Remove from Twilio" section (published only). */
+    removal: boolean;
+}
+
+/**
+ * The action row of the recording notice: exactly one primary button.
+ * A publish run disables everything ("Publishing… (15–30 s)").
+ */
+export function noticeActions(o: OutboundState): NoticeActions {
+    const unsaved = outboundUnsaved(o);
+    const running = o.publishRunning || o.publishing;
+    const busy = running || o.saving || o.unpublishing;
+    const out = (label: string, run: 'save' | 'publish', enabled: boolean, help: string, discard = false): NoticeActions =>
+        ({ primary: { label, run, enabled: enabled && !busy }, discard, help, removal: o.published });
+    if (running) return out(PUBLISHING_LABEL, 'publish', false, PUBLISH_CHANGES_HELP);
+    if (!o.published) {
+        return o.noticeOn
+            ? out('Publish notice', 'publish', true, PUBLISH_NOTICE_HELP)
+            : out(o.saving ? 'Saving…' : 'Save', 'save', unsaved, SAVE_OFF_HELP);
+    }
+    // Published: a broken or outdated Function needs a publish even with no changes.
+    const repair = o.functionExists === false ? FUNCTION_MISSING_HELP
+        : o.voiceUrlMatches === false ? VOICE_URL_HELP
+        : o.needsRepublish ? REPUBLISH_HELP : '';
+    const toPublish = unsaved || o.changesPending;
+    if (!o.noticeOn && (toPublish || o.publishedNoticeVersion > 0)) {
+        return out('Turn off notice', 'publish', true, TURN_OFF_HELP);
+    }
+    if (toPublish) return out('Publish changes', 'publish', true, PUBLISH_CHANGES_HELP, unsaved && o.noticeOn);
+    if (repair) return out('Publish changes', 'publish', true, repair);
+    return out('Publish changes', 'publish', false, NO_CHANGES_HELP);
+}
+
+/** "Live in Twilio": what callers hear now. */
+export function liveNotice(o: OutboundState): { quote: string; note: string } | null {
+    if (!o.published) return null;
+    if (!o.publishedNoticeVersion) return { quote: '', note: 'No notice plays. Calls connect at once.' };
+    if (o.publishedNoticeVersion === o.noticeVersion) {
+        return { quote: '\u201C' + (o.savedNoticeText || o.defaultText) + '\u201D', note: '' };
+    }
+    return { quote: '', note: 'Version ' + o.publishedNoticeVersion + '. The saved text is newer and is not live yet.' };
+}
