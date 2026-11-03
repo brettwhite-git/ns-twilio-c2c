@@ -361,15 +361,42 @@ define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis
      * deleted (data loss). Callers must not save or delete the recording
      * on TRANSIENT_ERROR; the bounded waits close the call later.
      */
+    /** Sentences per page (Twilio v2 lists allow up to 1000). */
+    const SENTENCE_PAGE_SIZE = 1000;
+    /** Page cap: 20 × 1000 sentences, far beyond any call; bounds governance (10 units a page). */
+    const MAX_SENTENCE_PAGES = 20;
+
+    /**
+     * All sentences of a transcript, every page (meta.next_page_url).
+     * Any page that fails transiently → TRANSIENT_ERROR, so the whole
+     * transcript is fetched again on the next run (never saved in part).
+     * A next_page_url off the Intelligence host is never followed (the
+     * request carries the auth header).
+     */
     const fetchSentences = (transcriptSid, authHeader) => {
-        const body = getTwilioJson(`${TWILIO_INTEL_BASE}/Transcripts/${transcriptSid}/Sentences`,
-            authHeader, 'CTC Fetch Sentences');
-        if (isTransientError(body)) return body;
-        if (!body || !Array.isArray(body.sentences)) {
-            log.error({ title: 'CTC Fetch Sentences — no sentences list', details: `transcript=${transcriptSid}` });
-            return TRANSIENT_ERROR;
+        const all = [];
+        let url = `${TWILIO_INTEL_BASE}/Transcripts/${transcriptSid}/Sentences?PageSize=${SENTENCE_PAGE_SIZE}`;
+        for (let page = 0; url; page++) {
+            if (page >= MAX_SENTENCE_PAGES) {
+                log.error({ title: 'CTC Fetch Sentences — page cap reached',
+                    details: `transcript=${transcriptSid} pages=${page} sentences=${all.length}` });
+                return TRANSIENT_ERROR;
+            }
+            const body = getTwilioJson(url, authHeader, 'CTC Fetch Sentences');
+            if (isTransientError(body)) return body;
+            if (!body || !Array.isArray(body.sentences)) {
+                log.error({ title: 'CTC Fetch Sentences — no sentences list', details: `transcript=${transcriptSid} page=${page}` });
+                return TRANSIENT_ERROR;
+            }
+            Array.prototype.push.apply(all, body.sentences);
+            const next = body.meta && body.meta.next_page_url;
+            url = typeof next === 'string' && next.indexOf(TWILIO_INTEL_BASE + '/') === 0 ? next : '';
+            if (next && !url) {
+                log.error({ title: 'CTC Fetch Sentences — next page off host', details: `transcript=${transcriptSid}` });
+                return TRANSIENT_ERROR;
+            }
         }
-        return body.sentences;
+        return all;
     };
 
     /**
