@@ -7,7 +7,8 @@
  *                       Account SID (read only), API Key SID, API Key
  *                       Secret script ID; Save & test / Test connection.
  *   Rotate the API key  the rotation steps (same row height as Connection).
- *   Danger zone         Pause calling… (confirm) and Re-run setup (only
+ *   Danger zone         Phone in its own tab (phone tab mode switch,
+ *                       wizardSetPhoneTab), Pause calling… (confirm) and Re-run setup (only
  *                       while paused: opens the onboarding stepper at
  *                       Step 1, as the rail's "Re-run wizard" does).
  *
@@ -21,7 +22,7 @@ import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {cancelCredentialsEdit, editCredentialsField, saveCredentials} from '../../app/effects/credentials';
-import {rerunPreflight} from '../../app/effects/console';
+import {rerunPreflight, setPhoneTab} from '../../app/effects/console';
 import {goToStep} from '../../app/effects/navigation';
 import type {AppState, CheckResult} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
@@ -41,7 +42,15 @@ interface CredentialsSnapshot {
     apiKeySid?: string;
     apiSecretId?: string;
     active?: boolean;
+    phoneTab?: boolean;
 }
+
+export const PHONE_TAB_HELP_OFF =
+    'Phone mode shows NetSuite and the phone in one tab. If a NetSuite update breaks NetSuite inside phone mode, ' +
+    'turn this on: the phone gets its own tab and reps work in NetSuite in other tabs. Open phone tabs switch at their next load.';
+export const PHONE_TAB_HELP_ON =
+    'On: the phone runs in its own tab without NetSuite inside it. Reps keep that tab open and work in other tabs. ' +
+    'Turn it off to show NetSuite inside phone mode again. Open phone tabs switch at their next load.';
 
 /** Preflight checks that prove the Twilio connection. */
 export const CONNECTION_CHECK_IDS = ['twilio_reachable', 'jwt_mint', 'secret_resolves'];
@@ -154,8 +163,17 @@ export default class AccountPage extends PureComponent<PageTickProps, unknown> {
                 vstack([text(title, { strong: true }), help(helpText)], Gap.SPACING1X),
                 control
             ], Gap.SPACING4X);
+        const phoneTab = snap.phoneTab === true;
+        const c = state.console;
         return card([
             cardTitle('Danger zone', { danger: true }),
+            row('Phone in its own tab', phoneTab ? PHONE_TAB_HELP_ON : PHONE_TAB_HELP_OFF,
+                vstack([
+                    button(c.phoneTabSaving ? 'Saving…' : phoneTab ? 'Show NetSuite in phone mode' : 'Use a separate phone tab',
+                        () => { setPhoneTab(!phoneTab); }, { enabled: !c.phoneTabSaving }),
+                    c.phoneTabError ? errorLine(friendlyError(c.phoneTabError)) : null
+                ], Gap.SPACING1X)),
+            divider(),
             row('Pause calling',
                 'Reps cannot place or receive calls until you resume. Calls in progress finish normally. Twilio settings are kept.',
                 <PauseControl pauseLabel="Pause calling…" danger={true} tick={this.props.tick} />),

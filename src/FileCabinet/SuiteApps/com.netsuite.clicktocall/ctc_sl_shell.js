@@ -22,7 +22,8 @@
  * top.document.getElementById shim. Shell events go to the console.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock'], (url, log, file, ctcHtml, ctcEntity, ctcDock) => {
+define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock', './lib/ctc_config'],
+    (url, log, file, ctcHtml, ctcEntity, ctcDock, ctcConfig) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const safeJsonEmbed = ctcHtml.safeJsonEmbed;
@@ -115,6 +116,8 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
         ctcHtml.setNoStoreHeaders(context.response);
         context.response.write(buildHtml({
             framePath,
+            // Admin switch (config): phone tab, no NetSuite frame. Never throws.
+            phoneTab: ctcConfig.readPhoneTabMode(),
             softphoneUrl,
             shellBase,
             phoneFrameName: ctcEntity.SOFTPHONE_POPUP_NAME,
@@ -131,6 +134,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
      * @param {string} o.shellBase - this Suitelet's own URL ('' if unresolved)
      * @param {string} o.phoneFrameName - name of the hidden phone frame
      * @param {string} [o.dockTags] - dock <script> tags ('' if unavailable)
+     * @param {boolean} [o.phoneTab] - admin switch: no NetSuite frame (phone tab)
      * @returns {string}
      */
     const buildHtml = (o) => {

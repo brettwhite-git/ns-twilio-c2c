@@ -335,9 +335,43 @@ define(['N/search', 'N/record', 'N/log'], (search, record, log) => {
         }
     };
 
+    /**
+     * Phone tab mode (custrecord_ctc_phone_tab_mode): the phone mode shell
+     * runs without the NetSuite frame. The admin's fallback when a NetSuite
+     * release breaks NetSuite inside the frame (architecture review H1).
+     * Read on its own (lookupFields, not a loadConfig column) and never
+     * throws: a missing or unreadable field means false (framed mode).
+     * @param {string|number} [id] config record id; looked up when omitted
+     * @returns {boolean}
+     */
+    const readPhoneTabMode = (id) => {
+        try {
+            let recId = id;
+            if (!recId) {
+                const rows = search.create({
+                    type: 'customrecord_ctc_config',
+                    filters: [['isinactive', 'is', 'F']],
+                    columns: ['internalid']
+                }).run().getRange({ start: 0, end: 1 });
+                if (!rows.length) return false;
+                recId = rows[0].id;
+            }
+            const v = search.lookupFields({
+                type: 'customrecord_ctc_config',
+                id: recId,
+                columns: ['custrecord_ctc_phone_tab_mode']
+            });
+            return isChecked(v && v.custrecord_ctc_phone_tab_mode);
+        } catch (e) {
+            log.error({ title: 'CTC config — phone tab mode unreadable; framed mode', details: (e && e.message) || String(e) });
+            return false;
+        }
+    };
+
     return {
         loadOutboundConfig,
         loadConfig,
+        readPhoneTabMode,
         readRoutingState,
         writeRoutingState,
         DEFAULT_RING_SECONDS,

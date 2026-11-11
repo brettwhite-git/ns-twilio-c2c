@@ -99,6 +99,29 @@ export async function rerunPreflight(): Promise<void> {
     }
 }
 
+/**
+ * Phone tab mode on / off (wizardSetPhoneTab, config
+ * custrecord_ctc_phone_tab_mode). On success the cached snapshot's
+ * phoneTab follows; open phone mode tabs switch at their next load.
+ */
+export async function setPhoneTab(on: boolean): Promise<void> {
+    if ((store.getState() as AppState).console.phoneTabSaving) return;
+    store.dispatch(Action.consolePatch({ phoneTabSaving: true, phoneTabError: null }));
+    try {
+        const result = await wizardCall('wizardSetPhoneTab', { phoneTab: on });
+        if (!result || (result as { ok?: boolean }).ok === false) {
+            store.dispatch(Action.consolePatch({ phoneTabError: errorOf(result, 'The phone mode setting was not saved') }));
+            return;
+        }
+        const snap = (store.getState() as AppState).console.snapshot as Record<string, unknown> | null;
+        store.dispatch(Action.consolePatch({ snapshot: { ...(snap || {}), phoneTab: on } }));
+    } catch (e) {
+        store.dispatch(Action.consolePatch({ phoneTabError: thrownText(e, 'The phone mode setting was not saved') }));
+    } finally {
+        store.dispatch(Action.consolePatch({ phoneTabSaving: false }));
+    }
+}
+
 /** Mark the cached snapshot active / paused at once (the banner and rail follow). */
 const setActiveFlag = (active: boolean): void => {
     const snap = (store.getState() as AppState).console.snapshot as Record<string, unknown> | null;

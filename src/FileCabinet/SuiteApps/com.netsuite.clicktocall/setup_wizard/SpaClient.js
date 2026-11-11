@@ -724,6 +724,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             voiceSaving: false,
             voiceError: null,
             activeModal: null,
+            phoneTabSaving: false,
+            phoneTabError: null,
             pendingDeactivateConfirm: false,
             deactivating: false,
             deactivateError: null,
@@ -933,6 +935,26 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
         finally {
             store.dispatch(Action.consolePatch({ preflightRefreshing: false }));
+        }
+    }
+    async function setPhoneTab(on) {
+        if (store.getState().console.phoneTabSaving)
+            return;
+        store.dispatch(Action.consolePatch({ phoneTabSaving: true, phoneTabError: null }));
+        try {
+            const result = await wizardCall('wizardSetPhoneTab', { phoneTab: on });
+            if (!result || result.ok === false) {
+                store.dispatch(Action.consolePatch({ phoneTabError: errorOf(result, 'The phone mode setting was not saved') }));
+                return;
+            }
+            const snap = store.getState().console.snapshot;
+            store.dispatch(Action.consolePatch({ snapshot: { ...(snap || {}), phoneTab: on } }));
+        }
+        catch (e) {
+            store.dispatch(Action.consolePatch({ phoneTabError: thrownText$1(e, 'The phone mode setting was not saved') }));
+        }
+        finally {
+            store.dispatch(Action.consolePatch({ phoneTabSaving: false }));
         }
     }
     const setActiveFlag = (active) => {
@@ -4860,6 +4882,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
     }
 
+    const PHONE_TAB_HELP_OFF = 'Phone mode shows NetSuite and the phone in one tab. If a NetSuite update breaks NetSuite inside phone mode, ' +
+        'turn this on: the phone gets its own tab and reps work in NetSuite in other tabs. Open phone tabs switch at their next load.';
+    const PHONE_TAB_HELP_ON = 'On: the phone runs in its own tab without NetSuite inside it. Reps keep that tab open and work in other tabs. ' +
+        'Turn it off to show NetSuite inside phone mode again. Open phone tabs switch at their next load.';
     const CONNECTION_CHECK_IDS = ['twilio_reachable', 'jwt_mint', 'secret_resolves'];
     const ROTATION_STEPS = [
         'In the Twilio Console (Account › API keys & tokens), create a new Standard API key. Copy its SID and secret: Twilio shows the secret only once.',
@@ -4945,8 +4971,15 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 vstack([text(title, { strong: true }), help(helpText)], Gap.SPACING1X),
                 control
             ], Gap.SPACING4X);
+            const phoneTab = snap.phoneTab === true;
+            const c = state.console;
             return card([
                 cardTitle('Danger zone', { danger: true }),
+                row('Phone in its own tab', phoneTab ? PHONE_TAB_HELP_ON : PHONE_TAB_HELP_OFF, vstack([
+                    button(c.phoneTabSaving ? 'Saving…' : phoneTab ? 'Show NetSuite in phone mode' : 'Use a separate phone tab', () => { setPhoneTab(!phoneTab); }, { enabled: !c.phoneTabSaving }),
+                    c.phoneTabError ? errorLine(friendlyError(c.phoneTabError)) : null
+                ], Gap.SPACING1X)),
+                divider(),
                 row('Pause calling', 'Reps cannot place or receive calls until you resume. Calls in progress finish normally. Twilio settings are kept.', jsxRuntime.jsx(PauseControl, { pauseLabel: "Pause calling\u2026", danger: true, tick: this.props.tick })),
                 divider(),
                 row('Re-run setup', 'Walk through the 5 setup steps again with the current values filled in. Use it to move to another Twilio account. Available while calling is paused.', button('Re-run setup', () => { goToStep(1); }, { enabled: paused, icon: core__namespace.SystemIcon.REFRESH }))

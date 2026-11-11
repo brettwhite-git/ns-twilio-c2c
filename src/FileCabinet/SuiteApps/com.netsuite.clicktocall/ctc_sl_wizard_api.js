@@ -388,7 +388,8 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                     twimlAppSid:       cfg.twimlAppSid || '',
                     phoneNumber:       cfg.phoneNumber || '',
                     intelServiceSid:   cfg.intelServiceSid || '',
-                    active:            cfg.active === true
+                    active:            cfg.active === true,
+                    phoneTab:          config.readPhoneTabMode(cfg.id)
                 }
             };
         } catch (e) {
@@ -1242,6 +1243,40 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Action: wizardSetPhoneTab (phone mode without the NetSuite frame)  */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * wizardSetPhoneTab { phoneTab: boolean } → { ok, phoneTab }.
+     * Sets custrecord_ctc_phone_tab_mode. On: every phone mode shell runs
+     * as a phone tab (no NetSuite frame); the fallback when a NetSuite
+     * release breaks NetSuite inside the frame. Open shells switch at
+     * their next load.
+     */
+    const wizardSetPhoneTab = (payload) => {
+        if (!payload || typeof payload.phoneTab !== 'boolean') {
+            return { ok: false, error: 'invalid_phone_tab', message: 'phoneTab must be true or false.' };
+        }
+        const id = getConfigRecordId();
+        if (!id) return { ok: false, error: 'config_not_found' };
+        try {
+            record.submitFields({
+                type: 'customrecord_ctc_config',
+                id: id,
+                values: { custrecord_ctc_phone_tab_mode: payload.phoneTab }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Wizard — phone tab mode not saved', details: e && e.message ? e.message : String(e) });
+            return { ok: false, error: 'phone_tab_failed', errorMessage: e && e.message ? e.message : String(e) };
+        }
+        log.audit({
+            title: 'CTC Wizard — phone tab mode ' + (payload.phoneTab ? 'on' : 'off'),
+            details: 'user=' + runtime.getCurrentUser().id
+        });
+        return { ok: true, phoneTab: payload.phoneTab };
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Action: wizardActivate (Step 5 — flip active flag)                 */
     /* ------------------------------------------------------------------ */
 
@@ -1990,6 +2025,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardSaveAssignments:   wizardSaveAssignments,
         wizardRunPreflight:      wizardRunPreflight,
         wizardActivate:          wizardActivate,
+        wizardSetPhoneTab:       wizardSetPhoneTab,
         wizardLoadInbound:       wizardLoadInbound,
         wizardSaveInbound:       wizardSaveInbound,
         wizardPublishRouting:    wizardPublishRouting,

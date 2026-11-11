@@ -131,6 +131,10 @@ export interface ConsoleState {
     // Credentials section
     activeModal: 'rotate-secret' | null;
 
+    // Phone tab mode switch (Danger zone; wizardSetPhoneTab)
+    phoneTabSaving: boolean;
+    phoneTabError: string | null;
+
     // Health + Deactivate / Reactivate flow
     pendingDeactivateConfirm: boolean;
     deactivating: boolean;
@@ -546,6 +550,8 @@ const initialState: AppState = {
         voiceSaving: false,
         voiceError: null,
         activeModal: null,
+        phoneTabSaving: false,
+        phoneTabError: null,
         pendingDeactivateConfirm: false,
         deactivating: false,
         deactivateError: null,

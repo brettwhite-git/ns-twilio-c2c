@@ -186,6 +186,14 @@
             <ismandatory>F</ismandatory>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_phone_tab_mode">
+            <label>Phone Mode: Separate Phone Tab</label>
+            <description>When checked, phone mode runs in its own tab without NetSuite inside it; reps work in NetSuite in other tabs and the phone button there controls the phone. Use it when a NetSuite update breaks NetSuite inside phone mode. Open phone tabs switch at their next load. Not checked by default.</description>
+            <fieldtype>CHECKBOX</fieldtype>
+            <ismandatory>F</ismandatory>
+            <defaultchecked>F</defaultchecked>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
         <customrecordcustomfield scriptid="custrecord_ctc_out_allowed_cc">
             <label>Outbound Allowed Country Codes</label>
             <description>Country codes reps may call through the outbound Twilio Function (toll-fraud guard), for example +1, +44. A longer prefix such as +1416 also works; * allows every country. Blank means the country of the default caller ID. Publish the outbound Function again after a change. Also turn on Twilio Voice Geo Permissions for the same countries.</description>
