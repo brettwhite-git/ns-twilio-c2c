@@ -151,6 +151,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             requestUnlock: ctcDock.REQUEST_UNLOCK_AUDIO,
             phoneMovedType: ctcDock.PHONE_MOVED_MESSAGE,
             phoneDisabledType: ctcDock.PHONE_DISABLED_MESSAGE,
+            phoneDuplicateType: ctcDock.PHONE_DUPLICATE_MESSAGE,
             shellStateType: ctcDock.SHELL_STATE_MESSAGE,
             unlockAudioType: ctcDock.UNLOCK_AUDIO_MESSAGE,
             takeoverParam: ctcDock.TAKEOVER_PARAM
@@ -467,14 +468,17 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   //     an entity record path with a numeric id.
   //   PHONE_MOVED_MESSAGE: the anchor handed the phone to another tab.
   //   PHONE_DISABLED_MESSAGE: the RESTlet refuses tokens for this user.
+  //   PHONE_DUPLICATE_MESSAGE: another phone in this browser won (one anchor).
   var RECORD_PATH = /^[/]app[/]common[/]entity[/](custjob|contact)[.]nl[?]id=[0-9]+$/;
   window.addEventListener('message', function (ev) {
     var m = ev && ev.data;
     if (!m || m.v !== 1) return;
-    if (m.type !== CFG.openRecordType && m.type !== CFG.phoneMovedType && m.type !== CFG.phoneDisabledType) return;
+    if (m.type !== CFG.openRecordType && m.type !== CFG.phoneMovedType && m.type !== CFG.phoneDisabledType &&
+      m.type !== CFG.phoneDuplicateType) return;
     if (ev.origin !== location.origin || ev.source !== phoneFrame.contentWindow) return;
     if (m.type === CFG.phoneMovedType) { phoneMoved(); return; }
     if (m.type === CFG.phoneDisabledType) { phoneDisabled(); return; }
+    if (m.type === CFG.phoneDuplicateType) { phoneDuplicate(); return; }
     if (typeof m.path !== 'string' || !RECORD_PATH.test(m.path)) {
       logEvent('screen-pop refused', tail(m.path));
       return;
@@ -518,13 +522,23 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     return out;
   }
   var bus = null;
+  // anchorId of the latest working anchor (bus contract: request.anchor).
+  var anchorId = '';
   function busRequest(action) {
     if (!bus) return '';
     var m = { v: 1, type: 'request', action: action, origin: CFG.requestOrigin, nonce: makeNonce() };
+    if (anchorId) m.anchor = anchorId;
     bus.postMessage(m);
     return m.nonce;
   }
+  function workingAnchor(snap) {
+    return typeof snap.anchorId === 'string' && snap.anchorId !== '' && snap.phase !== 'offline' && snap.phase !== CFG.phaseMoved;
+  }
   function onSnapshot(snap) {
+    if (workingAnchor(snap)) {
+      anchorId = snap.anchorId;
+      if (probing) probeSeen = true;
+    }
     setPhase(snap.phase);
     takeoverReply(snap);
     ringFromSnapshot(snap);
@@ -866,7 +880,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
       if (granted) { lockLost(e && e.name); return; }   // another tab stole it
       if (e && e.name === 'AbortError') return;          // our own cancel of a queued wait
       logEvent('lock error', e && e.message);
-      if (mode === 'first') startPhone('lock error');
+      if (mode === 'first') { lockBroken = true; probeThenStart('lock error'); }
       else if (mode === 'steal' && lockState === 'stealing') becomeWaiting('steal failed');
     });
   }
@@ -879,6 +893,46 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     stopPhone('lock lost');
     setPhase(CFG.phaseMoved);
     becomeWaiting('lock lost');
+  }
+  // ---- No usable lock: ask the bus first ----
+  // The lock request failed: start the phone only when no other phone
+  // answers a 'hello' within PROBE_MS. Else wait with the busy banner;
+  // "Use phone here" then starts the phone without the lock (stealLock).
+  // The anchors' own check (one anchor, bus contract) is the backstop.
+  var PROBE_MS = 1500;
+  var probing = false;
+  var probeSeen = false;
+  var lockBroken = false;
+  function probeThenStart(reason) {
+    if (!bus) { startPhone(reason); return; }
+    probing = true;
+    probeSeen = false;
+    bus.postMessage({ v: 1, type: 'hello' });
+    setTimeout(function () {
+      probing = false;
+      if (!probeSeen) { startPhone(reason + ', no other phone'); return; }
+      lockState = 'waiting';
+      busy.hidden = false;
+      logEvent('phone busy', 'another phone answered the bus');
+      if (wantTakeover) {
+        wantTakeover = false;
+        takeover();
+      }
+    }, PROBE_MS);
+  }
+  // Our anchor lost to another phone in this browser (one anchor): stop it
+  // and wait like a second tab.
+  function phoneDuplicate() {
+    if (!phoneStarted) return;
+    logEvent('phone stopped', 'another phone is open in this browser');
+    stopPhone('duplicate anchor');
+    if (releaseLock) { releaseLock(); releaseLock = null; }
+    if (lockBroken || !navigator.locks || typeof navigator.locks.request !== 'function') {
+      lockState = 'waiting';
+      busy.hidden = false;
+      return;
+    }
+    becomeWaiting('duplicate anchor');
   }
   // Our anchor handed the phone over (bus 'takeover' from a waiting tab).
   function phoneMoved() {
@@ -934,6 +988,12 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   function stealLock(reason) {
     endTakeover();
     if (lockState !== 'waiting') return;
+    if (lockBroken) {
+      lockState = 'none';
+      busy.hidden = true;
+      startPhone('took the phone (no lock): ' + reason);
+      return;
+    }
     if (waitAbort) { try { waitAbort.abort(); } catch (e) { /* done */ } waitAbort = null; }
     lockState = 'stealing';
     logEvent('takeover', reason);
@@ -943,7 +1003,8 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     requestLock('first');
   } else {
     logEvent('lock unavailable', 'no Web Locks API');
-    startPhone('no lock');
+    lockBroken = true;
+    probeThenStart('no lock');
   }
   document.getElementById('ctc-pm-busy-reload').addEventListener('click', function () {
     window.location.reload();

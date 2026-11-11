@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '23';
+    const DOCK_ASSET_VERSION = '24';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -33,8 +33,13 @@ define(['./ctc_html'], (ctcHtml) => {
     //
     // ---- dock → anchor ----
     //   { type: 'hello' }   asks for a snapshot (no origin / nonce needed)
-    //   { type: 'request', action, origin: 'dock', nonce, ...fields }
+    //   { type: 'request', action, origin: 'dock', nonce, anchor, ...fields }
     //     origin: always the string 'dock'.
+    //     anchor: snap.anchorId of the latest snapshot from a working anchor
+    //       (not 'offline' / 'moved'). An anchor drops a request that names
+    //       another anchor, so two anchors never both act on one 'dial'.
+    //       Omitted before the first snapshot (old docks also omit it; the
+    //       anchor then accepts it).
     //     nonce: a fresh random string per request, 8-64 chars of [A-Za-z0-9_-]
     //       (use REQUEST_NONCE_PATTERN). The anchor drops a request without
     //       both, or with a nonce it saw before (replay). A refused request
@@ -67,15 +72,25 @@ define(['./ctc_html'], (ctcHtml) => {
     //                               gesture) and asks for Notification
     //                               permission once (snap.notify).
     //   BroadcastChannel cannot authenticate a sender: any same-origin page
-    //   can post these. origin / nonce / rate limits only stop accidents and
-    //   replays; server-side allow-listing of dialled numbers is the backstop
-    //   (future work).
+    //   can post these. origin / nonce / anchor / rate limits only stop
+    //   accidents and replays; the backstop is server side: the outbound
+    //   Function's country allow-list and Twilio Geo Permissions.
     //
     // ---- anchor → docks ----
-    //   { type: 'snapshot', snap: { phase, direction, caller, callSid, entityId, entityType,
+    //   { type: 'snapshot', snap: { anchorId, locked, phase, direction, caller, callSid, entityId, entityType,
     //     entityName, contactName, number, startedAt, muted, lastLog, audio, canReceive,
     //     callWarning, audioUnlocked, notify, missedUnseen, error, refused } }
     //   Sent on every state change and as the answer to 'hello'.
+    // anchorId: random id of this anchor page load ('a' + hex). locked: its
+    //   shell holds the Web Lock PHONE_LOCK_NAME.
+    // One anchor: the anchor runs only inside the shell (window.parent has
+    //   __ctcShell); opened any other way it starts no Device and no bus.
+    //   It says 'hello' at start. An anchor that sees another anchor's
+    //   working snapshot keeps going when it wins (its shell holds the lock
+    //   and the other's does not; with equal lock state, the lower anchorId),
+    //   and answers with its own snapshot. The loser unregisters, publishes
+    //   'moved' and sends its shell PHONE_DUPLICATE_MESSAGE (after a live
+    //   call ends; it never ends a call).
     // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'incoming'
     //        | 'connected' | 'reconnecting' | 'error' | 'moved'
     //   incoming: Twilio rings this phone (inbound). Docks show the incoming
@@ -175,6 +190,9 @@ define(['./ctc_html'], (ctcHtml) => {
     //     origin, and only an entity record path (/app/common/entity/custjob.nl|contact.nl?id=<digits>).
     //   anchor → shell: { v: 1, type: PHONE_MOVED_MESSAGE } after a takeover.
     //   anchor → shell: { v: 1, type: PHONE_DISABLED_MESSAGE } on not_a_phone_user.
+    //   anchor → shell: { v: 1, type: PHONE_DUPLICATE_MESSAGE } when it lost
+    //     to another anchor (see One anchor). The shell stops its phone frame
+    //     and shows the busy banner.
     //   shell → anchor: { v: 1, type: SHELL_STATE_MESSAGE, audioUnlocked, notify }
     //     on phone-frame load and on change; the anchor copies both into snap.
     //   shell → anchor: { v: 1, type: UNLOCK_AUDIO_MESSAGE } from a gesture.
@@ -217,6 +235,7 @@ define(['./ctc_html'], (ctcHtml) => {
     const SHELL_STATE_MESSAGE = 'ctc-shell-state';
     const UNLOCK_AUDIO_MESSAGE = 'ctc-unlock-audio';
     const PHONE_DISABLED_MESSAGE = 'ctc-phone-disabled';
+    const PHONE_DUPLICATE_MESSAGE = 'ctc-phone-duplicate';
     // RESTlet error (and snap.error.code) for a user who may not use the phone.
     const ERROR_NOT_A_PHONE_USER = 'not_a_phone_user';
     // snap.error.kind when NetSuite signed the rep out (bus contract above).
@@ -326,6 +345,7 @@ define(['./ctc_html'], (ctcHtml) => {
         SHELL_STATE_MESSAGE,
         UNLOCK_AUDIO_MESSAGE,
         PHONE_DISABLED_MESSAGE,
+        PHONE_DUPLICATE_MESSAGE,
         ERROR_NOT_A_PHONE_USER,
         ERROR_SIGNED_OUT,
         MISSED_STORAGE_KEY,

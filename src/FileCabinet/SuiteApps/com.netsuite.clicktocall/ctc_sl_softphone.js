@@ -1824,7 +1824,38 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var NOTIFY_STATES = { 'default': 1, granted: 1, denied: 1, unsupported: 1 };
         // The last refused request: { action, reason, nonce, at } or null.
         var dockRefused = null;
-        var dockBus = (typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('${escapeJs(ctcDock.BUS_CHANNEL)}') : null;
+
+        // --- One anchor (bus contract: anchorId, locked, request.anchor) ---
+        // The anchor runs only inside the phone mode shell (window.parent
+        // has __ctcShell). Opened any other way (an old bookmark, a direct
+        // URL) it starts no Device and no bus host: a second anchor would
+        // ring and dial next to the real one.
+        // ANCHOR_ID: random per page load. Snapshots carry it; docks name it
+        // in their requests, so only one anchor acts on a request.
+        function inPhoneShell() {
+            try { return window.parent !== window && !!window.parent.__ctcShell; } catch (err) { return false; }
+        }
+        var IN_SHELL = inPhoneShell();
+        function makeAnchorId() {
+            var out = '';
+            try {
+                var b = new Uint8Array(9);
+                window.crypto.getRandomValues(b);
+                for (var i = 0; i < b.length; i++) out += ('0' + b[i].toString(16)).slice(-2);
+            } catch (err) {
+                out = Math.random().toString(36).slice(2) + Date.now().toString(36);
+            }
+            return 'a' + out;
+        }
+        var ANCHOR_ID = makeAnchorId();
+        // True when this anchor's shell holds the Web Lock (the normal case).
+        function shellHoldsLock() {
+            try {
+                var st = window.parent.__ctcShell.phoneState();
+                return !!st && st.lock === 'held';
+            } catch (err) { return false; }
+        }
+        var dockBus = (IN_SHELL && typeof BroadcastChannel !== 'undefined') ? new BroadcastChannel('${escapeJs(ctcDock.BUS_CHANNEL)}') : null;
 
         function currentCallSid() {
             var c = pendingInbound || activeCall;
@@ -1837,6 +1868,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 v: 1,
                 type: 'snapshot',
                 snap: {
+                    anchorId: ANCHOR_ID,
+                    locked: shellHoldsLock(),
                     phase: dockPhase,
                     direction: callDirection,
                     caller: dockCaller,
@@ -2152,6 +2185,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function dockTakeover(m) {
             if (activeCall || pendingInbound || LIVE_PHASES[dockPhase]) { refuseRequest(m, 'call-live'); return; }
             if (movedAway) { publishDock(); return; }
+            stepAside('${escapeJs(ctcDock.PHONE_MOVED_MESSAGE)}', 'Phone moved to another tab');
+        }
+
+        // Stop being the anchor: unregister (Twilio stops ringing this
+        // tab), publish phase 'moved' and tell the shell (shellType), which
+        // stops this frame. Used by a takeover and by a duplicate anchor.
+        function stepAside(shellType, why) {
             movedAway = true;
             clearRegisterRetry();
             var done = false;
@@ -2159,12 +2199,12 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 if (done) return;
                 done = true;
                 dockPhase = '${escapeJs(ctcDock.PHASE_MOVED)}';
-                regLog('Phone moved to another tab');
+                regLog(why);
                 publishDock();
                 sendHeartbeat('moved');
                 if (window.parent !== window) {
                     try {
-                        window.parent.postMessage({ v: 1, type: '${escapeJs(ctcDock.PHONE_MOVED_MESSAGE)}' }, window.location.origin);
+                        window.parent.postMessage({ v: 1, type: shellType }, window.location.origin);
                     } catch (err) { console.error('[CTC] moved message failed', err); }
                 }
             }
@@ -2179,6 +2219,56 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             }
         }
 
+        // Another anchor's snapshot on the bus: two phones in one browser
+        // (a shell that started without the Web Lock, or a lock error). One
+        // must stop. The one whose shell holds the lock wins; with equal
+        // lock state the lower ANCHOR_ID wins. The winner answers with its
+        // own snapshot so the loser sees it too. The loser steps aside
+        // (shell gets PHONE_DUPLICATE_MESSAGE); during a live call it waits
+        // for the call to end first and never ends a call.
+        var IDLE_ANCHOR_PHASES = { offline: 1, moved: 1 };
+        var yieldWait = null;
+        function isLiveHere() {
+            return !!(activeCall || pendingInbound || LIVE_PHASES[dockPhase]);
+        }
+        function anchorWins(other) {
+            var mine = shellHoldsLock();
+            var theirs = other.locked === true;
+            if (mine !== theirs) return mine;
+            return ANCHOR_ID < String(other.anchorId);
+        }
+        function onOtherAnchor(other) {
+            if (!other || typeof other.anchorId !== 'string' || !other.anchorId || other.anchorId === ANCHOR_ID) return;
+            if (movedAway) return;
+            // A phone that just stepped aside: republish so docks drop its 'moved'.
+            if (IDLE_ANCHOR_PHASES[other.phase]) {
+                if (other.phase === '${escapeJs(ctcDock.PHASE_MOVED)}') publishDock();
+                return;
+            }
+            if (anchorWins(other)) {
+                console.warn('[CTC] Another phone answered on the bus (' + other.anchorId + '); it stops');
+                publishDock();
+                return;
+            }
+            yieldAnchor();
+        }
+        function yieldAnchor() {
+            if (movedAway) return;
+            if (isLiveHere()) {
+                if (!yieldWait) {
+                    regLog('Another phone is open in this browser; this one stops after the call');
+                    yieldWait = setInterval(function () {
+                        if (isLiveHere()) return;
+                        clearInterval(yieldWait);
+                        yieldWait = null;
+                        yieldAnchor();
+                    }, 2000);
+                }
+                return;
+            }
+            stepAside('${escapeJs(ctcDock.PHONE_DUPLICATE_MESSAGE)}', 'Another phone is open in this browser; this one stopped');
+        }
+
         if (dockBus) {
             dockBus.onmessage = function (e) {
                 var m = e.data;
@@ -2187,7 +2277,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     publishDock();
                     return;
                 }
+                if (m.type === 'snapshot') {
+                    onOtherAnchor(m.snap);
+                    return;
+                }
                 if (m.type !== 'request') return;
+                // Addressed to another anchor: not ours to act on.
+                if (m.anchor != null && m.anchor !== ANCHOR_ID) return;
                 var why = requestRefusal(m);
                 if (why) {
                     console.warn('[CTC] Bus request dropped: ' + m.action + ' (' + why + ')');
@@ -5189,6 +5285,16 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         btnHangup.addEventListener('click', hangUp);
 
         // --- Init ---
+        if (!IN_SHELL) {
+            // Not inside the phone mode shell: no Device, no bus host.
+            console.warn('[CTC] Softphone opened outside phone mode; not starting');
+            setStatus('Open phone mode to call', 'error');
+            showError('This page runs only inside NetSuite phone mode. Open the phone from your dashboard.');
+            return;
+        }
+        // Any phone already open in this browser answers with its snapshot
+        // (see onOtherAnchor: one of the two stops).
+        if (dockBus) dockBus.postMessage({ v: 1, type: 'hello' });
         if (!TOKEN_URL) {
             setStatus('Configuration error', 'error');
             showError('Token endpoint not configured. Check CTC script deployments.');

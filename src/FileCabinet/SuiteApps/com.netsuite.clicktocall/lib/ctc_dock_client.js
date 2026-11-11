@@ -696,6 +696,8 @@
         if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) m[k] = extra[k];
         m.origin = 'dock';
         m.nonce = makeNonce();
+        // Name the anchor this request is for (bus contract: one anchor acts).
+        if (anchorId) m.anchor = anchorId;
         return m;
     }
 
@@ -1836,9 +1838,15 @@
 
     // --- Bus ---
     var helloTimer = null;
+    // anchorId of the latest snapshot from a working anchor (not offline /
+    // moved); requests carry it as 'anchor'.
+    var anchorId = '';
     bus.onmessage = function (e) {
         var m = e.data;
         if (!m || m.v !== 1 || m.type !== 'snapshot' || !m.snap) return;
+        if (typeof m.snap.anchorId === 'string' && m.snap.phase !== 'offline' && m.snap.phase !== 'moved') {
+            anchorId = m.snap.anchorId;
+        }
         window.clearTimeout(helloTimer);
         gotSnapshot = true;
         var prev = snap;
