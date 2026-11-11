@@ -3,7 +3,10 @@
  * Outbound.dc.html.
  *   1. "Call path" card, key/value rows: Twilio app and Default caller ID
  *      (shared voiceField editor: live Twilio list, partial save), and
- *      "Who calls out from what" (the caller-ID rule; Phones & reps link).
+ *      "Who calls out from what" (the caller-ID rule; Phones & reps link),
+ *      and "Countries reps can call" (the dial Function's country
+ *      allow-list, read-only; Twilio Geo Permissions note) once the
+ *      outbound state is loaded.
  *      The Intelligence service moved to Transcripts & AI.
  *   2. "Recording notice" card + its action row (OutboundNotice: save,
  *      publish, resume, remove from Twilio).
@@ -19,6 +22,7 @@ import type {PageTickProps} from '../../App';
 import OutboundNotice from './OutboundNotice';
 import {callerIdList} from './PhonesPage';
 import {friendlyError} from '../shared/friendlyError';
+import {allowListView} from '../shared/consoleModel';
 import {formatPhone} from '../shared/formatPhone';
 import {VOICE_FIELD_SPECS, voiceActionControl, voiceValueControl} from '../shared/voiceField';
 import type {VoiceFieldSpec} from '../shared/voiceField';
@@ -66,6 +70,11 @@ export default class OutboundPage extends PureComponent<PageTickProps, unknown> 
             kv('Who calls out from what', callerIdList(state),
                 button('Phones & reps', () => { goToSection('phones'); }, { link: true, small: true }))
         ];
+        if (state.outbound.loaded) {
+            const allow = allowListView(state.outbound);
+            path.push(divider(), kv('Countries reps can call',
+                vstack([text(allow.value), help(allow.help)], Gap.SPACING1X), null));
+        }
         if (c.voiceError) path.push(errorLine(friendlyError(c.voiceError)));
 
         return vstack([

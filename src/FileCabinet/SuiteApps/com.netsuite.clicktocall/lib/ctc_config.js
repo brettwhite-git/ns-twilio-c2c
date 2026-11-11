@@ -129,7 +129,7 @@ define(['N/search', 'N/record', 'N/log'], (search, record, log) => {
     const OUTBOUND_DEFAULTS = {
         outNoticeOn: false, outNoticeText: DEFAULT_OUTBOUND_NOTICE, outNoticeVersion: 1, outPublishedNoticeVersion: 0,
         outFnService: '', outFnEnv: '', outFnBuild: '', outFnPendingBuild: '', outFnDomain: '', outFnCodeVersion: '',
-        outFnHash: '', outPrevVoiceUrl: '', outPublishedAt: ''
+        outFnHash: '', outPrevVoiceUrl: '', outPublishedAt: '', outAllowedCc: '', outPublishedAllowedCc: ''
     };
     const readOutbound = (id) => {
         try {
@@ -148,7 +148,9 @@ define(['N/search', 'N/record', 'N/log'], (search, record, log) => {
                 outFnCodeVersion:  text(v('custrecord_ctc_out_fn_code_ver')),
                 outFnHash:         text(v('custrecord_ctc_out_fn_hash')),
                 outPrevVoiceUrl:   text(v('custrecord_ctc_out_prev_voiceurl')),
-                outPublishedAt:    text(v('custrecord_ctc_out_published_at'))
+                outPublishedAt:    text(v('custrecord_ctc_out_published_at')),
+                outAllowedCc:      text(v('custrecord_ctc_out_allowed_cc')),
+                outPublishedAllowedCc: text(v('custrecord_ctc_out_pub_allowed_cc'))
             };
         } catch (e) {
             log.error({ title: 'CTC config — outbound fields unreadable; notice treated as off', details: (e && e.message) || String(e) });

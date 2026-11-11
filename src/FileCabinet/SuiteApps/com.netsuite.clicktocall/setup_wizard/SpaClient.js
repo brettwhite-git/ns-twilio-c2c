@@ -796,6 +796,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             driftVoiceUrl: 'unknown',
             publishedNoticeVersion: 0,
             changesPending: false,
+            allowedPrefixes: '',
+            allowedSource: '',
+            publishedAllowedPrefixes: '',
+            allowListPending: false,
             functionExists: null,
             functionMessage: '',
             savedNoticeOn: false,
@@ -2888,11 +2892,27 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     const REPUBLISH_HELP = 'A newer version of the Function is available. Publish to update it. Takes 15–30 seconds.';
     const FUNCTION_MISSING_HELP = 'The Function is missing in Twilio. Publish to create it again. Takes 15–30 seconds.';
     const VOICE_URL_HELP = 'Your Twilio app no longer points at the Function. Publish to point it back. Takes 15–30 seconds.';
+    const ALLOW_LIST_HELP = 'The allowed countries changed. Publish to apply them. Takes 15–30 seconds.';
     const PUBLISHING_LABEL = 'Publishing… (15–30 s)';
     const REMOVE_CONFIRM_TEXT = 'Remove the Function now?';
     function removeBody(prevVoiceUrl) {
         return 'Deletes the ctc-outbound Function and points your Twilio app back at its previous Voice URL' +
             (prevVoiceUrl ? ': ' + prevVoiceUrl : '') + '. Outbound calls keep working, without a notice.';
+    }
+    const GEO_PERMISSIONS_HELP = 'Also turn on Twilio Geo Permissions (Twilio Console, Voice, Settings, Geo permissions) for the same ' +
+        'countries only. +1 also reaches Caribbean countries; Geo Permissions can block those.';
+    function allowListView(o) {
+        const value = o.allowedPrefixes === '*' ? 'Every country'
+            : o.allowedPrefixes ? o.allowedPrefixes.split(',').join(', ') : '—';
+        const where = o.allowedSource === 'config'
+            ? 'Set on the Click-to-Call configuration record (Outbound Allowed Country Codes).'
+            : 'The country of the default caller ID. Change it on the Click-to-Call configuration record ' +
+                '(Outbound Allowed Country Codes).';
+        const scope = !o.published
+            ? 'The Twilio dial Function checks it only while the recording notice is published.'
+            : o.allowListPending ? 'Not live yet: publish the recording notice to apply it.'
+                : 'The Twilio dial Function checks it on every call.';
+        return { value, help: [where, scope, GEO_PERMISSIONS_HELP].join(' ') };
     }
     function outboundUnsaved(o) {
         return o.loaded && (o.noticeOn !== o.savedNoticeOn || o.noticeText !== o.savedNoticeText);
@@ -2911,6 +2931,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             return { tone: 'warn', label: 'Published · the Twilio build is still running', extra: when };
         if (o.needsRepublish)
             return { tone: 'warn', label: 'Republish needed', extra: when };
+        if (o.allowListPending)
+            return { tone: 'warn', label: 'Allowed countries changed · publish to apply', extra: when };
         if (outboundUnsaved(o))
             return { tone: 'warn', label: 'Unsaved changes', extra: '' };
         if (o.changesPending) {
@@ -2934,7 +2956,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
         const repair = o.functionExists === false ? FUNCTION_MISSING_HELP
             : o.voiceUrlMatches === false ? VOICE_URL_HELP
-                : o.needsRepublish ? REPUBLISH_HELP : '';
+                : o.needsRepublish ? REPUBLISH_HELP
+                    : o.allowListPending ? ALLOW_LIST_HELP : '';
         const toPublish = unsaved || o.changesPending;
         if (!o.noticeOn && (toPublish || o.publishedNoticeVersion > 0)) {
             return out('Turn off notice', 'publish', true, TURN_OFF_HELP);
@@ -3020,6 +3043,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 : 'unknown',
             publishedNoticeVersion: Number(raw.publishedNoticeVersion) || 0,
             changesPending: raw.changesPending === true,
+            allowedPrefixes: str(raw.allowedPrefixes),
+            allowedSource: str(raw.allowedSource),
+            publishedAllowedPrefixes: str(raw.publishedAllowedPrefixes),
+            allowListPending: raw.allowListPending === true,
             functionExists: typeof raw.functionExists === 'boolean' ? raw.functionExists : null,
             functionMessage: str(raw.functionMessage)
         };
@@ -4601,6 +4628,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 divider(),
                 kv$1('Who calls out from what', callerIdList(state), button('Phones & reps', () => { goToSection('phones'); }, { link: true, small: true }))
             ];
+            if (state.outbound.loaded) {
+                const allow = allowListView(state.outbound);
+                path.push(divider(), kv$1('Countries reps can call', vstack([text(allow.value), help(allow.help)], Gap.SPACING1X), null));
+            }
             if (c.voiceError)
                 path.push(errorLine(friendlyError(c.voiceError)));
             return vstack([

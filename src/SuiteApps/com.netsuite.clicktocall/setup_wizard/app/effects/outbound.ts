@@ -82,6 +82,10 @@ export const toSnapshot = (raw: RawSnapshot): OutboundSnapshot => {
             : 'unknown',
         publishedNoticeVersion: Number(raw.publishedNoticeVersion) || 0,
         changesPending: raw.changesPending === true,
+        allowedPrefixes: str(raw.allowedPrefixes),
+        allowedSource: str(raw.allowedSource),
+        publishedAllowedPrefixes: str(raw.publishedAllowedPrefixes),
+        allowListPending: raw.allowListPending === true,
         functionExists: typeof raw.functionExists === 'boolean' ? raw.functionExists : null,
         functionMessage: str(raw.functionMessage)
     };

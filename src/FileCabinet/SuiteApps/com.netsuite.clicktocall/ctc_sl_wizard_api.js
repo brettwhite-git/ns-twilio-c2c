@@ -1693,6 +1693,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
      *     appSid, functionUrl, prevVoiceUrl, publishedAt,
      *     publishedCodeVersion, codeVersion, needsRepublish, published,
      *     pending, voiceUrlMatches, publishedNoticeVersion, changesPending,
+     *     allowedPrefixes, allowedSource, publishedAllowedPrefixes, allowListPending,
      *     functionExists?, functionMessage?,
      *     drift?: { voiceUrl, functionCode, functionService } }
      * live true: one Twilio GET of the TwiML App (voiceUrlMatches, drift),
@@ -1706,6 +1707,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         const publishedNoticeVersion = cfg.outPublishedNoticeVersion || 0;
         const published = outbound.isPublished(cfg);
         const st = live ? outbound.outboundStatus(cfg) : null;
+        const allow = outbound.allowedPrefixes(cfg);
         const state = {
             noticeOn: noticeOn,
             noticeText: cfg.outNoticeText || config.DEFAULT_OUTBOUND_NOTICE,
@@ -1724,7 +1726,12 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
             voiceUrlMatches: st ? st.voiceUrlMatches : null,
             publishedNoticeVersion: publishedNoticeVersion,
             // Saved notice settings differ from what Twilio runs now.
-            changesPending: published && (noticeOn ? noticeVersion : 0) !== publishedNoticeVersion
+            changesPending: published && (noticeOn ? noticeVersion : 0) !== publishedNoticeVersion,
+            // Country allow-list of /dial (custrecord_ctc_out_allowed_cc, read-only here).
+            allowedPrefixes: allow.text,
+            allowedSource: allow.source,
+            publishedAllowedPrefixes: cfg.outPublishedAllowedCc || '',
+            allowListPending: outbound.allowListPending(cfg)
         };
         if (st) {
             state.drift = st.drift;

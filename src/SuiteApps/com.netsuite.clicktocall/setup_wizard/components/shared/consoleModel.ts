@@ -386,6 +386,8 @@ export const FUNCTION_MISSING_HELP =
     'The Function is missing in Twilio. Publish to create it again. Takes 15–30 seconds.';
 export const VOICE_URL_HELP =
     'Your Twilio app no longer points at the Function. Publish to point it back. Takes 15–30 seconds.';
+export const ALLOW_LIST_HELP =
+    'The allowed countries changed. Publish to apply them. Takes 15–30 seconds.';
 export const PUBLISHING_LABEL = 'Publishing… (15–30 s)';
 export const REMOVE_CONFIRM_TEXT = 'Remove the Function now?';
 
@@ -393,6 +395,25 @@ export const REMOVE_CONFIRM_TEXT = 'Remove the Function now?';
 export function removeBody(prevVoiceUrl: string): string {
     return 'Deletes the ctc-outbound Function and points your Twilio app back at its previous Voice URL' +
         (prevVoiceUrl ? ': ' + prevVoiceUrl : '') + '. Outbound calls keep working, without a notice.';
+}
+
+export const GEO_PERMISSIONS_HELP =
+    'Also turn on Twilio Geo Permissions (Twilio Console, Voice, Settings, Geo permissions) for the same ' +
+    'countries only. +1 also reaches Caribbean countries; Geo Permissions can block those.';
+
+/** "Countries reps can call" row of the Call path card (outbound allow-list). */
+export function allowListView(o: OutboundState): { value: string; help: string } {
+    const value = o.allowedPrefixes === '*' ? 'Every country'
+        : o.allowedPrefixes ? o.allowedPrefixes.split(',').join(', ') : '—';
+    const where = o.allowedSource === 'config'
+        ? 'Set on the Click-to-Call configuration record (Outbound Allowed Country Codes).'
+        : 'The country of the default caller ID. Change it on the Click-to-Call configuration record ' +
+          '(Outbound Allowed Country Codes).';
+    const scope = !o.published
+        ? 'The Twilio dial Function checks it only while the recording notice is published.'
+        : o.allowListPending ? 'Not live yet: publish the recording notice to apply it.'
+            : 'The Twilio dial Function checks it on every call.';
+    return { value, help: [where, scope, GEO_PERMISSIONS_HELP].join(' ') };
 }
 
 /** The form differs from the notice as last saved. */
@@ -411,6 +432,7 @@ export function noticeStatus(o: OutboundState): { tone: Tone; label: string; ext
     if (o.voiceUrlMatches === false) return { tone: 'problem', label: 'The Twilio app does not point at the Function', extra: when };
     if (o.pending) return { tone: 'warn', label: 'Published · the Twilio build is still running', extra: when };
     if (o.needsRepublish) return { tone: 'warn', label: 'Republish needed', extra: when };
+    if (o.allowListPending) return { tone: 'warn', label: 'Allowed countries changed · publish to apply', extra: when };
     if (outboundUnsaved(o)) return { tone: 'warn', label: 'Unsaved changes', extra: '' };
     if (o.changesPending) {
         return { tone: 'warn', label: 'Saved, not live yet · callers still hear ' + hears(o.publishedNoticeVersion), extra: '' };
@@ -454,7 +476,8 @@ export function noticeActions(o: OutboundState): NoticeActions {
     // Published: a broken or outdated Function needs a publish even with no changes.
     const repair = o.functionExists === false ? FUNCTION_MISSING_HELP
         : o.voiceUrlMatches === false ? VOICE_URL_HELP
-        : o.needsRepublish ? REPUBLISH_HELP : '';
+        : o.needsRepublish ? REPUBLISH_HELP
+        : o.allowListPending ? ALLOW_LIST_HELP : '';
     const toPublish = unsaved || o.changesPending;
     if (!o.noticeOn && (toPublish || o.publishedNoticeVersion > 0)) {
         return out('Turn off notice', 'publish', true, TURN_OFF_HELP);

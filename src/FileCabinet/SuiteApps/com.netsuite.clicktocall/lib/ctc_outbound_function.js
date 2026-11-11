@@ -10,6 +10,8 @@
  *           /dial:   <Dial answerOnBridge record="record-from-answer-dual">
  *                      <Number url="https://{domain}/notice">{To}</Number>
  *                    </Dial>            (url only when NOTICE_ON is 'true')
+ *                    To must start with a prefix in ALLOWED_PREFIXES
+ *                    (country allow-list, toll-fraud guard), else <Say>.
  *           /notice: <Say>{NOTICE_TEXT, "AI" read as "A I"}</Say>
  *
  * The recording stays on the PARENT call (the rep's browser leg), so the
@@ -23,7 +25,8 @@
  *   functions   FriendlyName ctc-dial (Path /dial), ctc-notice (Path /notice),
  *               Visibility protected (Twilio checks X-Twilio-Signature)
  *   build       Runtime node22 (RUNTIME)
- *   variables   NOTICE_ON, NOTICE_TEXT, NOTICE_VER, CALLER_ID_DEFAULT
+ *   variables   NOTICE_ON, NOTICE_TEXT, NOTICE_VER, CALLER_ID_DEFAULT,
+ *               ALLOWED_PREFIXES ('+1,+44' or '*'; see allowedPrefixes)
  *
  * publishOutbound sequence (steps, in order):
  *   probe       GET  serverless.twilio.com/v1/Services (Serverless access)
@@ -52,8 +55,8 @@
  * leave the consent log (noticeForCall) on the old version.
  *
  * Governance (N/https call = 10 units, config submitFields = 2 units):
- *   first publish, worst case: 19 calls + MAX_BUILD_POLLS polls
- *     = 29 calls = 290 units, + about 10 units of submitFields.
+ *   first publish, worst case: 20 calls + MAX_BUILD_POLLS polls
+ *     = 30 calls = 300 units, + about 10 units of submitFields.
  *   republish, code unchanged (text / on-off change): about 9 calls = 90 units.
  *   resume: 1-10 polls + 7 calls = 80-170 units.
  *   unpublish: 2-4 calls = 20-40 units.
@@ -69,7 +72,8 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
        (runtime, record, log, config, twilio) => {
 
     /** Bump when DIAL_SOURCE / NOTICE_SOURCE / RUNTIME change. */
-    const FN_CODE_VERSION = '1';
+    // 2: country allow-list (ALLOWED_PREFIXES) in /dial (2026-11-11).
+    const FN_CODE_VERSION = '2';
     const RUNTIME = 'node22';
 
     const SERVICE_UNIQUE_NAME = 'ctc-outbound';
@@ -133,6 +137,21 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
         '  var to = String(event.To || \'\');',
         '  if (!/^\\+?[0-9]{7,15}$/.test(to)) {',
         '    twiml.say(\'This number cannot be dialed.\');',
+        '    return callback(null, twiml);',
+        '  }',
+        '  // E.164: 10 digits are NANP; other numbers without + get one.',
+        '  if (to.charAt(0) !== \'+\') to = to.length === 10 ? \'+1\' + to : \'+\' + to;',
+        '  // Country allow-list (toll-fraud guard). Empty or missing: nothing is allowed.',
+        '  var allow = String(context.ALLOWED_PREFIXES || \'\');',
+        '  var ok = allow === \'*\';',
+        '  var prefixes = allow.split(\',\');',
+        '  for (var i = 0; !ok && i < prefixes.length; i++) {',
+        '    var p = prefixes[i].trim();',
+        '    if (/^\\+[1-9][0-9]{0,5}$/.test(p) && to.indexOf(p) === 0) ok = true;',
+        '  }',
+        '  if (!ok) {',
+        '    console.warn(\'CTC dial blocked: country not allowed (\' + to.slice(0, 4) + \'...)\');',
+        '    twiml.say(\'This number is outside the countries your administrator allows.\');',
         '    return callback(null, twiml);',
         '  }',
         '  var attrs = { answerOnBridge: true, record: \'record-from-answer-dual\' };',
@@ -259,12 +278,72 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
     const livePublishedNoticeVersion = (cfg) =>
         (cfg && cfg.outNoticeOn === true ? (Number(cfg.outNoticeVersion) || 1) : 0);
 
+    /* ---- Country allow-list (toll-fraud guard, review H5) ---- */
+
+    // Two-digit ITU country codes. Codes 1 and 7 have one digit; every
+    // other code has three. Country codes are prefix-free.
+    const TWO_DIGIT_CC = ['20', '27', '30', '31', '32', '33', '34', '36', '39', '40', '41', '43', '44', '45',
+        '46', '47', '48', '49', '51', '52', '53', '54', '55', '56', '57', '58', '60', '61', '62', '63', '64',
+        '65', '66', '81', '82', '84', '86', '90', '91', '92', '93', '94', '95', '98'];
+
+    /** '+44' for '+442071234567'; '' when there is no number. */
+    const countryCodeOf = (e164) => {
+        const d = String(e164 || '').replace(/[^0-9]/g, '');
+        if (!d) return '';
+        if (d.charAt(0) === '1' || d.charAt(0) === '7') return '+' + d.charAt(0);
+        if (TWO_DIGIT_CC.indexOf(d.slice(0, 2)) !== -1) return '+' + d.slice(0, 2);
+        return d.length >= 3 ? '+' + d.slice(0, 3) : '';
+    };
+
+    /**
+     * Parse the config allow-list: prefixes split by commas, semicolons or
+     * spaces, each '+' (optional) and 1-6 digits, not starting with 0
+     * ('+1', '+44', '+1416'), or '*' (every country). Bad entries are
+     * dropped. Returns unique '+digits' entries, or ['*'].
+     * @param {*} raw
+     * @returns {string[]}
+     */
+    const parseAllowedPrefixes = (raw) => {
+        const out = [];
+        const tokens = String(raw == null ? '' : raw).split(/[\s,;]+/);
+        for (let i = 0; i < tokens.length; i++) {
+            const t = tokens[i];
+            if (t === '*') return ['*'];
+            const m = /^\+?([1-9][0-9]{0,5})$/.exec(t);
+            if (m && out.indexOf('+' + m[1]) === -1) out.push('+' + m[1]);
+        }
+        return out;
+    };
+
+    /**
+     * The country prefixes reps may call through the Function.
+     * source 'config': custrecord_ctc_out_allowed_cc; 'caller-id': the
+     * default caller ID's country code (config blank or no valid entry);
+     * 'fallback': '+1' when there is no caller ID either.
+     * @returns {{list: string[], text: string, source: string}}
+     */
+    const allowedPrefixes = (cfg) => {
+        let list = parseAllowedPrefixes(cfg && cfg.outAllowedCc);
+        let source = 'config';
+        if (!list.length) {
+            const cc = countryCodeOf(toE164(cfg && cfg.phoneNumber));
+            list = [cc || '+1'];
+            source = cc ? 'caller-id' : 'fallback';
+        }
+        return { list: list, text: list.join(','), source: source };
+    };
+
+    /** Saved allow-list differs from the one the last publish put live. */
+    const allowListPending = (cfg) =>
+        isPublished(cfg) && String(cfg.outPublishedAllowedCc || '') !== allowedPrefixes(cfg).text;
+
     /** Variables the Function reads (all strings). */
     const desiredVariables = (cfg) => {
         const vars = {
             NOTICE_ON: cfg.outNoticeOn === true ? 'true' : 'false',
             NOTICE_TEXT: cfg.outNoticeText || config.DEFAULT_OUTBOUND_NOTICE,
-            NOTICE_VER: String(cfg.outNoticeVersion || 1)
+            NOTICE_VER: String(cfg.outNoticeVersion || 1),
+            ALLOWED_PREFIXES: allowedPrefixes(cfg).text
         };
         const callerId = toE164(cfg.phoneNumber);
         if (callerId) vars.CALLER_ID_DEFAULT = callerId;
@@ -390,7 +469,8 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
                 custrecord_ctc_out_fn_pending_build: '',
                 custrecord_ctc_out_fn_code_ver: FN_CODE_VERSION,
                 custrecord_ctc_out_fn_hash: codeHash(),
-                custrecord_ctc_out_pub_notice_ver: livePublishedNoticeVersion(cfg)
+                custrecord_ctc_out_pub_notice_ver: livePublishedNoticeVersion(cfg),
+                custrecord_ctc_out_pub_allowed_cc: allowedPrefixes(cfg).text
             });
         } catch (e) {
             return rec.fail('deployment', 'Deployed in Twilio, but NetSuite could not record the ' +
@@ -432,7 +512,8 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
                 custrecord_ctc_out_fn_code_ver: FN_CODE_VERSION,
                 custrecord_ctc_out_fn_hash: codeHash(),
                 custrecord_ctc_out_published_at: publishedAt,
-                custrecord_ctc_out_pub_notice_ver: livePublishedNoticeVersion(cfg)
+                custrecord_ctc_out_pub_notice_ver: livePublishedNoticeVersion(cfg),
+                custrecord_ctc_out_pub_allowed_cc: allowedPrefixes(cfg).text
             });
         } catch (e) {
             return rec.fail('save', 'The Function is live, but NetSuite could not save the publish details: ' +
@@ -723,7 +804,8 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
                 custrecord_ctc_out_fn_hash: '',
                 custrecord_ctc_out_prev_voiceurl: '',
                 custrecord_ctc_out_published_at: '',
-                custrecord_ctc_out_pub_notice_ver: 0
+                custrecord_ctc_out_pub_notice_ver: 0,
+                custrecord_ctc_out_pub_allowed_cc: ''
             });
         } catch (e) {
             return r.fail('save', 'Removed in Twilio, but NetSuite could not clear the stored details: ' + errText(e));
@@ -834,6 +916,10 @@ define(['N/runtime', 'N/record', 'N/log', './ctc_config', './ctc_twilio_admin'],
         isPublished,
         needsRepublish,
         noticeForCall,
+        countryCodeOf,
+        parseAllowedPrefixes,
+        allowedPrefixes,
+        allowListPending,
         desiredVariables,
         publishOutbound,
         unpublishOutbound,

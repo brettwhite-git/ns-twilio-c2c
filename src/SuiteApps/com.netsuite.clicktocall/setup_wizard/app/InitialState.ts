@@ -281,6 +281,14 @@ export interface OutboundSnapshot {
     publishedNoticeVersion: number;
     /** Published, and the saved notice differs from what Twilio plays. */
     changesPending: boolean;
+    /** Country prefixes /dial allows ('+1,+44' or '*'), from the config record. */
+    allowedPrefixes: string;
+    /** 'config' | 'caller-id' | 'fallback' (where allowedPrefixes came from). */
+    allowedSource: string;
+    /** Allow-list the last publish put live ('' = none yet). */
+    publishedAllowedPrefixes: string;
+    /** Published, and the allow-list differs from the live one. */
+    allowListPending: boolean;
     /** The published service/environment still exist in Twilio; null = not checked / unknown. */
     functionExists: boolean | null;
     /** Plain message when the published Function is missing in Twilio ('' otherwise). */
@@ -610,6 +618,10 @@ const initialState: AppState = {
         driftVoiceUrl: 'unknown',
         publishedNoticeVersion: 0,
         changesPending: false,
+        allowedPrefixes: '',
+        allowedSource: '',
+        publishedAllowedPrefixes: '',
+        allowListPending: false,
         functionExists: null,
         functionMessage: '',
         savedNoticeOn: false,
