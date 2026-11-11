@@ -154,7 +154,8 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             phoneDuplicateType: ctcDock.PHONE_DUPLICATE_MESSAGE,
             shellStateType: ctcDock.SHELL_STATE_MESSAGE,
             unlockAudioType: ctcDock.UNLOCK_AUDIO_MESSAGE,
-            takeoverParam: ctcDock.TAKEOVER_PARAM
+            takeoverParam: ctcDock.TAKEOVER_PARAM,
+            phoneTab: o.phoneTab === true
         };
         return `<!DOCTYPE html>
 <html lang="en">
@@ -182,12 +183,30 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   .ctc-pm-banner .title { font-size: 13px; font-weight: 600; color: #161513; }
   .ctc-pm-banner .sub { font-size: 12px; color: #5F5B55; margin-top: 2px; }
   #ctc-pm-reload, #ctc-pm-busy-reload, #ctc-pm-disabled-exit { background: none; border: 0; color: #1B6097; font-size: 13px; padding: 0 8px; height: 32px; border-radius: 6px; flex: none; }
+  #ctc-pm-unsupported-exit { background: none; border: 0; color: #1B6097; font-size: 13px; padding: 0 8px; height: 32px; border-radius: 6px; flex: none; }
+  /* Phone tab: the shell without the NetSuite frame (browser gate, admin switch). */
+  body.ctc-phone-tab { background: #F4F2EF; overflow: auto; }
+  #ctc-pt { box-sizing: border-box; min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 96px 16px 32px; }
+  .ctc-pt-card { box-sizing: border-box; width: 100%; max-width: 480px; padding: 24px; background: #FFFFFF; border-radius: 12px;
+    box-shadow: 0 0 0 1px rgba(22,21,19,0.08), 0 8px 24px rgba(22,21,19,0.06); }
+  .ctc-pt-card h1 { margin: 0 0 8px; font-size: 18px; font-weight: 600; color: #161513; }
+  .ctc-pt-card p { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: #5F5B55; }
+  #ctc-pt-why { font-size: 13px; color: #8A5300; }
+  #ctc-pt-open { margin-top: 4px; background: #345D7E; color: #FFFFFF; border: 0; height: 36px; padding: 0 16px; border-radius: 6px; font-size: 14px; font-weight: 600; }
   #ctc-pm-signin, #ctc-pm-busy-take { background: #345D7E; color: #FFFFFF; border: 0; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 600; flex: none; }
 
 </style>
 </head>
 <body>
-<iframe id="ctc-ns-frame" title="NetSuite" src="${escapeHtml(o.framePath)}"></iframe>
+${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeHtml(o.framePath) + '"></iframe>'}
+<main id="ctc-pt" hidden>
+  <div class="ctc-pt-card">
+    <h1>This tab is your phone</h1>
+    <p>Keep this tab open to make and take calls. Work in NetSuite in other tabs. The phone button on those pages controls this phone.</p>
+    <p id="ctc-pt-why" hidden></p>
+    <button type="button" id="ctc-pt-open">Open NetSuite in a new tab</button>
+  </div>
+</main>
 <iframe id="ctc-phone-frame" class="ctc-off" title="Softphone" name="${escapeHtml(o.phoneFrameName)}" allow="microphone; autoplay" src="about:blank"></iframe>
 
 <div id="ctc-pm-banners">
@@ -208,6 +227,14 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     </div>
     <button type="button" id="ctc-pm-busy-reload">Reload</button>
     <button type="button" id="ctc-pm-busy-take">Use phone here</button>
+  </div>
+  <div class="ctc-pm-banner" id="ctc-pm-unsupported" role="alert" hidden>
+    <span class="dot" aria-hidden="true"></span>
+    <div class="text">
+      <div class="title">This browser cannot run the NetSuite phone</div>
+      <div class="sub" id="ctc-pm-unsupported-sub">Use a current version of Chrome, Edge, Firefox or Safari.</div>
+    </div>
+    <button type="button" id="ctc-pm-unsupported-exit">Exit phone mode</button>
   </div>
   <div class="ctc-pm-banner" id="ctc-pm-disabled" role="status" hidden>
     <span class="dot" aria-hidden="true"></span>
@@ -256,6 +283,45 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   var busy = document.getElementById('ctc-pm-busy');
   var disabledBanner = document.getElementById('ctc-pm-disabled');
 
+  // ---- Browser gate (support matrix: SPEC.md section 1) ----
+  // Required for any phone: Web Locks (one phone per browser) and
+  // BroadcastChannel (the ctc-bus). Missing → no phone, one clear banner.
+  // Required for the NetSuite frame: the Navigation API (it keeps NetSuite
+  // menu clicks inside the frame). Missing → phone tab: the shell without
+  // the NetSuite frame; NetSuite runs in normal tabs (remote-control docks).
+  var FEATURES = {
+    locks: !!(navigator.locks && typeof navigator.locks.request === 'function'),
+    bus: typeof BroadcastChannel === 'function',
+    navigation: !!(window.navigation && typeof window.navigation.addEventListener === 'function')
+  };
+  var missingCore = [];
+  if (!FEATURES.locks) missingCore.push('Web Locks');
+  if (!FEATURES.bus) missingCore.push('BroadcastChannel');
+  var unsupported = missingCore.length > 0;
+  var phoneTab = CFG.phoneTab || !FEATURES.navigation || !nsFrame;
+  var phoneTabWhy = CFG.phoneTab || !nsFrame ? 'admin' : (!FEATURES.navigation ? 'navigation api missing' : '');
+  if (phoneTab) {
+    if (nsFrame) {
+      // Started loading NetSuite already; stop it and drop the frame.
+      try { nsFrame.src = 'about:blank'; } catch (e) { /* ignore */ }
+      nsFrame.hidden = true;
+      nsFrame = null;
+    }
+    document.body.className = (document.body.className ? document.body.className + ' ' : '') + 'ctc-phone-tab';
+    document.getElementById('ctc-pt').hidden = false;
+    document.getElementById('ctc-pm-reload').hidden = true;
+    if (phoneTabWhy === 'navigation api missing') {
+      var why = document.getElementById('ctc-pt-why');
+      why.textContent = 'This browser cannot keep NetSuite inside phone mode, so the phone has its own tab. Chrome and Edge can show NetSuite and the phone in one tab.';
+      why.hidden = false;
+    }
+    document.getElementById('ctc-pt-open').addEventListener('click', function () {
+      window.open(CFG.framePath, '_blank');
+    });
+    document.title = 'Phone \u2014 NetSuite';
+  }
+  window.__ctcShell.phoneTab = phoneTab;
+
   var lastGoodPath = CFG.framePath;
   var phase = 'offline';
   var phoneStarted = false;
@@ -283,7 +349,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     var el = origGetById(id);
     if (el) return el;
     try {
-      var doc = nsFrame.contentDocument;
+      var doc = nsFrame ? nsFrame.contentDocument : null;
       var found = doc ? doc.getElementById(id) : null;
       if (found && fallbackLogged < 20) {
         fallbackLogged++;
@@ -363,7 +429,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   }
   document.getElementById('ctc-pm-reload').addEventListener('click', function () {
     banner.hidden = true;
-    nsFrame.src = lastGoodPath;
+    if (nsFrame) nsFrame.src = lastGoodPath;
   });
 
   // ---- Frame watcher ----
@@ -386,7 +452,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
       return lastGoodPath;
     }
   }
-  nsFrame.addEventListener('load', function () {
+  if (nsFrame) nsFrame.addEventListener('load', function () {
     var loc, path, title, win;
     try {
       win = nsFrame.contentWindow;
@@ -443,7 +509,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   var allowTopNav = false;
   var shellScriptId = '';
   try { shellScriptId = new URL(CFG.shellBase, location.href).searchParams.get('script') || ''; } catch (e) { shellScriptId = ''; }
-  if (window.navigation && typeof window.navigation.addEventListener === 'function') {
+  if (nsFrame && FEATURES.navigation) {
     window.navigation.addEventListener('navigate', function (e) {
       if (allowTopNav || !e.cancelable || e.hashChange || e.downloadRequest) return;
       if (e.navigationType !== 'push' && e.navigationType !== 'replace') return;
@@ -458,8 +524,8 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
       logEvent('kept in frame', path);
       nsFrame.src = path;
     });
-  } else {
-    logEvent('navigation api missing', 'NetSuite menu clicks will leave phone mode');
+  } else if (phoneTab) {
+    logEvent('phone tab', phoneTabWhy);
   }
 
   // ---- Messages from the phone frame ----
@@ -483,6 +549,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
       logEvent('screen-pop refused', tail(m.path));
       return;
     }
+    if (!nsFrame) { logEvent('screen-pop skipped', 'phone tab'); return; }
     logEvent('screen-pop', m.path);
     nsFrame.src = m.path;
   });
@@ -999,13 +1066,17 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     logEvent('takeover', reason);
     requestLock('steal');
   }
-  if (navigator.locks && typeof navigator.locks.request === 'function') {
-    requestLock('first');
+  if (unsupported) {
+    // No phone at all: without Web Locks two tabs could both run one; without
+    // BroadcastChannel no dock can reach the phone.
+    logEvent('browser unsupported', missingCore.join(', '));
+    document.getElementById('ctc-pm-unsupported-sub').textContent =
+      'It lacks ' + missingCore.join(' and ') + '. Use a current version of Chrome, Edge, Firefox or Safari.';
+    document.getElementById('ctc-pm-unsupported').hidden = false;
   } else {
-    logEvent('lock unavailable', 'no Web Locks API');
-    lockBroken = true;
-    probeThenStart('no lock');
+    requestLock('first');
   }
+  document.getElementById('ctc-pm-unsupported-exit').addEventListener('click', exitPhoneMode);
   document.getElementById('ctc-pm-busy-reload').addEventListener('click', function () {
     window.location.reload();
   });
