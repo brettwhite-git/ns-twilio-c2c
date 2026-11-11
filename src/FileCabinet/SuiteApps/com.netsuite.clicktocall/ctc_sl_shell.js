@@ -217,7 +217,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   <div class="ctc-pm-banner" id="ctc-pm-banner" role="alert" hidden>
     <span class="dot" aria-hidden="true"></span>
     <div class="text">
-      <div class="title">Your NetSuite session ended</div>
+      <div class="title" id="ctc-pm-banner-title">Your NetSuite session ended</div>
       <div class="sub" id="ctc-pm-banner-sub">Sign in again to keep working.</div>
     </div>
     <button type="button" id="ctc-pm-reload">Reload page</button>
@@ -282,6 +282,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   var nsFrame = document.getElementById('ctc-ns-frame');
   var phoneFrame = document.getElementById('ctc-phone-frame');
   var banner = document.getElementById('ctc-pm-banner');
+  var bannerTitle = document.getElementById('ctc-pm-banner-title');
   var bannerSub = document.getElementById('ctc-pm-banner-sub');
 
   var busy = document.getElementById('ctc-pm-busy');
@@ -376,15 +377,30 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   }
 
   // ---- Session banner ----
+  // bannerKind 'session': a login page, or the phone says signed_out.
+  // 'unreadable': the frame shows a page of another origin (often the
+  // sign-in host, or another NetSuite account): it may not be a sign-out.
+  var bannerKind = 'session';
   function bannerText() {
+    if (bannerKind === 'unreadable') {
+      bannerTitle.textContent = 'This page cannot show inside phone mode';
+      bannerSub.textContent = (ACTIVE[phase] ? 'Your call is still connected. ' : '') +
+        'Reload to go back. If you were signed out, sign in again.';
+      return;
+    }
+    bannerTitle.textContent = 'Your NetSuite session ended';
     bannerSub.textContent = ACTIVE[phase] ? 'Your call is still connected.' : 'Sign in again to keep working.';
   }
   // fromPhone: the phone reported 'signed_out' (else the NetSuite frame
   // landed on a login page). A banner from the phone hides by itself when
   // the phone recovers.
   var bannerFromPhone = false;
-  function showBanner(fromPhone) {
+  function showBanner(fromPhone, kind) {
     if (!sessionLost || !fromPhone) bannerFromPhone = !!fromPhone;
+    // A sign-out (phone or login page) is certain: it wins over an
+    // unreadable frame, which never replaces a session banner.
+    if (kind !== 'unreadable' || fromPhone) bannerKind = 'session';
+    else if (!sessionLost) bannerKind = 'unreadable';
     sessionLost = true;
     bannerText();
     if (banner.hidden) {
@@ -441,11 +457,11 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     return p.indexOf('/pages/login') === 0 || p.indexOf('/pages/customerlogin') === 0 ||
       p.indexOf('/app/login') === 0 || p.indexOf('/login.nl') !== -1 || p.indexOf('enterpriselogin') !== -1;
   }
-  function leftFrame(reason) {
+  function leftFrame(reason, kind) {
     // Oracle forbids showing the login page inside an iframe: blank it now.
     nsFrame.src = 'about:blank';
     logEvent('left-frame', reason);
-    showBanner();
+    showBanner(false, kind);
   }
   function currentFramePath() {
     try {
@@ -465,7 +481,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
       path = loc.pathname + loc.search + loc.hash;
       title = nsFrame.contentDocument ? nsFrame.contentDocument.title : '';
     } catch (e) {
-      leftFrame('cross-origin: ' + (e && e.name ? e.name : 'unreadable'));
+      leftFrame('cross-origin: ' + (e && e.name ? e.name : 'unreadable'), 'unreadable');
       return;
     }
     if (isLoginPath(loc.pathname)) {
@@ -481,12 +497,64 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     if (title) setRealTitle(title);
     logEvent('frame load', path);
     syncContext(win);
+    watchFrameWindow(win);
     try {
       win.addEventListener('error', function (ev) {
         logEvent('frame error', (ev && ev.message ? ev.message : 'error') + ' @ ' + tail(ev && ev.filename));
       });
     } catch (e) { /* frame window not accessible */ }
   });
+
+  // ---- In-frame fixes (architecture review H4) ----
+  // External links: a link in NetSuite to another site would load that
+  // site in the frame (unreadable → banner, the rep's place lost). The
+  // frame's own Navigation API sees the destination first: cancel it and
+  // open the site in a new tab. Left alone: same origin, NetSuite hosts
+  // (sign-in, other accounts: the banner handles them), form posts,
+  // downloads, hash changes, traversals.
+  // Print: Ctrl / Cmd+P prints the top document (the shell), not the page
+  // in the frame. Catch the key in the shell and in the frame and print
+  // the frame instead. (The browser menu's Print still prints the shell.)
+  function isNetSuiteHost(host) {
+    return /(^|[.])netsuite[.]com$/i.test(String(host || ''));
+  }
+  function printFrame() {
+    if (!nsFrame) return false;
+    try {
+      nsFrame.contentWindow.focus();
+      nsFrame.contentWindow.print();
+      logEvent('print', 'NetSuite frame');
+      return true;
+    } catch (e) {
+      logEvent('print error', e && e.message);
+      return false;
+    }
+  }
+  function onPrintKey(ev) {
+    if (!ev || !(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey) return;
+    if (String(ev.key || '').toLowerCase() !== 'p') return;
+    if (printFrame() && typeof ev.preventDefault === 'function') ev.preventDefault();
+  }
+  window.__ctcShell.print = printFrame;
+  if (nsFrame) document.addEventListener('keydown', onPrintKey, true);
+  function watchFrameWindow(win) {
+    try { win.addEventListener('keydown', onPrintKey, true); } catch (e) { /* frame window not accessible */ }
+    try {
+      if (!win.navigation || typeof win.navigation.addEventListener !== 'function') return;
+      win.navigation.addEventListener('navigate', function (e) {
+        if (!e.cancelable || e.hashChange || e.downloadRequest || e.formData) return;
+        if (e.navigationType !== 'push' && e.navigationType !== 'replace') return;
+        var dest;
+        try { dest = new URL(e.destination.url); } catch (err) { return; }
+        if (dest.origin === location.origin) return;
+        if (dest.protocol !== 'https:' && dest.protocol !== 'http:') return;
+        if (isNetSuiteHost(dest.hostname)) return;
+        e.preventDefault();
+        logEvent('external link', dest.origin);
+        window.open(dest.href, '_blank', 'noopener');
+      });
+    } catch (e) { /* frame navigation not accessible */ }
+  }
 
   // ---- Record context for the dock ----
   // The dock on a record page inside the frame (frame mode) leaves its
@@ -517,6 +585,10 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     window.navigation.addEventListener('navigate', function (e) {
       if (allowTopNav || !e.cancelable || e.hashChange || e.downloadRequest) return;
       if (e.navigationType !== 'push' && e.navigationType !== 'replace') return;
+      // A top-level form post: loading its URL in the frame would turn the
+      // POST into a GET and drop the form data. Let it go (the tab leaves
+      // phone mode; the leave guard asks first during a call).
+      if (e.formData) { logEvent('top post left alone', tail(e.destination && e.destination.url)); return; }
       var dest;
       try { dest = new URL(e.destination.url); } catch (err) { return; }
       if (dest.origin !== location.origin || dest.pathname.indexOf('/app/') !== 0) return;
