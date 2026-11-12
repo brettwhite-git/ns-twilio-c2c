@@ -212,6 +212,17 @@
     var PILL_SHADOW = shadowCss(PILL_SHADE);
     var PILL_SHADOW_LIGHT = shadowCss(PILL_SHADE_LIGHT);
     var HELLO_TIMEOUT_MS = 600;
+    // Bus contract (lib/ctc_dock.js): BUS_MIN_VERSION, COALESCE_MS,
+    // REQUEST_QUEUE_MS, UI_STATE_KEY, UI_STATE_VERSION.
+    var BUS_MIN_VERSION = 1;
+    var COALESCE_MS = 1000;
+    var REQUEST_QUEUE_MS = 2000;
+    var UI_KEY = 'ctc-dock-ui';
+    var UI_VERSION = 1;
+    var UI_VIEWS = { dial: 1, search: 1, recents: 1, call: 1 };
+    // Shell lock states in which another tab runs the phone (phoneState()).
+    var SHELL_WAITING = { waiting: 1, stealing: 1, moving: 1 };
+    var NOT_READY_TEXT = 'The phone is not ready yet. Try again.';
     // Shell: the phone frame loads after the dock. While it boots (up to
     // this long) a silent bus means "starting", not "offline".
     var SHELL_BOOT_MS = 15000;
@@ -574,6 +585,20 @@
     var wrap = null;
     var wrapTimer = null;
     var pillWrap = false; // the pill shows the wrap-up stage now
+    // Readiness handshake (bus contract): ready once a working anchor with a
+    // compatible bus version answered. Until then requests wait in queue
+    // ({ m, at }, at most REQUEST_QUEUE_MS). anchorBus: that anchor's bus
+    // version. inflight: requests sent to an anchor that acks (bus 2+) and
+    // not acked yet ({ seq, anchor, at }). lastCmd: the last command
+    // ({ key, seq, at, anchor }) for COALESCE_MS.
+    var ready = false;
+    var anchorBus = 0;
+    var queue = [];
+    var queueTimer = null;
+    var inflight = [];
+    var lastCmd = null;
+    // Shared UI state is being applied (no write back).
+    var applyingUi = false;
     var bus = new BroadcastChannel(cfg.bus);
 
     // --- DOM ---
@@ -627,18 +652,80 @@
     var srPolite = $('.sr-polite');
 
     // --- Helpers ---
+    // The snap point: CORNER_KEY (every dock version writes it, so it wins),
+    // else the shared UI state's corner.
     function readCorner() {
         try {
             var c = window.localStorage.getItem(CORNER_KEY);
-            return CORNERS.indexOf(c) !== -1 ? c : DEFAULT_CORNER;
-        } catch (e) {
-            return DEFAULT_CORNER;
-        }
+            if (CORNERS.indexOf(c) !== -1) return c;
+        } catch (e) { /* storage blocked */ }
+        var u = readUi();
+        return u && CORNERS.indexOf(u.corner) !== -1 ? u.corner : DEFAULT_CORNER;
     }
 
     // The pill (or the panel, which shares its point) moved.
     function saveCorner(c) {
         try { window.localStorage.setItem(CORNER_KEY, c); } catch (e) { /* private mode */ }
+        saveUi();
+    }
+
+    // --- Shared UI state (localStorage UI_KEY, bus contract) ---
+    // { v, open, view, corner, at }. Written when the user opens or closes
+    // the panel, picks a tab or moves the dock; applied on load and when the
+    // tab becomes visible or gets focus (applyUi), never while the user works
+    // here. null when missing, unreadable or of another version.
+    function readUi() {
+        try {
+            var u = JSON.parse(window.localStorage.getItem(UI_KEY) || 'null');
+            if (!u || typeof u !== 'object' || u.v !== UI_VERSION) return null;
+            return {
+                open: u.open === true,
+                view: UI_VIEWS[u.view] ? u.view : '',
+                corner: CORNERS.indexOf(u.corner) !== -1 ? u.corner : ''
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function saveUi() {
+        if (applyingUi) return;
+        var prev = readUi();
+        var view = panel && typeof panel.view === 'function' ? panel.view() : '';
+        var state = {
+            v: UI_VERSION,
+            // A page without the dialer keeps what the last panel said.
+            open: panel ? !!expanded : !!(prev && prev.open),
+            view: UI_VIEWS[view] ? view : (prev && prev.view) || 'dial',
+            corner: corner,
+            at: Date.now()
+        };
+        try { window.localStorage.setItem(UI_KEY, JSON.stringify(state)); } catch (e) { /* private mode */ }
+    }
+
+    // The panel can open here: shell, or a remote-control tab.
+    function panelUsable() {
+        return !!panel && !dockEl.hidden && (mode === 'shell' || remote());
+    }
+
+    // Show the phone as the user left it in any tab: snap point, view, panel
+    // open or minimized. A live call shows its in-call view by itself.
+    function applyUi() {
+        var u = readUi();
+        if (!u) return;
+        applyingUi = true;
+        try {
+            var c = readCorner();
+            if (c !== corner) {
+                corner = c;
+                place(false);
+                if (expanded) placePanel();
+            }
+            if (panel && u.view && typeof panel.setView === 'function') panel.setView(u.view);
+            if (panelUsable() && u.open !== expanded) setExpanded(u.open, false);
+        } finally {
+            applyingUi = false;
+        }
     }
 
     function reduced() { return !!(reducedMotion && reducedMotion.matches); }
@@ -655,10 +742,19 @@
         return false;
     }
 
-    // Outside mode with the dialer loaded and the phone in another tab: the
-    // shell's pill + panel as a remote control (requests over the bus).
+    // Shell mode while another tab runs the phone (this shell waits for the
+    // lock, takes it, or just handed it over).
+    function shellWaiting() {
+        return mode === 'shell' && !!SHELL_WAITING[shellLock()];
+    }
+
+    // The dialer loaded and the phone in another tab: the shell's pill +
+    // panel as a remote control (requests over the bus; the audio, the
+    // microphone and "Turn on phone" stay with that tab). Outside mode, or
+    // a shell that waits for the lock.
     function remote() {
-        return mode === 'outside' && !!panel && phoneElsewhere();
+        if (!panel) return false;
+        return (mode === 'outside' && phoneElsewhere()) || shellWaiting();
     }
 
     function errorKind() {
@@ -828,13 +924,107 @@
         if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) m[k] = extra[k];
         m.origin = 'dock';
         m.nonce = makeNonce();
-        // Name the anchor this request is for (bus contract: one anchor acts).
-        if (anchorId) m.anchor = anchorId;
         return m;
     }
 
+    // This tab's sender id and command counter (request from / seq), shared
+    // with the shell page in this window.
+    function busSender() {
+        var s = window.__ctcBusTab;
+        if (!s || typeof s.id !== 'string' || typeof s.seq !== 'number') {
+            s = window.__ctcBusTab = { id: 't' + makeNonce().slice(0, 16), seq: 0 };
+        }
+        return s;
+    }
+
+    // The seq of a new command. The same command again within COALESCE_MS
+    // (a double-click) takes the same seq, so the anchor runs it once; 0 when
+    // the first one went to another anchor (never doubled: dropped). Never
+    // for 'digits': two presses of a key are two tones.
+    function nextSeq(action, extra) {
+        var key = action === 'digits' ? '' : action + '|' + JSON.stringify(extra || {});
+        var now = Date.now();
+        if (key && lastCmd && lastCmd.key === key && now - lastCmd.at < COALESCE_MS) {
+            return lastCmd.anchor === anchorId ? lastCmd.seq : 0;
+        }
+        var sender = busSender();
+        sender.seq += 1;
+        lastCmd = { key: key, seq: sender.seq, at: now, anchor: anchorId };
+        return sender.seq;
+    }
+
+    // Every request: origin + nonce + from / seq. Sent at once when the
+    // anchor is ready, else queued (readiness handshake). 'unlockAudio' is
+    // for the shell (a gesture now) and never waits. Returns the nonce.
+    function request(action, extra) {
+        var m = requestMessage(action, extra);
+        var seq = nextSeq(action, extra);
+        if (!seq) return m.nonce;
+        m.from = busSender().id;
+        m.seq = seq;
+        if (ready || action === 'unlockAudio') postRequest(m);
+        else queueRequest(m);
+        return m.nonce;
+    }
+
+    function postRequest(m) {
+        // Name the anchor this request is for (bus contract: one anchor acts).
+        if (anchorId) m.anchor = anchorId;
+        if (anchorBus >= 2) inflight.push({ seq: m.seq, anchor: anchorId, at: Date.now() });
+        bus.postMessage(m);
+    }
+
+    function queueRequest(m) {
+        queue.push({ m: m, at: Date.now() });
+        if (!queueTimer) queueTimer = window.setTimeout(expireQueue, REQUEST_QUEUE_MS);
+    }
+
+    // Requests that waited REQUEST_QUEUE_MS for the anchor: dropped, with
+    // one quiet line.
+    function expireQueue() {
+        queueTimer = null;
+        var now = Date.now();
+        var kept = queue.filter(function (q) { return now - q.at < REQUEST_QUEUE_MS; });
+        var dropped = kept.length < queue.length;
+        queue = kept;
+        if (queue.length) queueTimer = window.setTimeout(expireQueue, Math.max(0, REQUEST_QUEUE_MS - (now - queue[0].at)));
+        if (dropped) quietError(NOT_READY_TEXT);
+    }
+
+    function flushQueue() {
+        if (queueTimer) { window.clearTimeout(queueTimer); queueTimer = null; }
+        var q = queue;
+        queue = [];
+        q.forEach(function (x) { postRequest(x.m); });
+    }
+
+    // The anchor acked these (snap.acks); requests older than 10 s are
+    // forgotten.
+    function trackAcks(s) {
+        if (!inflight.length) return;
+        var mine = s.acks && typeof s.acks === 'object' ? s.acks[busSender().id] : null;
+        var now = Date.now();
+        inflight = inflight.filter(function (x) {
+            return now - x.at < 10000 && !(Array.isArray(mine) && mine.indexOf(x.seq) !== -1);
+        });
+    }
+
+    // The anchor went away or handed the phone over: what it never acked
+    // was dropped there (bus contract), and is never sent again.
+    function dropInflight() {
+        var lost = inflight.length > 0;
+        inflight = [];
+        if (lost) quietError(NOT_READY_TEXT);
+    }
+
+    // A quiet error line: the panel's muted line, and the polite live region.
+    function quietError(text) {
+        say(srPolite, text);
+        if (panel && typeof panel.quiet === 'function') panel.quiet(text);
+    }
+
     function send(action) {
-        bus.postMessage(requestMessage(action));
+        request(action);
     }
 
     // --- Render ---
@@ -855,22 +1045,25 @@
     // inbound is on and the anchor is re-registering). Quiet: amber dot and
     // tooltip / aria text only.
     var READY_NOT_RECEIVING = { dot: T.amber, label: 'Ready to call · not receiving calls — reconnecting' };
+    // What the panel draws before the first snapshot.
+    var STARTING_SNAP = { phase: 'starting' };
     var ARROWS_HINT = ' Arrow keys move the dock.';
 
     function render() {
         // The panel follows every snapshot first, so nothing below can leave
         // it on a stale view.
         trackNotEnabled();
-        if (panel && snap) panel.render(snap);
+        // Before the anchor answers, the panel says Starting too.
+        if (panel) panel.render(snap || STARTING_SNAP);
 
         var before = capturePill(); // the pill as drawn now, for a size ease
         var wasHidden = dockEl.hidden;
         if (mode === 'outside') renderOutside();
-        else if (!snap) dockEl.hidden = true;
         else if (notEnabled()) hideDock();
         else {
-            renderChip(snap.phase, false);
-            renderCard();
+            // No snapshot yet (readiness handshake): the Starting pill.
+            renderChip(snap ? snap.phase : 'starting', false);
+            if (snap) renderCard();
             setExpanded(expanded, false);
         }
         // First show on this page (load, login, after the lock check):
@@ -1080,7 +1273,8 @@
                 label: 'Call ended with ' + wrap.display + (len ? ', ' + len : '') + '. Open phone'
             };
         }
-        if (mode === 'shell' && snap && snap.audioUnlocked === false) {
+        // audioUnlocked is the phone tab's: a waiting shell (remote) never asks.
+        if (mode === 'shell' && !shellWaiting() && snap && snap.audioUnlocked === false) {
             return { dot: view.dot, main: 'call', action: 'unlock', l1: 'Turn on phone', label: 'Turn on phone' };
         }
         var n = missedCount();
@@ -2059,6 +2253,7 @@
         if (panel.answered) panel.answered();
         panel.open({});
         setExpanded(true, true);
+        saveUi();
     }
 
     // No panel: the answered ring went live, so open the call card and
@@ -2319,6 +2514,7 @@
         if (mode === 'outside' && !phoneElsewhere()) { goShell(); return; }
         if (panel) {
             setExpanded(true, true);
+            saveUi();
             panel.focus();
         } else if (isActive()) {
             setExpanded(true, true);
@@ -2389,12 +2585,45 @@
     // anchorId of the latest snapshot from a working anchor (not offline /
     // moved); requests carry it as 'anchor'.
     var anchorId = '';
+    // snap.bus: the anchor's bus contract version (none: an older anchor, 1).
+    function busVersionOf(s) {
+        return s.bus === undefined || s.bus === null ? 1 : s.bus;
+    }
+    function busCompatible(s) {
+        var v = busVersionOf(s);
+        return typeof v === 'number' && v >= BUS_MIN_VERSION;
+    }
+
+    // Readiness handshake + hand-over. A working anchor (not offline /
+    // moved) makes this tab ready and sends what waited. A new anchor id, or
+    // our anchor saying offline / moved, is a hand-over: what the old one
+    // never acked is dropped; after offline / moved requests wait again, and
+    // this tab says hello (no time-out: the next anchor speaks when it starts).
+    function trackAnchor(s) {
+        var id = typeof s.anchorId === 'string' ? s.anchorId : '';
+        trackAcks(s);
+        if (s.phase !== 'offline' && s.phase !== 'moved') {
+            if (id && anchorId && id !== anchorId) dropInflight();
+            if (id) anchorId = id;
+            anchorBus = busVersionOf(s);
+            if (!ready) {
+                ready = true;
+                flushQueue();
+            }
+            return;
+        }
+        if (!ready || (id && anchorId && id !== anchorId)) return;
+        ready = false;
+        dropInflight();
+        bus.postMessage({ v: 1, type: 'hello' });
+    }
+
     bus.onmessage = function (e) {
         var m = e.data;
         if (!m || m.v !== 1 || m.type !== 'snapshot' || !m.snap) return;
-        if (typeof m.snap.anchorId === 'string' && m.snap.phase !== 'offline' && m.snap.phase !== 'moved') {
-            anchorId = m.snap.anchorId;
-        }
+        // An anchor too old for this dock: not drawn, never sent to.
+        if (!busCompatible(m.snap)) return;
+        trackAnchor(m.snap);
         window.clearTimeout(helloTimer);
         gotSnapshot = true;
         var prev = snap;
@@ -2415,16 +2644,19 @@
         helloTimer = window.setTimeout(function () {
             var booting = mode === 'shell' && !gotSnapshot && Date.now() - mountedAt < SHELL_BOOT_MS;
             var phase = booting ? 'starting' : 'offline';
+            // Silence: no anchor. Requests wait (and drop) until one speaks.
+            ready = false;
             if (!snap || snap.phase !== phase) { snap = { phase: phase }; clearWrap(); render(); }
         }, HELLO_TIMEOUT_MS);
     }
 
     // --- Outside mode: who holds the phone? ---
+    // done runs after the pill is drawn for the answer.
     function checkLock(done) {
         if (!navigator.locks || typeof navigator.locks.query !== 'function') {
             lockHeld = null;
-            if (done) done();
             render();
+            if (done) done();
             return;
         }
         navigator.locks.query().then(function (state) {
@@ -2432,8 +2664,8 @@
         }, function () {
             lockHeld = null;
         }).then(function () {
-            if (done) done();
             render();
+            if (done) done();
         });
     }
 
@@ -2484,6 +2716,7 @@
             }
             panel.open({ ctx: normalizeContext(ctx) });
             setExpanded(true, true);
+            saveUi();
             panel.focus('call');
         },
 
@@ -2534,12 +2767,10 @@
                 root.appendChild(st);
             },
             getSnap: function () { return snap; },
-            send: function (action, extra) {
-                var m = requestMessage(action, extra);
-                bus.postMessage(m);
-                return m.nonce;
-            },
-            collapse: function () { setExpanded(false, true); focusPill(); },
+            send: function (action, extra) { return request(action, extra); },
+            // The user picked a view in the panel: share it (UI_KEY).
+            saveUi: saveUi,
+            collapse: function () { setExpanded(false, true); saveUi(); focusPill(); },
             registerPanel: function (p) {
                 panel = p;
                 p.el.hidden = true;
@@ -2551,15 +2782,32 @@
                 root.appendChild(panelLift); // under the panel
                 root.appendChild(p.el);
                 if (p.handle) bindPanelDrag(p.handle);
-                if (snap) render();
+                if (snap || mountedAt) render();
+                applyUi();
             }
-        }
+        },
+
+        /**
+         * Shell: the lock state changed (phoneState()); draw again.
+         */
+        refresh: function () { render(); },
+
+        /**
+         * true when the dialer panel is loaded (the shell's busy banner is
+         * only the fallback without it).
+         * @returns {boolean}
+         */
+        hasPanel: function () { return !!panel; }
     };
 
     function mount() {
         document.body.appendChild(host);
         mountedAt = Date.now();
-        if (mode === 'outside') checkLock(maybeAutoEnter);
+        // Outside: once the lock check says who holds the phone, the shared
+        // UI state applies (the panel can open only then).
+        if (mode === 'outside') checkLock(function () { maybeAutoEnter(); applyUi(); });
+        // Shell: the Starting pill (disabled slot) until the anchor answers.
+        else render();
         hello();
         window.setInterval(function () {
             if (document.hidden) return;
@@ -2567,11 +2815,14 @@
             if (snap && snap.phase !== 'offline') hello();
             else if (mode === 'outside' && phoneElsewhere()) hello();
         }, PING_INTERVAL_MS);
+        // Back in this tab: the phone as the user left it (shared UI state).
         document.addEventListener('visibilitychange', function () {
             if (document.hidden) return;
-            if (mode === 'outside') checkLock();
+            if (mode === 'outside') checkLock(applyUi);
+            else applyUi();
             hello();
         });
+        window.addEventListener('focus', applyUi);
     }
 
     if (document.body) mount();

@@ -32,18 +32,40 @@ define(['./ctc_html'], (ctcHtml) => {
     // every tab of this browser profile. Every message carries v: 1.
     //
     // ---- dock → anchor ----
-    //   { type: 'hello' }   asks for a snapshot (no origin / nonce needed)
-    //   { type: 'request', action, origin: 'dock', nonce, anchor, ...fields }
+    //   { type: 'hello' }   asks for a snapshot (no origin / nonce needed).
+    //     The anchor answers at once with a snapshot.
+    //   { type: 'request', action, origin: 'dock', nonce, anchor, from, seq, ...fields }
     //     origin: always the string 'dock'.
     //     anchor: snap.anchorId of the latest snapshot from a working anchor
     //       (not 'offline' / 'moved'). An anchor drops a request that names
     //       another anchor, so two anchors never both act on one 'dial'.
-    //       Omitted before the first snapshot (old docks also omit it; the
-    //       anchor then accepts it).
+    //       New docks never send before the readiness handshake (below), so
+    //       they always name it. Old docks may omit it; the anchor then
+    //       accepts it.
     //     nonce: a fresh random string per request, 8-64 chars of [A-Za-z0-9_-]
     //       (use REQUEST_NONCE_PATTERN). The anchor drops a request without
     //       both, or with a nonce it saw before (replay). A refused request
     //       comes back as snap.refused with the same nonce (see below).
+    //     from: the sending tab's id (REQUEST_SENDER_PATTERN), one per page
+    //       load, shared by every sender in that window (the shell page and
+    //       its dock). seq: a positive integer, +1 per new command of that
+    //       tab. The anchor runs each (from, seq) once: it keeps the last
+    //       SEQ_MEMORY seqs of the last SENDER_MEMORY tabs, drops a repeat
+    //       silently and acks it again. A dock sends the SAME seq again (fresh
+    //       nonce) for a repeat of the same command within COALESCE_MS (a
+    //       double-click on Call is one 'dial'; never for 'digits'). Old docks
+    //       send no from / seq: no dedupe for them (nonce and rate limits
+    //       only). Acks: snap.acks (below).
+    //     A request that reaches an anchor after it started a hand-over
+    //     ('takeover' accepted, or it lost to another anchor) is dropped
+    //     (not run, not acked), so a command sent during a hand-over is never
+    //     doubled. Docks never replay a sent request.
+    //   Readiness handshake (docks): a dock says 'hello' at load and after a
+    //     hand-over (its anchor said 'moved' / 'offline'). It sends no request
+    //     until a snapshot from a working anchor with a compatible bus version
+    //     (snap.bus, below) arrives; before the first one its pill shows
+    //     'starting' (disabled slot). Requests made meanwhile wait at most
+    //     REQUEST_QUEUE_MS, then are dropped with a quiet error line.
     //   Actions:
     //     'mute' | 'unmute' | 'hangup'
     //     'digits'      { d }  one of 0-9 * #, only during a call (DTMF)
@@ -77,10 +99,18 @@ define(['./ctc_html'], (ctcHtml) => {
     //   Function's country allow-list and Twilio Geo Permissions.
     //
     // ---- anchor → docks ----
-    //   { type: 'snapshot', snap: { anchorId, locked, phase, direction, caller, callSid, entityId, entityType,
+    //   { type: 'snapshot', snap: { bus, anchorId, locked, phase, direction, caller, callSid, entityId, entityType,
     //     entityName, contactName, number, startedAt, muted, lastLog, audio, canReceive,
-    //     callWarning, audioUnlocked, notify, missedUnseen, error, refused } }
-    //   Sent on every state change and as the answer to 'hello'.
+    //     callWarning, audioUnlocked, notify, missedUnseen, error, refused, acks } }
+    //   Sent on every state change, after every request it ran, and as the
+    //   answer to 'hello'.
+    // bus: BUS_VERSION of the anchor. A snapshot without it comes from an
+    //   older anchor and counts as version 1. A dock works with an anchor
+    //   whose version is BUS_MIN_VERSION or more; older ones it ignores.
+    //   Docks ignore fields they do not know, so new fields never break an
+    //   older dock.
+    // acks: { <from>: [seq, ...] } the last ACK_MEMORY seqs this anchor ran
+    //   (or refused) per tab, newest last. A request it dropped is never in it.
     // anchorId: random id of this anchor page load ('a' + hex). locked: its
     //   shell holds the Web Lock PHONE_LOCK_NAME.
     // One anchor: the anchor runs only inside the shell (window.parent has
@@ -173,20 +203,38 @@ define(['./ctc_html'], (ctcHtml) => {
     //   (dial while Click-to-Call is paused). Match nonce to
     //   your own request. Requests without origin / nonce are dropped silently.
     //
-    // ---- Multi-tab ("Use phone here") ----
+    // ---- Multi-tab ("Move phone here") ----
     //   One shell holds the Web Lock PHONE_LOCK_NAME and runs the anchor. A
-    //   second shell tab waits (busy banner) and queues a normal lock request,
-    //   so it takes over by itself when the first tab closes / crashes / is
-    //   discarded. window.__ctcShell.takeover() (or the banner's "Use phone
-    //   here") in a waiting shell sends 'takeover'. The anchor refuses during a
+    //   second shell tab waits and queues a normal lock request, so it takes
+    //   over by itself when the first tab closes / crashes / is discarded.
+    //   While it waits (lock 'waiting' / 'stealing' / 'moving') its dock is a
+    //   remote control of the anchor in the other tab, like an outside tab;
+    //   the busy banner shows only when the shell has no dock.
+    //   window.__ctcShell.takeover() (the dock's gear item "Move phone here",
+    //   or the banner's "Use phone here") in a waiting shell sends 'takeover'.
+    //   The shell refuses at once while the anchor's last snapshot (less than
+    //   ANCHOR_SILENT_MS old) shows a live phase. The anchor refuses during a
     //   live call (refused.reason 'call-live'); else it unregisters, publishes
     //   phase 'moved' and tells its shell (PHONE_MOVED_MESSAGE). The waiting
-    //   shell then takes the lock with { steal: true } (also after 3 s with no
-    //   answer from any anchor) and starts its phone; the old shell stops its
-    //   phone frame and waits (busy banner) in turn. An outside (normal) tab
-    //   cannot hold the phone: its "Use phone here" opens the shell in the
-    //   same tab with u=<its path>; the shell then calls takeover() itself
-    //   when it finds the phone busy (a dock action; see TAKEOVER_PARAM).
+    //   shell then takes the lock with { steal: true } and starts its phone;
+    //   the old shell stops its phone frame and waits in turn. No answer in
+    //   3 s: the shell steals only when the anchor's last known phase is not
+    //   live, or it sent nothing for ANCHOR_SILENT_MS. A shell whose lock is
+    //   stolen during a live call of its own keeps its phone (lock
+    //   'yielding'): the anchor steps aside after the call (One anchor), and
+    //   the shell stops the phone frame when the call ends. An outside
+    //   (normal) tab cannot hold the phone: its "Move phone here" opens the
+    //   shell in the same tab with u=<its path>; the shell then calls
+    //   takeover() itself when it finds the phone busy (see TAKEOVER_PARAM).
+    //
+    // ---- Shared UI state (docks, localStorage UI_STATE_KEY) ----
+    //   { v: UI_STATE_VERSION, open, view, corner, at }: panel open or
+    //   minimized, view 'dial' | 'search' | 'recents' | 'call', the snap
+    //   point (also kept in the older key 'ctc-dock-pos', which every dock
+    //   version writes and which wins), epoch ms. Written when the user opens
+    //   or closes the panel, picks a tab or moves the dock. Applied on load and
+    //   when the tab becomes visible or gets focus, never while the user
+    //   works in the tab. A live call always shows the in-call view.
     //
     // ---- anchor ↔ shell (window.postMessage, same origin; not the bus) ----
     //   (No longer sent: the automatic screen-pop on Answer was removed at the user's
@@ -211,13 +259,34 @@ define(['./ctc_html'], (ctcHtml) => {
     //   frame   - a NetSuite page inside the shell. Draws nothing; exposes
     //             window.__ctcDock.call() → top.__ctcShell.call(ctx) and
     //             window.__ctcRecordContext for the shell to read on load.
-    //   outside - a normal NetSuite tab. Chip only. Another tab holds
-    //             PHONE_LOCK_NAME → mirror its call read-only (End/Mute
-    //             allowed). Else "Open phone" → top navigates to the shell
+    //   outside - a normal NetSuite tab. Another tab holds PHONE_LOCK_NAME →
+    //             the full pill + panel as a remote control (bus requests).
+    //             Else "Open phone" → top navigates to the shell
     //             with u=<this page>. With data-auto-enter="1" (dashboard
     //             portlet) it goes there by itself unless the rep left phone
     //             mode in this tab (sessionStorage EXIT_KEY = '1').
     const BUS_CHANNEL = 'ctc-bus';
+
+    // Bus contract version: snapshots carry it as snap.bus. Version 2
+    // (2026-11-11): request from / seq, snap.acks, readiness handshake.
+    const BUS_VERSION = 2;
+    // Oldest anchor version a dock works with (a snapshot without bus = 1).
+    const BUS_MIN_VERSION = 1;
+    // request.from: the sending tab's id.
+    const REQUEST_SENDER_PATTERN = '^[A-Za-z0-9_-]{4,64}$';
+    // Anchor memory for (from, seq) dedupe and acks.
+    const SEQ_MEMORY = 32;
+    const SENDER_MEMORY = 16;
+    const ACK_MEMORY = 8;
+    // Dock: a repeat of the same command within this time reuses its seq.
+    const COALESCE_MS = 1000;
+    // Dock: requests made before the readiness handshake wait this long.
+    const REQUEST_QUEUE_MS = 2000;
+    // Shell: an anchor silent this long no longer blocks a takeover.
+    const ANCHOR_SILENT_MS = 10000;
+    // localStorage key and version of the shared dock UI state.
+    const UI_STATE_KEY = 'ctc-dock-ui';
+    const UI_STATE_VERSION = 1;
 
     // Bus phase while Twilio rings this phone (inbound), and the requests the
     // docks send to answer or decline it.
@@ -339,6 +408,17 @@ define(['./ctc_html'], (ctcHtml) => {
         DIALER_ASSET_PATH,
         DOCK_ASSET_VERSION,
         BUS_CHANNEL,
+        BUS_VERSION,
+        BUS_MIN_VERSION,
+        REQUEST_SENDER_PATTERN,
+        SEQ_MEMORY,
+        SENDER_MEMORY,
+        ACK_MEMORY,
+        COALESCE_MS,
+        REQUEST_QUEUE_MS,
+        ANCHOR_SILENT_MS,
+        UI_STATE_KEY,
+        UI_STATE_VERSION,
         PHASE_INCOMING,
         PHASE_ANSWERING,
         REQUEST_ANSWER,

@@ -1849,6 +1849,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             return 'a' + out;
         }
         var ANCHOR_ID = makeAnchorId();
+        // The shell (same origin) reads it to tell this phone's snapshots
+        // from another tab's.
+        window.__ctcAnchorId = ANCHOR_ID;
         // True when this anchor's shell holds the Web Lock (the normal case).
         function shellHoldsLock() {
             try {
@@ -1869,6 +1872,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 v: 1,
                 type: 'snapshot',
                 snap: {
+                    // Bus contract version (BUS_VERSION, lib/ctc_dock.js).
+                    bus: ${Number(ctcDock.BUS_VERSION)},
                     anchorId: ANCHOR_ID,
                     locked: shellHoldsLock(),
                     phase: dockPhase,
@@ -1897,7 +1902,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     notify: shellNotify,
                     missedUnseen: missedUnseen,
                     error: phoneError || { kind: '', code: 0, message: '' },
-                    refused: dockRefused
+                    refused: dockRefused,
+                    // { <from>: [seq, ...] }: requests this anchor ran, per tab.
+                    acks: dockAcks()
                 }
             });
         }
@@ -2154,6 +2161,52 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             publishDock();
         }
 
+        // --- Run each command once: (from, seq) per tab ---
+        // Docks number their commands per tab (request from / seq). A repeat
+        // of a (from, seq) this anchor ran already (a double-click sends the
+        // same seq again) is dropped and acked again. seqSenders: the last
+        // SENDER_MEMORY tabs, most recent last: { from, seqs: [ran, newest
+        // last] }. Requests without a valid from / seq (older docks) are never
+        // repeats.
+        var SENDER_RE = new RegExp('${escapeJs(ctcDock.REQUEST_SENDER_PATTERN)}');
+        var SEQ_MEMORY = ${Number(ctcDock.SEQ_MEMORY)};
+        var SENDER_MEMORY = ${Number(ctcDock.SENDER_MEMORY)};
+        var ACK_MEMORY = ${Number(ctcDock.ACK_MEMORY)};
+        var seqSenders = [];
+
+        function requestKey(m) {
+            if (!m || typeof m.from !== 'string' || !SENDER_RE.test(m.from)) return null;
+            var seq = m.seq;
+            if (typeof seq !== 'number' || seq < 1 || seq % 1 !== 0 || seq > 9007199254740991) return null;
+            return { from: m.from, seq: seq };
+        }
+
+        // true when (from, seq) ran already; else remembers it (it runs now).
+        function seenRequest(m) {
+            var k = requestKey(m);
+            if (!k) return false;
+            var entry = null;
+            for (var i = 0; i < seqSenders.length; i++) {
+                if (seqSenders[i].from === k.from) { entry = seqSenders.splice(i, 1)[0]; break; }
+            }
+            if (!entry) entry = { from: k.from, seqs: [] };
+            seqSenders.push(entry);
+            if (seqSenders.length > SENDER_MEMORY) seqSenders.shift();
+            if (entry.seqs.indexOf(k.seq) !== -1) return true;
+            entry.seqs.push(k.seq);
+            if (entry.seqs.length > SEQ_MEMORY) entry.seqs.shift();
+            return false;
+        }
+
+        // snap.acks: { <from>: [seq, ...] }, the last ACK_MEMORY per tab.
+        function dockAcks() {
+            var out = {};
+            (seqSenders || []).forEach(function (e) {
+                if (e.seqs.length) out[e.from] = e.seqs.slice(-ACK_MEMORY);
+            });
+            return out;
+        }
+
         // A dock asks to place a call. The dock already chose the entity,
         // contact, and number, so load them as a picker selection would and
         // dial. Refused while a call is live or before the device is ready,
@@ -2290,6 +2343,17 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     console.warn('[CTC] Bus request dropped: ' + m.action + ' (' + why + ')');
                     return;
                 }
+                // Handing the phone over (or handed over): run nothing, ack
+                // nothing, so a command sent during a hand-over is never doubled.
+                if (movedAway && m.action !== '${escapeJs(ctcDock.REQUEST_TAKEOVER)}') {
+                    console.warn('[CTC] Bus request dropped: ' + m.action + ' (phone moving)');
+                    return;
+                }
+                // The same command again (same tab, same seq): ran once already.
+                if (seenRequest(m)) {
+                    publishDock();
+                    return;
+                }
                 if (m.action === 'dial') {
                     dockDial(m);
                 } else if (m.action === 'digits') {
@@ -2314,6 +2378,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 }
                 // 'unlockAudio' is for the shell (a top-level gesture); the
                 // shell forwards it here as UNLOCK_AUDIO_MESSAGE.
+                // The ack (snap.acks) goes out in this snapshot.
+                publishDock();
             };
             window.addEventListener('pagehide', function () {
                 dockPhase = 'offline';

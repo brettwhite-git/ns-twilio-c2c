@@ -165,8 +165,9 @@
         '.dl-alert-act{margin:2px 0 0 -8px}',
         // Refused request: one muted line, 4 s.
         '.dl-refused{flex-shrink:0;margin:8px 14px 0;font-size:12px;color:#94A6BF;text-align:center}',
-        // Remote control (outside tab): where the audio is.
-        '.dl-remote{flex-shrink:0;padding:0 14px 12px;background:rgba(0,0,0,0.12);font-size:11px;color:#94A6BF;text-align:center}',
+        // Remote control (another tab holds the phone), settings view only:
+        // where the audio is.
+        '.dl-remote{font-size:12px;color:#94A6BF}',
         '.dl-pane{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}',
         '.dl-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
         // Dial · Search · Recents: one centred row, 28 px apart.
@@ -272,6 +273,10 @@
         '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
         '.dl-audio-msg{text-align:left;padding:0}',
         '.dl-exit{align-self:flex-start;margin-top:8px}',
+        // "Move phone here" while a call is live: disabled, with the reason.
+        '.dl-use-here[disabled]{opacity:0.5;cursor:default}',
+        '.dl-use-here[disabled]:hover{background:transparent}',
+        '.dl-move-why{font-size:12px;color:#94A6BF;margin-top:-6px}',
         '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot::before{animation:none}.dl.closed,.dl[data-side].closed{transform:none}}'
     ].join('\n'));
 
@@ -377,11 +382,12 @@
         +     '<div class="dl-msg dl-audio-msg" role="status"></div>'
         +     '<label class="dl-afield dl-in-row">Microphone<select class="dl-in"></select></label>'
         +     '<label class="dl-afield dl-out-row">Speaker<select class="dl-out"></select></label>'
+        +     '<div class="dl-remote" hidden>Audio plays in your phone tab.</div>'
         +     '<button type="button" class="dl-text dl-exit">Exit phone mode</button>'
-        +     '<button type="button" class="dl-text dl-exit dl-use-here" hidden>Use phone here</button>'
+        +     '<button type="button" class="dl-text dl-exit dl-use-here" aria-describedby="dl-move-why" hidden>Move phone here</button>'
+        +     '<div class="dl-move-why" id="dl-move-why" hidden>You can move the phone when the call ends.</div>'
         +   '</div>'
-        + '</div>'
-        + '<div class="dl-remote" hidden>Audio plays in your phone tab.</div>';
+        + '</div>';
 
     var q = function (sel) { return el.querySelector(sel); };
     var qa = function (sel) { return Array.prototype.slice.call(el.querySelectorAll(sel)); };
@@ -405,7 +411,7 @@
         answer: q('.dl-answer'), decline: q('.dl-decline'), ringActs: qa('.dl-ring-act'), callActs: qa('.dl-call-act'),
         head: q('.dl-head'), audio: q('.dl-audio-wrap'), audioBack: q('.dl-audio-back'), audioMsg: q('.dl-audio-msg'),
         inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit:not(.dl-use-here)'),
-        useHere: q('.dl-use-here'), remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
+        useHere: q('.dl-use-here'), moveWhy: q('.dl-move-why'), remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
         alert: q('.dl-alert'), alertTitle: q('.dl-alert-title'), alertText: q('.dl-alert-text'), alertAct: q('.dl-alert-act'),
         refused: q('.dl-refused'), liveWarn: q('.dl-live-warn'),
         alerts: q('.dl-alerts'), alertsBtn: q('.dl-alerts-btn'), alertsOff: q('.dl-alerts-off')
@@ -526,9 +532,19 @@
         if (next === 'recents' && (!recentsLoaded || Date.now() - recentsAt > RECENTS_STALE_MS)) loadRecents();
     }
 
+    // A tab the user picks is shared with every tab (client: UI_KEY).
     ui.tabs.forEach(function (t) {
-        t.addEventListener('click', function () { setTab(t.getAttribute('data-tab')); });
+        t.addEventListener('click', function () {
+            setTab(t.getAttribute('data-tab'));
+            if (host.saveUi) host.saveUi();
+        });
     });
+
+    // The view in front: 'call' while the in-call (or ring) view shows,
+    // else the tab.
+    function currentView() {
+        return isActive() || isIncoming() ? 'call' : tab;
+    }
 
     // --- Dial tab: entity, contacts, numbers ---
     function setDisplay(value, isManual) {
@@ -1185,8 +1201,14 @@
         var shell = window.__ctcShell;
         var remote = isRemote();
         ui.exit.hidden = remote || !(shell && typeof shell.exit === 'function');
-        // Remote control: "Use phone here" instead of Exit, only between calls.
-        ui.useHere.hidden = !remote || active || isIncoming();
+        // Remote control: where the audio is, and "Move phone here" instead
+        // of Exit. While a call is live (here or ringing) it is disabled and
+        // says why: the anchor refuses a takeover during a call.
+        ui.remote.hidden = !remote;
+        var live = active || isIncoming();
+        ui.useHere.hidden = !remote;
+        ui.useHere.disabled = remote && live;
+        ui.moveWhy.hidden = !remote || !live;
     }
 
     function setAudioOpen(open) {
@@ -1210,6 +1232,7 @@
         if (shell && typeof shell.exit === 'function') shell.exit();
     });
     ui.useHere.addEventListener('click', function () {
+        if (ui.useHere.disabled || isActive() || isIncoming()) return;
         if (host.useHere) host.useHere();
     });
     ui.alertsBtn.addEventListener('click', function () {
@@ -1258,7 +1281,6 @@
         renderAlert();
         renderRefused();
         renderAlerts();
-        ui.remote.hidden = !isRemote();
 
         // Every snapshot sets all three views, so the panel can never stay on
         // Dial while the anchor is on a call.
@@ -1344,17 +1366,22 @@
         if (canRun) alertRun = a.run;
     }
 
+    // A quiet line (client: a request that never reached the anchor), the
+    // same muted line as a refusal, 4 s.
+    function showQuiet(text) {
+        ui.refused.textContent = text;
+        ui.refused.hidden = false;
+        window.clearTimeout(refusedTimer);
+        refusedTimer = window.setTimeout(function () { ui.refused.hidden = true; }, REFUSED_SHOW_MS);
+    }
+
     // A request of ours the anchor refused: one muted line for 4 s, once.
     function renderRefused() {
         var r = snap && snap.refused;
         if (!r || !r.nonce || !ownNonces[r.nonce]) return;
         delete ownNonces[r.nonce];
         var text = REFUSED_TEXT[r.reason];
-        if (!text) return;
-        ui.refused.textContent = text;
-        ui.refused.hidden = false;
-        window.clearTimeout(refusedTimer);
-        refusedTimer = window.setTimeout(function () { ui.refused.hidden = true; }, REFUSED_SHOW_MS);
+        if (text) showQuiet(text);
     }
 
     // Call alerts (browser notifications) line under the header. The
@@ -1448,6 +1475,15 @@
             render(snap);
         },
         // Wrap-up pill Call back: dial the last call through the Dial tab.
-        callBack: function (c) { callBack(c); }
+        callBack: function (c) { callBack(c); },
+        // Shared UI state (client): the view in front, and a view to show.
+        // 'call' shows by itself while a call is live; nothing else to do.
+        view: currentView,
+        setView: function (v) {
+            if ((v === 'dial' || v === 'search' || v === 'recents') && v !== tab) setTab(v);
+        },
+        // A quiet error from the client (a request dropped before the anchor
+        // was ready, or lost in a hand-over).
+        quiet: showQuiet
     });
 })();

@@ -159,6 +159,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             shellStateType: ctcDock.SHELL_STATE_MESSAGE,
             unlockAudioType: ctcDock.UNLOCK_AUDIO_MESSAGE,
             takeoverParam: ctcDock.TAKEOVER_PARAM,
+            anchorSilentMs: ctcDock.ANCHOR_SILENT_MS,
             phoneTab: o.phoneTab === true
         };
         return `<!DOCTYPE html>
@@ -261,7 +262,8 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   // picks shell mode when it finds it on the top window. call(ctx) opens the
   // dialer on Dial with the record loaded; it never dials by itself.
   // unlockAudio(): call it inside a click / key handler ("Turn on phone").
-  // takeover(): "Use phone here" in a shell that waits for the phone.
+  // takeover(): "Move phone here" in a shell that waits for the phone;
+  // false when it cannot start (not waiting, one in progress, call live).
   // phoneState(): { lock, audioUnlocked, notify } for the dock.
   window.__ctcShell = {
     version: 1,
@@ -287,6 +289,41 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
 
   var busy = document.getElementById('ctc-pm-busy');
   var disabledBanner = document.getElementById('ctc-pm-disabled');
+
+  // ---- "Phone in another tab" banner: no-dock fallback only ----
+  // The dock (shell mode, with its panel) is a remote control of the other
+  // tab's phone while this shell waits, and holds "Move phone here". The
+  // banner shows only when there is no dock (its scripts failed to load).
+  var busyWanted = false;
+  // The dock scripts load after this one (parser-blocking tags): until the
+  // document is parsed, no banner, so it never flashes before the dock.
+  var docParsed = document.readyState !== 'loading';
+  function hasDock() {
+    try {
+      var d = window.__ctcDock;
+      return !!(d && d.mode === 'shell' && typeof d.hasPanel === 'function' && d.hasPanel());
+    } catch (e) { return false; }
+  }
+  function syncBusy() {
+    busy.hidden = !busyWanted || !docParsed || hasDock();
+  }
+  function setBusy(on) {
+    busyWanted = !!on;
+    syncBusy();
+  }
+  function onParsed() {
+    docParsed = true;
+    syncBusy();
+  }
+  document.addEventListener('DOMContentLoaded', onParsed);
+  window.addEventListener('load', onParsed);
+  // Tell the dock the lock state changed (it reads phoneState()).
+  function notifyDock() {
+    try {
+      var d = window.__ctcDock;
+      if (d && typeof d.refresh === 'function') d.refresh();
+    } catch (e) { logEvent('dock refresh error', e && e.message); }
+  }
 
   // ---- Browser gate (support matrix: SPEC.md section 1) ----
   // Required for any phone: Web Locks (one phone per browser) and
@@ -642,6 +679,8 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     if (on) window.addEventListener('beforeunload', onBeforeUnload);
     else window.removeEventListener('beforeunload', onBeforeUnload);
   }
+  // phase: this shell's OWN phone (its #ctc-phone-frame). Another tab's call
+  // never turns on the leave guard here: leaving this tab does not end it.
   function setPhase(next) {
     next = String(next || 'offline');
     if (next === phase) return;
@@ -649,6 +688,9 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     phase = next;
     setGuard(!!ACTIVE[phase]);
     if (!banner.hidden) bannerText();
+    // The lock went to another tab during our call: the call ended, so the
+    // phone stops now (lockLost kept it for the call).
+    if (lockState === 'yielding' && !ACTIVE[phase]) finishYield();
   }
 
   // ---- Bus ----
@@ -667,25 +709,62 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   var bus = null;
   // anchorId of the latest working anchor (bus contract: request.anchor).
   var anchorId = '';
-  function busRequest(action) {
+  // This tab's sender id and command counter (bus contract: request from /
+  // seq), shared with the dock in this window.
+  function busSender() {
+    var s = window.__ctcBusTab;
+    if (!s || typeof s.id !== 'string' || typeof s.seq !== 'number') {
+      s = window.__ctcBusTab = { id: 't' + makeNonce().slice(0, 16), seq: 0 };
+    }
+    return s;
+  }
+  function busRequest(action, toAnchor) {
     if (!bus) return '';
-    var m = { v: 1, type: 'request', action: action, origin: CFG.requestOrigin, nonce: makeNonce() };
-    if (anchorId) m.anchor = anchorId;
+    var sender = busSender();
+    sender.seq += 1;
+    var m = { v: 1, type: 'request', action: action, origin: CFG.requestOrigin, nonce: makeNonce(), from: sender.id, seq: sender.seq };
+    if (toAnchor || anchorId) m.anchor = toAnchor || anchorId;
     bus.postMessage(m);
     return m.nonce;
   }
   function workingAnchor(snap) {
     return typeof snap.anchorId === 'string' && snap.anchorId !== '' && snap.phase !== 'offline' && snap.phase !== CFG.phaseMoved;
   }
+  // The anchor in our own phone frame publishes its id there (same origin).
+  function ownAnchorId() {
+    if (!phoneStarted) return '';
+    try {
+      var w = phoneFrame.contentWindow;
+      var id = w && w.__ctcAnchorId;
+      return typeof id === 'string' ? id : '';
+    } catch (e) { return ''; }
+  }
+  // A snapshot from this shell's own phone. Its id unknown (the frame not
+  // started yet): every snapshot counts as ours while the phone runs.
+  function ownSnapshot(snap) {
+    if (!phoneStarted) return false;
+    var id = ownAnchorId();
+    return !id || snap.anchorId === id;
+  }
+  // The latest snapshot from another tab's anchor: { anchorId, phase, at }.
+  // takeover() reads it (1.11: never steal from a live call).
+  var peer = null;
   function onSnapshot(snap) {
     if (workingAnchor(snap)) {
       anchorId = snap.anchorId;
       if (probing) probeSeen = true;
     }
-    setPhase(snap.phase);
+    if (ownSnapshot(snap)) setPhase(snap.phase);
+    else peer = { anchorId: String(snap.anchorId || ''), phase: String(snap.phase || ''), at: Date.now() };
     takeoverReply(snap);
     ringFromSnapshot(snap);
     sessionFromSnapshot(snap);
+  }
+  function peerLive() {
+    return !!(peer && ACTIVE[peer.phase]);
+  }
+  function peerSilent() {
+    return !peer || Date.now() - peer.at > CFG.anchorSilentMs;
   }
 
   // ---- Signed out (phone error kind signed_out) ----
@@ -952,10 +1031,12 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   // ---- Phone frame: one per browser (Web Lock) ----
   // lockState: 'none' (no Web Locks API, or not asked yet) | 'held' (this tab
   // runs the phone) | 'moving' (handed off; waiting for the other tab to
-  // steal the lock) | 'waiting' (busy banner; a normal request is queued so
-  // this tab takes over when the holder closes, crashes or is discarded) |
-  // 'stealing' ("Use phone here" in progress) | 'disabled' (the phone is not
-  // enabled for this user; lock released).
+  // steal the lock) | 'waiting' (the dock is a remote control, or the busy
+  // banner without a dock; a normal request is queued so this tab takes
+  // over when the holder closes, crashes or is discarded) | 'stealing'
+  // ("Move phone here" in progress) | 'yielding' (another tab stole the lock
+  // during our live call: the phone keeps the call and stops when it ends)
+  // | 'disabled' (the phone is not enabled for this user; lock released).
   // After the anchor reports 'moved' this shell keeps the lock until the
   // new tab steals it: releasing first would let this tab's own queued
   // request win the free lock. No steal within MOVE_FALLBACK_MS: the phone
@@ -984,9 +1065,14 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     phoneFrame.src = 'about:blank';
     logEvent('phone stop', reason);
   }
+  function setLock(next) {
+    if (next === lockState) return;
+    lockState = next;
+    notifyDock();
+  }
   function gotLock(mode) {
-    lockState = 'held';
-    busy.hidden = true;
+    setLock('held');
+    setBusy(false);
     endTakeover();
     startPhone(mode === 'first' ? 'lock held' : mode === 'steal' ? 'took the phone' : 'lock freed');
     // Keep the lock until this page goes away, the phone moves, or the
@@ -994,8 +1080,8 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     return new Promise(function (resolve) { releaseLock = resolve; });
   }
   function becomeWaiting(reason) {
-    lockState = 'waiting';
-    busy.hidden = false;
+    setLock('waiting');
+    setBusy(true);
     logEvent('phone busy', reason);
     requestLock('wait');
     if (wantTakeover) {
@@ -1027,15 +1113,29 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
       else if (mode === 'steal' && lockState === 'stealing') becomeWaiting('steal failed');
     });
   }
-  // Another tab took the phone (steal): stop ours and wait in turn.
+  // Another tab took the phone (steal): stop ours and wait in turn. Never
+  // during our own live call (1.11): only the anchor ends its call. The
+  // phone keeps it; the anchor sees the new tab's phone and steps aside
+  // after the call (one anchor), or finishYield stops it when the call ends.
   function lockLost(reason) {
     releaseLock = null;
     if (moveFallbackTimer) { clearTimeout(moveFallbackTimer); moveFallbackTimer = null; }
     if (lockState === 'disabled') return;
+    if (phoneStarted && ACTIVE[phase]) {
+      logEvent('phone taken by another tab during a call', (reason || '') + '; the call goes on here');
+      setLock('yielding');
+      return;
+    }
     logEvent('phone taken by another tab', reason);
     stopPhone('lock lost');
     setPhase(CFG.phaseMoved);
     becomeWaiting('lock lost');
+  }
+  function finishYield() {
+    logEvent('phone stopped', 'call ended after the lock went to another tab');
+    stopPhone('lock lost, call ended');
+    becomeWaiting('lock lost');
+    setPhase(CFG.phaseMoved);
   }
   // ---- No usable lock: ask the bus first ----
   // The lock request failed: start the phone only when no other phone
@@ -1054,8 +1154,8 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     setTimeout(function () {
       probing = false;
       if (!probeSeen) { startPhone(reason + ', no other phone'); return; }
-      lockState = 'waiting';
-      busy.hidden = false;
+      setLock('waiting');
+      setBusy(true);
       logEvent('phone busy', 'another phone answered the bus');
       if (wantTakeover) {
         wantTakeover = false;
@@ -1071,8 +1171,8 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     stopPhone('duplicate anchor');
     if (releaseLock) { releaseLock(); releaseLock = null; }
     if (lockBroken || !navigator.locks || typeof navigator.locks.request !== 'function') {
-      lockState = 'waiting';
-      busy.hidden = false;
+      setLock('waiting');
+      setBusy(true);
       return;
     }
     becomeWaiting('duplicate anchor');
@@ -1080,15 +1180,15 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   // Our anchor handed the phone over (bus 'takeover' from a waiting tab).
   function phoneMoved() {
     if (lockState !== 'held') return;
-    lockState = 'moving';
     stopPhone('moved to another tab');
-    busy.hidden = false;
+    setLock('moving');
+    setBusy(true);
     moveFallbackTimer = setTimeout(function () {
       moveFallbackTimer = null;
       if (lockState !== 'moving') return;
       logEvent('takeover abandoned', 'no tab took the phone');
-      lockState = 'held';
-      busy.hidden = true;
+      setLock('held');
+      setBusy(false);
       startPhone('takeover abandoned');
     }, MOVE_FALLBACK_MS);
   }
@@ -1099,20 +1199,38 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     logEvent('phone not enabled', 'not_a_phone_user');
     if (waitAbort) { try { waitAbort.abort(); } catch (e) { /* done */ } waitAbort = null; }
     endTakeover();
-    lockState = 'disabled';
     stopPhone('not enabled');
+    setLock('disabled');
     if (releaseLock) { releaseLock(); releaseLock = null; }
-    busy.hidden = true;
+    setBusy(false);
     disabledBanner.hidden = false;
   }
-  // "Use phone here": ask the current anchor to let go, then steal the lock.
+  // "Move phone here": ask the current anchor to let go, then steal the
+  // lock. Never from a live call (1.11): refused at once while the anchor's
+  // last snapshot (fresh) shows one; the anchor itself refuses during a call.
   function takeover() {
     if (lockState !== 'waiting' || takeoverNonce) return false;
-    takeoverNonce = busRequest(CFG.requestTakeover);
+    if (peerLive() && !peerSilent()) {
+      logEvent('takeover refused', 'call live in the other tab');
+      return false;
+    }
+    takeoverNonce = busRequest(CFG.requestTakeover, peer && peer.anchorId);
     if (!takeoverNonce) { stealLock('no bus'); return true; }
     logEvent('takeover asked', takeoverNonce);
-    takeoverTimer = setTimeout(function () { stealLock('no anchor reply'); }, TAKEOVER_WAIT_MS);
+    takeoverTimer = setTimeout(takeoverTimedOut, TAKEOVER_WAIT_MS);
     return true;
+  }
+  // No answer from the anchor in TAKEOVER_WAIT_MS: steal only when its last
+  // known phase is not live, or it has been silent for ANCHOR_SILENT_MS (a
+  // closed or frozen tab). Else give up: a slow tab keeps its call.
+  function takeoverTimedOut() {
+    takeoverTimer = null;
+    if (peerLive() && !peerSilent()) {
+      logEvent('takeover abandoned', 'no reply, call live in the other tab');
+      endTakeover();
+      return;
+    }
+    stealLock('no anchor reply');
   }
   function endTakeover() {
     if (takeoverTimer) clearTimeout(takeoverTimer);
@@ -1132,13 +1250,13 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     endTakeover();
     if (lockState !== 'waiting') return;
     if (lockBroken) {
-      lockState = 'none';
-      busy.hidden = true;
+      setLock('none');
+      setBusy(false);
       startPhone('took the phone (no lock): ' + reason);
       return;
     }
     if (waitAbort) { try { waitAbort.abort(); } catch (e) { /* done */ } waitAbort = null; }
-    lockState = 'stealing';
+    setLock('stealing');
     logEvent('takeover', reason);
     requestLock('steal');
   }
