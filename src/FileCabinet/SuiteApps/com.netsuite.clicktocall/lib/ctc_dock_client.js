@@ -184,13 +184,33 @@
     var PANEL_FADE_MS = 200;
     // Incoming card: the pill morphs into it (A1, 2026-11-01). Enter / exit /
     // reduced durations; the content fades in from INC_CONTENT_AT of the
-    // enter; INC_OPEN is the clip of the open card (outset so the shadow
-    // shows while the morph ends).
+    // enter. INC_RADIUS: the open card's corners.
     var INC_ENTER_MS = 1280;
     var INC_EXIT_MS = 880;
     var INC_REDUCED_MS = 120;
     var INC_CONTENT_AT = 0.4;
-    var INC_OPEN = 'inset(-32px round 48px)';
+    var INC_RADIUS = 16;
+    var INC_SHADOW = '0 10px 24px rgba(15,27,48,0.26)';
+    // The open window of the morph: the card plus 32 px all round (radius
+    // 48), so the card's shadow shows as the morph ends.
+    var INC_OUTSET = 32;
+    var INC_OUTSET_RADIUS = 48;
+    // Pill size change between stages: FLIP on the compositor (fitPill).
+    var PILL_EASE_MS = 200;
+    var PILL_EASE = 'ease-out';
+    // Morph stacks (morphStack): nine pieces, painted centre, edges, corners.
+    // Each piece is a [column, row] cell of the box: l / c / r x t / c / b.
+    var PIECES = { c: ['c', 'c'], t: ['c', 't'], b: ['c', 'b'], l: ['l', 'c'], r: ['r', 'c'], tl: ['l', 't'], tr: ['r', 't'], bl: ['l', 'b'], br: ['r', 'b'] };
+    var PIECE_KEYS = ['c', 't', 'b', 'l', 'r', 'tl', 'tr', 'bl', 'br'];
+    var SEAM = 1; // px a surface piece reaches under its outer neighbours (no hairline at the joins)
+    // The pill's outer shadow (dark / light surface): y offset, blur and
+    // colour. At rest the ::before layer (box-shadow); during a size ease
+    // two filled, blurred layers (.v-shade, the same shadow, see morphPill).
+    var PILL_SHADE = { y: 10, blur: 24, color: 'rgba(15,27,48,0.26)' };
+    var PILL_SHADE_LIGHT = { y: 6, blur: 16, color: 'rgba(22,21,19,0.08)' };
+    function shadowCss(sh) { return '0 ' + sh.y + 'px ' + sh.blur + 'px ' + sh.color; }
+    var PILL_SHADOW = shadowCss(PILL_SHADE);
+    var PILL_SHADOW_LIGHT = shadowCss(PILL_SHADE_LIGHT);
     var HELLO_TIMEOUT_MS = 600;
     // Shell: the phone frame loads after the dock. While it boots (up to
     // this long) a silent bus means "starting", not "offline".
@@ -227,6 +247,14 @@
     var AMBER = T.amber;
     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
 
+    // Markup of one morph stack (morphStack): nine clipped pieces, each with
+    // a full-size fill.
+    function stackHtml(cls) {
+        return '<div class="ms ' + cls + '" aria-hidden="true">'
+            + PIECE_KEYS.map(function (k) { return '<div class="mp" data-p="' + k + '"><i></i></div>'; }).join('')
+            + '</div>';
+    }
+
     var ICON_PHONE = '<path d="M2 5.5C2 3.6 3.6 2 5.5 2h1.3c.9 0 1.7.6 1.9 1.5l1 4c.2.8-.1 1.6-.8 2.1l-1.5 1.1a12 12 0 0 0 5.9 5.9l1.1-1.5c.5-.7 1.3-1 2.1-.8l4 1c.9.2 1.5 1 1.5 1.9v1.3c0 1.9-1.6 3.5-3.5 3.5A16.5 16.5 0 0 1 2 5.5z"></path>';
     var ICON_MIC = '<rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"></path>';
     var ICON_RETRY = '<path d="M3 12a9 9 0 1 0 2.6-6.4L3 8M3 3v5h5"></path>';
@@ -235,7 +263,7 @@
     var CSS = [
         ':host{all:initial}',
         '*{box-sizing:border-box}',
-        '.dock{position:fixed;left:0;top:0;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#FFFFFF;-webkit-font-smoothing:antialiased;will-change:transform}',
+        '.dock{position:fixed;left:0;top:0;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#FFFFFF;-webkit-font-smoothing:antialiased}',
         // Author display rules beat the UA [hidden] rule, so restate it.
         '[hidden]{display:none !important}',
         'button{font:inherit;color:inherit;margin:0;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform 140ms ease-out,background-color 140ms ease-out}',
@@ -249,10 +277,30 @@
            grip, dot, words, timer, Mute, main button in a row. Vertical (R4)
            on the left/right middle points (ml, mr): the same parts in a
            column, no words (labels live in title + aria-label). */
-        '.vchip{display:flex;align-items:center;gap:10px;border-radius:26px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26);touch-action:none;user-select:none;-webkit-user-select:none}',
+        /* The pill's outer shadow is two pre-rendered layers (::before at
+           rest, ::after deeper while lifted) that swap by opacity: no
+           box-shadow change. isolation: the layers, the morph stacks and
+           the ring layers (z-index -1) sit above the pill's own surface and
+           under its content. */
+        '.vchip{position:relative;isolation:isolate;display:flex;align-items:center;gap:10px;border-radius:26px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);touch-action:none;user-select:none;-webkit-user-select:none}',
+        '.vchip::before,.vchip::after{content:"";position:absolute;inset:-1px;border-radius:inherit;pointer-events:none;z-index:-1}',
+        '.vchip::before{box-shadow:' + PILL_SHADOW + '}',
+        '.vchip::after{box-shadow:0 16px 36px rgba(15,27,48,0.32);opacity:0}',
         '.dock:not(.vert) .vchip{flex-direction:row;height:52px;padding:0 6px 0 14px}',
         '.dock.vert .vchip{flex-direction:column;width:52px;padding:10px 0}',
-        '.dock.lifted .vchip{box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 16px 36px rgba(15,27,48,0.32)}',
+        '.dock.lifted .vchip::before,.vchip.morph::before{opacity:0}',
+        '.dock.lifted .vchip::after{opacity:1}',
+        /* morph stacks (FLIP, see morphStack): hidden at rest; while a size
+           or shape change runs the element's own surface steps aside and
+           the stacks draw it */
+        '.ms{position:absolute;left:0;top:0;width:0;height:0;z-index:-1;pointer-events:none;display:none}',
+        '.morph>.ms{display:block}',
+        '.mp{position:absolute;overflow:hidden}',
+        '.morph .mp,.morph .mp>i{will-change:transform}',
+        '.mp>i{position:absolute;display:block;box-sizing:border-box}',
+        '.v-shade{position:absolute;z-index:-1;pointer-events:none;display:none}',
+        '.morph>.v-shade{display:block;will-change:opacity}',
+        '.vchip.morph,.inc.morph{background:transparent !important;border-color:transparent !important;box-shadow:none !important}',
         '.v-body{display:flex;align-items:center;gap:10px;padding:0;border-radius:12px;background:transparent;text-align:left}',
         '.dock:not(.vert) .v-body{flex-direction:row;height:40px;min-width:0}',
         '.dock.vert .v-body{flex-direction:column;width:40px}',
@@ -277,8 +325,13 @@
         /* incoming: a soft ring (T.ring) that grows out of the dot and fades
            (ease-out), so ringing reads apart from a green connected call.
            Only the dot moves; reduced motion keeps a still halo. */
-        '.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + ';animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-ring{0%{box-shadow:0 0 0 0 ' + rgba(T.ring, 0.55) + '}70%,100%{box-shadow:0 0 0 7px ' + rgba(T.ring, 0) + '}}',
+        /* The ring is a disc under the dot (8 px, ring colour at .55) that
+           scales to 22 px (the old 7 px spread) and fades: transform and
+           opacity only. While it runs the still halo steps aside. */
+        '.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:none}',
+        '.v-dot::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + rgba(T.ring, 0.55) + ';opacity:0;z-index:-1;pointer-events:none}',
+        '.vchip[data-live="true"][data-stage="incoming"] .v-dot::before{animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-ring{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(2.75);opacity:0}}',
         /* each shape shows only its own words / timer */
         '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
         '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
@@ -300,8 +353,17 @@
         // Wrap-up: Call back, the same go button.
         '.v-main.callback{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
         // Ringing: the Answer button (go) wears a ring orb that pulses out.
-        '.v-main.answer{background:' + T.go + ';animation:ctc-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-orb{0%{box-shadow:0 0 0 0 ' + rgba(T.goDot, 0.55) + ',0 4px 12px ' + rgba(T.go, 0.36) + '}70%,100%{box-shadow:0 0 0 10px ' + rgba(T.goDot, 0) + ',0 4px 12px ' + rgba(T.go, 0.36) + '}}',
+        // The orb: a disc under the button (goDot at .55) that scales from
+        // 40 to 60 px (the old 10 px spread) and fades, over the still drop
+        // shadow (::before). Transform and opacity only.
+        '.v-main.answer{position:relative;background:' + T.go + '}',
+        '.v-main.answer::before,.v-main.answer::after{content:"";position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none}',
+        '.v-main.answer::before{box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
+        '.v-main.answer::after{background:' + rgba(T.goDot, 0.55) + ';opacity:0;animation:ctc-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-orb{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(1.5);opacity:0}}',
+        // Pressed (scale 0.97 makes the button its own layer, so the disc
+        // would draw over its face): no orb while held.
+        '.v-main.answer:active::after{visibility:hidden}',
         '.v-main.end{background:' + T.stop + ';box-shadow:0 4px 12px ' + rgba(T.stop, 0.40) + '}',
         '.v-main.end:hover{background:' + T.stopHover + '}',
         '.v-main.end svg{transform:rotate(135deg)}',
@@ -318,7 +380,8 @@
         '.v-ico{display:none}',
         '.v-main.call .ico-call,.v-main.callback .ico-call,.v-main.answer .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
         /* offline / error: light pill */
-        '.vchip.light{background:#FFFFFF;border:1px solid #E5E2DD;box-shadow:0 6px 16px rgba(22,21,19,0.08)}',
+        '.vchip.light{background:#FFFFFF;border:1px solid #E5E2DD;box-shadow:none}',
+        '.vchip.light::before{box-shadow:' + PILL_SHADOW_LIGHT + '}',
         '.vchip.light .v-grip i{background:#D9D5CF}',
         '.vchip.light.err{border-color:#F2C4BD}',
         '.vchip.light.err .v-grip i{background:#E5D3D0}',
@@ -337,9 +400,12 @@
         '.v-menu-item{display:block;width:100%;padding:9px 12px;border-radius:8px;background:transparent;text-align:left;font-size:13px;font-weight:500;color:#FFFFFF;white-space:nowrap}',
         '.v-menu-item:hover{background:rgba(255,255,255,0.08)}',
         /* incoming card: rises out of the pill (placed by script with
-           translate; enter / exit run on transform + opacity, WAAPI). Row:
-           sky dot, caller text, Decline, Answer. */
-        '.inc{position:fixed;left:0;top:0;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:16px;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26)}',
+           translate; the enter / exit morph runs on transform + opacity,
+           WAAPI, see animateIncoming). Row: sky dot, caller text, Decline,
+           Answer. The outer shadow is a layer (.inc-shade) that fades in
+           as the morph's window opens past the card. */
+        '.inc{position:fixed;left:0;top:0;isolation:isolate;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:' + INC_RADIUS + 'px;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06)}',
+        '.inc-shade{position:absolute;inset:-1px;border-radius:inherit;box-shadow:' + INC_SHADOW + ';z-index:-1;pointer-events:none}',
         '.inc-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:' + T.ring + '}',
         '.inc-text{flex:1;min-width:0;display:flex;flex-direction:column}',
         '.inc-label{font-size:11px;font-weight:500;line-height:14px;color:#9FC9EE}',
@@ -379,17 +445,24 @@
 
         /* dialer panel (.card.dl, ctc_dock_dialer.js) while dragged: the open /
            close fade keeps transform; the drag moves translate and lifts with
-           scale (1.02, eased in) and a deeper shadow; .settling glides
-           translate to the snap point. */
-        '.card.dl{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out}',
-        '.card.dl.settling{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out,translate ' + SETTLE + '}',
-        '.card.dl.lifted{scale:' + (1 + LIFT) + ';box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 24px 56px rgba(15,27,48,0.36)}',
-        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-live="true"][data-stage="incoming"] .v-dot,.v-main.answer{animation:none}.v-main.answer{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
+           scale (1.02, eased in) and a deeper shadow: .dl-lift, a
+           pre-rendered shadow layer under the panel that follows its box,
+           fades in (opacity) and scales with it. .settling glides translate
+           to the snap point. */
+        '.card.dl{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out}',
+        '.card.dl.settling{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,translate ' + SETTLE + '}',
+        '.card.dl.lifted{scale:' + (1 + LIFT) + '}',
+        '.card.dl.lifted,.card.dl.settling,.dl-lift.lifted,.dl-lift.settling{will-change:translate,scale,opacity}',
+        '.dl-lift{position:fixed;left:0;top:0;border-radius:28px;pointer-events:none;opacity:0;box-shadow:0 24px 56px rgba(15,27,48,0.16);transition:opacity 140ms ease-out,scale 140ms ease-out}',
+        '.dl-lift.settling{transition:opacity 140ms ease-out,scale 140ms ease-out,translate ' + SETTLE + '}',
+        '.dl-lift.lifted{opacity:1;scale:' + (1 + LIFT) + '}',
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.v-dot::before,.v-main.answer::after{animation:none}.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + '}.v-main.answer::before{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
     ].join('\n');
 
     var HTML = ''
         + '<div class="dock" hidden>'
         +   '<div class="vchip navy">'
+        +     '<span class="v-shade" aria-hidden="true"></span><span class="v-shade" aria-hidden="true"></span>' + stackHtml('v-surf')
         +     '<button type="button" class="v-body">'
         +       '<span class="v-grip" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'
         +       '<span class="v-dot" aria-hidden="true"><span class="v-count" hidden></span></span>'
@@ -429,6 +502,8 @@
         + '</div>'
         // Incoming card: outside .dock (the dock's transform would carry it).
         + '<div class="inc navy" role="alertdialog" aria-label="Incoming call" hidden>'
+        +   '<span class="inc-shade" aria-hidden="true"></span>'
+        +   stackHtml('inc-surf')
         +   '<span class="inc-dot" aria-hidden="true"></span>'
         +   '<div class="inc-text">'
         +     '<span class="inc-label">Incoming call</span>'
@@ -456,6 +531,7 @@
     var pos = { x: 0, y: 0 };
     var drag = null;
     var panelDrag = null;
+    var panelLift = null; // the panel's lifted-shadow layer (.dl-lift), made in registerPanel
     var panelSettleTimer = null;
     var panelHideTimer = null;
     var suppressClick = false;
@@ -469,7 +545,6 @@
     // Last settled pill size along its long axis (width when horizontal,
     // height when vertical); 0 = none shown.
     var pillFit = { vert: false, size: 0 };
-    var pillFitTimer = null;
     // Outside mode: does another tab hold the phone? 'pending' until the
     // first lock query answers; null when the browser has no Web Locks.
     var lockHeld = mode === 'outside' ? 'pending' : false;
@@ -534,6 +609,16 @@
     var menuEl = $('.v-menu');
     var useHereItem = $('.v-use-here');
     var incEl = $('.inc');
+    var incShade = $('.inc-shade');
+    var incSurf = $('.inc-surf');
+    // The card's own content (the shadow layer and the morph stacks are not).
+    var incContent = Array.prototype.filter.call(incEl.children, function (el) {
+        return el !== incShade && el !== incSurf;
+    });
+    var vSurf = $('.v-surf');
+    var vShades = root.querySelectorAll('.v-shade'); // [old size, new size]
+    // Pill parts that move or fade when the pill changes size (fitPill).
+    var pillParts = ['.v-grip', '.v-dot', '.h-words', '.h-time', '.v-time', '.v-mute', '.v-main'].map(function (sel) { return $(sel); });
     var incName = $('.inc-name');
     var incSub = $('.inc-sub');
     var incAnswer = $('.inc-answer');
@@ -778,6 +863,7 @@
         trackNotEnabled();
         if (panel && snap) panel.render(snap);
 
+        var before = capturePill(); // the pill as drawn now, for a size ease
         var wasHidden = dockEl.hidden;
         if (mode === 'outside') renderOutside();
         else if (!snap) dockEl.hidden = true;
@@ -790,7 +876,7 @@
         // First show on this page (load, login, after the lock check):
         // the entrance, at the pill's final size and place.
         if (wasHidden && !dockEl.hidden) enter();
-        fitPill();
+        fitPill(before);
         syncIncoming();
         followAnswer();
     }
@@ -1136,43 +1222,294 @@
         syncExpandedAria();
     }
 
-    // The pill's long axis follows its content: width when horizontal,
-    // height when vertical. A change while it shows eases over 200 ms (no
-    // ease under reduced motion). The dock is placed on the start and end
-    // sizes and the ResizeObserver re-places it on every frame between, so
-    // it stays anchored to its snap point (left / centre / right edge when
-    // horizontal, centred on ml / mr when vertical). A render during an ease
-    // (snapshots come in bursts) continues from the size shown now.
-    function fitPill() {
-        window.clearTimeout(pillFitTimer);
-        var st = vchipEl.style;
-        var vert = dockEl.classList.contains('vert');
-        var prop = vert ? 'height' : 'width';
-        var shown = !dockEl.hidden && !vchipEl.hidden;
-        var from = pillFit.vert === vert ? pillFit.size : 0;
-        if (from && st.transition) from = vert ? vchipEl.offsetHeight : vchipEl.offsetWidth;
-        st.transition = '';
-        st.width = '';
-        st.height = '';
-        st.overflow = '';
-        if (!shown) { pillFit.size = 0; return; }
-        var to = vert ? vchipEl.offsetHeight : vchipEl.offsetWidth;
-        pillFit = { vert: vert, size: to };
-        if (!from || from === to || reduced() || entering) {
-            if (from !== to) place(false);
-            return;
+    // --- Compositor morph (FLIP) ---
+    // A rounded box changes size or shape with transform only. The element
+    // is laid out at its final size (box: x 0, y 0, w, h, r); a stack of
+    // nine clipped pieces (centre, four edges, four corners) covers it, and
+    // each piece animates from where its part of the box sits in the start
+    // rect (a: x, y, w, h, r, relative to the element's border box) to
+    // identity. Corners scale evenly (a.r / box.r), so they never stretch
+    // and the radius morphs; edges stretch only along their length, the
+    // centre both ways. Every piece is linear in the rect, so the pieces
+    // stay joined on every frame. Surface pieces overlap their outer
+    // neighbours by SEAM px (no hairline at the joins, as long as what
+    // overlaps is opaque; a see-through shadow is never pieced).
+    //   Plain mode (the pill's size ease): each piece holds its part of a
+    //   full-size copy of the look (the fill) and stretches with it; two
+    //   keyframes, the WAAPI easing.
+    //   Window mode (the incoming card): the stack is a rounded window
+    //   (box may sit off the element's origin and be larger than it) onto
+    //   the card's own surface, which stays put: each fill is the card
+    //   (fillBox) and is counter-scaled. Keyframes are sampled along
+    //   the easing (linear between; sampleRects), and piece and fill share
+    //   them, so they cancel all the way. The look is the old clip-path reveal, on the compositor.
+    var MORPH_STEPS = 12; // window mode: keyframes at 12 even steps of time and 12 of distance
+    var MIN_SCALE = 0.01; // window mode: thinnest window (its fill scales by 1 / this)
+
+    function shownEl(el) { return !!el && el.getClientRects().length > 0; }
+
+    function parseMatrix(t) {
+        var m = /^matrix\(([^)]+)\)$/.exec(String(t || '').trim());
+        if (!m) return null;
+        var v = m[1].split(',').map(parseFloat);
+        return v.length === 6 && v.every(isFinite) ? { sx: v[0], sy: v[3], tx: v[4], ty: v[5] } : null;
+    }
+
+    // CSS cubic-bezier(x1, y1, x2, y2) as a function of time (0..1).
+    function bezier(x1, y1, x2, y2) {
+        var at = function (a, b, t) { return 3 * a * t * (1 - t) * (1 - t) + 3 * b * t * t * (1 - t) + t * t * t; };
+        return function (x) {
+            if (x <= 0 || x >= 1) return x <= 0 ? 0 : 1;
+            var lo = 0, hi = 1, t = x;
+            for (var i = 0; i < 30; i++) {
+                t = (lo + hi) / 2;
+                if (at(x1, x2, t) < x) lo = t; else hi = t;
+            }
+            return at(y1, y2, t);
+        };
+    }
+    var ENTER_CURVE = bezier(0.23, 1, 0.32, 1); // ENTER_EASE
+
+    // Look of `el` (computed) for the fills: background, border, its own
+    // (inset) box-shadow.
+    function surfaceLook(el) {
+        var cs = window.getComputedStyle(el);
+        return 'box-shadow:' + cs.getPropertyValue('box-shadow') + ';' + ['background-color', 'background-image', 'background-size', 'background-position', 'background-repeat',
+            'border-top-width', 'border-right-width', 'border-bottom-width', 'border-left-width',
+            'border-top-style', 'border-right-style', 'border-bottom-style', 'border-left-style',
+            'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color']
+            .map(function (k) { return k + ':' + cs.getPropertyValue(k); }).join(';');
+    }
+
+    // Lay the stack's pieces out for `box` (margin m past the box, overlap
+    // seam) and give every fill `look` at fillBox (default: box).
+    // win: window mode (each corner piece rounds its own corner; fills
+    // counter-scale about the piece's anchor). (bx, by): the element's
+    // border widths. Element coordinates throughout. Runs once per morph.
+    function layoutStack(stack, box, m, seam, look, bx, by, win, fillBox) {
+        var X = box.x, Y = box.y, W = box.w, H = box.h, R = box.r;
+        var f = fillBox || box;
+        var cols = { l: [X - m, X + R + seam], c: [X + R, X + W - R], r: [X + W - R - seam, X + W + m] };
+        var rows = { t: [Y - m, Y + R + seam], c: [Y + R, Y + H - R], b: [Y + H - R - seam, Y + H + m] };
+        var ax = { l: X, c: X + R, r: X + W };
+        var ay = { t: Y, c: Y + R, b: Y + H };
+        var corner = { tl: 'top-left', tr: 'top-right', bl: 'bottom-left', br: 'bottom-right' };
+        stack.style.left = -bx + 'px';
+        stack.style.top = -by + 'px';
+        Array.prototype.forEach.call(stack.children, function (p) {
+            var k = p.getAttribute('data-p');
+            var cell = PIECES[k];
+            var cx = cols[cell[0]], cy = rows[cell[1]];
+            p.style.cssText = 'left:' + cx[0] + 'px;top:' + cy[0] + 'px;width:' + Math.max(0, cx[1] - cx[0]) + 'px;height:'
+                + Math.max(0, cy[1] - cy[0]) + 'px;transform-origin:' + (ax[cell[0]] - cx[0]) + 'px ' + (ay[cell[1]] - cy[0]) + 'px'
+                + (win && corner[k] ? ';border-' + corner[k] + '-radius:' + R + 'px' : '');
+            p.firstChild.style.cssText = look + ';left:' + (f.x - cx[0]) + 'px;top:' + (f.y - cy[0]) + 'px;width:' + f.w + 'px;height:' + f.h
+                + 'px;border-radius:' + f.r + 'px' + (win ? ';transform-origin:' + (ax[cell[0]] - f.x) + 'px ' + (ay[cell[1]] - f.y) + 'px' : '');
+        });
+    }
+
+    // Piece k drawn at rect a: translate (dx, dy) and scale (sx, sy) about
+    // its anchor (identity when a is the box).
+    function pieceParts(k, box, a, minScale) {
+        var cell = PIECES[k];
+        var R = box.r;
+        var lo = minScale || 0.0001;
+        var K = R > 0 ? Math.max(lo, a.r / R) : 1;
+        var SX = box.w - 2 * R > 0.5 ? Math.max(lo, (a.w - 2 * a.r) / (box.w - 2 * R)) : 1;
+        var SY = box.h - 2 * R > 0.5 ? Math.max(lo, (a.h - 2 * a.r) / (box.h - 2 * R)) : 1;
+        var ax = { l: box.x, c: box.x + R, r: box.x + box.w }[cell[0]];
+        var ay = { t: box.y, c: box.y + R, b: box.y + box.h }[cell[1]];
+        var fx = { l: a.x, c: a.x + a.r, r: a.x + a.w }[cell[0]];
+        var fy = { t: a.y, c: a.y + a.r, b: a.y + a.h }[cell[1]];
+        return { dx: fx - ax, dy: fy - ay, sx: cell[0] === 'c' ? SX : K, sy: cell[1] === 'c' ? SY : K };
+    }
+    function round3(v) { return Math.round(v * 1000) / 1000; }
+    function tf(dx, dy, sx, sy) {
+        return 'translate(' + round3(dx) + 'px, ' + round3(dy) + 'px) scale(' + round3(sx) + ', ' + round3(sy) + ')';
+    }
+    function pieceTransform(k, box, a) {
+        var q = pieceParts(k, box, a);
+        return tf(q.dx, q.dy, q.sx, q.sy);
+    }
+
+    // The rect a stack draws now (mid-morph), from its corner pieces; null
+    // when it cannot be read.
+    function stackRect(stack, box) {
+        var tl = parseMatrix(window.getComputedStyle(stack.querySelector('[data-p="tl"]')).transform);
+        var br = parseMatrix(window.getComputedStyle(stack.querySelector('[data-p="br"]')).transform);
+        if (!tl || !br) return null;
+        return { x: box.x + tl.tx, y: box.y + tl.ty, w: box.w + br.tx - tl.tx, h: box.h + br.ty - tl.ty, r: tl.sx * box.r };
+    }
+
+    function lerpRect(a, b, p) {
+        var l = function (u, v) { return u + (v - u) * p; };
+        return { x: l(a.x, b.x), y: l(a.y, b.y), w: l(a.w, b.w), h: l(a.h, b.h), r: l(a.r, b.r) };
+    }
+
+    // Window mode keyframes: times (0..1) at MORPH_STEPS even steps of
+    // time and MORPH_STEPS even steps of distance along `curve` (dense
+    // where it moves fast), each with its rect. Few keyframes keep the
+    // start cheap.
+    function sampleRects(from, to, curve) {
+        var ts = [];
+        for (var i = 0; i <= MORPH_STEPS; i++) {
+            ts.push(i / MORPH_STEPS);
+            var lo = 0, hi = 1, y = i / MORPH_STEPS; // the time the curve reaches y
+            for (var k = 0; k < 24; k++) { var m = (lo + hi) / 2; if (curve(m) < y) lo = m; else hi = m; }
+            ts.push(hi);
         }
-        st.overflow = 'hidden'; // content may be larger than the pill mid-ease
-        st[prop] = from + 'px';
-        place(false); // anchor on the start size; the observer follows the ease
-        st.transition = prop + ' 200ms ease-out';
-        st[prop] = to + 'px';
-        pillFitTimer = window.setTimeout(function () {
-            st.transition = '';
-            st[prop] = '';
-            st.overflow = '';
-            place(false);
-        }, 220);
+        ts.sort(function (a, b) { return a - b; });
+        var out = [];
+        ts.forEach(function (t) {
+            t = Math.round(t * 10000) / 10000;
+            if (!out.length || t - out[out.length - 1].t > 0.004) out.push({ t: t, rect: lerpRect(from, to, curve(t)) });
+        });
+        out[out.length - 1] = { t: 1, rect: lerpRect(from, to, 1) };
+        return out;
+    }
+
+    // Animate the stack from rect `from` to rect `to` (either may be the
+    // box itself). curve: window mode (sampled keyframes along it; opts'
+    // easing is replaced by linear). Returns the WAAPI animations: the
+    // pieces first (PIECE_KEYS order), then in window mode their fills.
+    function morphStack(stack, box, from, to, opts, curve) {
+        var pieces = PIECE_KEYS.map(function (k) { return stack.querySelector('[data-p="' + k + '"]'); });
+        if (!curve) {
+            return pieces.map(function (p, i) {
+                var k = PIECE_KEYS[i];
+                return p.animate([{ transform: pieceTransform(k, box, from) }, { transform: pieceTransform(k, box, to) }], opts);
+            });
+        }
+        var samples = sampleRects(from, to, curve);
+        var lin = { duration: opts.duration, easing: 'linear', fill: opts.fill };
+        // Window values as drawn (rounded), so each fill inverts exactly them.
+        var parts = pieces.map(function (p, j) {
+            return samples.map(function (smp) {
+                var q = pieceParts(PIECE_KEYS[j], box, smp.rect, MIN_SCALE);
+                return { t: smp.t, dx: round3(q.dx), dy: round3(q.dy), sx: round3(q.sx), sy: round3(q.sy) };
+            });
+        });
+        var out = pieces.map(function (p, j) {
+            return p.animate(parts[j].map(function (q) { return { offset: q.t, transform: tf(q.dx, q.dy, q.sx, q.sy) }; }), lin);
+        });
+        return out.concat(pieces.map(function (p, j) {
+            return p.firstChild.animate(parts[j].map(function (q) {
+                return { offset: q.t, transform: tf(-q.dx / q.sx, -q.dy / q.sy, 1 / q.sx, 1 / q.sy) };
+            }), lin);
+        }));
+    }
+
+    function boxOf(el, r) {
+        var w = el.offsetWidth, h = el.offsetHeight;
+        return { x: 0, y: 0, w: w, h: h, r: r === undefined ? Math.min(w, h) / 2 : r }; // also the identity rect
+    }
+
+    // --- Pill size (FLIP) ---
+    // The pill's long axis follows its content (width when horizontal,
+    // height when vertical). A change while it shows: the pill takes its new
+    // size and place at once (anchored to its snap point); its surface and
+    // shadow (morph stacks) ease from the shape drawn before to the new one
+    // over PILL_EASE_MS; parts that stay slide from where they were drawn;
+    // parts that are new (or changed size) fade in over the second part.
+    // Transform and opacity only. No ease under reduced motion, during the
+    // entrance, or on a shape switch. A render during an ease starts from
+    // what is drawn now.
+    var pillMorph = null; // running animations, or null
+
+    // What the pill draws now, before a render changes it; null when no
+    // ease could follow.
+    function capturePill() {
+        if (dockEl.hidden || vchipEl.hidden || reduced() || typeof vchipEl.animate !== 'function') return null;
+        var r = vchipEl.getBoundingClientRect();
+        var rect = { left: r.left, top: r.top, width: r.width, height: r.height };
+        if (pillMorph && vchipEl.classList.contains('morph')) {
+            var a = stackRect(vSurf, boxOf(vchipEl));
+            if (a) rect = { left: r.left + a.x, top: r.top + a.y, width: a.w, height: a.h };
+        }
+        return {
+            vert: dockEl.classList.contains('vert'),
+            rect: rect,
+            parts: pillParts.map(function (el) {
+                var shown = shownEl(el);
+                return { el: el, shown: shown, rect: shown ? el.getBoundingClientRect() : null, opacity: shown ? window.getComputedStyle(el).opacity : '0' };
+            })
+        };
+    }
+
+    function stopPillMorph() {
+        if (!pillMorph) return;
+        var anims = pillMorph;
+        pillMorph = null;
+        anims.forEach(function (a) { a.onfinish = null; a.cancel(); });
+        vchipEl.classList.remove('morph');
+    }
+
+    function fitPill(before) {
+        var vert = dockEl.classList.contains('vert');
+        var shown = !dockEl.hidden && !vchipEl.hidden;
+        if (!shown) { stopPillMorph(); pillFit.size = 0; return; }
+        var to = vert ? vchipEl.offsetHeight : vchipEl.offsetWidth;
+        var from = pillFit.vert === vert ? pillFit.size : 0;
+        pillFit = { vert: vert, size: to };
+        if (from === to) return; // same size: a running ease goes on
+        place(false); // the new size at its snap point, at once
+        if (!from || !before || before.vert !== vert || reduced() || entering) { stopPillMorph(); return; }
+        morphPill(before);
+    }
+
+    function morphPill(before) {
+        stopPillMorph();
+        var box = boxOf(vchipEl);
+        var now = vchipEl.getBoundingClientRect();
+        var b = before.rect;
+        var a = { x: b.left - now.left, y: b.top - now.top, w: b.width, h: b.height, r: Math.min(b.width, b.height) / 2 };
+        layoutStack(vSurf, box, 0, SEAM, surfaceLook(vchipEl), vchipEl.clientLeft, vchipEl.clientTop);
+        // The shadow crossfades between the old and the new size: two
+        // filled shapes in the shadow colour, blurred (a static filter, laid
+        // out once), so the shadow under the part of the pill still to come
+        // is there too (an outer box-shadow is cut out under its own box).
+        // A stretched or pieced shadow would show its ends or seams.
+        var sh = vchipEl.classList.contains('light') ? PILL_SHADE_LIGHT : PILL_SHADE;
+        [a, box].forEach(function (q, i) {
+            vShades[i].style.cssText = 'left:' + (q.x - vchipEl.clientLeft) + 'px;top:' + (q.y - vchipEl.clientTop + sh.y) + 'px;width:' + q.w
+                + 'px;height:' + q.h + 'px;border-radius:' + q.r + 'px;background:' + sh.color + ';filter:blur(' + sh.blur / 2 + 'px)';
+        });
+        var opts = { duration: PILL_EASE_MS, easing: PILL_EASE };
+        vchipEl.classList.add('morph');
+        var anims = morphStack(vSurf, box, a, box, opts);
+        anims.push(vShades[0].animate([{ opacity: 1 }, { opacity: 0 }], { duration: PILL_EASE_MS, easing: PILL_EASE, fill: 'forwards' }));
+        anims.push(vShades[1].animate([{ opacity: 0 }, { opacity: 1 }], { duration: PILL_EASE_MS, easing: PILL_EASE, fill: 'backwards' }));
+        // Parts ride with the pill's near end (left / top half) or far end:
+        // a part that stays slides from where it was drawn; a new or resized
+        // part slides with its end and fades in over the second half.
+        var vert = before.vert;
+        var nearD = vert ? b.top - now.top : b.left - now.left;
+        var farD = vert ? b.top + b.height - now.top - now.height : b.left + b.width - now.left - now.width;
+        before.parts.forEach(function (p) {
+            if (!shownEl(p.el)) return;
+            var r = p.el.getBoundingClientRect();
+            var dx, dy;
+            var kept = p.shown && Math.abs(r.width - p.rect.width) < 0.5 && Math.abs(r.height - p.rect.height) < 0.5;
+            if (kept) {
+                dx = p.rect.left - r.left;
+                dy = p.rect.top - r.top;
+            } else {
+                var near = vert ? r.top + r.height / 2 < now.top + now.height / 2 : r.left + r.width / 2 < now.left + now.width / 2;
+                dx = vert ? 0 : near ? nearD : farD;
+                dy = vert ? (near ? nearD : farD) : 0;
+                anims.push(p.el.animate([{ opacity: p.shown ? p.opacity : 0 }, { opacity: 1 }], {
+                    duration: Math.round(PILL_EASE_MS / 2), delay: Math.round(PILL_EASE_MS / 2), easing: PILL_EASE, fill: 'backwards'
+                }));
+            }
+            if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+            anims.push(p.el.animate([{ transform: 'translate(' + round3(dx) + 'px, ' + round3(dy) + 'px)' }, { transform: 'translate(0px, 0px)' }], opts));
+        });
+        pillMorph = anims;
+        anims[0].onfinish = function () {
+            if (pillMorph !== anims) return;
+            pillMorph = null;
+            vchipEl.classList.remove('morph');
+        };
     }
 
     // The control that holds focus for the pill.
@@ -1265,6 +1602,7 @@
             window.clearTimeout(panelHideTimer);
             panelHideTimer = window.setTimeout(function () {
                 if (!expanded) el.hidden = true;
+                syncLift();
             }, PANEL_FADE_MS);
         }
     }
@@ -1302,20 +1640,15 @@
     }
 
     // Rendered size of the pill in one orientation. Toggles the class and back
-    // in the same task, so nothing paints and no resize is observed. The other
-    // shape is measured at its natural size (no size ease in progress).
+    // in the same task, so nothing paints and no resize is observed. The pill
+    // is always laid out at its natural size (a size ease is drawn by
+    // transforms only).
     function sizeOf(vert) {
         var was = dockEl.classList.contains('vert');
         if (was === vert) return { w: dockEl.offsetWidth, h: dockEl.offsetHeight };
-        var st = vchipEl.style;
-        var keep = { w: st.width, h: st.height, o: st.overflow };
-        st.width = st.height = st.overflow = '';
         dockEl.classList.toggle('vert', vert);
         var s = { w: dockEl.offsetWidth, h: dockEl.offsetHeight };
         dockEl.classList.toggle('vert', was);
-        st.width = keep.w;
-        st.height = keep.h;
-        st.overflow = keep.o;
         return s;
     }
 
@@ -1372,11 +1705,14 @@
         dockEl.setAttribute('data-row', row);
         dockEl.setAttribute('data-col', col);
         cardEl.style.transformOrigin = (col === 'r' ? 'right ' : col === 'l' ? 'left ' : 'center ') + (row === 'b' ? 'bottom' : row === 't' ? 'top' : 'center');
+        // will-change only while the dock moves (a drag, this glide).
         if (glide) {
             dockEl.style.transition = 'transform ' + SETTLE;
-            window.setTimeout(function () { dockEl.style.transition = ''; }, 320);
+            dockEl.style.willChange = 'transform';
+            window.setTimeout(function () { dockEl.style.transition = ''; dockEl.style.willChange = ''; }, 320);
         } else {
             dockEl.style.transition = '';
+            dockEl.style.willChange = '';
         }
         applyTransform(false);
         placeIncoming(glide);
@@ -1441,12 +1777,30 @@
         s.top = Math.round(xy.y) + 'px';
         var col = corner.charAt(1);
         el.setAttribute('data-side', col === 'c' ? corner.charAt(0) : col);
+        syncLift();
+    }
+
+    // The lifted-shadow layer follows the panel's box (left / top / size /
+    // translate) and its lifted / settling state. It shows only while
+    // lifted (opacity), so the open / close slide needs no copy.
+    function syncLift() {
+        if (!panelLift || !panel) return;
+        var ps = panel.el.style, ls = panelLift.style;
+        ls.left = ps.left;
+        ls.top = ps.top;
+        ls.width = ps.width;
+        ls.height = ps.height;
+        ls.translate = ps.translate;
+        panelLift.hidden = panel.el.hidden;
+        panelLift.classList.toggle('lifted', panel.el.classList.contains('lifted'));
+        panelLift.classList.toggle('settling', panel.el.classList.contains('settling'));
     }
 
     function stopPanelSettle() {
         window.clearTimeout(panelSettleTimer);
         panelSettleTimer = null;
         if (panel) panel.el.classList.remove('settling');
+        syncLift();
     }
 
     // The panel's drag offset as drawn now (mid-settle too).
@@ -1557,15 +1911,10 @@
         st.translate = g.at.x + 'px ' + g.at.y + 'px';
     }
 
-    // The card clipped to the pill's rect (pill radius): where the enter
+    // The pill's rect relative to the card (pill radius): where the enter
     // starts and the exit ends.
-    function pillClip(g) {
-        var l = Math.round(g.p.x - g.at.x);
-        var t = Math.round(g.p.y - g.at.y);
-        var r = Math.round(g.s.w - l - g.p.w);
-        var b = Math.round(g.s.h - t - g.p.h);
-        var rad = Math.round(Math.min(g.p.w, g.p.h) / 2);
-        return 'inset(' + t + 'px ' + r + 'px ' + b + 'px ' + l + 'px round ' + rad + 'px)';
+    function pillRectOnCard(g) {
+        return { x: g.p.x - g.at.x, y: g.p.y - g.at.y, w: g.p.w, h: g.p.h, r: Math.min(g.p.w, g.p.h) / 2 };
     }
 
     function stopIncomingAnim() {
@@ -1583,58 +1932,77 @@
         vchipEl.style.opacity = under ? '0' : '';
     }
 
-    // Enter: the card's clip grows from the pill's rect to the whole card
-    // (INC_ENTER_MS); its content fades in from INC_CONTENT_AT; the pill
-    // fades out in the first part. Exit (INC_EXIT_MS): the content fades
-    // out, the clip shrinks back to the pill's rect, the pill fades in at
-    // the end. Reduced motion: opacity only, INC_REDUCED_MS. WAAPI; a new
-    // enter / exit starts from what is drawn now, so a ring during an exit
-    // turns it around smoothly.
+    // Enter (INC_ENTER_MS): a FLIP morph. The card is laid out at its own
+    // place and size; a rounded window onto its surface and shadow (morph
+    // stack in window mode, see morphStack) grows from the pill's rect and
+    // radius to the card plus INC_OUTSET all round (the old clip-path
+    // reveal; the shadow layer fades in as the window passes the card's
+    // edges); its content fades in from INC_CONTENT_AT; the pill fades
+    // out in the first part. Exit (INC_EXIT_MS): the content fades out, the
+    // window shrinks back to the pill's rect, the pill fades in at the end.
+    // Transform and opacity only (WAAPI). Reduced motion: the card's
+    // opacity only, INC_REDUCED_MS. A new enter / exit starts from what is
+    // drawn now (the window's rect read from its corner pieces), so a ring
+    // during an exit turns it around smoothly.
     function animateIncoming(show) {
         var red = reduced();
         var canAnimate = typeof incEl.animate === 'function';
         var running = !!incAnim && canAnimate;
-        var content = Array.prototype.slice.call(incEl.children);
-        var from = null;
+        var morphing = running && incEl.classList.contains('morph');
         var opacityNow = function (el) { return window.getComputedStyle(el).opacity; };
         var pillFrom = running ? opacityNow(vchipEl) : (show ? '1' : '0');
-        var contentFrom = content.map(function (el) { return running ? opacityNow(el) : (show ? '0' : '1'); });
-        if (running) {
-            var cs = window.getComputedStyle(incEl);
-            from = red ? { opacity: cs.opacity } : { clipPath: cs.clipPath && cs.clipPath !== 'none' ? cs.clipPath : INC_OPEN };
-        }
+        var contentFrom = incContent.map(function (el) { return running ? opacityNow(el) : (show ? '0' : '1'); });
+        var cardFrom = running && !morphing ? opacityNow(incEl) : null;
+        var card = boxOf(incEl, INC_RADIUS);
+        var open = { x: -INC_OUTSET, y: -INC_OUTSET, w: card.w + 2 * INC_OUTSET, h: card.h + 2 * INC_OUTSET, r: INC_OUTSET_RADIUS };
+        var rectFrom = morphing ? stackRect(incSurf, open) : null;
         stopIncomingAnim();
+        incEl.classList.remove('morph');
         if (!canAnimate) {
             setPillUnderCard(show);
             if (!show) incEl.hidden = true;
             return;
         }
-        var g = incomingGeom();
-        var closed = red ? { opacity: 0 } : { clipPath: pillClip(g) };
-        var open = red ? { opacity: 1 } : { clipPath: INC_OPEN };
         var dur = red ? INC_REDUCED_MS : show ? INC_ENTER_MS : INC_EXIT_MS;
         var fade = function (el, a, b, delay, ms) {
             incSideAnims.push(el.animate([{ opacity: a }, { opacity: b }], { duration: ms, delay: delay, easing: ENTER_EASE, fill: 'both' }));
         };
         setPillUnderCard(false); // the fade owns the pill's opacity until the end
+        var a;
         if (red) {
             fade(vchipEl, pillFrom, show ? 0 : 1, 0, dur);
-        } else if (show) {
-            fade(vchipEl, pillFrom, 0, 0, Math.round(dur * 0.375));
-            content.forEach(function (el, i) { fade(el, contentFrom[i], 1, Math.round(dur * INC_CONTENT_AT), Math.round(dur * (1 - INC_CONTENT_AT))); });
+            a = incEl.animate([{ opacity: cardFrom !== null ? cardFrom : (show ? 0 : 1) }, { opacity: show ? 1 : 0 }], { duration: dur, easing: ENTER_EASE, fill: 'both' });
         } else {
-            content.forEach(function (el, i) { fade(el, contentFrom[i], 0, 0, Math.round(dur * 0.4)); });
-            fade(vchipEl, pillFrom, 1, Math.round(dur * 0.55), Math.round(dur * 0.45));
+            var pillR = pillRectOnCard(incomingGeom());
+            var from = rectFrom || (show ? pillR : open);
+            layoutStack(incSurf, open, 0, SEAM, surfaceLook(incEl), incEl.clientLeft, incEl.clientTop, true, card);
+            incEl.classList.add('morph');
+            var to = show ? open : pillR;
+            var pieces = morphStack(incSurf, open, from, to, { duration: dur, fill: 'both' }, ENTER_CURVE);
+            // The card's shadow (its layer, in place) shows as the window
+            // opens past the card's edges: opacity = how far past, of
+            // INC_OUTSET (a pieced, see-through shadow would show seams).
+            pieces.push(incShade.animate(sampleRects(from, to, ENTER_CURVE).map(function (smp) {
+                var r = smp.rect;
+                var past = Math.min(-r.x, -r.y, r.x + r.w - card.w, r.y + r.h - card.h) / INC_OUTSET;
+                return { offset: smp.t, opacity: round3(Math.max(0, Math.min(1, past))) };
+            }), { duration: dur, easing: 'linear', fill: 'both' }));
+            a = pieces.shift();
+            incSideAnims = pieces;
+            var inAt = Math.round(dur * INC_CONTENT_AT);
+            if (show) {
+                fade(vchipEl, pillFrom, 0, 0, Math.round(dur * 0.375));
+                incContent.forEach(function (el, i) { fade(el, contentFrom[i], 1, inAt, dur - inAt); });
+            } else {
+                incContent.forEach(function (el, i) { fade(el, contentFrom[i], 0, 0, Math.round(dur * 0.4)); });
+                fade(vchipEl, pillFrom, 1, Math.round(dur * 0.55), Math.round(dur * 0.45));
+            }
         }
-        var a = incEl.animate(show ? [from || closed, open] : [from || open, closed], {
-            duration: dur,
-            easing: ENTER_EASE,
-            fill: 'both'
-        });
         incAnim = a;
         a.onfinish = function () {
             if (incAnim !== a) return;
             stopIncomingAnim(); // the end state is the elements' own (shown) or hidden
+            incEl.classList.remove('morph');
             setPillUnderCard(show);
             if (!show) incEl.hidden = true;
         };
@@ -1661,6 +2029,7 @@
         var hadFocus = incEl.contains(root.activeElement);
         if (dockEl.hidden || vchipEl.hidden) {
             stopIncomingAnim();
+            incEl.classList.remove('morph');
             setPillUnderCard(false);
             incEl.hidden = true;
             return;
@@ -1775,6 +2144,7 @@
         if (!drag.moved) {
             drag.moved = true;
             dockEl.style.transition = '';
+            dockEl.style.willChange = 'transform';
             dockEl.classList.add('lifted');
             // Bounds for this drag: the snap points' extremes (the pill's
             // size and the safe top as the drag starts).
@@ -1862,6 +2232,7 @@
             var off = panelOffset();
             stopPanelSettle();
             el.style.translate = off.x + 'px ' + off.y + 'px';
+            syncLift();
             panelDrag = {
                 id: e.pointerId, x0: e.clientX, y0: e.clientY,
                 left: parseFloat(el.style.left) || 0, top: parseFloat(el.style.top) || 0,
@@ -1892,6 +2263,7 @@
             d.x = x - d.left;
             d.y = y - d.top;
             el.style.translate = Math.round(d.x) + 'px ' + Math.round(d.y) + 'px';
+            syncLift();
             var now = e.timeStamp || Date.now();
             d.samples.push({ x: e.clientX, y: e.clientY, t: now });
             while (d.samples.length > 2 && now - d.samples[0].t > 100) d.samples.shift();
@@ -1920,10 +2292,12 @@
             placePanel();
             el.style.translate = Math.round(vx0 - (parseFloat(el.style.left) || 0)) + 'px '
                 + Math.round(vy0 - (parseFloat(el.style.top) || 0)) + 'px';
-            if (reduced()) { el.style.translate = ''; return; }
+            syncLift();
+            if (reduced()) { el.style.translate = ''; syncLift(); return; }
             void el.offsetWidth; // commit the start so the glide runs
             el.classList.add('settling');
             el.style.translate = '0px 0px';
+            syncLift();
             panelSettleTimer = window.setTimeout(stopPanelSettle, SETTLE_MS);
         }
         handle.addEventListener('pointerup', end);
@@ -2170,6 +2544,11 @@
                 panel = p;
                 p.el.hidden = true;
                 p.el.classList.add('closed');
+                panelLift = document.createElement('div');
+                panelLift.className = 'dl-lift';
+                panelLift.setAttribute('aria-hidden', 'true');
+                panelLift.hidden = true;
+                root.appendChild(panelLift); // under the panel
                 root.appendChild(p.el);
                 if (p.handle) bindPanelDrag(p.handle);
                 if (snap) render();

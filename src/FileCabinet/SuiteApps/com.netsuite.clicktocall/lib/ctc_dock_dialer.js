@@ -135,9 +135,13 @@
         // gear and collapse buttons (head padding-top 18 + half of 32 px).
         '.dl-head .dl-status{position:absolute;left:50%;top:34px;transform:translate(-50%,-50%)}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:11.5px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
-        '.dl-status .dot{width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
-        // incoming: the status dot rings like the pill dot (keyframes in the client CSS)
-        '.dl[data-phase="incoming"] .dl-status .dot{animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '.dl-status .dot{position:relative;width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
+        // incoming: the status dot rings like the pill dot: a disc under the
+        // dot (6 px, ring colour at .55) scales to 20 px (the old 7 px
+        // spread) and fades. Transform and opacity only.
+        '.dl-status{isolation:isolate}',
+        '.dl[data-phase="incoming"] .dl-status .dot::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + rgba(T.ring, 0.55) + ';opacity:0;z-index:-1;pointer-events:none;animation:ctc-ring-sm 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-ring-sm{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(3.333);opacity:0}}',
         '.dl-icon{width:32px;height:32px;border-radius:10px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-icon:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
         '.dl-icon[aria-pressed="true"]{background:rgba(255,255,255,0.12);color:#FFFFFF}',
@@ -268,7 +272,7 @@
         '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
         '.dl-audio-msg{text-align:left;padding:0}',
         '.dl-exit{align-self:flex-start;margin-top:8px}',
-        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot{animation:none}.dl.closed,.dl[data-side].closed{transform:none}}'
+        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot::before{animation:none}.dl.closed,.dl[data-side].closed{transform:none}}'
     ].join('\n'));
 
     // --- Markup (static; data goes in with textContent) ---
