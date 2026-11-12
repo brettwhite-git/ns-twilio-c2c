@@ -38,25 +38,39 @@
     // time the ringing started).
     var PENDING_MATCH_MS = 120000;
     var TYPE_LABEL = { customer: 'CUSTOMER', prospect: 'PROSPECT', lead: 'LEAD', contact: 'CONTACT' };
+    var LONG_PRESS_MS = 500; // a press on backspace this long clears the number
+    // Phone colour tokens (DESIGN.md §1; the same values as the client's).
+    // Buttons use go / stop; dots on the dark panel use goDot / stopDot.
+    var T = {
+        go: '#436B1D', goHover: '#385A18',
+        stop: '#B3311F', stopHover: '#9A2A1B',
+        goDot: '#8AC94F', stopDot: '#FF9D90',
+        ring: '#6FB6D3', amber: '#F4C76A', wrap: '#B6A3D9', offline: '#8B8780'
+    };
+    // '#RRGGBB' + alpha -> 'rgba(r,g,b,a)'.
+    function rgba(hex, a) {
+        var n = parseInt(hex.slice(1), 16);
+        return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
     var PHASE_VIEW = {
-        offline: { dot: '#8B8780', label: 'Phone offline' },
-        starting: { dot: '#F4C76A', label: 'Starting phone…' },
-        error: { dot: '#EE6E5C', label: 'Phone error' },
-        ready: { dot: '#94A6BF', label: 'Ready to call' },
-        dialing: { dot: '#F4C76A', label: 'Calling…' },
-        ringing: { dot: '#F4C76A', label: 'Ringing…' },
-        incoming: { dot: '#74C0FC', label: 'Incoming call' }, // sky: ringing reads apart from talking
-        connected: { dot: '#14B981', label: 'Connected' },
-        reconnecting: { dot: '#F4C76A', label: 'Reconnecting…' },
-        moved: { dot: '#8B8780', label: 'Phone moved to another tab' }
+        offline: { dot: T.offline, label: 'Phone offline' },
+        starting: { dot: T.amber, label: 'Starting phone…' },
+        error: { dot: T.stopDot, label: 'Phone error' },
+        ready: { dot: T.goDot, label: 'Ready to call' },
+        dialing: { dot: T.amber, label: 'Calling…' },
+        ringing: { dot: T.amber, label: 'Ringing…' },
+        incoming: { dot: T.ring, label: 'Incoming call' }, // ring: ringing reads apart from talking
+        connected: { dot: T.goDot, label: 'Connected' },
+        reconnecting: { dot: T.amber, label: 'Reconnecting…' },
+        moved: { dot: T.offline, label: 'Phone moved to another tab' }
     };
     // Header badge for snap.error.kind between calls.
     var ERROR_VIEW = {
-        mic: { dot: '#EE6E5C', label: 'Microphone blocked' },
-        session: { dot: '#F4C76A', label: 'Signing in…' },
-        network: { dot: '#F4C76A', label: 'Reconnecting…' },
-        twilio: { dot: '#EE6E5C', label: 'Phone error' },
-        paused: { dot: '#8B8780', label: 'Calling paused' }
+        mic: { dot: T.stopDot, label: 'Microphone blocked' },
+        session: { dot: T.amber, label: 'Signing in…' },
+        network: { dot: T.amber, label: 'Reconnecting…' },
+        twilio: { dot: T.stopDot, label: 'Phone error' },
+        paused: { dot: T.offline, label: 'Calling paused' }
     };
     var PAUSED_TEXT = 'Calling is paused by your administrator';
     // snap.callWarning (contract names, and the raw Twilio names) -> one line.
@@ -76,7 +90,7 @@
         paused: PAUSED_TEXT
     };
     // Header badge when snap.canReceive === false in the ready phase.
-    var READY_NOT_RECEIVING = { dot: '#F4C76A', label: 'Ready · reconnecting' };
+    var READY_NOT_RECEIVING = { dot: T.amber, label: 'Ready · reconnecting' };
     var KEYS = [
         ['1', ''], ['2', 'ABC'], ['3', 'DEF'], ['4', 'GHI'], ['5', 'JKL'], ['6', 'MNO'],
         ['7', 'PQRS'], ['8', 'TUV'], ['9', 'WXYZ'], ['*', ''], ['0', '+'], ['#', '']
@@ -125,7 +139,7 @@
         '.dl-icon{width:32px;height:32px;border-radius:10px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-icon:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
         '.dl-icon[aria-pressed="true"]{background:rgba(255,255,255,0.12);color:#FFFFFF}',
-        '.dl-note{flex-shrink:0;margin:10px 14px 0;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.06);display:flex;align-items:center;gap:8px;font-size:12px}',
+        '.dl-note{flex-shrink:0;margin:10px 14px 0;padding:8px 10px;border-radius:14px;background:rgba(255,255,255,0.06);display:flex;align-items:center;gap:8px;font-size:12px}',
         '.dl-note-text{flex:1;min-width:0}',
         '.dl-note a{color:#B6DCFA;text-decoration:none}',
         '.dl-note a:hover{text-decoration:underline}',
@@ -138,7 +152,7 @@
         '.dl-note[data-kind="missed"] .dl-note-x{order:-1}',
         '.dl-note[data-kind="missed"] .dl-note-call{margin-left:-8px}',
         // Error banner (snap.error.kind): what happened, what to do, one action.
-        '.dl-alert{flex-shrink:0;margin:10px 14px 0;padding:10px 12px;border-radius:10px;background:rgba(238,110,92,0.12);border:1px solid rgba(238,110,92,0.30);display:flex;flex-direction:column;align-items:flex-start;gap:4px;font-size:12px}',
+        '.dl-alert{flex-shrink:0;margin:10px 14px 0;padding:10px 12px;border-radius:14px;background:' + rgba(T.stopDot, 0.12) + ';border:1px solid ' + rgba(T.stopDot, 0.30) + ';display:flex;flex-direction:column;align-items:flex-start;gap:4px;font-size:12px}',
         '.dl-alert[data-tone="amber"]{background:rgba(244,199,106,0.10);border-color:rgba(244,199,106,0.30)}',
         '.dl-alert-title{font-weight:600;line-height:1.4}',
         '.dl-alert-text{color:#C9D3E1;line-height:1.45;overflow-wrap:anywhere}',
@@ -149,24 +163,25 @@
         '.dl-remote{flex-shrink:0;padding:0 14px 12px;background:rgba(0,0,0,0.12);font-size:11px;color:#94A6BF;text-align:center}',
         '.dl-pane{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}',
         '.dl-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
-        '.dl-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:2px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
-        '.dl-tab{padding:6px;border-radius:999px;background:transparent;font-size:11.5px;font-weight:600;color:#94A6BF}',
+        // Dial · Search · Recents: one centred row, 28 px apart.
+        '.dl-tabs{display:flex;justify-content:center;gap:28px;padding:2px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
+        '.dl-tab{padding:6px 12px;border-radius:999px;background:transparent;font-size:11.5px;font-weight:600;color:#94A6BF}',
         '.dl-tab[aria-selected="true"]{background:rgba(255,255,255,0.16);color:#FFFFFF}',
-        '.dl-box{padding:10px 12px;border-radius:12px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:8px}',
+        '.dl-box{padding:10px 12px;border-radius:16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:8px}',
         '.dl-entity-top{display:flex;align-items:center;gap:10px}',
         '.dl-av{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#38507A 0%,#1F2F4D 100%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0}',
         '.dl-entity-name{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.dl-badge{font-size:9px;letter-spacing:0.10em;color:#93C7AA;padding:1px 6px;border-radius:999px;border:1px solid rgba(20,185,129,0.30);background:rgba(20,185,129,0.08)}',
+        '.dl-badge{font-size:9px;letter-spacing:0.10em;color:#93C7AA;padding:1px 6px;border-radius:999px;border:1px solid ' + rgba(T.goDot, 0.30) + ';background:' + rgba(T.goDot, 0.08) + '}',
         '.dl-field{display:flex;align-items:center;gap:8px;padding:0 4px 0 9px;height:32px;border-radius:7px;border:1px solid rgba(255,255,255,0.08)}',
         '.dl-field span{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;width:52px;flex-shrink:0}',
         '.dl-field select{flex:1;min-width:0;height:30px;background:transparent;color:#FFFFFF;border:0;font:inherit;font-size:12px;cursor:pointer}',
         '.dl-field select option{color:#161513}',
-        '.dl-field select:focus-visible{outline:2px solid #74C0FC;outline-offset:1px;border-radius:4px}',
+        '.dl-field select:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px;border-radius:4px}',
         '.dl-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}',
         '.dl-tiles.two{grid-template-columns:repeat(2,minmax(0,1fr))}',
         '.dl-tile{padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:2px;min-width:0;color:#FFFFFF;text-decoration:none}',
         'a.dl-tile:hover{background:rgba(255,255,255,0.06)}',
-        'a.dl-tile:focus-visible{outline:2px solid #74C0FC;outline-offset:2px}',
+        'a.dl-tile:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
         '.dl-k{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:8.5px;letter-spacing:0.10em;color:#94A6BF}',
         '.dl-v{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.dl-v.link{color:#B6DCFA}',
@@ -174,7 +189,13 @@
         '.dl-v.mint{color:#B5EFD0;font-weight:600;font-size:13px}',
         '.dl-display{width:100%;height:40px;background:transparent;border:0;border-bottom:1px solid rgba(255,255,255,0.08);color:#FFFFFF;text-align:center;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:20px;font-weight:300;letter-spacing:0.02em}',
         '.dl-display::placeholder{color:#6B7B95}',
-        '.dl-display:focus-visible{outline:none;border-bottom-color:#74C0FC}',
+        '.dl-display:focus-visible{outline:none;border-bottom-color:' + T.ring + '}',
+        // Quick clear: a 24 px x inside the number field, only when it holds a number.
+        '.dl-display-wrap{position:relative}',
+        '.dl-display-wrap .dl-display{padding:0 36px}',
+        '.dl-clear{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:24px;height:24px;padding:0;border-radius:999px;background:rgba(255,255,255,0.12);color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-clear:hover{background:rgba(255,255,255,0.20)}',
+        '.dl-clear:active{transform:translateY(-50%) scale(0.97)}',
         '.dl-pad{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}',
         '.dl-key{height:44px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}',
         '.dl-key:hover{background:rgba(255,255,255,0.10)}',
@@ -185,16 +206,16 @@
         '.dl-btn{width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.10);color:#FFFFFF;display:flex;align-items:center;justify-content:center}',
         '.dl-btn:hover{background:rgba(255,255,255,0.18)}',
         '.dl-btn.big{width:52px;height:52px;border-radius:16px}',
-        '.dl-btn.call{background:#14B981;box-shadow:0 5px 16px rgba(20,185,129,0.32)}',
-        '.dl-btn.call:hover{background:#0E9E6D}',
-        '.dl-btn.end{background:#EE6E5C;box-shadow:0 5px 16px rgba(238,110,92,0.32)}',
-        '.dl-btn.end:hover{background:#D85440}',
+        '.dl-btn.call{background:' + T.go + ';box-shadow:0 5px 16px ' + rgba(T.go, 0.32) + '}',
+        '.dl-btn.call:hover{background:' + T.goHover + '}',
+        '.dl-btn.end{background:' + T.stop + ';box-shadow:0 5px 16px ' + rgba(T.stop, 0.32) + '}',
+        '.dl-btn.end:hover{background:' + T.stopHover + '}',
         '.dl-btn[aria-pressed="true"]{background:#F4C76A;color:#1F2F4D;box-shadow:0 4px 12px rgba(244,199,106,0.4)}',
         '.dl-keys[aria-pressed="true"]{background:rgba(255,255,255,0.24);color:#FFFFFF;box-shadow:none}',
         '.dl-btn[disabled]{opacity:0.4;cursor:default;box-shadow:none}',
         '.dl-q{width:100%;height:44px;flex-shrink:0;padding:0 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px}',
         '.dl-q::placeholder{color:#94A6BF}',
-        '.dl-q:focus-visible{outline:2px solid #74C0FC;outline-offset:1px}',
+        '.dl-q:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px}',
         '.dl-chips{display:flex;flex-wrap:wrap;gap:6px}',
         '.dl-chip{display:inline-flex;align-items:center;min-height:24px;padding:4px 10px;border-radius:999px;font-size:11px;color:#94A6BF;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-chip[aria-pressed="true"]{color:#FFFFFF;background:rgba(255,255,255,0.16)}',
@@ -219,9 +240,9 @@
         // Direction icon: 20 px circle, 12 px arrow (panel tints of the
         // portlet's In / Out / Missed colours; arrow vs circle >= 5:1).
         '.dl-dir{width:20px;height:20px;border-radius:999px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}',
-        '.dl-dir-in{background:rgba(116,192,252,0.18);color:#9FD0FA}',
+        '.dl-dir-in{background:' + rgba(T.ring, 0.18) + ';color:#9FD0FA}',
         '.dl-dir-out{background:rgba(255,255,255,0.10);color:#C9D3E1}',
-        '.dl-dir-missed{background:rgba(238,110,92,0.20);color:#FFA595}',
+        '.dl-dir-missed{background:' + rgba(T.stopDot, 0.20) + ';color:#FFA595}',
         '.dl-row-flag{color:#FF9E8C;font-weight:600}',
         '.dl-row-meta{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:10px;color:#94A6BF;flex-shrink:0;text-align:right;white-space:pre-line}',
         '.dl-empty,.dl-msg{font-size:12px;color:#94A6BF;text-align:center;padding:12px 0}',
@@ -241,7 +262,7 @@
         '.dl-afield{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#94A6BF}',
         '.dl-afield select{width:100%;height:36px;padding:0 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px;cursor:pointer}',
         '.dl-afield select option{color:#161513}',
-        '.dl-afield select:focus-visible{outline:2px solid #74C0FC;outline-offset:1px}',
+        '.dl-afield select:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px}',
         '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
         '.dl-audio-msg{text-align:left;padding:0}',
         '.dl-exit{align-self:flex-start;margin-top:8px}',
@@ -292,7 +313,10 @@
         +         '<div class="dl-tile"><span class="dl-k">BALANCE</span><span class="dl-v dl-bal">—</span></div>'
         +         '<div class="dl-tile"><span class="dl-k">LAST ACTIVITY</span><span class="dl-v dl-last">—</span></div>'
         +       '</div>'
-        +       '<input type="tel" class="dl-display" aria-label="Number to call" placeholder="Enter a number" autocomplete="off">'
+        +       '<div class="dl-display-wrap">'
+        +         '<input type="tel" class="dl-display" aria-label="Number to call" placeholder="Enter a number" autocomplete="off">'
+        +         '<button type="button" class="dl-clear" aria-label="Clear number" hidden><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>'
+        +       '</div>'
         +       '<div class="dl-pad dl-dialpad">' + keyHtml + '</div>'
         +     '</div>'
         +     '<div class="dl-view" data-view="search" role="tabpanel" hidden style="display:flex;flex-direction:column;gap:10px">'
@@ -364,7 +388,7 @@
         entity: q('.dl-entity'), av: q('.dl-av'), entityName: q('.dl-entity-name'), badge: q('.dl-badge'),
         contactRow: q('.dl-contact-row'), contact: q('.dl-contact'), numberRow: q('.dl-number-row'), number: q('.dl-number'),
         tiles: q('.dl-entity-tiles'), open: q('.dl-open'), bal: q('.dl-bal'), last: q('.dl-last'),
-        display: q('.dl-display'), dialpad: q('.dl-dialpad'),
+        display: q('.dl-display'), clearBtn: q('.dl-clear'), dialpad: q('.dl-dialpad'),
         call: q('.dl-call'), backspace: q('.dl-backspace'),
         query: q('.dl-q'), chips: qa('.dl-chip'), searchLabel: q('.dl-search-label'),
         results: q('.dl-results'), searchMsg: q('.dl-search-msg'),
@@ -504,6 +528,7 @@
     }
 
     function syncCallButton() {
+        ui.clearBtn.hidden = !ui.display.value;
         var hasNumber = !!digitsOf(ui.display.value).replace('+', '');
         ui.call.disabled = !hasNumber || isActive() || errKind() === 'paused';
     }
@@ -624,8 +649,40 @@
     ui.display.addEventListener('input', function () { manual = true; syncCallButton(); });
     ui.display.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !ui.call.disabled) { e.preventDefault(); placeCall(); }
+        // Esc clears the number first; on an empty field it closes the
+        // panel (the panel's own Escape handler).
+        if (e.key === 'Escape' && ui.display.value) {
+            e.preventDefault();
+            e.stopPropagation();
+            setDisplay('', true);
+        }
+    });
+    ui.clearBtn.addEventListener('click', function () {
+        setDisplay('', true);
+        ui.display.focus();
+    });
+    // Backspace: a click deletes one digit; a press held LONG_PRESS_MS
+    // clears the field (and its click then deletes nothing more).
+    var backHold = null;
+    var backCleared = false;
+    function endBackHold() {
+        if (backHold) { window.clearTimeout(backHold); backHold = null; }
+    }
+    ui.backspace.addEventListener('pointerdown', function (e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        backCleared = false;
+        endBackHold();
+        backHold = window.setTimeout(function () {
+            backHold = null;
+            backCleared = true;
+            setDisplay('', true);
+        }, LONG_PRESS_MS);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (type) {
+        ui.backspace.addEventListener(type, endBackHold);
     });
     ui.backspace.addEventListener('click', function () {
+        if (backCleared) { backCleared = false; return; }
         var d = digitsOf(ui.display.value);
         setDisplay(d.slice(0, -1), true);
     });

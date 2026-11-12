@@ -200,8 +200,28 @@
     var ACTIVE = { dialing: true, ringing: true, connected: true, reconnecting: true };
     // Talking: Mute and the keypad work.
     var TALKING = { connected: true, reconnecting: true };
+    // Phone colour tokens (DESIGN.md §1). Buttons use go / stop; dots on
+    // the dark surface use goDot / stopDot. Answer is always go.
+    var T = {
+        go: '#436B1D', goHover: '#385A18',
+        stop: '#B3311F', stopHover: '#9A2A1B',
+        goDot: '#8AC94F', stopDot: '#FF9D90',
+        ring: '#6FB6D3', amber: '#F4C76A', wrap: '#B6A3D9', offline: '#8B8780'
+    };
+    // '#RRGGBB' + alpha -> 'rgba(r,g,b,a)' (halos and coloured shadows).
+    function rgba(hex, a) {
+        var n = parseInt(hex.slice(1), 16);
+        return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + a + ')';
+    }
+    // The v2.1 dark phone surface (DESIGN.md §3): 3 px grain, coral bloom
+    // at bottom right, teal glows, navy gradient. Static (never animated).
+    var SURFACE = 'radial-gradient(rgba(255,255,255,0.035) 1px,transparent 1.2px) 0 0/3px 3px,'
+        + 'radial-gradient(55% 40% at 96% 100%,rgba(229,132,98,0.20),transparent 70%),'
+        + 'radial-gradient(110% 75% at 100% 0%,rgba(4,83,111,0.80),rgba(4,83,111,0) 62%),'
+        + 'radial-gradient(80% 50% at 0% 100%,rgba(47,143,179,0.14),transparent 70%),'
+        + 'linear-gradient(180deg,#1C3344 0%,#15283A 55%,#11203A 100%)';
     var MISSED_DOT = '#D9553F';
-    var AMBER = '#F4C76A';
+    var AMBER = T.amber;
     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
 
     var ICON_PHONE = '<path d="M2 5.5C2 3.6 3.6 2 5.5 2h1.3c.9 0 1.7.6 1.9 1.5l1 4c.2.8-.1 1.6-.8 2.1l-1.5 1.1a12 12 0 0 0 5.9 5.9l1.1-1.5c.5-.7 1.3-1 2.1-.8l4 1c.9.2 1.5 1 1.5 1.9v1.3c0 1.9-1.6 3.5-3.5 3.5A16.5 16.5 0 0 1 2 5.5z"></path>';
@@ -217,8 +237,8 @@
         '[hidden]{display:none !important}',
         'button{font:inherit;color:inherit;margin:0;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform 140ms ease-out,background-color 140ms ease-out}',
         'button:active{transform:scale(0.97)}',
-        'button:focus-visible{outline:2px solid #74C0FC;outline-offset:2px}',
-        '.navy{background:linear-gradient(180deg,#1A2B47 0%,#0F1B30 100%)}',
+        'button:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
+        '.navy{background:' + SURFACE + ';border:1px solid rgba(255,255,255,0.07)}',
         '.dot{width:7px;height:7px;border-radius:999px;flex-shrink:0;background:var(--dot,#94A6BF)}',
         '.mono{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}',
 
@@ -229,9 +249,6 @@
         '.vchip{display:flex;align-items:center;gap:10px;border-radius:26px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26);touch-action:none;user-select:none;-webkit-user-select:none}',
         '.dock:not(.vert) .vchip{flex-direction:row;height:52px;padding:0 6px 0 14px}',
         '.dock.vert .vchip{flex-direction:column;width:52px;padding:10px 0}',
-        '.dock:not(.vert) .vchip[data-main="none"],.dock:not(.vert) .vchip[data-main="vonly"]{padding-right:18px}',
-        '.dock:not(.vert) .vchip[data-main="vonly"] .v-main{display:none}',
-        '.dock.vert .vchip[data-main="none"]{padding-bottom:16px}',
         '.dock.lifted .vchip{box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 16px 36px rgba(15,27,48,0.32)}',
         '.v-body{display:flex;align-items:center;gap:10px;padding:0;border-radius:12px;background:transparent;text-align:left}',
         '.dock:not(.vert) .v-body{flex-direction:row;height:40px;min-width:0}',
@@ -240,21 +257,25 @@
         '.v-grip{display:grid;grid-template-columns:3px 3px;gap:2px;flex-shrink:0}',
         '.v-grip i{width:3px;height:3px;border-radius:999px;background:rgba(255,255,255,0.28)}',
         '.v-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:var(--dot,#94A6BF)}',
-        '.vchip[data-stage="dialing"] .v-dot,.vchip[data-stage="ringing"] .v-dot,.vchip[data-stage="reconnecting"] .v-dot{box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
+        /* halo: a 3 px ring at .20 of the dot colour, only while live
+           (data-live: calling, ringing, connected, muted, reconnecting,
+           incoming). Ready and Starting have none. */
+        '.vchip[data-live="true"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.amber, 0.20) + '}',
         /* missed calls: coral count badge on the dot (vertical pill only;
            the horizontal pill says "N missed") */
         '.v-dot{position:relative}',
-        '.v-count{position:absolute;top:-4px;left:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:' + MISSED_DOT + ';color:#FFFFFF;font-size:9px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px #1A2B47}',
+        '.v-count{position:absolute;top:-4px;left:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:' + MISSED_DOT + ';color:#FFFFFF;font-size:9px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px #15283A}',
         '.dock:not(.vert) .v-count{display:none}',
-        '.vchip[data-stage="connected"] .v-dot{box-shadow:0 0 0 3px rgba(20,185,129,0.20)}',
-        '.vchip[data-muted="true"] .v-dot{background:#F4C76A;box-shadow:0 0 0 3px rgba(244,199,106,0.20)}',
+        '.vchip[data-live="true"][data-stage="connected"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.20) + '}',
+        '.vchip[data-muted="true"] .v-dot{background:' + T.amber + '}',
+        '.vchip[data-live="true"][data-muted="true"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.amber, 0.20) + '}',
         '.vchip[data-stage="starting"] .v-dot{animation:ctc-breathe 1.2s ease-in-out infinite alternate}',
         '@keyframes ctc-breathe{from{opacity:0.4}to{opacity:1}}',
-        /* incoming: a soft sky ring that grows out of the dot and fades
+        /* incoming: a soft ring (T.ring) that grows out of the dot and fades
            (ease-out), so ringing reads apart from a green connected call.
            Only the dot moves; reduced motion keeps a still halo. */
-        '.vchip[data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px rgba(116,192,252,0.30);animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-ring{0%{box-shadow:0 0 0 0 rgba(116,192,252,0.55)}70%,100%{box-shadow:0 0 0 7px rgba(116,192,252,0)}}',
+        '.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + ';animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-ring{0%{box-shadow:0 0 0 0 ' + rgba(T.ring, 0.55) + '}70%,100%{box-shadow:0 0 0 7px ' + rgba(T.ring, 0) + '}}',
         /* each shape shows only its own words / timer */
         '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
         '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
@@ -272,15 +293,23 @@
         '.v-mute[aria-pressed="true"]{background:#F4C76A}',
         '.v-mute[aria-pressed="true"] svg{stroke:#1F2F4D}',
         '.v-main{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
-        '.v-main.call{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
-        // Ringing: the Answer button wears a green ring orb that pulses out.
-        '.v-main.answer{background:#14B981;animation:ctc-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-orb{0%{box-shadow:0 0 0 0 rgba(20,185,129,0.55),0 4px 12px rgba(20,185,129,0.36)}70%,100%{box-shadow:0 0 0 10px rgba(20,185,129,0),0 4px 12px rgba(20,185,129,0.36)}}',
-        '.v-main.end{background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
-        '.v-main.end:hover{background:#D85440}',
+        '.v-main.call{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
+        // Ringing: the Answer button (go) wears a ring orb that pulses out.
+        '.v-main.answer{background:' + T.go + ';animation:ctc-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-orb{0%{box-shadow:0 0 0 0 ' + rgba(T.goDot, 0.55) + ',0 4px 12px ' + rgba(T.go, 0.36) + '}70%,100%{box-shadow:0 0 0 10px ' + rgba(T.goDot, 0) + ',0 4px 12px ' + rgba(T.go, 0.36) + '}}',
+        '.v-main.end{background:' + T.stop + ';box-shadow:0 4px 12px ' + rgba(T.stop, 0.40) + '}',
+        '.v-main.end:hover{background:' + T.stopHover + '}',
         '.v-main.end svg{transform:rotate(135deg)}',
         '.v-main.offline{background:#F4F2EE}',
         '.v-main.retry{width:36px;height:36px;border-radius:12px;background:#FCE9E7}',
+        /* disabled slot: a stage with no action (Starting, Calling paused,
+           moved, mirror idle) keeps the 40 px main slot, so the pill never
+           shrinks to a nub. Not a control: aria-hidden, out of the tab
+           order, and presses fall through to the pill body. */
+        '.v-main.disabled{background:rgba(255,255,255,0.10);cursor:default;pointer-events:none}',
+        '.v-main.disabled .ico-call{display:block;opacity:0.45}',
+        '.vchip.light .v-main.disabled{background:#F1EFED}',
+        '.vchip.light .v-main.disabled .ico-call{fill:' + T.offline + ';opacity:1}',
         '.v-ico{display:none}',
         '.v-main.call .ico-call,.v-main.answer .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
         /* offline / error: light pill */
@@ -306,23 +335,23 @@
            translate; enter / exit run on transform + opacity, WAAPI). Row:
            sky dot, caller text, Decline, Answer. */
         '.inc{position:fixed;left:0;top:0;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:16px;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26)}',
-        '.inc-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:#74C0FC}',
+        '.inc-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:' + T.ring + '}',
         '.inc-text{flex:1;min-width:0;display:flex;flex-direction:column}',
         '.inc-label{font-size:11px;font-weight:500;line-height:14px;color:#9FC9EE}',
         '.inc-name{margin-top:2px;font-size:15px;font-weight:600;line-height:20px;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.inc-sub{margin-top:1px;font-size:12px;line-height:16px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.inc-acts{display:flex;gap:8px;flex-shrink:0}',
         '.inc-btn{width:36px;height:36px;border-radius:999px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
-        '.inc-decline{background:#EE6E5C;box-shadow:0 4px 12px rgba(238,110,92,0.40)}',
-        '.inc-decline:hover{background:#D85440}',
+        '.inc-decline{background:' + T.stop + ';box-shadow:0 4px 12px ' + rgba(T.stop, 0.40) + '}',
+        '.inc-decline:hover{background:' + T.stopHover + '}',
         '.inc-decline svg{transform:rotate(135deg)}',
-        '.inc-answer{background:#14B981;box-shadow:0 4px 12px rgba(20,185,129,0.36)}',
-        '.inc-answer:hover{background:#0E9E6D}',
+        '.inc-answer{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
+        '.inc-answer:hover{background:' + T.goHover + '}',
         /* screen-reader-only live regions */
         '.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}',
 
         /* card */
-        '.card{width:300px;border-radius:14px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 16px 40px rgba(15,27,48,0.28);transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1)}',
+        '.card{width:300px;border-radius:28px;overflow:hidden;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 16px 40px rgba(15,27,48,0.28);transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1)}',
         '.card.closed{opacity:0;transform:scale(0.96)}',
         '.card-top{width:100%;padding:14px 16px;display:flex;align-items:center;gap:12px;background:transparent;text-align:left;border-radius:0}',
         '.card-top:active{transform:none}',
@@ -339,8 +368,8 @@
         '.key:hover{background:rgba(255,255,255,0.18)}',
         '.key[aria-pressed="true"]{background:#F4C76A}',
         '.key[aria-pressed="true"] svg{stroke:#1F2F4D}',
-        '.key.end{background:#EE6E5C}',
-        '.key.end:hover{background:#D85440}',
+        '.key.end{background:' + T.stop + '}',
+        '.key.end:hover{background:' + T.stopHover + '}',
         '.key[disabled]{opacity:0.4;cursor:default}',
 
         /* dialer panel (.card.dl, ctc_dock_dialer.js) while dragged: the open /
@@ -350,7 +379,7 @@
         '.card.dl{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out}',
         '.card.dl.settling{transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1),scale 140ms ease-out,box-shadow 140ms ease-out,translate ' + SETTLE + '}',
         '.card.dl.lifted{scale:' + (1 + LIFT) + ';box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 1px 1px rgba(0,0,0,0.08),0 24px 56px rgba(15,27,48,0.36)}',
-        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-stage="incoming"] .v-dot,.v-main.answer{animation:none}.v-main.answer{box-shadow:0 0 0 3px rgba(20,185,129,0.35)}}'
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.vchip[data-live="true"][data-stage="incoming"] .v-dot,.v-main.answer{animation:none}.v-main.answer{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
     ].join('\n');
 
     var HTML = ''
@@ -707,21 +736,21 @@
 
     // --- Render ---
     var PHASE_VIEW = {
-        offline: { dot: '#8B8780', label: 'Phone offline' },
-        error: { dot: '#EE6E5C', label: 'Phone error' },
-        starting: { dot: '#F4C76A', label: 'Starting phone…' },
-        ready: { dot: '#94A6BF', label: 'Phone ready' }, // aria-label only: the ready pill has no text
-        dialing: { dot: '#F4C76A', label: 'Calling…' },
-        ringing: { dot: '#F4C76A', label: 'Ringing…' },
-        incoming: { dot: '#74C0FC', label: 'Incoming call' }, // sky: ringing reads apart from talking
-        connected: { dot: '#14B981', label: 'Connected' },
+        offline: { dot: T.offline, label: 'Phone offline' },
+        error: { dot: T.stopDot, label: 'Phone error' },
+        starting: { dot: T.amber, label: 'Starting phone…' },
+        ready: { dot: T.goDot, label: 'Phone ready' }, // aria-label only: the ready pill has no text
+        dialing: { dot: T.amber, label: 'Calling…' },
+        ringing: { dot: T.amber, label: 'Ringing…' },
+        incoming: { dot: T.ring, label: 'Incoming call' }, // ring: ringing reads apart from talking
+        connected: { dot: T.goDot, label: 'Connected' },
         reconnecting: { dot: AMBER, label: 'Reconnecting…' },
-        moved: { dot: '#8B8780', label: 'Phone moved to another tab' }
+        moved: { dot: T.offline, label: 'Phone moved to another tab' }
     };
     // Ready, but Twilio cannot ring this phone (snap.canReceive === false:
     // inbound is on and the anchor is re-registering). Quiet: amber dot and
     // tooltip / aria text only.
-    var READY_NOT_RECEIVING = { dot: '#F4C76A', label: 'Ready to call · not receiving calls — reconnecting' };
+    var READY_NOT_RECEIVING = { dot: T.amber, label: 'Ready to call · not receiving calls — reconnecting' };
     var ARROWS_HINT = ' Arrow keys move the dock.';
 
     function render() {
@@ -819,7 +848,8 @@
         if (phase !== 'moved') setMenu(false);
 
         dockEl.hidden = false;
-        dockEl.style.setProperty('--dot', view.dot);
+        // The light error pill takes the stop button colour (stopDot is for dark).
+        dockEl.style.setProperty('--dot', light && phase === 'error' ? T.stop : view.dot);
         if (phase === 'incoming') {
             // Ringing in: the incoming card above / beside the pill holds
             // Answer / Decline (here and in a mirror tab: the anchor answers;
@@ -906,8 +936,8 @@
             return { dot: view.dot, light: true, l1: 'Phone moved to another tab', label: 'Phone moved to another tab. Open menu', action: 'menu' };
         }
         var kind = errorKind();
-        if (kind === 'mic') return { dot: '#EE6E5C', light: true, err: true, main: 'retry', l1: 'Microphone blocked', label: 'Microphone blocked. Open phone' };
-        if (kind === 'twilio') return { dot: '#EE6E5C', light: true, err: true, main: 'retry', l1: 'Phone error', label: 'Phone error. Open phone' };
+        if (kind === 'mic') return { dot: T.stop, light: true, err: true, main: 'retry', l1: 'Microphone blocked', label: 'Microphone blocked. Open phone' };
+        if (kind === 'twilio') return { dot: T.stop, light: true, err: true, main: 'retry', l1: 'Phone error', label: 'Phone error. Open phone' };
         if (kind === 'signed_out') return { dot: AMBER, amber: true, action: 'signin', l1: 'Sign in to NetSuite', label: 'Signed out of NetSuite. Sign in' };
         if (kind === 'session') return { dot: AMBER, amber: true, l1: 'Reconnecting…', label: 'Reconnecting. Open phone' };
         if (kind === 'network') return { dot: AMBER, amber: true, l1: 'Reconnecting…', label: 'Reconnecting. Open phone' };
@@ -959,20 +989,18 @@
     // The pill, both shapes. Grip, status dot, words + timer (horizontal) or
     // timer as mm over ss (vertical), Mute while connected, main button last.
     //   main: 'call' (open phone) | 'end' (hang up) | 'offline' (open phone)
-    //         | 'retry' (open phone) | null (no button: starting, incoming,
-    //         mirror idle)
+    //         | 'retry' (open phone) | 'answer' | null (no action: starting,
+    //         paused, moved, mirror idle; a disabled slot is drawn)
     // The body button opens the phone / call card. When the main button does
     // that same thing, the body leaves the tab order so keyboard users meet
     // one control per action.
     function renderPill(o) {
-        // A pill with no main button still carries the phone button; CSS
-        // shows it only in the vertical shape, which would otherwise shrink
-        // to a bare dot (starting, ringing, mirror idle). It opens the phone.
-        var vOnly = !o.main;
-        if (vOnly) o.main = 'call';
+        var disabled = !o.main;
+        var live = !o.light && (!!ACTIVE[o.stage] || o.stage === 'incoming');
         vchipEl.setAttribute('data-stage', o.stage);
+        vchipEl.setAttribute('data-live', live ? 'true' : 'false');
         vchipEl.setAttribute('data-muted', o.mute && o.muted ? 'true' : 'false');
-        vchipEl.setAttribute('data-main', vOnly ? 'vonly' : o.main);
+        vchipEl.setAttribute('data-main', disabled ? 'disabled' : o.main);
         vchipEl.classList.toggle('light', !!o.light);
         vchipEl.classList.toggle('navy', !o.light);
         vchipEl.classList.toggle('err', !!o.err);
@@ -993,10 +1021,18 @@
         vMute.setAttribute('aria-pressed', o.muted ? 'true' : 'false');
         vMute.setAttribute('aria-label', o.muted ? 'Unmute' : 'Mute');
         vMute.querySelector('svg').innerHTML = o.muted ? ICON_MIC_OFF : ICON_MIC;
-        vMain.hidden = !o.main;
-        vMain.className = 'v-main' + (o.main ? ' ' + o.main : '');
-        vMain.setAttribute('aria-label', o.mainLabel || (o.main === 'end' ? 'End call' : o.label));
-        var bodyIsMain = !vOnly && o.main && o.main !== 'end' && o.main !== 'answer';
+        vMain.hidden = false;
+        vMain.className = 'v-main ' + (disabled ? 'disabled' : o.main);
+        if (disabled) {
+            vMain.tabIndex = -1;
+            vMain.setAttribute('aria-hidden', 'true');
+            vMain.removeAttribute('aria-label');
+        } else {
+            vMain.removeAttribute('tabindex');
+            vMain.removeAttribute('aria-hidden');
+            vMain.setAttribute('aria-label', o.mainLabel || (o.main === 'end' ? 'End call' : o.label));
+        }
+        var bodyIsMain = !disabled && o.main !== 'end' && o.main !== 'answer';
         vBody.tabIndex = bodyIsMain ? -1 : 0;
         if (bodyIsMain) {
             vBody.removeAttribute('aria-label');
@@ -1615,9 +1651,20 @@
             drag.moved = true;
             dockEl.style.transition = '';
             dockEl.classList.add('lifted');
+            // Bounds for this drag: the snap points' extremes (the pill's
+            // size and the safe top as the drag starts).
+            drag.w = dockEl.offsetWidth;
+            drag.h = dockEl.offsetHeight;
+            drag.top = safeTop();
         }
-        pos.x = drag.ox + dx;
-        pos.y = drag.oy + dy;
+        // Clamped to the screen: past the bounds the pill rubber-bands (as
+        // the panel does) and never leaves the screen. Room: the gap to the
+        // screen edge less what the 1.02 lift adds on each side.
+        var grow = LIFT / 2;
+        var rawY = drag.oy + dy;
+        var roomY = (rawY < drag.top ? Math.min(EDGE, drag.top) : BOTTOM_GAP) - drag.h * grow;
+        pos.x = rubber(drag.ox + dx, EDGE, Math.max(EDGE, window.innerWidth - drag.w - EDGE), EDGE - drag.w * grow);
+        pos.y = rubber(rawY, drag.top, Math.max(drag.top, window.innerHeight - drag.h - BOTTOM_GAP), roomY);
         applyTransform(true);
         placeIncoming(false);
         var now = e.timeStamp || Date.now();
@@ -1805,6 +1852,7 @@
         if (!(e.target.closest && e.target.closest('button'))) onPillClick();
     });
     vMain.addEventListener('click', function () {
+        if (vMain.classList.contains('disabled')) return; // not a control (presses fall through to the pill)
         var a = takePillAction();
         if (vMain.classList.contains('end')) send('hangup');
         else if (vMain.classList.contains('answer')) respondIncoming('answer');

@@ -202,10 +202,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             --phone-text-faint: #6B7B95;
             --phone-card: rgba(255, 255, 255, 0.04);
             --phone-card-border: rgba(255, 255, 255, 0.08);
-            --action-call: #14B981;
-            --action-call-deep: #0E9E6D;
-            --action-end: #EE6E5C;
-            --action-end-deep: #D85440;
+            --action-call: #436B1D;
+            --action-call-deep: #385A18;
+            --action-end: #B3311F;
+            --action-end-deep: #9A2A1B;
             --action-neutral: rgba(255, 255, 255, 0.10);
             --action-neutral-hover: rgba(255, 255, 255, 0.18);
             --panel-bg: #FFFFFF;
@@ -370,8 +370,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         .status-pill.connecting { color: #F4C76A; }
         .status-pill.ringing { color: #F4C76A; }
         .status-pill.reconnecting { color: #F4C76A; }
-        .status-pill.incoming { color: #14B981; }
-        .status-pill.connected { color: #14B981; }
+        .status-pill.incoming { color: #6FB6D3; }
+        .status-pill.connected { color: #8AC94F; }
         .status-pill.ended { color: var(--phone-text-faint); }
         .status-pill.error { color: #FCA5A5; }
         /* Subtle blue divider between audio selectors and the contact picker — barely visible */
@@ -540,13 +540,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         .btn-call {
             width: 56px; height: 56px; border-radius: 16px;
             background: var(--action-call);
-            box-shadow: 0 5px 16px rgba(20, 185, 129, 0.32);
+            box-shadow: 0 5px 16px rgba(67, 107, 29, 0.32);
         }
         .btn-call:hover:not(:disabled) { background: var(--action-call-deep); }
         .btn-hangup {
             width: 56px; height: 56px; border-radius: 16px;
             background: var(--action-end);
-            box-shadow: 0 5px 16px rgba(238, 110, 92, 0.32);
+            box-shadow: 0 5px 16px rgba(179, 49, 31, 0.32);
         }
         .btn-hangup:hover:not(:disabled) { background: var(--action-end-deep); }
         .action-label {
@@ -777,7 +777,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             padding: 1px 6px;
             flex-shrink: 0;
         }
-        .result-list .badge.customer { color: #93C7AA; border-color: rgba(20,185,129,0.30); background: rgba(20,185,129,0.08); }
+        .result-list .badge.customer { color: #93C7AA; border-color: rgba(138,201,79,0.30); background: rgba(138,201,79,0.08); }
         .result-list .badge.lead     { color: #E8C77A; border-color: rgba(232,199,122,0.30); background: rgba(232,199,122,0.06); }
         .result-list .badge.prospect { color: #94BFD6; border-color: rgba(148,191,214,0.30); background: rgba(148,191,214,0.06); }
         .search-empty {
@@ -851,8 +851,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             text-transform: uppercase;
             letter-spacing: 0.10em;
             color: #93C7AA;
-            background: rgba(20,185,129,0.08);
-            border: 1px solid rgba(20,185,129,0.30);
+            background: rgba(138,201,79,0.08);
+            border: 1px solid rgba(138,201,79,0.30);
             border-radius: 999px;
             padding: 2px 8px;
             flex-shrink: 0;
@@ -1091,7 +1091,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             display: block;
             width: 0%;
             height: 100%;
-            background: linear-gradient(90deg, #74C0FC 0%, #74C0FC 60%, #F4C76A 80%, #FCA5A5 100%);
+            background: linear-gradient(90deg, #6FB6D3 0%, #6FB6D3 60%, #F4C76A 80%, #FCA5A5 100%);
             transition: width 60ms linear;
             transform-origin: left center;
         }
@@ -1113,15 +1113,15 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         .audio-overlay .save-default input[type=checkbox] {
             margin: 0;
             cursor: pointer;
-            accent-color: #14B981;
+            accent-color: #8AC94F;
         }
         .audio-overlay .done-btn {
             align-self: center;
             width: fit-content;
             min-width: 160px;
-            background: #74C0FC;
+            background: #6FB6D3;
             color: #0B1426;
-            border: 1px solid #74C0FC;
+            border: 1px solid #6FB6D3;
             border-radius: 8px;
             padding: 8px 18px;
             font-size: 13px;
@@ -1230,7 +1230,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             align-items: center;
             justify-content: center;
         }
-        .recents-row .dir.outbound { color: #94C7AC; background: rgba(20,185,129,0.10); }
+        .recents-row .dir.outbound { color: #94C7AC; background: rgba(138,201,79,0.10); }
         .recents-row .dir.inbound  { color: #94BFD6; background: rgba(148,191,214,0.10); }
         .recents-row .dir.missed   { color: #E69A8E; background: rgba(232,110,92,0.10); }
         .recents-row .dir svg { width: 12px; height: 12px; }
