@@ -117,6 +117,9 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 - **When the anchor tab closes**, a waiting phone-mode tab takes the lock automatically. This is existing behaviour.
 - **"Move phone here"** is a quiet item in the gear menu, for when the user wants the audio device in this tab. It is refused while a call is live.
 - **No page banner** for "phone in another tab". The pill states "In another tab" on L3 05 cover only the case where an anchor exists but this tab cannot control it (no bus).
+- **Reliable commands:**
+  - **Sequence numbers.** Every command (Dial, Answer, Mute, End and so on) carries the anchor id and a per-tab sequence number. The anchor runs each command once and acknowledges it. A double-click on Call places one call. A command sent during a hand-over is never doubled.
+  - **Readiness handshake.** A newly opened tab shows the Starting pill (disabled slot) until it hears a compatible anchor. That is usually under a second. Commands sent before then are held for up to 2 s, then dropped with a quiet error.
 - **Risks to verify:** commands from many tabs (one source of truth: the anchor's snapshot); the mic permission lives only in the anchor tab; audio plays from a background tab.
 
 ## 5. Call Central — direction B, NetSuite Next native (L4 rows 5 and 6)
