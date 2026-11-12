@@ -85,6 +85,7 @@ Source of truth for how the product looks and behaves. Code follows this file; c
   | Exit easing | `cubic-bezier(.4,0,.2,1)` |
 
   - Allowed loops: the starting breathe, the calling halo, the ringing/incoming ring and the recording dot.
+  - **Performance:** every animation runs at 60 fps, also at 5× slow. Animate only `transform` and `opacity`; no `clip-path`, `box-shadow`, width or height animation (use FLIP scaling and opacity on a pre-rendered shadow layer).
   - Starting ↔ Ready changes in place: the slot turns into Call with a 150ms colour change.
   - Reduced motion: opacity only, ≤150ms, with no loops, shake or rotation.
 
@@ -101,6 +102,22 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 - **States, grouped:** idle views (06b-1), outbound and in call (06b-2), call quality (06b-3), inbound and after call (06b-4), recover and blocked (06b-5).
 - **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. This is a design decision; the code still keeps the panel closed.
 - **Incoming card (panel closed):** 320px wide, radius 16, a clip-path morph out of the pill (1280ms in, 880ms out), with Answer in go green.
+
+## 4a. One phone, every tab (decided 2026-11-11)
+
+- **Every NetSuite tab gets the full phone.** That covers phone-mode tabs and ordinary NetSuite tabs, including ones opened earlier. Each shows the real pill and panel, and can dial, answer, mute, hold and end.
+- **The device stays put.** The Twilio device and the audio live in ONE anchor tab, which holds the Web Lock. Other tabs send commands over the `ctc-bus` BroadcastChannel and draw from the anchor's snapshot.
+- **Shared UI state follows the user:**
+  - panel open or minimized
+  - the current view (Dial / Search / Recents / in call)
+  - the snap position
+
+  These are written to shared storage. A tab applies them on load, and again when it becomes visible. A tab you open or return to shows the phone exactly as you left it. A live call shows in every tab.
+- **No hand-over gap:** the phone never moves on its own while the anchor is alive.
+- **When the anchor tab closes**, a waiting phone-mode tab takes the lock automatically. This is existing behaviour.
+- **"Move phone here"** is a quiet item in the gear menu, for when the user wants the audio device in this tab. It is refused while a call is live.
+- **No page banner** for "phone in another tab". The pill states "In another tab" on L3 05 cover only the case where an anchor exists but this tab cannot control it (no bus).
+- **Risks to verify:** commands from many tabs (one source of truth: the anchor's snapshot); the mic permission lives only in the anchor tab; audio plays from a background tab.
 
 ## 5. Call Central — direction B, NetSuite Next native (L4 rows 5 and 6)
 
