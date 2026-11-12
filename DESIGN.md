@@ -115,18 +115,18 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 ## 4. Dialer panel (L3 boards 06, 06b-1 … 06b-5)
 
 - **Size and shape:** `.pnl` 380 × 620, radius 28, on the dark v2.1 surface. It opens on the pill's snap point, and the pill hides while it is open.
-- **Header:** the grip centred at top, a status chip centred under it, and on the right the voicemail button (badge), the gear and close.
+- **Header:** the grip centred at top, a status chip centred under it, and on the right the voicemail button (badge; Planned, gated), the gear and close (a chevron, "Collapse phone", in code).
 - **Tabs:** Dial · Search · Recents, centred, with a 28px gap.
 - **Dial view:**
   - An × inside the number field clears it.
   - Backspace deletes one digit. A long press clears the field.
   - Esc clears first, then closes.
-- **Search view:** your book first, then everyone. Each row has its own Call.
+- **Search view:** type chips All · Customers · Prospects · Leads with counts filter the rep's book (no "Everyone" section). Each row with a number has its own 32px go-green Call (calls at once); a click on the row loads it into Dial. Shipped in asset 26. Sort is Planned.
 - **States, grouped:** idle views (06b-1), outbound and in call (06b-2), call quality (06b-3), inbound and after call (06b-4), recover and blocked (06b-5).
 - **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. Shipped in asset 25.
 - **Incoming card (panel closed):** 320px wide, radius 16, a FLIP scale morph out of the pill (nine-piece window, shadow on its own opacity layer; no clip-path), with Answer in go green. Shipped in asset 25.
 - **Gear (Settings view):** mic and speaker, "Audio plays in your phone tab.", "Move phone here" (disabled during a call), Exit phone mode. Shipped; not yet drawn on 06b-1.
-- **Search view chips:** All · Customers · Prospects · Leads with counts. Shipped; not yet drawn on 06b-1. Sort (Recent activity · Name · Last called) is Planned.
+- **Search view chips:** see Search view above. Sort (Recent activity · Name · Last called) is Planned.
 
 ## 4a. One phone, every tab (decided 2026-11-11)
 
@@ -191,4 +191,6 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 | 2026-11-11 | Header controls are 34px with the label inside; the title never stretches. |
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
+| 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
+| 2026-11-12 | Asset 26: Search rows get their own go-green Call; type chips stay; no "Everyone" section (Design change, findings #3). |
 | 2026-11-12 | Asset 25 deployed (Phase 1). Sync loop §0 added; L3/L4 boards tagged Shipped / Planned / Drift. §4 corrected to the shipped FLIP morph, Settings view and search chips. |

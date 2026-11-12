@@ -244,6 +244,11 @@
         '.dl-recent:hover{background:rgba(255,255,255,0.08)}',
         '.dl-recent .dl-row,.dl-recent .dl-row:hover{flex:1;min-width:0;background:transparent;border:0}',
         '.dl-recent-cb{flex-shrink:0;margin-right:6px}',
+        // Search: each row with a number carries its own Call (go green).
+        '.dl-row-call{flex-shrink:0;width:32px;height:32px;margin-right:6px;padding:0;border-radius:999px;background:' + T.go + ';display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-row-call:hover{background:' + T.goHover + '}',
+        '.dl-row-call:active{transform:scale(0.97)}',
+        '.dl-row-call:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
         // Direction icon: 20 px circle, 12 px arrow (panel tints of the
         // portlet's In / Out / Missed colours; arrow vs circle >= 5:1).
         '.dl-dir{width:20px;height:20px;border-radius:999px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}',
@@ -765,6 +770,7 @@
         var shown = searchType ? rows.filter(function (r) { return r.type === searchType; }) : rows;
         shown.forEach(function (r) {
             var li = document.createElement('li');
+            li.className = 'dl-recent';
             var b = document.createElement('button');
             b.type = 'button';
             b.className = 'dl-row';
@@ -783,6 +789,17 @@
                 ui.display.focus();
             });
             li.appendChild(b);
+            if (r.phone) {
+                var call = document.createElement('button');
+                call.type = 'button';
+                call.className = 'dl-row-call';
+                call.setAttribute('aria-label', 'Call ' + r.companyName);
+                call.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>';
+                call.addEventListener('click', function () {
+                    callBack({ name: r.companyName || '', number: r.phone, entityId: r.id, entityType: r.type });
+                });
+                li.appendChild(call);
+            }
             ui.results.appendChild(li);
         });
         ui.searchMsg.className = 'dl-msg dl-search-msg';
