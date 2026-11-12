@@ -12,6 +12,29 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 | L3 | Design system (tokens, components, phone pill, dialer) | https://claude.ai/artifact/Jw98h4kH2Vk1m4NJgu9sy9 |
 | L4 | Screens (wizard, console, rep, manager) | https://claude.ai/artifact/GYfzs3wQ7b7fDHqcjQoSxt |
 
+## 0. Keeping design, canvas and code in sync
+
+`DESIGN.md` holds the rules. The canvases show them. The code follows them. When two disagree, this file wins until a decision changes it.
+
+**Testing loop (td3061543 or any live test):**
+1. Save screenshots to `docs/testing/<YYYY-MM-DD>/` (gitignored). Name each file `<screen>-<state>.png`.
+2. Write one line per finding in that folder's `findings.md`: screen, `DOCK_ASSET_VERSION`, what you saw, label.
+3. Give each finding one label:
+
+   | Label | Meaning | What changes, in one commit |
+   |---|---|---|
+   | **Bug** | The code does not match the design | Code only |
+   | **Design change** | The live result is better, or the design was wrong | Code + this file (rule and §7 log line) + the canvas board |
+   | **Gap** | The code shows something the design does not have | This file + a new board tagged *Shipped* |
+
+4. A "Design change" or "Gap" sets the board tag to *Drift* until the board is fixed.
+
+**Board tags** (end of each L3/L4 board title, after "  —  "): *Shipped · asset NN*, *Shipped* (not dock code), *Planned* or *Drift (reason)*. Maps and notes carry no tag.
+
+**Version log:** each `DOCK_ASSET_VERSION` bump adds a §7 line that says what changed in the design (or "no design change").
+
+**Guards:** a git pre-commit warning fires when dock or Call Central files change and this file does not. Claude Code hooks (`.claude/hooks/`) remind the agent of this loop when a prompt mentions testing or screenshots, and when it edits those files.
+
 ## 1. Foundations
 
 - **Font:** `'Oracle Sans','Helvetica Neue',Helvetica,Arial,sans-serif`. Text is 12px minimum. Contrast is 4.5:1 minimum.
@@ -100,8 +123,10 @@ Source of truth for how the product looks and behaves. Code follows this file; c
   - Esc clears first, then closes.
 - **Search view:** your book first, then everyone. Each row has its own Call.
 - **States, grouped:** idle views (06b-1), outbound and in call (06b-2), call quality (06b-3), inbound and after call (06b-4), recover and blocked (06b-5).
-- **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. This is a design decision; the code still keeps the panel closed.
-- **Incoming card (panel closed):** 320px wide, radius 16, a clip-path morph out of the pill (1280ms in, 880ms out), with Answer in go green.
+- **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. Shipped in asset 25.
+- **Incoming card (panel closed):** 320px wide, radius 16, a FLIP scale morph out of the pill (nine-piece window, shadow on its own opacity layer; no clip-path), with Answer in go green. Shipped in asset 25.
+- **Gear (Settings view):** mic and speaker, "Audio plays in your phone tab.", "Move phone here" (disabled during a call), Exit phone mode. Shipped; not yet drawn on 06b-1.
+- **Search view chips:** All · Customers · Prospects · Leads with counts. Shipped; not yet drawn on 06b-1. Sort (Recent activity · Name · Last called) is Planned.
 
 ## 4a. One phone, every tab (decided 2026-11-11)
 
@@ -166,3 +191,4 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 | 2026-11-11 | Header controls are 34px with the label inside; the title never stretches. |
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
+| 2026-11-12 | Asset 25 deployed (Phase 1). Sync loop §0 added; L3/L4 boards tagged Shipped / Planned / Drift. §4 corrected to the shipped FLIP morph, Settings view and search chips. |
