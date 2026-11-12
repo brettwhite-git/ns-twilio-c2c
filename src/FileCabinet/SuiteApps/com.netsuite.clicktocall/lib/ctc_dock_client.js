@@ -196,8 +196,11 @@
     // this long) a silent bus means "starting", not "offline".
     var SHELL_BOOT_MS = 15000;
     var PING_INTERVAL_MS = 15000;
-    // Live call phases the pill treats as "on a call" (incoming has its own view).
-    var ACTIVE = { dialing: true, ringing: true, connected: true, reconnecting: true };
+    // Wrap-up: how long the pill says "Call ended" (with Call back) after a call.
+    var WRAP_MS = 8000;
+    // Live call phases the pill treats as "on a call" (incoming has its own
+    // view; answering has its own pill: "Connecting…", no action).
+    var ACTIVE = { dialing: true, ringing: true, answering: true, connected: true, reconnecting: true };
     // Talking: Mute and the keypad work.
     var TALKING = { connected: true, reconnecting: true };
     // Phone colour tokens (DESIGN.md §1). Buttons use go / stop; dots on
@@ -294,6 +297,8 @@
         '.v-mute[aria-pressed="true"] svg{stroke:#1F2F4D}',
         '.v-main{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
         '.v-main.call{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
+        // Wrap-up: Call back, the same go button.
+        '.v-main.callback{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
         // Ringing: the Answer button (go) wears a ring orb that pulses out.
         '.v-main.answer{background:' + T.go + ';animation:ctc-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
         '@keyframes ctc-orb{0%{box-shadow:0 0 0 0 ' + rgba(T.goDot, 0.55) + ',0 4px 12px ' + rgba(T.go, 0.36) + '}70%,100%{box-shadow:0 0 0 10px ' + rgba(T.goDot, 0) + ',0 4px 12px ' + rgba(T.go, 0.36) + '}}',
@@ -311,7 +316,7 @@
         '.vchip.light .v-main.disabled{background:#F1EFED}',
         '.vchip.light .v-main.disabled .ico-call{fill:' + T.offline + ';opacity:1}',
         '.v-ico{display:none}',
-        '.v-main.call .ico-call,.v-main.answer .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
+        '.v-main.call .ico-call,.v-main.callback .ico-call,.v-main.answer .ico-call,.v-main.end .ico-call,.v-main.offline .ico-offline,.v-main.retry .ico-retry{display:block}',
         /* offline / error: light pill */
         '.vchip.light{background:#FFFFFF;border:1px solid #E5E2DD;box-shadow:0 6px 16px rgba(22,21,19,0.08)}',
         '.vchip.light .v-grip i{background:#D9D5CF}',
@@ -484,6 +489,16 @@
     var incAnim = null;
     var incSideAnims = [];
     var incDismissed = '';
+    // Answer sent from this tab with no panel: the ring (ringKey) whose call
+    // card opens, End focused, once the phase is live. '' = none. With a
+    // panel the dialer opens on the call and focuses End itself.
+    var answeredRing = '';
+    // Wrap-up after a call ended (phase back to ready): the call the pill
+    // offers to call back for WRAP_MS. null = none. { number, display,
+    // entityName, entityId, entityType, seconds, timed }.
+    var wrap = null;
+    var wrapTimer = null;
+    var pillWrap = false; // the pill shows the wrap-up stage now
     var bus = new BroadcastChannel(cfg.bus);
 
     // --- DOM ---
@@ -684,11 +699,14 @@
         return (parts[0].charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : '')).toUpperCase();
     }
 
-    function elapsed() {
-        if (!snap || !snap.startedAt) return '';
-        var s = Math.max(0, Math.floor((Date.now() - snap.startedAt) / 1000));
+    function clockText(s) {
         var m = Math.floor(s / 60);
         return (m < 10 ? '0' : '') + m + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
+    }
+
+    function elapsed() {
+        if (!snap || !snap.startedAt) return '';
+        return clockText(Math.max(0, Math.floor((Date.now() - snap.startedAt) / 1000)));
     }
 
     // Display form of a number. Same rules as formatPhone in
@@ -743,6 +761,7 @@
         dialing: { dot: T.amber, label: 'Calling…' },
         ringing: { dot: T.amber, label: 'Ringing…' },
         incoming: { dot: T.ring, label: 'Incoming call' }, // ring: ringing reads apart from talking
+        answering: { dot: T.goDot, label: 'Connecting…' }, // Answer sent, Twilio not accepted yet
         connected: { dot: T.goDot, label: 'Connected' },
         reconnecting: { dot: AMBER, label: 'Reconnecting…' },
         moved: { dot: T.offline, label: 'Phone moved to another tab' }
@@ -773,6 +792,7 @@
         if (wasHidden && !dockEl.hidden) enter();
         fitPill();
         syncIncoming();
+        followAnswer();
     }
 
     // Entrance: 260 ms fade + scale 0.96 -> 1 + a few px in from the pill's
@@ -873,17 +893,37 @@
             if (timerId) { window.clearInterval(timerId); timerId = null; }
             return;
         }
+        if (phase === 'answering') {
+            // Answer sent, Twilio has not connected the call yet: go dot,
+            // "Connecting…", no action (a disabled main slot, no Mute).
+            var caller = callerText();
+            renderPill({
+                stage: phase,
+                dot: true,
+                main: null,
+                label: 'Connecting call from ' + caller + '.' + (panel ? ' Open phone.' : ' Open call card.') + ARROWS_HINT,
+                title: 'Connecting call from ' + caller,
+                l1: view.label,
+                l2: ''
+            });
+            setOrient();
+            tick();
+            if (timerId) { window.clearInterval(timerId); timerId = null; }
+            return;
+        }
         // Idle states that replace the plain pill: phase moved, errors,
-        // Turn on phone, missed calls (see idleView).
+        // wrap-up, Turn on phone, missed calls (see idleView).
         var idle = active || mirror ? null : idleView(phase, view);
         if (idle) {
             dockEl.style.setProperty('--dot', idle.dot);
             renderPill({
-                stage: phase,
+                stage: idle.stage || phase,
                 dot: true,
                 light: !!idle.light,
                 err: !!idle.err,
+                timer: !!idle.timer,
                 main: idle.main || null,
+                mainLabel: idle.mainLabel || '',
                 action: idle.action || '',
                 label: idle.label + '.' + ARROWS_HINT,
                 title: idle.label,
@@ -929,8 +969,10 @@
 
     // The pill between calls when something needs the rep (null: the plain
     // pill). Shell and remote tabs only. Order: phase moved, an error kind,
-    // Turn on phone (shell tab, audio still locked), missed calls.
-    //   { dot, l1, l2, label (title / aria), main, action, light, err, amber, count }
+    // wrap-up (a call just ended), Turn on phone (shell tab, audio still
+    // locked), missed calls.
+    //   { dot, l1, l2, label (title / aria), main, mainLabel, action, light,
+    //     err, amber, count, stage, timer }
     function idleView(phase, view) {
         if (phase === 'moved') {
             return { dot: view.dot, light: true, l1: 'Phone moved to another tab', label: 'Phone moved to another tab. Open menu', action: 'menu' };
@@ -944,6 +986,14 @@
         // Paused by the admin: a quiet offline-style pill, no Call.
         if (kind === 'paused') return { dot: PHASE_VIEW.offline.dot, light: true, l1: 'Calling paused', label: 'Calling is paused by your administrator' };
         if (phase !== 'ready') return null;
+        if (wrap && panel) {
+            var len = wrap.timed ? clockText(wrap.seconds) : '';
+            return {
+                stage: 'wrapup', dot: T.wrap, l1: 'Call ended', l2: wrap.display, timer: wrap.timed,
+                main: 'callback', mainLabel: 'Call back ' + wrap.display,
+                label: 'Call ended with ' + wrap.display + (len ? ', ' + len : '') + '. Open phone'
+            };
+        }
         if (mode === 'shell' && snap && snap.audioUnlocked === false) {
             return { dot: view.dot, main: 'call', action: 'unlock', l1: 'Turn on phone', label: 'Turn on phone' };
         }
@@ -966,7 +1016,8 @@
     }
 
     // Horizontal pill words (two lines; '' = line not shown). The vertical
-    // pill shows none. A wrap-up stage slots in here later.
+    // pill shows none. Answering and wrap-up set their own (renderChip,
+    // idleView).
     function pillWords(phase, mirror, active) {
         if (phase === 'incoming') return { l1: 'Ringing', l2: '' }; // the card names the caller
         var number = active ? formatPhone(snap.number) || snap.number || '' : '';
@@ -989,14 +1040,17 @@
     // The pill, both shapes. Grip, status dot, words + timer (horizontal) or
     // timer as mm over ss (vertical), Mute while connected, main button last.
     //   main: 'call' (open phone) | 'end' (hang up) | 'offline' (open phone)
-    //         | 'retry' (open phone) | 'answer' | null (no action: starting,
+    //         | 'retry' (open phone) | 'answer' | 'callback' (wrap-up: dial
+    //         the last call again) | null (no action: starting, answering,
     //         paused, moved, mirror idle; a disabled slot is drawn)
     // The body button opens the phone / call card. When the main button does
     // that same thing, the body leaves the tab order so keyboard users meet
     // one control per action.
     function renderPill(o) {
         var disabled = !o.main;
-        var live = !o.light && (!!ACTIVE[o.stage] || o.stage === 'incoming');
+        // Halo only while live (DESIGN.md §3); answering waits for Twilio.
+        var live = !o.light && o.stage !== 'answering' && (!!ACTIVE[o.stage] || o.stage === 'incoming');
+        pillWrap = o.stage === 'wrapup';
         vchipEl.setAttribute('data-stage', o.stage);
         vchipEl.setAttribute('data-live', live ? 'true' : 'false');
         vchipEl.setAttribute('data-muted', o.mute && o.muted ? 'true' : 'false');
@@ -1032,7 +1086,7 @@
             vMain.removeAttribute('aria-hidden');
             vMain.setAttribute('aria-label', o.mainLabel || (o.main === 'end' ? 'End call' : o.label));
         }
-        var bodyIsMain = !disabled && o.main !== 'end' && o.main !== 'answer';
+        var bodyIsMain = !disabled && o.main !== 'end' && o.main !== 'answer' && o.main !== 'callback';
         vBody.tabIndex = bodyIsMain ? -1 : 0;
         if (bodyIsMain) {
             vBody.removeAttribute('aria-label');
@@ -1149,13 +1203,15 @@
     }
 
     // No motion on the timer tick.
+    // The wrap-up pill shows the call's final length instead.
     function tick() {
         var t = elapsed();
-        hTime.textContent = t;
+        var p = pillWrap && wrap && wrap.timed ? clockText(wrap.seconds) : t;
+        hTime.textContent = p;
         cardTime.textContent = t;
-        var i = t.indexOf(':');
-        vMm.textContent = i === -1 ? '' : t.slice(0, i);
-        vSs.textContent = i === -1 ? '' : t.slice(i + 1);
+        var i = p.indexOf(':');
+        vMm.textContent = i === -1 ? '' : p.slice(0, i);
+        vSs.textContent = i === -1 ? '' : p.slice(i + 1);
     }
 
     function setExpanded(next, animate) {
@@ -1614,13 +1670,82 @@
         if (hadFocus) focusPill(); // keyboard Answer / Decline: focus stays with the dock
     }
 
-    // Answer / Decline on the card: the bus request (origin + nonce), then
-    // the card exits and stays away for this ring.
+    // Answer / Decline on the card or the pill: the bus request (origin +
+    // nonce), then the card exits and stays away for this ring. Answer also
+    // opens the phone on the call (DESIGN.md §4: the card's exit and the
+    // panel open start together); Decline never does.
     function respondIncoming(action) {
         if (!snap || snap.phase !== 'incoming') return;
         incDismissed = ringKey();
         send(action);
         syncIncoming();
+        if (action === 'answer') openCallView();
+    }
+
+    // The panel opens at once in its in-call view; the dialer moves focus
+    // to End when the phase goes live. Without a panel the call card opens
+    // once the phase is live (followAnswer).
+    function openCallView() {
+        if (!panel) { answeredRing = incDismissed; return; }
+        if (panel.answered) panel.answered();
+        panel.open({});
+        setExpanded(true, true);
+    }
+
+    // No panel: the answered ring went live, so open the call card and
+    // focus its End. The ring ending another way (missed, error) drops it.
+    function followAnswer() {
+        if (!answeredRing || !snap) return;
+        if (snap.phase === 'incoming' && ringKey() === answeredRing) return;
+        answeredRing = '';
+        if (panel || !isActive() || dockEl.hidden) return;
+        setExpanded(true, true);
+        try { endBtn.focus({ preventScroll: true }); } catch (e) { endBtn.focus(); }
+    }
+
+    // --- Wrap-up ---
+    // A call ended (a live phase went back to ready): the pill says "Call
+    // ended" with the caller and the final length, and offers Call back, for
+    // WRAP_MS. Never blocks dialing: any other phase (a new call, a ring, a
+    // dial) drops it at once. Driven only by the snapshots.
+    function clearWrap() {
+        wrap = null;
+        if (wrapTimer) { window.clearTimeout(wrapTimer); wrapTimer = null; }
+    }
+
+    function trackWrap(prev, next) {
+        if (!next || next.phase !== 'ready') { clearWrap(); return; }
+        if (!prev || !ACTIVE[prev.phase]) return;
+        var c = (prev.direction === 'inbound' && prev.caller) || {};
+        var number = String(prev.number || c.number || '');
+        clearWrap();
+        if (!number) return;
+        var entityName = String(prev.entityName || c.name || '');
+        wrap = {
+            number: number,
+            display: entityName || String(prev.contactName || '') || formatPhone(number) || number,
+            entityName: entityName,
+            entityId: String(prev.entityId || c.entityId || ''),
+            entityType: String(prev.entityType || c.entityType || ''),
+            seconds: prev.startedAt ? Math.max(0, Math.floor((Date.now() - prev.startedAt) / 1000)) : 0,
+            timed: !!prev.startedAt
+        };
+        wrapTimer = window.setTimeout(function () {
+            wrapTimer = null;
+            wrap = null;
+            render();
+        }, WRAP_MS);
+    }
+
+    // Call back on the wrap-up pill: the dialer's normal dial path (Dial tab
+    // loads the record or number, then dials). The pill drops the stage now.
+    function callBackFromWrap() {
+        var w = wrap;
+        clearWrap();
+        if (w && panel && panel.callBack) {
+            panel.callBack({ number: w.number, name: w.entityName, entityId: w.entityId, entityType: w.entityType });
+        }
+        render();
     }
 
 
@@ -1856,6 +1981,7 @@
         var a = takePillAction();
         if (vMain.classList.contains('end')) send('hangup');
         else if (vMain.classList.contains('answer')) respondIncoming('answer');
+        else if (vMain.classList.contains('callback')) callBackFromWrap();
         else if (!runPillAction(a)) openFromPill();
     });
     useHereItem.addEventListener('click', function () {
@@ -1900,6 +2026,7 @@
         var prev = snap;
         snap = m.snap;
         announce(prev, snap);
+        trackWrap(prev, snap);
         render();
     };
 
@@ -1914,7 +2041,7 @@
         helloTimer = window.setTimeout(function () {
             var booting = mode === 'shell' && !gotSnapshot && Date.now() - mountedAt < SHELL_BOOT_MS;
             var phase = booting ? 'starting' : 'offline';
-            if (!snap || snap.phase !== phase) { snap = { phase: phase }; render(); }
+            if (!snap || snap.phase !== phase) { snap = { phase: phase }; clearWrap(); render(); }
         }, HELLO_TIMEOUT_MS);
     }
 

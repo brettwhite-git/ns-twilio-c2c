@@ -92,10 +92,17 @@ define(['./ctc_html'], (ctcHtml) => {
     //   'moved' and sends its shell PHONE_DUPLICATE_MESSAGE (after a live
     //   call ends; it never ends a call).
     // phase: 'offline' | 'starting' | 'ready' | 'dialing' | 'ringing' | 'incoming'
-    //        | 'connected' | 'reconnecting' | 'error' | 'moved'
+    //        | 'answering' | 'connected' | 'reconnecting' | 'error' | 'moved'
     //   incoming: Twilio rings this phone (inbound). Docks show the incoming
     //     card (Answer / Decline) at their pill, or the panel's ring view when
     //     the panel is open.
+    //   answering: the anchor accepted an inbound call ('answer') and waits
+    //     for Twilio's 'accept' (media not up yet). Goes to 'connected' on
+    //     accept, to 'ready' when the caller hangs up first (lastLog
+    //     'missed') or the accept fails, to 'error' on a call error. The call
+    //     exists (End works); Mute and the keypad do not yet. Docks show
+    //     "Connecting…" with no action. Older docks do not know the phase
+    //     and draw it as 'offline' (no action) until it changes.
     //   reconnecting: a live call lost its media / signaling path and Twilio is
     //     trying to restore it (Call 'reconnecting'). The call, timer and mute
     //     state are kept; the phase goes back to 'connected' on 'reconnected'
@@ -103,7 +110,7 @@ define(['./ctc_html'], (ctcHtml) => {
     //   moved: this anchor handed the phone to another tab ('takeover'); it is
     //     unregistered and its frame is stopped next. The new tab's anchor
     //     publishes its own snapshots ('starting' → 'ready') soon after.
-    //   Live phases (a call exists): dialing, ringing, incoming, connected, reconnecting.
+    //   Live phases (a call exists): dialing, ringing, incoming, answering, connected, reconnecting.
     // direction: 'outbound' | 'inbound' (the current or last call)
     // caller: null | { number, name, entityId, entityType } for an inbound call; name and the
     //   entity fill in after the anchor's lookupCaller answer (a second snapshot).
@@ -215,6 +222,8 @@ define(['./ctc_html'], (ctcHtml) => {
     // Bus phase while Twilio rings this phone (inbound), and the requests the
     // docks send to answer or decline it.
     const PHASE_INCOMING = 'incoming';
+    // Bus phase between 'answer' and Twilio's accept (see the contract).
+    const PHASE_ANSWERING = 'answering';
     const REQUEST_ANSWER = 'answer';
     const REQUEST_DECLINE = 'decline';
     // postMessage type the anchor sends the shell for the screen-pop.
@@ -331,6 +340,7 @@ define(['./ctc_html'], (ctcHtml) => {
         DOCK_ASSET_VERSION,
         BUS_CHANNEL,
         PHASE_INCOMING,
+        PHASE_ANSWERING,
         REQUEST_ANSWER,
         REQUEST_DECLINE,
         OPEN_RECORD_MESSAGE,

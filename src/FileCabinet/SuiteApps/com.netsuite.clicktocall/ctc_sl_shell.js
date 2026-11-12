@@ -274,7 +274,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     takeover: function () { return takeover(); },
     phoneState: function () { return { lock: lockState, audioUnlocked: audioUnlocked, notify: notifyState() }; }
   };
-  var ACTIVE = { incoming: 1, dialing: 1, ringing: 1, connected: 1, reconnecting: 1 };
+  var ACTIVE = { incoming: 1, dialing: 1, ringing: 1, answering: 1, connected: 1, reconnecting: 1 };
   var SEARCH = String(location.search || '');
   var DEBUG = /[?&]debug=1(&|$)/.test(SEARCH);
   var wantTakeover = new RegExp('[?&]' + CFG.takeoverParam + '=1(&|$)').test(SEARCH);

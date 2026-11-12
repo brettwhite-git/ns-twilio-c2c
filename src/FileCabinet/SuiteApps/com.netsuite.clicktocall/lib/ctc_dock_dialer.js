@@ -25,7 +25,8 @@
     var formatPhone = dock.formatPhone;
     var initials = dock.initials;
 
-    var ACTIVE = { dialing: true, ringing: true, connected: true, reconnecting: true };
+    // answering: Answer sent, Twilio not connected yet (End works, Mute not).
+    var ACTIVE = { dialing: true, ringing: true, answering: true, connected: true, reconnecting: true };
     var TALKING = { connected: true, reconnecting: true }; // Mute and the keypad work
     var PENDING_TIMEOUT_MS = 15000;
     var REFUSED_SHOW_MS = 4000;
@@ -60,6 +61,7 @@
         dialing: { dot: T.amber, label: 'Calling…' },
         ringing: { dot: T.amber, label: 'Ringing…' },
         incoming: { dot: T.ring, label: 'Incoming call' }, // ring: ringing reads apart from talking
+        answering: { dot: T.goDot, label: 'Connecting…' },
         connected: { dot: T.goDot, label: 'Connected' },
         reconnecting: { dot: T.amber, label: 'Reconnecting…' },
         moved: { dot: T.offline, label: 'Phone moved to another tab' }
@@ -436,6 +438,10 @@
     var noteMissed = null;    // { name, number, entityId, entityType } the missed note calls back
     var missedCaller = null;  // newest snap.missedUnseen.last (kept after markMissedSeen)
     var ownNonces = {};       // nonces of requests this panel sent (refused lines)
+    // Answer sent from this tab (panel ring view, pill or incoming card):
+    // the live view shows the call controls at once, and End takes focus
+    // when the phase goes live. Cleared then, or when the ring ends.
+    var answerSent = false;
     var refusedTimer = null;
     var alertRun = null;
 
@@ -968,8 +974,10 @@
             name = c.name || number || 'Unknown caller';
             sub = ['Incoming call', number !== name ? number : ''].filter(function (x) { return x; }).join(' · ');
         }
-        ui.ringActs.forEach(function (a) { a.hidden = !incoming; });
-        ui.callActs.forEach(function (a) { a.hidden = incoming; });
+        // After Answer the call controls show at once (the ring view is gone).
+        var ringing = incoming && !answerSent;
+        ui.ringActs.forEach(function (a) { a.hidden = !ringing; });
+        ui.callActs.forEach(function (a) { a.hidden = ringing; });
         ui.answer.setAttribute('aria-label', 'Answer call from ' + name);
         ui.decline.setAttribute('aria-label', 'Decline call from ' + name);
         ui.liveAv.textContent = initials(name);
@@ -1011,7 +1019,12 @@
 
     ui.mute.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
     ui.end.addEventListener('click', function () { send('hangup'); });
-    ui.answer.addEventListener('click', function () { send('answer'); });
+    ui.answer.addEventListener('click', function () {
+        if (!isIncoming()) return;
+        answerSent = true;
+        send('answer');
+        render(snap);
+    });
     ui.decline.addEventListener('click', function () { send('decline'); });
     ui.keys.addEventListener('click', function () {
         var show = ui.dtmf.hidden;
@@ -1284,6 +1297,16 @@
             }
         }
         syncCallButton();
+        followAnswer();
+    }
+
+    // Answer sent: once the call is live, End takes focus (panel shown).
+    function followAnswer() {
+        if (!answerSent) return;
+        if (isIncoming()) return;
+        answerSent = false;
+        if (!isActive() || audioOpen || el.hidden || el.classList.contains('closed')) return;
+        ui.end.focus();
     }
 
     // Error banner (snap.error.kind): one action. In a remote tab the phone
@@ -1344,8 +1367,8 @@
 
     function focusPanel(what) {
         if (audioOpen) { ui.audioBack.focus(); return; }
-        if (isIncoming()) { ui.answer.focus(); return; }
-        if (isActive()) { ui.end.focus(); return; }
+        if (isIncoming() && !answerSent) { ui.answer.focus(); return; }
+        if (isActive() || answerSent) { ui.end.focus(); return; }
         if (what === 'call' && tab === 'dial' && !ui.call.disabled) { ui.call.focus(); return; }
         if (tab === 'search') ui.query.focus();
         else if (tab === 'recents') ui.tabs[2].focus();
@@ -1412,6 +1435,15 @@
             deferredCtx = null;
             followContext(c);
         },
-        focus: function (what) { window.setTimeout(function () { focusPanel(what); }, 0); }
+        focus: function (what) { window.setTimeout(function () { focusPanel(what); }, 0); },
+        // Answer went out from the pill or the incoming card (the client
+        // opens the panel next): show the call view, focus End once live.
+        answered: function () {
+            if (!isIncoming()) return;
+            answerSent = true;
+            render(snap);
+        },
+        // Wrap-up pill Call back: dial the last call through the Dial tab.
+        callBack: function (c) { callBack(c); }
     });
 })();

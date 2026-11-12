@@ -1801,6 +1801,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var DOCK_PHASE_BY_PILL = {
             '': 'ready', connecting: 'dialing', ringing: 'ringing',
             incoming: '${escapeJs(ctcDock.PHASE_INCOMING)}',
+            answering: '${escapeJs(ctcDock.PHASE_ANSWERING)}',
             connected: 'connected',
             reconnecting: '${escapeJs(ctcDock.PHASE_RECONNECTING)}',
             ended: 'ready', error: 'error'
@@ -2179,7 +2180,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // live or ringing. Else: stop the registration watchdog, unregister
         // (Twilio stops ringing this tab), publish 'moved' and tell the
         // shell, which stops this frame once the other tab took the lock.
-        var LIVE_PHASES = { dialing: 1, ringing: 1, incoming: 1, connected: 1, reconnecting: 1 };
+        var LIVE_PHASES = { dialing: 1, ringing: 1, incoming: 1, answering: 1, connected: 1, reconnecting: 1 };
         var TAKEOVER_UNREGISTER_WAIT_MS = 1500;
 
         function dockTakeover(m) {
@@ -4002,11 +4003,15 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             dockContactName = '';
             setDialedNumber(from, { resetFresh: true, fromPicker: true });
 
-            // Caller hung up, or Studio's ring timeout ended the dial.
+            // Caller hung up, or Studio's ring timeout ended the dial. Also
+            // after Answer while Twilio has not accepted yet (phase
+            // answering): the call never connected, so it counts as missed.
             call.on('cancel', function () {
-                if (pendingInbound !== call) return;
+                var answering = activeCall === call && dockPhase === '${escapeJs(ctcDock.PHASE_ANSWERING)}';
+                if (pendingInbound !== call && !answering) return;
                 console.log('[CTC] Incoming call cancelled');
                 pendingInbound = null;
+                if (answering) activeCall = null;
                 // Unanswered: counts in snapshot missedUnseen until a dock
                 // sends markMissedSeen (inboundEnded publishes it).
                 addMissedCall(dockCaller);
@@ -4029,7 +4034,8 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             var call = pendingInbound;
             pendingInbound = null;
             activeCall = call;
-            setStatus('Answering\\u2026');
+            // Bus phase 'answering' until Twilio's accept ('connected').
+            setStatus('Answering\\u2026', 'answering');
             setButtons(false, false, true);
             setCallView('active');
             if (typeof stopMicMeter === 'function') stopMicMeter();
