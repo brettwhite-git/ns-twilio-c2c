@@ -179,6 +179,7 @@
     var RUBBER = 0.3; // past the screen edge a dragged panel moves at 0.3 of the pointer, slowing to a stop
     var LIFT = 0.02; // lifted panel: scale 1.02
     var ENTER_MS = 260;
+    var REDUCED_MS = 150; // reduced motion: opacity only, <= 150 ms (DESIGN.md §3)
     var ENTER_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
     var ENTER_SHIFT = 6; // px the pill travels in from its edge
     var PANEL_FADE_MS = 200;
@@ -254,7 +255,7 @@
         + 'radial-gradient(110% 75% at 100% 0%,rgba(4,83,111,0.80),rgba(4,83,111,0) 62%),'
         + 'radial-gradient(80% 50% at 0% 100%,rgba(47,143,179,0.14),transparent 70%),'
         + 'linear-gradient(180deg,#1C3344 0%,#15283A 55%,#11203A 100%)';
-    var MISSED_DOT = '#D9553F';
+    var MISSED_DOT = T.stopDot; // missed: the stop dot on dark (DESIGN.md §1)
     var AMBER = T.amber;
     var reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -274,7 +275,7 @@
     var CSS = [
         ':host{all:initial}',
         '*{box-sizing:border-box}',
-        '.dock{position:fixed;left:0;top:0;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:#FFFFFF;-webkit-font-smoothing:antialiased}',
+        '.dock{position:fixed;left:0;top:0;pointer-events:auto;font-family:"Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;color:#FFFFFF;-webkit-font-smoothing:antialiased}',
         // Author display rules beat the UA [hidden] rule, so restate it.
         '[hidden]{display:none !important}',
         'button{font:inherit;color:inherit;margin:0;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform 140ms ease-out,background-color 140ms ease-out}',
@@ -326,7 +327,7 @@
         /* missed calls: coral count badge on the dot (vertical pill only;
            the horizontal pill says "N missed") */
         '.v-dot{position:relative}',
-        '.v-count{position:absolute;top:-4px;left:-4px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:' + MISSED_DOT + ';color:#FFFFFF;font-size:9px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px #15283A}',
+        '.v-count{position:absolute;top:-5px;left:-5px;min-width:18px;height:18px;padding:0 4px;border-radius:999px;background:' + MISSED_DOT + ';color:#11203A;font-size:12px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 0 0 2px #15283A}',
         '.dock:not(.vert) .v-count{display:none}',
         '.vchip[data-live="true"][data-stage="connected"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.20) + '}',
         '.vchip[data-muted="true"] .v-dot{background:' + T.amber + '}',
@@ -343,6 +344,13 @@
         '.v-dot::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + rgba(T.ring, 0.55) + ';opacity:0;z-index:-1;pointer-events:none}',
         '.vchip[data-live="true"][data-stage="incoming"] .v-dot::before{animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
         '@keyframes ctc-ring{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(2.75);opacity:0}}',
+        /* calling (dialing, ringing out): the halo breathes out of the dot.
+           The same disc as the ring, in amber, grows to the 3 px halo
+           (8 -> 14 px) and fades, 1.6 s: transform and opacity only. While
+           it runs the still halo steps aside; reduced motion keeps it. */
+        '.vchip[data-live="true"][data-stage="dialing"] .v-dot,.vchip[data-live="true"][data-stage="ringing"] .v-dot{box-shadow:none}',
+        '.vchip[data-live="true"][data-stage="dialing"] .v-dot::before,.vchip[data-live="true"][data-stage="ringing"] .v-dot::before{background:' + rgba(T.amber, 0.45) + ';animation:ctc-halo 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '@keyframes ctc-halo{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(1.75);opacity:0}}',
         /* each shape shows only its own words / timer */
         '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
         '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
@@ -350,15 +358,17 @@
         '.vchip[data-stage="moved"] .h-words{max-width:none}',
         '.h-l1,.h-l2{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.h-l1{font-size:13px;font-weight:600;line-height:16px;color:#FFFFFF}',
-        '.h-l2{font-size:11px;line-height:14px;color:#94A6BF}',
+        '.h-l2{font-size:12px;line-height:16px;color:#94A6BF}',
         '.h-l2.muted,.h-l1.amber,.h-l2.amber{color:#F4C76A}',
         '.h-time{flex-shrink:0;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:13px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1;white-space:nowrap;color:#FFFFFF}',
         '.v-time{display:flex;flex-direction:column;align-items:center;font-family:"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;font-size:13px;font-weight:300;font-variant-numeric:tabular-nums;line-height:1;color:#FFFFFF}',
         '.v-sep{font-size:7px;color:#94A6BF}',
         '.v-mute{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,0.10);display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
         '.v-mute:hover{background:rgba(255,255,255,0.18)}',
-        '.v-mute[aria-pressed="true"]{background:#F4C76A}',
-        '.v-mute[aria-pressed="true"] svg{stroke:#1F2F4D}',
+        // Unmute: a glass amber tile (DESIGN.md §3): amber wash, 1 px inset
+        // amber ring (no layout shift), amber icon.
+        '.v-mute[aria-pressed="true"]{background:' + rgba(T.amber, 0.16) + ';box-shadow:inset 0 0 0 1px ' + T.amber + '}',
+        '.v-mute[aria-pressed="true"] svg{stroke:' + T.amber + '}',
         '.v-main{width:40px;height:40px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
         '.v-main.call{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
         // Wrap-up: Call back, the same go button.
@@ -377,9 +387,11 @@
         '.v-main.answer:active::after{visibility:hidden}',
         '.v-main.end{background:' + T.stop + ';box-shadow:0 4px 12px ' + rgba(T.stop, 0.40) + '}',
         '.v-main.end:hover{background:' + T.stopHover + '}',
+        // End is the Call glyph rotated 135 deg: the turn eases (transform, 150 ms).
+        '.v-main svg{transition:transform 150ms cubic-bezier(0.23,1,0.32,1)}',
         '.v-main.end svg{transform:rotate(135deg)}',
         '.v-main.offline{background:#F4F2EE}',
-        '.v-main.retry{width:36px;height:36px;border-radius:12px;background:#FCE9E7}',
+        '.v-main.retry{background:#FCE9E7}',
         /* disabled slot: a stage with no action (Starting, Calling paused,
            moved, mirror idle) keeps the 40 px main slot, so the pill never
            shrinks to a nub. Not a control: aria-hidden, out of the tab
@@ -415,11 +427,11 @@
            WAAPI, see animateIncoming). Row: sky dot, caller text, Decline,
            Answer. The outer shadow is a layer (.inc-shade) that fades in
            as the morph's window opens past the card. */
-        '.inc{position:fixed;left:0;top:0;isolation:isolate;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:' + INC_RADIUS + 'px;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06)}',
+        '.inc{position:fixed;left:0;top:0;isolation:isolate;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:' + INC_RADIUS + 'px;color:#FFFFFF;pointer-events:auto;font-family:"Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06)}',
         '.inc-shade{position:absolute;inset:-1px;border-radius:inherit;box-shadow:' + INC_SHADOW + ';z-index:-1;pointer-events:none}',
         '.inc-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:' + T.ring + '}',
         '.inc-text{flex:1;min-width:0;display:flex;flex-direction:column}',
-        '.inc-label{font-size:11px;font-weight:500;line-height:14px;color:#9FC9EE}',
+        '.inc-label{font-size:12px;font-weight:500;line-height:16px;color:#9FC9EE}',
         '.inc-name{margin-top:2px;font-size:15px;font-weight:600;line-height:20px;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.inc-sub{margin-top:1px;font-size:12px;line-height:16px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.inc-acts{display:flex;gap:8px;flex-shrink:0}',
@@ -443,13 +455,13 @@
         '.who-sub{font-size:12px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.card-time{font-size:15px;font-weight:300}',
         '.card-bar{padding:10px 16px 12px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.12);display:flex;align-items:center;gap:8px}',
-        '.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;color:var(--dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
+        '.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;color:var(--dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.pill .dot{width:6px;height:6px}',
         '.spacer{flex:1}',
         '.key{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,0.10);display:inline-flex;align-items:center;justify-content:center}',
         '.key:hover{background:rgba(255,255,255,0.18)}',
-        '.key[aria-pressed="true"]{background:#F4C76A}',
-        '.key[aria-pressed="true"] svg{stroke:#1F2F4D}',
+        '.key[aria-pressed="true"]{background:' + rgba(T.amber, 0.16) + ';box-shadow:inset 0 0 0 1px ' + T.amber + '}',
+        '.key[aria-pressed="true"] svg{stroke:' + T.amber + '}',
         '.key.end{background:' + T.stop + '}',
         '.key.end:hover{background:' + T.stopHover + '}',
         '.key[disabled]{opacity:0.4;cursor:default}',
@@ -467,7 +479,7 @@
         '.dl-lift{position:fixed;left:0;top:0;border-radius:28px;pointer-events:none;opacity:0;box-shadow:0 24px 56px rgba(15,27,48,0.16);transition:opacity 140ms ease-out,scale 140ms ease-out}',
         '.dl-lift.settling{transition:opacity 140ms ease-out,scale 140ms ease-out,translate ' + SETTLE + '}',
         '.dl-lift.lifted{opacity:1;scale:' + (1 + LIFT) + '}',
-        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 200ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.vchip .v-dot,.v-dot::before,.v-main.answer::after{animation:none}.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + '}.v-main.answer::before{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 150ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.v-main svg{transition:none}.vchip .v-dot,.v-dot::before,.v-main.answer::after{animation:none}.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + '}.vchip[data-live="true"][data-stage="dialing"] .v-dot,.vchip[data-live="true"][data-stage="ringing"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.amber, 0.20) + '}.v-main.answer::before{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
     ].join('\n');
 
     var HTML = ''
@@ -1076,7 +1088,7 @@
 
     // Entrance: 260 ms fade + scale 0.96 -> 1 + a few px in from the pill's
     // edge, on the pill itself (the dock's transform holds its place).
-    // Reduced motion: fade only. Called only when the dock goes from hidden
+    // Reduced motion: fade only, REDUCED_MS. Called only when the dock goes from hidden
     // to shown, so in-shell re-renders and cross-tab moves never run it.
     function enter() {
         if (vchipEl.hidden || typeof vchipEl.animate !== 'function') return;
@@ -1088,11 +1100,12 @@
             ? { opacity: 0 }
             : { opacity: 0, transform: 'translate(' + dx + 'px,' + dy + 'px) scale(0.96)' };
         var to = reduced() ? { opacity: 1 } : { opacity: 1, transform: 'none' };
+        var dur = reduced() ? REDUCED_MS : ENTER_MS;
         vchipEl.getAnimations().forEach(function (a) { a.cancel(); });
-        vchipEl.animate([from, to], { duration: ENTER_MS, easing: ENTER_EASE });
+        vchipEl.animate([from, to], { duration: dur, easing: ENTER_EASE });
         entering = true;
         window.clearTimeout(enterTimer);
-        enterTimer = window.setTimeout(function () { entering = false; }, ENTER_MS);
+        enterTimer = window.setTimeout(function () { entering = false; }, dur);
     }
 
     // No pill (not_enabled): the panel closes and the menu with it.

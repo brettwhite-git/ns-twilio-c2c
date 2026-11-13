@@ -114,7 +114,7 @@
         // size for every view. Header and footer stay; the body fills the
         // rest and scrolls. The panel is not inside .dock, so it restates the
         // dock's font and pointer rules.
-        '.dl{position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        '.dl{position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:"Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         // Open / close: fade + 12 px slide from the panel's edge (data-side
         // from the client: l, r, else the row's t or b).
         '.dl.closed{opacity:0;transform:translateX(12px);pointer-events:none}',
@@ -124,8 +124,8 @@
         '.dl-head{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:18px 14px 0;flex-shrink:0;cursor:grab;user-select:none;-webkit-user-select:none}',
         // Call alerts line under the header buttons (notify default / denied).
         '.dl-alerts{flex-basis:100%;display:flex;justify-content:center;min-height:24px;align-items:center}',
-        '.dl-alerts .dl-text{font-size:11.5px;padding:4px 8px}',
-        '.dl-alerts-off{font-size:11px;color:#6B7B95}',
+        '.dl-alerts .dl-text{font-size:12px;padding:4px 8px}',
+        '.dl-alerts-off{font-size:12px;color:#6B7B95}',
         '.dl-head:active{cursor:grabbing}',
         '.dl-head button{cursor:pointer}',
         // The grip says the panel can be dragged (same dots as the pill grip).
@@ -134,7 +134,7 @@
         // The status badge sits in the middle of the header, level with the
         // gear and collapse buttons (head padding-top 18 + half of 32 px).
         '.dl-head .dl-status{position:absolute;left:50%;top:34px;transform:translate(-50%,-50%)}',
-        '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:11.5px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
+        '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:12px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-status .dot{position:relative;width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
         // incoming: the status dot rings like the pill dot: a disc under the
         // dot (6 px, ring colour at .55) scales to 20 px (the old 7 px
@@ -156,7 +156,6 @@
         '.dl-note[data-kind="missed"]{flex-wrap:wrap;row-gap:4px}',
         '.dl-note[data-kind="missed"] .dl-note-text{order:-2;flex-basis:calc(100% - 32px)}',
         '.dl-note[data-kind="missed"] .dl-note-x{order:-1}',
-        '.dl-note[data-kind="missed"] .dl-note-call{margin-left:-8px}',
         // Error banner (snap.error.kind): what happened, what to do, one action.
         '.dl-alert{flex-shrink:0;margin:10px 14px 0;padding:10px 12px;border-radius:14px;background:' + rgba(T.stopDot, 0.12) + ';border:1px solid ' + rgba(T.stopDot, 0.30) + ';display:flex;flex-direction:column;align-items:flex-start;gap:4px;font-size:12px}',
         '.dl-alert[data-tone="amber"]{background:rgba(244,199,106,0.10);border-color:rgba(244,199,106,0.30)}',
@@ -172,15 +171,15 @@
         '.dl-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
         // Dial · Search · Recents: one centred row, 28 px apart.
         '.dl-tabs{display:flex;justify-content:center;gap:28px;padding:2px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
-        '.dl-tab{padding:6px 12px;border-radius:999px;background:transparent;font-size:11.5px;font-weight:600;color:#94A6BF}',
+        '.dl-tab{padding:6px 12px;border-radius:999px;background:transparent;font-size:12px;font-weight:600;color:#94A6BF}',
         '.dl-tab[aria-selected="true"]{background:rgba(255,255,255,0.16);color:#FFFFFF}',
         '.dl-box{padding:10px 12px;border-radius:16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:8px}',
         '.dl-entity-top{display:flex;align-items:center;gap:10px}',
-        '.dl-av{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#38507A 0%,#1F2F4D 100%);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0}',
+        '.dl-av{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#38507A 0%,#1F2F4D 100%);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}',
         '.dl-entity-name{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.dl-badge{font-size:9px;letter-spacing:0.10em;color:#93C7AA;padding:1px 6px;border-radius:999px;border:1px solid ' + rgba(T.goDot, 0.30) + ';background:' + rgba(T.goDot, 0.08) + '}',
+        '.dl-badge{font-size:12px;letter-spacing:0.10em;color:#93C7AA;padding:1px 6px;border-radius:999px;border:1px solid ' + rgba(T.goDot, 0.30) + ';background:' + rgba(T.goDot, 0.08) + '}',
         '.dl-field{display:flex;align-items:center;gap:8px;padding:0 4px 0 9px;height:32px;border-radius:7px;border:1px solid rgba(255,255,255,0.08)}',
-        '.dl-field span{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;width:52px;flex-shrink:0}',
+        '.dl-field span{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:12px;letter-spacing:0.08em;color:#94A6BF;width:60px;flex-shrink:0}',
         '.dl-field select{flex:1;min-width:0;height:30px;background:transparent;color:#FFFFFF;border:0;font:inherit;font-size:12px;cursor:pointer}',
         '.dl-field select option{color:#161513}',
         '.dl-field select:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px;border-radius:4px}',
@@ -189,8 +188,8 @@
         '.dl-tile{padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:2px;min-width:0;color:#FFFFFF;text-decoration:none}',
         'a.dl-tile:hover{background:rgba(255,255,255,0.06)}',
         'a.dl-tile:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
-        '.dl-k{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:8.5px;letter-spacing:0.10em;color:#94A6BF}',
-        '.dl-v{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.dl-k{font-size:12px;font-weight:600;letter-spacing:0.04em;color:#94A6BF}',
+        '.dl-v{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.dl-v.link{color:#B6DCFA}',
         '.dl-v.gold{color:#F4C76A;font-weight:600;font-size:13px}',
         '.dl-v.mint{color:#B5EFD0;font-weight:600;font-size:13px}',
@@ -207,9 +206,9 @@
         '.dl-key{height:44px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}',
         '.dl-key:hover{background:rgba(255,255,255,0.10)}',
         '.dl-key b{font-size:15px;font-weight:500;line-height:1}',
-        '.dl-key i{font-style:normal;font-size:7px;letter-spacing:0.14em;font-weight:600;color:#94A6BF;min-height:7px;line-height:1}',
+        '.dl-key i{font-style:normal;font-size:12px;letter-spacing:0.14em;font-weight:600;color:#94A6BF;min-height:12px;line-height:1}',
         '.dl-foot{flex-shrink:0;margin-top:10px;padding:12px 14px 14px;border-top:1px solid rgba(255,255,255,0.06);background:rgba(0,0,0,0.12);display:flex;justify-content:center;align-items:flex-start;gap:28px}',
-        '.dl-act{display:flex;flex-direction:column;align-items:center;gap:5px;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF}',
+        '.dl-act{display:flex;flex-direction:column;align-items:center;gap:5px;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:12px;letter-spacing:0.08em;color:#94A6BF}',
         '.dl-btn{width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,0.10);color:#FFFFFF;display:flex;align-items:center;justify-content:center}',
         '.dl-btn:hover{background:rgba(255,255,255,0.18)}',
         '.dl-btn.big{width:52px;height:52px;border-radius:16px}',
@@ -217,17 +216,19 @@
         '.dl-btn.call:hover{background:' + T.goHover + '}',
         '.dl-btn.end{background:' + T.stop + ';box-shadow:0 5px 16px ' + rgba(T.stop, 0.32) + '}',
         '.dl-btn.end:hover{background:' + T.stopHover + '}',
-        '.dl-btn[aria-pressed="true"]{background:#F4C76A;color:#1F2F4D;box-shadow:0 4px 12px rgba(244,199,106,0.4)}',
+        // Unmute: a glass amber tile (DESIGN.md §3): amber wash, 1 px inset
+        // amber ring (no layout shift), amber icon (currentColor).
+        '.dl-btn[aria-pressed="true"]{background:' + rgba(T.amber, 0.16) + ';color:' + T.amber + ';box-shadow:inset 0 0 0 1px ' + T.amber + '}',
         '.dl-keys[aria-pressed="true"]{background:rgba(255,255,255,0.24);color:#FFFFFF;box-shadow:none}',
         '.dl-btn[disabled]{opacity:0.4;cursor:default;box-shadow:none}',
         '.dl-q{width:100%;height:44px;flex-shrink:0;padding:0 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px}',
         '.dl-q::placeholder{color:#94A6BF}',
         '.dl-q:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px}',
         '.dl-chips{display:flex;flex-wrap:wrap;gap:6px}',
-        '.dl-chip{display:inline-flex;align-items:center;min-height:24px;padding:4px 10px;border-radius:999px;font-size:11px;color:#94A6BF;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
+        '.dl-chip{display:inline-flex;align-items:center;min-height:24px;padding:4px 10px;border-radius:999px;font-size:12px;color:#94A6BF;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-chip[aria-pressed="true"]{color:#FFFFFF;background:rgba(255,255,255,0.16)}',
         '.dl-chip em{font-style:normal;margin-left:4px;opacity:0.8}',
-        '.dl-sect{text-align:center;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:9px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
+        '.dl-sect{text-align:center;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:12px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
         '.dl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}',
         // Lists fill the rest of the body and scroll on their own.
         // The 3 px padding keeps the rows' focus rings inside the scroll box.
@@ -237,7 +238,7 @@
         '.dl-row:hover{background:rgba(255,255,255,0.08)}',
         '.dl-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
         '.dl-row-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.dl-row-sub{font-size:11px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.dl-row-sub{font-size:12px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         // Recents: the card is the list item, so a missed row can carry a
         // Call back button next to the row button (no button inside a button).
         '.dl-recent{display:flex;align-items:center;gap:4px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)}',
@@ -256,13 +257,13 @@
         '.dl-dir-out{background:rgba(255,255,255,0.10);color:#C9D3E1}',
         '.dl-dir-missed{background:' + rgba(T.stopDot, 0.20) + ';color:#FFA595}',
         '.dl-row-flag{color:#FF9E8C;font-weight:600}',
-        '.dl-row-meta{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:10px;color:#94A6BF;flex-shrink:0;text-align:right;white-space:pre-line}',
+        '.dl-row-meta{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:12px;color:#94A6BF;flex-shrink:0;text-align:right;white-space:pre-line}',
         '.dl-empty,.dl-msg{font-size:12px;color:#94A6BF;text-align:center;padding:12px 0}',
         '.dl-msg.err{color:#FCA5A5}',
         '.dl-live{flex:1 1 auto;min-height:0;overflow:auto;padding:24px 14px 0;display:flex;flex-direction:column;align-items:center;gap:4px}',
         '.dl-live-av{width:68px;height:68px;border-radius:999px;background:linear-gradient(135deg,#38507A 0%,#1F2F4D 100%);border:2px solid rgba(255,255,255,0.08);box-shadow:0 3px 12px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:600;margin-bottom:10px}',
         '.dl-live-name{font-size:20px;font-weight:600;letter-spacing:-0.01em;text-align:center}',
-        '.dl-live-sub{font-size:11.5px;color:#94A6BF}',
+        '.dl-live-sub{font-size:12px;color:#94A6BF}',
         '.dl-live-time{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;font-size:26px;font-weight:300;letter-spacing:0.04em;margin-top:8px;min-height:32px}',
         '.dl-live-warn{font-size:12px;color:#F4C76A;margin-top:2px}',
         '.dl-live .dl-tiles{width:100%;margin-top:18px}',
@@ -271,6 +272,11 @@
         '.dl-audio-title{font-size:14px;font-weight:600}',
         '.dl-text{background:transparent;color:#B6DCFA;font-size:12.5px;padding:6px 8px;border-radius:8px}',
         '.dl-text:hover{background:rgba(255,255,255,0.06)}',
+        // Call back (missed note, Recents): a small go-green button; Call is always go green.
+        '.dl-go{flex-shrink:0;height:28px;padding:0 12px;border-radius:8px;background:' + T.go + ';color:#FFFFFF;font-size:12px;font-weight:600;display:inline-flex;align-items:center}',
+        '.dl-go:hover{background:' + T.goHover + '}',
+        '.dl-go:active{transform:scale(0.97)}',
+        '.dl-go:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
         '.dl-afield{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#94A6BF}',
         '.dl-afield select{width:100%;height:36px;padding:0 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px;cursor:pointer}',
         '.dl-afield select option{color:#161513}',
@@ -304,7 +310,7 @@
         +   '<div class="dl-alerts" hidden><button type="button" class="dl-text dl-alerts-btn" hidden>Get call alerts</button><span class="dl-alerts-off" hidden>Call alerts are off in this browser</span></div>'
         + '</div>'
         + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span>'
-        +   '<button type="button" class="dl-text dl-note-call" hidden>Call back</button>'
+        +   '<button type="button" class="dl-go dl-note-call" hidden>Call back</button>'
         +   '<a class="dl-note-link" href="#" target="_top">Open record →</a>'
         +   '<button type="button" class="dl-note-x" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 6l12 12M18 6L6 18"></path></svg></button>'
         + '</div>'
@@ -935,7 +941,7 @@
         if (missed && r.phone) {
             var cb = document.createElement('button');
             cb.type = 'button';
-            cb.className = 'dl-text dl-recent-cb';
+            cb.className = 'dl-go dl-recent-cb';
             cb.textContent = 'Call back';
             cb.setAttribute('aria-label', 'Call back ' + name);
             cb.addEventListener('click', function () {

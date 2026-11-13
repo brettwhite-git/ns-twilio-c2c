@@ -915,15 +915,15 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-period-ico { left: 11px; }
 .ctc-pl-period-chev { right: 10px; }
 .ctc-pl-spacer { flex: 1; }
-/* Header actions: one button family (32 px, 8 px radius, 12.5 px / 600); Call is the one dark action. */
+/* Header actions: one button family (32 px, 8 px radius, 12.5 px / 600); Call is filled go green (DESIGN.md 2.4). */
 .ctc-pl-root a.ctc-pl-report { height: 32px; padding: 0 12px 0 10px; border-radius: 8px; background: #FFFFFF; box-shadow: inset 0 0 0 1px #DCD9D3; color: #161513; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; white-space: nowrap; transition: transform 140ms ease-out, background-color 120ms ease; }
 .ctc-pl-root a.ctc-pl-report:hover { background: #F6F5F2; color: #161513; }
 .ctc-pl-report svg { color: #5C5955; display: block; }
 .ctc-pl-head-divider { width: 1px; height: 20px; background: #DCD9D3; }
 .ctc-pl-report-short { display: none; }
-.ctc-pl-call-btn { height: 32px; padding: 0 12px 0 10px; transition: transform 140ms ease-out, background-color 120ms ease; border: 0; border-radius: 8px; background: #0F1B30; color: #FFFFFF; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
-.ctc-pl-call-btn:hover:not(:disabled) { background: #1B2A44; }
-.ctc-pl-call-btn svg { color: #14B981; display: block; }
+.ctc-pl-call-btn { height: 32px; padding: 0 12px 0 10px; transition: transform 140ms ease-out, background-color 120ms ease; border: 0; border-radius: 8px; background: #436B1D; color: #FFFFFF; display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+.ctc-pl-call-btn:hover:not(:disabled) { background: #385A18; }
+.ctc-pl-call-btn svg { color: #FFFFFF; display: block; }
 .ctc-pl-paused { font-size: 12.5px; color: #5C5955; }
 
 /* KPI strip: flat, hairline dividers */
@@ -1004,8 +1004,8 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-state-sub { font-size: 12px; color: #5C5955; }
 .ctc-pl-state-sub:empty { display: none; }
 .ctc-pl-btn { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; font-size: 12px; font-weight: 600; }
-.ctc-pl-btn-call { background: #0F1B30; color: #FFFFFF; }
-.ctc-pl-btn-call:hover:not(:disabled) { background: #1B2A44; }
+.ctc-pl-btn-call { background: #436B1D; color: #FFFFFF; }
+.ctc-pl-btn-call:hover:not(:disabled) { background: #385A18; }
 .ctc-pl-btn-secondary { background: transparent; box-shadow: inset 0 0 0 1px #C9C5BE; color: #161513; font-weight: 500; }
 .ctc-pl-btn-secondary:hover:not(:disabled) { background: #F7F6F3; }
 .ctc-pl-skel { display: flex; flex-direction: column; gap: 12px; min-height: 168px; padding: 18px 12px; }

@@ -95,16 +95,22 @@ Source of truth for how the product looks and behaves. Code follows this file; c
   - Dark surface: `rgba(255,255,255,.10)` with the icon at 45% opacity.
   - Light surface: `#F1EFED` with a `#8B8780` icon.
 - **Ready:** no word, a `#8AC94F` dot with no halo, and a green Call button.
+- **Outbound dialing and ringing:** one stage: the contact name over "Calling…", amber dot, red End. No ring timer; the timer starts when the call connects.
+- **Wrap-up:** "Call ended" over the name, the final length, and a green Call back. Never "Phone Call saved" (the record and AI summary finish later).
 - **Unmute:** a glass amber tile (`rgba(244,199,106,.16)` with an amber ring and amber icon), not a solid amber tile.
 - **Dark surface v2.1 ("phone CSS"):** a grain layer, a coral bloom at bottom right, teal glows and a navy gradient `#1C3344 → #15283A → #11203A`, with a 1px `rgba(255,255,255,.07)` border. The light surface (offline, error, paused) is white with a `#E5E2DD` border.
+- **Which surface:** light = blocked or stopped (offline, mic blocked, phone error, calling paused). Dark with an amber dot = recoverable and in progress (signed out → "Sign in to NetSuite", reconnecting, calls won't ring).
 - **Motion:**
 
   | Token | Value |
   |---|---|
   | dur-2 | 150ms |
   | dur-3 | 200ms |
-  | dur-5 | 500ms |
-  | Enter easing | `cubic-bezier(0,0,.2,1)` |
+  | dur-5 | 500ms (general; not used by the phone) |
+  | Incoming card in / out | 1280ms / 880ms (FLIP) |
+  | Panel open / close | 200ms opacity + 12px slide |
+  | Phone enter easing | `cubic-bezier(.23,1,.32,1)` |
+  | Enter easing (pages) | `cubic-bezier(0,0,.2,1)` |
   | Exit easing | `cubic-bezier(.4,0,.2,1)` |
 
   - Allowed loops: the starting breathe, the calling halo, the ringing/incoming ring and the recording dot.
@@ -115,7 +121,8 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 ## 4. Dialer panel (L3 boards 06, 06b-1 … 06b-5)
 
 - **Size and shape:** `.pnl` 380 × 620, radius 28, on the dark v2.1 surface. It opens on the pill's snap point, and the pill hides while it is open.
-- **Header:** the grip centred at top, a status chip centred under it, and on the right the voicemail button (badge; Planned, gated), the gear and close (a chevron, "Collapse phone", in code).
+- **Header:** the grip centred at top, a status chip centred under it, and on the right the voicemail button (badge; Planned, gated), the gear and a down chevron, "Collapse phone" (never ×: the phone collapses to the pill, it does not close).
+- **Call back** (missed note, Recents missed row): a 28px go-green button, radius 8, 12px/600 white text. Shipped in asset 27.
 - **Tabs:** Dial · Search · Recents, centred, with a 28px gap.
 - **Dial view:**
   - An × inside the number field clears it.
@@ -192,5 +199,7 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
 | 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
+| 2026-11-12 | Motion tokens follow the code: phone enter easing (.23,1,.32,1); incoming card 1280/880ms; panel 200ms (findings #21, #22). Asset 27 bug batch: text ≥12px, Oracle Sans stack, reduced motion 150ms, missed dot #FF9D90, retry 40px circle, glass amber Unmute, calling halo loop, portlet Call go green. |
+| 2026-11-12 | Decided: ringing = "Calling…" (no ring timer); wrap-up = "Call ended"; Call back is go green (asset 27); signed out stays dark + amber (light = blocked/paused only); panel close is the "Collapse phone" chevron. Findings #6, #7, #11, #12, #16/#42. |
 | 2026-11-12 | Asset 26: Search rows get their own go-green Call; type chips stay; no "Everyone" section (Design change, findings #3). |
 | 2026-11-12 | Asset 25 deployed (Phase 1). Sync loop §0 added; L3/L4 boards tagged Shipped / Planned / Drift. §4 corrected to the shipped FLIP morph, Settings view and search chips. |
