@@ -212,6 +212,7 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
 | 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
+| 2026-11-13 | Diagram colour variant chosen: B "SaaS tiers" (§8a) for multi-owner architecture and data-flow diagrams; statecharts stay Mono. |
 | 2026-11-13 | User journeys (L1) adopt the "Swimlane journey" contract (§9): stage columns, Interactions and Descriptions lanes, numbered cards and step diamonds. |
 | 2026-11-13 | Architecture and flow diagrams adopt the "Mono blueprint" contract (§8): monochrome, dashed connectors, black pills and numbered step markers. |
 | 2026-11-13 | Deleted 4 Legacy boards (user OK): L2 Phone ownership statechart and Multi-tab scenarios, L3 03b v1 Controls, L4 M5 report placeholder. |
@@ -263,6 +264,26 @@ Applies to every architecture, sequence and data-flow diagram: `docs/architectur
 - Text ≥12px, contrast ≥4.5:1 (ink on white, white on ink).
 - A legend is a single row under the title only when a diagram uses a part the reader may not know (callout, marker).
 - Status of a diagram (Shipped / Design only) is its board badge (§0), not a colour in the drawing.
+
+### 8a. Colour variant — "SaaS tiers" (decided 2026-11-13)
+
+Architecture and data-flow diagrams with more than one owner use the SaaS tiers colours on top of the §8 shapes. Statecharts, sequence diagrams and single-owner diagrams stay plain Mono blueprint. Sample: L2 board "L2.3g · Diagram colour options", option B.
+
+**Colour means owner only.** Connectors, pills, step markers and callouts stay ink. Nodes stay white with a 1px ink stroke; a node may carry a 4px top rule in its tier border colour, and a service node's icon chip takes the tier tab colour.
+
+| Tier | What belongs | Tab fill / text | Group tint | Group border (1.5px) |
+|---|---|---|---|---|
+| Client | browser tabs, the dock, the softphone page, the Setup Wizard UI | `#2761C8` / white | `#F0F4FB` | `#2761C8` |
+| NetSuite | SuiteScripts (Suitelets, RESTlet, Scheduled Script, UserEvent, portlet), config | `#1E998C` / ink | `#EEF5F4` | `#0F7369` |
+| Twilio | Voice SDK, Functions, Studio, Conversational Intelligence, PSTN | `#F29862` / ink | `#FAF3EF` | `#B8501A` |
+| AI | N/llm and the analysis step | `#412079` / white | `#F4F0F9` | `#5B2DA8` |
+| Data | records (Phone Call, Task, config record), recordings, transcripts | `#B9E0A8` / ink | `#F1F6F0` | `#3C7F2A` |
+| People | Rep, Manager, Admin, Caller | actor circle `#6B6661`, white icon | — | — |
+
+- Contrast (measured): every tab text pair ≥5.2:1, ink on every tint ≥16:1, every border ≥4.9:1 on white.
+- Colour-blind safe: the tab fills sit on a lightness ladder (L* 22 / 43 / 57 / 71 / 85); the closest simulated pair is ΔE 21. Never tell tiers apart by hue alone in text either: each group keeps its name on its tab.
+- A legend row (tier chip + name) sits under the title of every coloured diagram.
+- Generic hues only: no vendor brand colours or logos.
 
 ## 9. User journeys — "Swimlane journey" contract (decided 2026-11-13)
 
