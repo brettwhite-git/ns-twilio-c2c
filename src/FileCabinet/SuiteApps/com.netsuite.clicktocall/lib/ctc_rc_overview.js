@@ -34,7 +34,7 @@ define(['./ctc_html', './ctc_workspace_queries', './ctc_rc_shell', './ctc_rc_cal
 
     // Outcome rows in this order (ctcHtml.outcomeOf texts); bar colours.
     const OUTCOME_ORDER = ['Summary ready', 'Follow-up suggested', 'Voicemail', 'Missed call', 'No answer',
-        'Processing…', 'Too short', 'No transcript', 'Summary failed', '—'];
+        'Summarizing', 'Too short', 'No transcript', 'Summary failed', '—'];
     const OUTCOME_LABEL = { '—': 'Other' };
     const OUTCOME_BAR = { 'Summary ready': '#1F3550', 'Follow-up suggested': '#E9A62A', 'Voicemail': '#E7837A', 'Missed call': '#F2A79B' };
     const OUTCOME_BAR_DEFAULT = '#B9B5AE';

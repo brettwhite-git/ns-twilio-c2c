@@ -13,6 +13,21 @@
  * actions the anchor uses). Call control and audio device changes go to the
  * anchor (the shell's hidden #ctc-phone-frame) over the dock bus: the anchor
  * is the only window with audio.
+ *
+ * Header voicemail button: its red badge counts unheard voicemails (rows of
+ * softphoneVoicemails whose `at` is newer than localStorage
+ * ctc-vm-seen-<employeeId>); it opens the Voicemail view, which marks them
+ * all seen. The list refreshes when the panel opens and every 5 min while it
+ * shows. Recordings are deleted after transcription: rows offer Call back
+ * and Open record (the Phone Call), never Play.
+ *
+ * Add to NetSuite sheet (DESIGN.md §6, asset 31): opens from the Dial
+ * slot (a typed number with no record), a Recents row with no record
+ * (row.unknown; with its Phone Call), "No match in NetSuite" in the ring
+ * and inbound call views, and the after-call note of a call with no record
+ * (the Phone Call id from lastLog.recordUrl). RESTlet actions:
+ * softphoneSearch + softphoneContacts (pickers), softphoneFindDuplicates,
+ * softphoneAddToNetSuite.
  */
 (function () {
     'use strict';
@@ -39,7 +54,41 @@
     // time the ringing started).
     var PENDING_MATCH_MS = 120000;
     var TYPE_LABEL = { customer: 'CUSTOMER', prospect: 'PROSPECT', lead: 'LEAD', contact: 'CONTACT' };
-    var LONG_PRESS_MS = 500; // a press on backspace this long clears the number
+    // Search row sub line: "Type · contact or phone".
+    var TYPE_NAME = { customer: 'Customer', prospect: 'Prospect', lead: 'Lead', contact: 'Contact' };
+    // Search filter icon menu: Show (type) and its labels.
+    var FILTERS = [['', 'All'], ['customer', 'Customers'], ['prospect', 'Prospects'], ['lead', 'Leads']];
+    // ... and Sort by (same menu), kept per browser.
+    var SORTS = [['recent', 'Recent activity'], ['name', 'Name'], ['lastCalled', 'Last called']];
+    var SORT_KEY = 'ctc-dock-sort';
+    // Voicemail: unheard = row.at newer than localStorage VM_SEEN_PREFIX +
+    // employee id (ISO). Refreshed when the panel opens (at most once per
+    // VM_MIN_GAP_MS) and every VM_REFRESH_MS while it shows.
+    var VM_SEEN_PREFIX = 'ctc-vm-seen-';
+    var VM_REFRESH_MS = 5 * 60 * 1000;
+    var VM_MIN_GAP_MS = 30000;
+    var VM_LIMIT = 30;
+    var LONG_PRESS_MS = 500; // a press on backspace this long clears the number; on 0 it types +
+    // Match slot above the Dial number: after MATCH_DEBOUNCE_MS without a
+    // keystroke, a typed number of MATCH_MIN_DIGITS or more is looked up
+    // (RESTlet lookupCaller: the rep's book first) and a match shows as
+    // "Name · Type"; a click loads that record.
+    var MATCH_DEBOUNCE_MS = 300;
+    var MATCH_MIN_DIGITS = 7;
+    // "Add to NetSuite" in the slot when no record matches (DESIGN.md §4,
+    // §6); it opens the Add to NetSuite sheet (asset 31), as do Recents
+    // "Add", the ring view and the after-call note.
+    var ADD_TO_NETSUITE_ENABLED = true;
+    // The sheet's four choices ([softphoneAddToNetSuite mode, label]); the
+    // last shows only when there is a Phone Call to keep (phoneCallId).
+    var AS_CHOICES = [
+        ['existingContact', 'Add to a contact'],
+        ['newContact', 'New contact at a company'],
+        ['newCompany', 'New lead or prospect'],
+        ['logOnly', 'Log without a record']
+    ];
+    // Choice 1 phone field: '' = the first empty one (the server picks).
+    var AS_FIELDS = [['', 'Fill an empty field'], ['mobilephone', 'Mobile'], ['officephone', 'Office'], ['phone', 'Main']];
     // Phone colour tokens (DESIGN.md §1; the same values as the client's).
     // Buttons use go / stop; dots on the dark panel use goDot / stopDot.
     var T = {
@@ -57,7 +106,7 @@
         offline: { dot: T.offline, label: 'Phone offline' },
         starting: { dot: T.amber, label: 'Starting phone…' },
         error: { dot: T.stopDot, label: 'Phone error' },
-        ready: { dot: T.goDot, label: 'Ready to call' },
+        ready: { dot: T.goDot, label: 'Ready' },
         dialing: { dot: T.amber, label: 'Calling…' },
         ringing: { dot: T.amber, label: 'Calling…' },
         incoming: { dot: T.ring, label: 'Incoming call' }, // ring: ringing reads apart from talking
@@ -101,11 +150,28 @@
     var ICON_MIC = '<rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"></path>';
     var ICON_MIC_OFF = '<path d="M2 2l20 20M9 9v3a3 3 0 0 0 5.1 2.1M15 9.3V5a3 3 0 0 0-5.9-.6M19 10v2a7 7 0 0 1-.6 2.8M5 10v2a7 7 0 0 0 12 5M12 19v3"></path>';
     var STROKE = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
-    // Recents direction icons: arrow down-left (in, missed), up-right (out).
+    var STROKE2 = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+    // L3 03 Components icons (viewBox 0 0 24 24).
+    var ICON_VM = '<circle cx="6.5" cy="12" r="3.5"></circle><circle cx="17.5" cy="12" r="3.5"></circle><path d="M6.5 15.5h11"></path>';
+    var ICON_USER = '<circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path>';
+    var ICON_SEARCH = '<circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path>';
+    var ICON_X = '<path d="M6 6l12 12M18 6L6 18"></path>';
+    var ICON_CARET = '<path d="M6 9l6 6 6-6"></path>';
+    var ICON_CHECK = '<path d="M4 12l5 5L20 6"></path>';
+    // Filter: three dashes of decreasing length.
+    var ICON_FILTER = '<path d="M4 7h16M7 12h10M10 17h4"></path>';
+    // Open record: an arrow out of a box.
+    var ICON_OPEN = '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path>';
+    // Back chevron (Audio settings, Add to NetSuite, Voicemail).
+    var ICON_BACK = '<svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE2 + '><path d="M15 6l-6 6 6 6"></path></svg>';
+    var USER_SVG = function (size) {
+        return '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_USER + '</svg>';
+    };
+    // Recents direction icons: bare arrows, down-left (in, missed), up-right (out).
     var DIR_VIEW = {
-        'in': { label: 'Inbound call', path: 'M17 7L7 17M7 9v8h8' },
+        'in': { label: 'Inbound call', path: 'M17 7L7 17M15 17H7V9' },
         out: { label: 'Outbound call', path: 'M7 17L17 7M9 7h8v8' },
-        missed: { label: 'Missed call', path: 'M17 7L7 17M7 9v8h8' }
+        missed: { label: 'Missed call', path: 'M17 7L7 17M15 17H7V9' }
     };
 
     host.css([
@@ -113,7 +179,10 @@
         // size for every view. Header and footer stay; the body fills the
         // rest and scrolls. The panel is not inside .dock, so it restates the
         // dock's font and pointer rules.
-        '.dl{position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:"Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        // --dl-cols / --dl-gap: the keypad's 3 columns (65 px, 24 px apart),
+        // shared by the tabs, the keypad and the Dial footer, so Search, 0
+        // and Call share one centre line (DESIGN.md §4, asset 32).
+        '.dl{--dl-cols:repeat(3,65px);--dl-gap:24px;position:fixed;left:0;top:0;width:380px;display:flex;flex-direction:column;color:#FFFFFF;pointer-events:auto;font-family:"Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         // Open / close: fade + 12 px slide from the panel's edge (data-side
         // from the client: l, r, else the row's t or b).
         '.dl.closed{opacity:0;transform:translateX(12px);pointer-events:none}',
@@ -130,9 +199,15 @@
         // The grip says the panel can be dragged (same dots as the pill grip).
         '.dl-grip{position:absolute;top:6px;left:50%;transform:translateX(-50%);display:grid;grid-template-columns:repeat(3,3px);gap:3px;pointer-events:none}',
         '.dl-grip i{width:3px;height:3px;border-radius:999px;background:rgba(255,255,255,0.32)}',
-        // The status badge sits in the middle of the header, level with the
-        // gear and collapse buttons (head padding-top 18 + half of 32 px).
-        '.dl-head .dl-status{position:absolute;left:50%;top:34px;transform:translate(-50%,-50%)}',
+        // The status badge sits exactly in the middle of the header, level
+        // with the header buttons (right). Two equal side columns (1fr) keep
+        // it centred: the left one is empty, the right one is never narrower
+        // than the buttons. A label too long to stay centred moves left,
+        // then ends in an ellipsis; it never goes under the buttons.
+        '.dl-head-row{flex:1 1 100%;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto) minmax(max-content,1fr);align-items:center}',
+        '.dl-head-row .dl-icon{margin-left:8px}',
+        '.dl-head-r{grid-column:3;display:flex;align-items:center;justify-content:flex-end}',
+        '.dl-head .dl-status{grid-column:2;justify-self:center;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden;white-space:nowrap}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:12px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-status .dot{position:relative;width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
         // incoming: the status dot rings like the pill dot: a disc under the
@@ -141,9 +216,12 @@
         '.dl-status{isolation:isolate}',
         '.dl[data-phase="incoming"] .dl-status .dot::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + rgba(T.ring, 0.55) + ';opacity:0;z-index:-1;pointer-events:none;animation:ctc-ring-sm 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
         '@keyframes ctc-ring-sm{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(3.333);opacity:0}}',
-        '.dl-icon{width:32px;height:32px;border-radius:10px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-icon{position:relative;width:32px;height:32px;border-radius:10px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-icon:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
         '.dl-icon[aria-pressed="true"]{background:rgba(255,255,255,0.12);color:#FFFFFF}',
+        // Voicemail: red badge with the unheard count (L3 06b-1 header).
+        '.dl-vm-badge{position:absolute;top:-3px;right:-6px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:' + T.stop + ';color:#FFFFFF;font-size:12px;font-weight:700;line-height:16px;text-align:center;pointer-events:none}',
+        '.dl-status-label{min-width:0;overflow:hidden;text-overflow:ellipsis}',
         '.dl-note{flex-shrink:0;margin:10px 14px 0;padding:8px 10px;border-radius:14px;background:rgba(255,255,255,0.06);display:flex;align-items:center;gap:8px;font-size:12px}',
         '.dl-note-text{flex:1;min-width:0}',
         '.dl-note a{color:#B6DCFA;text-decoration:none}',
@@ -165,13 +243,19 @@
         '.dl-refused{flex-shrink:0;margin:8px 14px 0;font-size:12px;color:#94A6BF;text-align:center}',
         // Remote control (another tab holds the phone), settings view only:
         // where the audio is.
-        '.dl-remote{font-size:12px;color:#94A6BF}',
+        '.dl-remote{font-size:13px;color:#B9CEDA}',
         '.dl-pane{display:flex;flex-direction:column;flex:1 1 auto;min-height:0}',
         '.dl-body{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 14px 0;display:flex;flex-direction:column;gap:10px}',
-        // Dial · Search · Recents: one centred row, 28 px apart.
-        '.dl-tabs{display:flex;justify-content:center;gap:28px;padding:2px;border-radius:999px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
-        '.dl-tab{padding:6px 12px;border-radius:999px;background:transparent;font-size:12px;font-weight:600;color:#94A6BF}',
-        '.dl-tab[aria-selected="true"]{background:rgba(255,255,255,0.16);color:#FFFFFF}',
+        // Dial · Search · Recents on the keypad's 3 columns (--dl-cols), each
+        // label centred in its column, full width under the header with a
+        // bottom rule. The selected tab is underlined at the label's width
+        // (2 px white, an inset shadow: no layout shift), not a filled pill.
+        '.dl-tabs{display:grid;grid-template-columns:var(--dl-cols);column-gap:var(--dl-gap);justify-content:center;justify-items:center;flex-shrink:0;margin-top:8px;padding:0 16px;border-bottom:1px solid rgba(255,255,255,0.10)}',
+        '.dl-tab{height:44px;padding:0 2px;border-radius:0;background:transparent;font-size:14px;font-weight:600;color:#94A6BF;white-space:nowrap}',
+        '.dl-tab:hover{color:#FFFFFF}',
+        '.dl-tab:active{transform:none}',
+        '.dl-tab[aria-selected="true"]{color:#FFFFFF;box-shadow:inset 0 -2px 0 #FFFFFF}',
+        '.dl-tab:focus-visible{outline-offset:-2px}',
         '.dl-box{padding:10px 12px;border-radius:16px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:8px}',
         '.dl-entity-top{display:flex;align-items:center;gap:10px}',
         '.dl-av{width:26px;height:26px;border-radius:7px;background:linear-gradient(135deg,#38507A 0%,#1F2F4D 100%);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}',
@@ -201,7 +285,29 @@
         '.dl-clear{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:24px;height:24px;padding:0;border-radius:999px;background:rgba(255,255,255,0.12);color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-clear:hover{background:rgba(255,255,255,0.20)}',
         '.dl-clear:active{transform:translateY(-50%) scale(0.97)}',
+        // Match slot above the number (20 px, always kept: no layout jump):
+        // a record that owns the typed number, "Name · Type".
+        '.dl-slot{height:20px;flex-shrink:0;display:flex;align-items:center;justify-content:center;min-width:0}',
+        '.dl-match{max-width:100%;height:20px;padding:0 6px;border-radius:6px;background:transparent;display:inline-flex;align-items:center;gap:0;font-size:14px;font-weight:600;line-height:20px;color:#FFFFFF;white-space:nowrap;overflow:hidden}',
+        '.dl-match:hover{background:rgba(255,255,255,0.08)}',
+        '.dl-match:active{transform:none}',
+        '.dl-match-name{min-width:0;overflow:hidden;text-overflow:ellipsis}',
+        '.dl-match-type{flex-shrink:0;color:#94A6BF}',
+        '.dl-add{height:20px;padding:0 6px;border-radius:6px;background:transparent;font-size:14px;font-weight:600;line-height:20px;color:#9FD0FA;text-decoration:none}',
+        '.dl-add:hover{text-decoration:underline}',
+        '.dl-add:active{transform:none}',
         '.dl-pad{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}',
+        // Dial keypad (DESIGN.md §4): iPhone-style 65 px round keys on the
+        // shared 3 columns (--dl-cols, centred); the rows spread to fill the
+        // height between the number and the footer (never closer than 8 px;
+        // the body scrolls when a record card takes the room). Fill .10,
+        // pressed .22, no border.
+        '.dl-pad.dl-dialpad{flex:1 1 auto;grid-template-columns:var(--dl-cols);grid-template-rows:repeat(4,65px);column-gap:var(--dl-gap);row-gap:8px;justify-content:center;align-content:space-evenly;min-height:284px}',
+        '.dl-dialpad .dl-key{width:65px;height:65px;padding:0;border-radius:999px;border:0;background:rgba(255,255,255,0.10);gap:3px;transition:transform 140ms ease-out}',
+        '.dl-dialpad .dl-key:hover{background:rgba(255,255,255,0.10)}',
+        '.dl-dialpad .dl-key:active{background:rgba(255,255,255,0.22)}',
+        '.dl-dialpad .dl-key b{font-size:25px;font-weight:400;line-height:1;color:#FFFFFF}',
+        '.dl-dialpad .dl-key i{font-size:12px;font-weight:600;letter-spacing:0.12em;color:#94A6BF;line-height:1;min-height:12px;padding-left:0.12em}',
         '.dl-key{height:44px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}',
         '.dl-key:hover{background:rgba(255,255,255,0.10)}',
         '.dl-key b{font-size:15px;font-weight:500;line-height:1}',
@@ -220,43 +326,101 @@
         '.dl-btn[aria-pressed="true"]{background:' + rgba(T.amber, 0.16) + ';color:' + T.amber + ';box-shadow:inset 0 0 0 1px ' + T.amber + '}',
         '.dl-keys[aria-pressed="true"]{background:rgba(255,255,255,0.24);color:#FFFFFF;box-shadow:none}',
         '.dl-btn[disabled]{opacity:0.4;cursor:default;box-shadow:none}',
-        '.dl-q{width:100%;height:44px;flex-shrink:0;padding:0 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px}',
+        // Dial footer: the keypad's 3 columns (--dl-cols, same side
+        // padding): empty · 64 px round Call under "0" · 48 px round ghost
+        // Backspace under "#", centred on Call. No text labels (aria-label + title).
+        '.dl-foot.dial{display:grid;grid-template-columns:var(--dl-cols);column-gap:var(--dl-gap);justify-content:center;align-items:center;justify-items:center}',
+        '.dl-btn.go64{width:64px;height:64px;border-radius:999px}',
+        '.dl-btn.ghost{width:48px;height:48px;border-radius:999px;background:transparent;color:#94A6BF}',
+        '.dl-btn.ghost:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
+        // Search and Recents fields: glass box, search icon left; Search adds
+        // x (clear) and the filter icon at the right end.
+        '.dl-qbox{position:relative;flex-shrink:0;display:flex;align-items:center;gap:8px;height:40px;padding:0 6px 0 12px;border-radius:16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);color:#94A6BF}',
+        '.dl-qbox:has(.dl-q:focus){border-color:' + T.ring + '}',
+        '.dl-qbox > svg{flex-shrink:0}',
+        '.dl-q{flex:1;min-width:0;height:38px;padding:0;border:0;background:transparent;color:#FFFFFF;font:inherit;font-size:14px;outline:none;-webkit-appearance:none;appearance:none}',
         '.dl-q::placeholder{color:#94A6BF}',
-        '.dl-q:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px}',
-        '.dl-chips{display:flex;flex-wrap:wrap;gap:6px}',
-        '.dl-chip{display:inline-flex;align-items:center;min-height:24px;padding:4px 10px;border-radius:999px;font-size:12px;color:#94A6BF;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
-        '.dl-chip[aria-pressed="true"]{color:#FFFFFF;background:rgba(255,255,255,0.16)}',
-        '.dl-chip em{font-style:normal;margin-left:4px;opacity:0.8}',
+        '.dl-q::-webkit-search-cancel-button{-webkit-appearance:none;appearance:none;display:none}',
+        '.dl-qclear{position:static;transform:none;flex-shrink:0}',
+        '.dl-qclear:active{transform:scale(0.97)}',
+        // Filter icon (three dashes, 32 px): opens the Show + Sort by menu.
+        // While Show is not All, a 6 px light-blue dot sits on its corner.
+        '.dl-filter{position:relative;width:32px;height:32px;flex-shrink:0;padding:0;border-radius:8px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-filter:hover,.dl-filter[aria-expanded="true"]{background:rgba(255,255,255,0.10);color:#FFFFFF}',
+        '.dl-fdot{position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:999px;background:#9FD0FA;pointer-events:none}',
+        // The menu: groups (a 12/600 uppercase label, a rule between); one
+        // choice per group, a check marks it.
+        '.dl-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:3;width:208px;padding:4px;border-radius:12px;background:#1A2B47;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26);display:flex;flex-direction:column}',
+        '.dl-menu.end{left:auto;right:0}',
+        '.dl-mi{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 10px;border-radius:8px;background:transparent;color:#FFFFFF;font-size:13px;font-weight:500;text-align:left}',
+        '.dl-mi:hover,.dl-mi:focus-visible{background:rgba(255,255,255,0.08)}',
+        '.dl-mi:focus-visible{outline-offset:-2px}',
+        '.dl-mi:active{transform:none}',
+        '.dl-mi svg{flex-shrink:0;visibility:hidden}',
+        '.dl-mi[aria-checked="true"] svg{visibility:visible}',
+        '.dl-mi span{flex:1;min-width:0}',
+        '.dl-mi em{font-style:normal;font-variant-numeric:tabular-nums;color:#C9D3E1}',
+        '.dl-mgroup{display:flex;flex-direction:column}',
+        '.dl-mlabel{padding:8px 10px 4px;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#94A6BF}',
+        '.dl-menu .dl-rule{margin:4px 6px}',
         '.dl-sect{text-align:center;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:12px;letter-spacing:0.08em;color:#94A6BF;text-transform:uppercase}',
         '.dl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}',
         // Lists fill the rest of the body and scroll on their own.
         // The 3 px padding keeps the rows' focus rings inside the scroll box.
         '.dl-view{flex:1 1 auto;min-height:0}',
-        '.dl-results,.dl-recent-list{flex:1 1 auto;min-height:0;overflow:auto;padding:3px;margin:-3px}',
+        '.dl-results,.dl-recent-list,.dl-vm-list{flex:1 1 auto;min-height:0;overflow:auto;padding:3px;margin:-3px}',
         '.dl-row{width:100%;padding:8px 10px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;gap:10px;text-align:left}',
         '.dl-row:hover{background:rgba(255,255,255,0.08)}',
         '.dl-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
-        '.dl-row-name{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.dl-row-name{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.dl-row-name.mono{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}',
         '.dl-row-sub{font-size:12px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        // Recents: the card is the list item, so a missed row can carry a
-        // Call back button next to the row button (no button inside a button).
-        '.dl-recent{display:flex;align-items:center;gap:4px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)}',
-        '.dl-recent:hover{background:rgba(255,255,255,0.08)}',
-        '.dl-recent .dl-row,.dl-recent .dl-row:hover{flex:1;min-width:0;background:transparent;border:0}',
-        '.dl-recent-cb{flex-shrink:0;margin-right:6px}',
-        // Search: each row with a number carries its own Call (go green).
+        // Search rows: a card per row; the Call sits next to the row
+        // button (no button inside a button).
+        '.dl-card{display:flex;align-items:center;gap:4px;border-radius:10px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06)}',
+        '.dl-card:hover{background:rgba(255,255,255,0.08)}',
+        '.dl-card .dl-row,.dl-card .dl-row:hover,.dl-recent .dl-row,.dl-recent .dl-row:hover{flex:1;min-width:0;background:transparent;border:0}',
+        '.dl-ricon{flex-shrink:0;display:inline-flex;color:#94A6BF}',
+        // Recents (and Voicemail): flat rows with a bottom rule under day
+        // group labels (Today / Yesterday / date).
+        '.dl-day{padding:10px 2px 4px;font-size:12px;font-weight:600;color:#94A6BF}',
+        '.dl-day:first-child{padding-top:2px}',
+        '.dl-recent .dl-row{padding:0 4px 0 2px;border-radius:8px}',
+        '.dl-recent{display:flex;align-items:center;gap:6px;min-height:58px;border-bottom:1px solid rgba(255,255,255,0.10)}',
+        '.dl-recent:hover{background:rgba(255,255,255,0.04)}',
+        '.dl-recent .dl-row-sub{display:flex;align-items:center;gap:6px;margin-top:2px}',
+        '.dl-row-time{flex-shrink:0}',
+        '.dl-recent-cb{flex-shrink:0}',
+        // Missed / Voicemail in Recents: coral text (no outcome chips).
+        '.dl-row-miss{flex-shrink:0;font-size:12px;font-weight:600;color:#FF9E8C}',
+        // Each row with a number carries its own Call (go green).
         '.dl-row-call{flex-shrink:0;width:32px;height:32px;margin-right:6px;padding:0;border-radius:999px;background:' + T.go + ';display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-recent .dl-row-call{margin-right:0}',
         '.dl-row-call:hover{background:' + T.goHover + '}',
         '.dl-row-call:active{transform:scale(0.97)}',
         '.dl-row-call:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
-        // Direction icon: 20 px circle, 12 px arrow (panel tints of the
-        // portlet's In / Out / Missed colours; arrow vs circle >= 5:1).
-        '.dl-dir{width:20px;height:20px;border-radius:999px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}',
-        '.dl-dir-in{background:' + rgba(T.ring, 0.18) + ';color:#9FD0FA}',
-        '.dl-dir-out{background:rgba(255,255,255,0.10);color:#C9D3E1}',
-        '.dl-dir-missed{background:' + rgba(T.stopDot, 0.20) + ';color:#FFA595}',
-        '.dl-row-flag{color:#FF9E8C;font-weight:600}',
+        // Direction: a bare 16 px arrow; missed in the stop dot colour.
+        '.dl-dir{flex-shrink:0;display:inline-flex;color:#94A6BF}',
+        '.dl-dir-missed{color:' + T.stopDot + '}',
         '.dl-row-meta{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:12px;color:#94A6BF;flex-shrink:0;text-align:right;white-space:pre-line}',
+        // Voicemail view rows (DESIGN.md §4, asset 32): two columns. Left
+        // (flexible): the name (an 8 px coral dot before it while unheard)
+        // and the AI brief under it, at most 2 lines. Right: time · length,
+        // then Open record (32 px ghost circle) and Call back.
+        '.dl-vm-item{padding:10px 2px 12px;border-bottom:1px solid rgba(255,255,255,0.10);display:flex;align-items:flex-start;gap:12px}',
+        '.dl-vm-l{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}',
+        '.dl-vm-name{display:flex;align-items:center;gap:6px;min-width:0}',
+        '.dl-vm-dot{width:8px;height:8px;border-radius:999px;background:#FF9D90;flex-shrink:0}',
+        '.dl-vm-brief{margin:0;font-size:13px;line-height:1.45;color:#C9D3E1;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}',
+        '.dl-vm-r{flex-shrink:0;display:flex;flex-direction:column;align-items:flex-end;gap:8px;text-align:right}',
+        '.dl-vm-meta{font-size:12px;color:#94A6BF;font-variant-numeric:tabular-nums;white-space:nowrap}',
+        '.dl-vm-acts{display:flex;align-items:center;gap:8px}',
+        '.dl-vm-open{width:32px;height:32px;flex-shrink:0;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);box-sizing:border-box;color:#C9D3E1;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}',
+        '.dl-vm-open:hover{background:rgba(255,255,255,0.14);color:#FFFFFF}',
+        '.dl-vm-open:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
+        '.dl-link{font-size:12px;font-weight:600;color:#B6DCFA;text-decoration:none;padding:4px 6px;border-radius:6px}',
+        '.dl-link:hover{text-decoration:underline}',
+        '.dl-link:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
         '.dl-empty,.dl-msg{font-size:12px;color:#94A6BF;text-align:center;padding:12px 0}',
         '.dl-msg.err{color:#FCA5A5}',
         '.dl-live{flex:1 1 auto;min-height:0;overflow:auto;padding:24px 14px 0;display:flex;flex-direction:column;align-items:center;gap:4px}',
@@ -267,8 +431,6 @@
         '.dl-live-warn{font-size:12px;color:#F4C76A;margin-top:2px}',
         '.dl-live .dl-tiles{width:100%;margin-top:18px}',
         '.dl-live .dl-pad{width:100%;margin-top:14px}',
-        '.dl-audio-top{display:flex;align-items:center;gap:8px}',
-        '.dl-audio-title{font-size:14px;font-weight:600}',
         '.dl-text{background:transparent;color:#B6DCFA;font-size:12.5px;padding:6px 8px;border-radius:8px}',
         '.dl-text:hover{background:rgba(255,255,255,0.06)}',
         // Call back (missed note, Recents): a small go-green button; Call is always go green.
@@ -276,20 +438,79 @@
         '.dl-go:hover{background:' + T.goHover + '}',
         '.dl-go:active{transform:scale(0.97)}',
         '.dl-go:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
-        '.dl-afield{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#94A6BF}',
-        '.dl-afield select{width:100%;height:36px;padding:0 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:13px;cursor:pointer}',
+        // Audio settings sheet (L3 06 / 06b-1): back chevron + "Audio
+        // settings"; labelled full-width selects (48 px, radius 12, tinted,
+        // chevron); a rule; Exit phone mode as a coral outline pill + caption.
+        '.dl-sheet-top{display:flex;align-items:center;gap:8px;margin-left:-6px}',
+        '.dl-back{width:32px;height:32px;padding:0;border-radius:999px;background:transparent;color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
+        '.dl-back:hover{background:rgba(255,255,255,0.08)}',
+        '.dl-sheet-title{font-size:16px;font-weight:700}',
+        '.dl-afield{display:flex;flex-direction:column;gap:6px;font-size:12px;font-weight:600;color:#B9CEDA}',
+        '.dl-sel{position:relative;display:block}',
+        '.dl-afield select{width:100%;height:40px;padding:0 40px 0 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:14px;font-weight:400;cursor:pointer;-webkit-appearance:none;appearance:none;text-overflow:ellipsis}',
         '.dl-afield select option{color:#161513}',
         '.dl-afield select:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px}',
         '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
+        '.dl-sel svg{position:absolute;right:14px;top:50%;margin-top:-8px;color:#B9CEDA;pointer-events:none}',
         '.dl-audio-msg{text-align:left;padding:0}',
-        '.dl-exit{align-self:flex-start;margin-top:8px}',
-        '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot::before{animation:none}.dl.closed,.dl[data-side].closed{transform:none}}'
+        '.dl-rule{align-self:stretch;height:1px;margin:4px 0 6px;border:0;background:rgba(255,255,255,0.10);flex-shrink:0}',
+        '.dl-exit-block{display:flex;flex-direction:column;align-items:flex-start;gap:6px}',
+        '.dl-exit{height:36px;padding:0 16px;border-radius:999px;border:1px solid ' + rgba(T.stopDot, 0.55) + ';background:transparent;color:' + T.stopDot + ';font-size:14px;font-weight:600}',
+        '.dl-exit:hover{background:' + rgba(T.stopDot, 0.10) + '}',
+        '.dl-exit-note{font-size:12px;color:#B9CEDA}',
+        // Add to NetSuite sheet (DESIGN.md §6, L3 06b-4): the audio sheet's
+        // pattern (back chevron + title, labelled 40 px fields radius 10
+        // fill .06, a rule) with the number under the title, a radio list
+        // of the four choices, the board's Lead | Prospect segment, an
+        // amber "Already in NetSuite" list, a coral error line and one
+        // primary button (the board's 44 px #36677D pill).
+        '.dl-as-num{margin-top:-6px;font-size:14px;color:#B9CEDA}',
+        '.dl-radios{display:flex;flex-direction:column;gap:2px}',
+        '.dl-radio{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 10px;border-radius:10px;font-size:14px;color:#FFFFFF;cursor:pointer}',
+        '.dl-radio:hover{background:rgba(255,255,255,0.06)}',
+        '.dl-radio:has(input:checked){background:rgba(255,255,255,0.08)}',
+        '.dl-radio input{-webkit-appearance:none;appearance:none;width:16px;height:16px;margin:0;flex-shrink:0;border-radius:999px;border:2px solid #B9CEDA;background:transparent;display:grid;place-content:center;cursor:pointer}',
+        '.dl-radio input:checked{border-color:#FFFFFF}',
+        '.dl-radio input:checked::before{content:"";width:8px;height:8px;border-radius:999px;background:#FFFFFF}',
+        '.dl-radio input:focus-visible,.dl-check input:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
+        '.dl-lbl{font-size:12px;font-weight:600;color:#B9CEDA}',
+        '.dl-as-block{display:flex;flex-direction:column;gap:6px}',
+        '.dl-afield input{width:100%;height:40px;padding:0 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.06);color:#FFFFFF;font:inherit;font-size:14px;font-weight:400;outline:none}',
+        '.dl-afield input::placeholder{color:#94A6BF}',
+        '.dl-afield input:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:1px}',
+        '.dl-as-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}',
+        '.dl-check{display:flex;align-items:center;gap:10px;min-height:32px;font-size:14px;color:#FFFFFF;cursor:pointer}',
+        '.dl-check input{width:16px;height:16px;margin:0;flex-shrink:0;accent-color:#FFFFFF;cursor:pointer}',
+        '.dl-as-note{font-size:12px;line-height:1.45;color:#B9CEDA}',
+        '.dl-as-picked .dl-row{cursor:default}',
+        '.dl-as-picked .dl-text{flex-shrink:0;margin-right:4px}',
+        '.dl-seg{display:flex;flex-shrink:0;padding:3px;border-radius:999px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.10)}',
+        '.dl-seg button{flex:1;height:32px;padding:0;border-radius:999px;background:transparent;color:#B9CEDA;font-size:13px;font-weight:600}',
+        '.dl-seg button[aria-pressed="true"]{background:#FFFFFF;color:#132337}',
+        '.dl-seg button:active{transform:none}',
+        '.dl-as-dups{margin:0}',
+        '.dl-dup-list{list-style:none;margin:2px 0 0;padding:0;align-self:stretch;display:flex;flex-direction:column;gap:8px}',
+        '.dl-dup{display:flex;align-items:center;gap:8px}',
+        '.dl-dup .dl-row-sub{color:#C9D3E1}',
+        // Small ghost button (the board's .xb): "Use this one", Recents "Add".
+        '.dl-ghost{flex-shrink:0;height:28px;padding:0 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.16);background:rgba(255,255,255,0.08);color:#FFFFFF;font-size:12px;font-weight:600;display:inline-flex;align-items:center;white-space:nowrap}',
+        '.dl-ghost:hover{background:rgba(255,255,255,0.16)}',
+        '.dl-as-err{font-size:12px;line-height:1.45;color:' + T.stopDot + '}',
+        '.dl-primary{flex-shrink:0;width:100%;height:44px;padding:0 20px;border-radius:999px;background:#36677D;color:#FFFFFF;font-size:14px;font-weight:600}',
+        '.dl-primary:hover{box-shadow:inset 0 0 0 999px rgba(255,255,255,0.08)}',
+        '.dl-primary[disabled]{opacity:0.4;cursor:default;box-shadow:none}',
+        '.dl-primary[disabled]:active{transform:none}',
+        // "Add to NetSuite" under "No match in NetSuite" (ring and inbound call).
+        '.dl-live-add{margin-top:4px;background:transparent}',
+        '@media (prefers-reduced-motion: reduce){.dl *,.dl-dialpad .dl-key{transition:none}.dl-dialpad .dl-key:active{transform:none}.dl[data-phase="incoming"] .dl-status .dot::before{animation:none}.dl.closed,.dl[data-side].closed{transform:none}}'
     ].join('\n'));
 
     // --- Markup (static; data goes in with textContent) ---
     var keyHtml = KEYS.map(function (k) {
         return '<button type="button" class="dl-key" data-key="' + k[0] + '" aria-label="' + k[0] + '"><b>' + k[0] + '</b><i>' + k[1] + '</i></button>';
     }).join('');
+
+    var SEL_CARET = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_CARET + '</svg>';
 
     var el = document.createElement('section');
     el.className = 'card navy dl';
@@ -298,27 +519,33 @@
     el.innerHTML = ''
         + '<div class="dl-head" title="Drag to move the phone">'
         +   '<span class="dl-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>'
-        +   '<span class="dl-status"><span class="dot"></span><span class="dl-status-label"></span></span>'
-        +   '<span class="spacer"></span>'
-        +   '<button type="button" class="dl-icon dl-gear" aria-label="Audio settings" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>'
-        +   '<button type="button" class="dl-icon dl-close" aria-label="Collapse phone"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 9l6 6 6-6"></path></svg></button>'
+        +   '<div class="dl-head-row">'
+        +     '<span class="dl-status"><span class="dot"></span><span class="dl-status-label"></span></span>'
+        +     '<div class="dl-head-r">'
+        +     '<button type="button" class="dl-icon dl-vm" aria-label="Voicemail" title="Voicemail" aria-pressed="false" hidden><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_VM + '</svg><span class="dl-vm-badge" aria-hidden="true" hidden></span></button>'
+        +     '<button type="button" class="dl-icon dl-gear" aria-label="Audio settings" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>'
+        +     '<button type="button" class="dl-icon dl-close" aria-label="Collapse phone"><svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 9l6 6 6-6"></path></svg></button>'
+        +     '</div>'
+        +   '</div>'
         +   '<div class="dl-alerts" hidden><button type="button" class="dl-text dl-alerts-btn" hidden>Get call alerts</button><span class="dl-alerts-off" hidden>Call alerts are off in this browser</span></div>'
+        + '</div>'
+        // Idle tabs: a full-width row under the header (hidden with the idle views).
+        + '<div class="dl-tabs" role="tablist" aria-label="Phone views">'
+        +   '<button type="button" class="dl-tab" role="tab" data-tab="dial" aria-selected="true">Dial</button>'
+        +   '<button type="button" class="dl-tab" role="tab" data-tab="search" aria-selected="false">Search</button>'
+        +   '<button type="button" class="dl-tab" role="tab" data-tab="recents" aria-selected="false">Recents</button>'
         + '</div>'
         + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span>'
         +   '<button type="button" class="dl-go dl-note-call" hidden>Call back</button>'
+        +   '<button type="button" class="dl-text dl-note-add" hidden>Add to NetSuite</button>'
         +   '<a class="dl-note-link" href="#" target="_top">Open record →</a>'
         +   '<button type="button" class="dl-note-x" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 6l12 12M18 6L6 18"></path></svg></button>'
         + '</div>'
         + '<div class="dl-alert" role="status" hidden><div class="dl-alert-title"></div><div class="dl-alert-text" hidden></div><button type="button" class="dl-text dl-alert-act" hidden></button></div>'
         + '<div class="dl-refused" role="status" hidden></div>'
-        // Idle: tabs
+        // Idle: the tab views
         + '<div class="dl-idle dl-pane">'
         +   '<div class="dl-body">'
-        +     '<div class="dl-tabs" role="tablist" aria-label="Phone views">'
-        +       '<button type="button" class="dl-tab" role="tab" data-tab="dial" aria-selected="true">Dial</button>'
-        +       '<button type="button" class="dl-tab" role="tab" data-tab="search" aria-selected="false">Search</button>'
-        +       '<button type="button" class="dl-tab" role="tab" data-tab="recents" aria-selected="false">Recents</button>'
-        +     '</div>'
         +     '<div class="dl-view" data-view="dial" role="tabpanel" style="display:flex;flex-direction:column;gap:10px">'
         +       '<div class="dl-box dl-entity" hidden>'
         +         '<div class="dl-entity-top"><span class="dl-av" aria-hidden="true"></span><span class="dl-entity-name"></span><span class="dl-badge"></span></div>'
@@ -330,6 +557,11 @@
         +         '<div class="dl-tile"><span class="dl-k">BALANCE</span><span class="dl-v dl-bal">—</span></div>'
         +         '<div class="dl-tile"><span class="dl-k">LAST ACTIVITY</span><span class="dl-v dl-last">—</span></div>'
         +       '</div>'
+        // The record that owns the typed number (20 px slot, kept when empty).
+        +       '<div class="dl-slot" aria-live="polite">'
+        +         '<button type="button" class="dl-match" hidden><span class="dl-match-name"></span><span class="dl-match-type"></span></button>'
+        +         '<button type="button" class="dl-add" aria-label="Add this number to NetSuite" hidden>Add to NetSuite</button>'
+        +       '</div>'
         +       '<div class="dl-display-wrap">'
         +         '<input type="tel" class="dl-display" aria-label="Number to call" placeholder="Enter a number" autocomplete="off">'
         +         '<button type="button" class="dl-clear" aria-label="Clear number" hidden><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>'
@@ -337,26 +569,29 @@
         +       '<div class="dl-pad dl-dialpad">' + keyHtml + '</div>'
         +     '</div>'
         +     '<div class="dl-view" data-view="search" role="tabpanel" hidden style="display:flex;flex-direction:column;gap:10px">'
-        +       '<input type="search" class="dl-q" aria-label="Search your book" placeholder="Search company, contact, or phone">'
-        +       '<div class="dl-chips" role="group" aria-label="Filter by type">'
-        +         '<button type="button" class="dl-chip" data-type="" aria-pressed="true">All<em data-count=""></em></button>'
-        +         '<button type="button" class="dl-chip" data-type="customer" aria-pressed="false">Customers<em data-count="customer"></em></button>'
-        +         '<button type="button" class="dl-chip" data-type="prospect" aria-pressed="false">Prospects<em data-count="prospect"></em></button>'
-        +         '<button type="button" class="dl-chip" data-type="lead" aria-pressed="false">Leads<em data-count="lead"></em></button>'
+        +       '<div class="dl-qbox">'
+        +         '<svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_SEARCH + '</svg>'
+        +         '<input type="search" class="dl-q" aria-label="Search your book" placeholder="Search company, contact, or phone" autocomplete="off">'
+        +         '<button type="button" class="dl-clear dl-qclear" aria-label="Clear search" hidden><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_X + '</svg></button>'
+        +         '<button type="button" class="dl-filter" aria-label="Filter and sort" title="Filter and sort" aria-haspopup="menu" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_FILTER + '</svg><span class="dl-fdot" aria-hidden="true" hidden></span></button>'
+        +         '<div class="dl-menu end dl-filter-menu" role="menu" aria-label="Filter and sort" hidden></div>'
         +       '</div>'
-        +       '<div class="dl-sect dl-search-label">Suggested · your book</div>'
-        +       '<ul class="dl-list dl-results"></ul>'
+        +       '<ul class="dl-list dl-results" aria-label="Results"></ul>'
         +       '<div class="dl-msg dl-search-msg" role="status"></div>'
         +     '</div>'
         +     '<div class="dl-view" data-view="recents" role="tabpanel" hidden style="display:flex;flex-direction:column;gap:10px">'
-        +       '<div class="dl-sect">Last 7 days</div>'
-        +       '<ul class="dl-list dl-recent-list"></ul>'
+        +       '<div class="dl-qbox">'
+        +         '<svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_SEARCH + '</svg>'
+        +         '<input type="search" class="dl-q dl-rq" aria-label="Search contacts" placeholder="Name, company or number" autocomplete="off">'
+        +       '</div>'
+        +       '<div class="dl-recent-list"></div>'
         +       '<div class="dl-msg dl-recent-msg" role="status"></div>'
         +     '</div>'
         +   '</div>'
-        +   '<div class="dl-foot">'
-        +     '<span class="dl-act"><button type="button" class="dl-btn big call dl-call" aria-label="Call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg></button>CALL</span>'
-        +     '<span class="dl-act"><button type="button" class="dl-btn dl-backspace" aria-label="Delete last digit"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '><path d="M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1zM17 9l-6 6M11 9l6 6"></path></svg></button>BACK</span>'
+        +   '<div class="dl-foot dial">'
+        +     '<span aria-hidden="true"></span>'
+        +     '<button type="button" class="dl-btn go64 call dl-call" aria-label="Call" title="Call"><svg width="24" height="24" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg></button>'
+        +     '<button type="button" class="dl-btn ghost dl-backspace" aria-label="Delete last digit" title="Delete last digit"><svg width="20" height="20" viewBox="0 0 24 24" ' + STROKE + '><path d="M21 5H9l-6 7 6 7h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1zM17 9l-6 6M11 9l6 6"></path></svg></button>'
         +   '</div>'
         + '</div>'
         // Live: in-call
@@ -365,6 +600,7 @@
         +     '<div class="dl-live-av" aria-hidden="true"></div>'
         +     '<div class="dl-live-name"></div>'
         +     '<div class="dl-live-sub"></div>'
+        +     '<button type="button" class="dl-link dl-live-add" hidden>Add to NetSuite</button>'
         +     '<div class="dl-live-time" aria-label="Call time"></div>'
         +     '<div class="dl-live-warn" role="status" hidden></div>'
         +     '<div class="dl-tiles two dl-live-tiles" hidden>'
@@ -384,12 +620,72 @@
         // Audio settings (gear)
         + '<div class="dl-audio-wrap dl-pane" hidden>'
         +   '<div class="dl-body" style="padding-bottom:14px">'
-        +     '<div class="dl-audio-top"><button type="button" class="dl-text dl-audio-back">Back</button><span class="dl-audio-title">Audio</span></div>'
+        +     '<div class="dl-sheet-top"><button type="button" class="dl-back dl-audio-back" aria-label="Back" title="Back">' + ICON_BACK + '</button><span class="dl-sheet-title">Audio settings</span></div>'
         +     '<div class="dl-msg dl-audio-msg" role="status"></div>'
-        +     '<label class="dl-afield dl-in-row">Microphone<select class="dl-in"></select></label>'
-        +     '<label class="dl-afield dl-out-row">Speaker<select class="dl-out"></select></label>'
+        +     '<label class="dl-afield dl-in-row">Microphone<span class="dl-sel"><select class="dl-in"></select>' + SEL_CARET + '</span></label>'
+        +     '<label class="dl-afield dl-out-row">Speaker<span class="dl-sel"><select class="dl-out"></select>' + SEL_CARET + '</span></label>'
         +     '<div class="dl-remote" hidden>Audio plays in your phone tab.</div>'
-        +     '<button type="button" class="dl-text dl-exit">Exit phone mode</button>'
+        +     '<div class="dl-exit-block">'
+        +       '<hr class="dl-rule">'
+        +       '<button type="button" class="dl-exit">Exit phone mode</button>'
+        +       '<div class="dl-exit-note">Calls will not ring until you reopen phone mode.</div>'
+        +     '</div>'
+        +   '</div>'
+        + '</div>'
+        // Add to NetSuite (DESIGN.md §6): Dial slot, Recents "Add", the ring
+        // view and the after-call note open it. Each block names the
+        // choices it shows (data-modes).
+        + '<div class="dl-as-wrap dl-pane" role="region" aria-labelledby="dl-as-title" hidden>'
+        +   '<div class="dl-body" style="padding-bottom:14px">'
+        +     '<div class="dl-sheet-top"><button type="button" class="dl-back dl-as-back" aria-label="Back" title="Back">' + ICON_BACK + '</button><span class="dl-sheet-title" id="dl-as-title">Add to NetSuite</span></div>'
+        +     '<div class="dl-as-num mono"></div>'
+        +     '<div class="dl-radios" role="radiogroup" aria-label="Where the number goes">'
+        +       AS_CHOICES.map(function (c) {
+                    return '<label class="dl-radio" data-mode="' + c[0] + '"><input type="radio" class="dl-as-radio" name="dl-as-mode" value="' + c[0] + '"><span>' + c[1] + '</span></label>';
+                }).join('')
+        +     '</div>'
+        +     '<hr class="dl-rule">'
+        // Contact (choice 1) or company (choice 2) picker: search the book
+        // (softphoneSearch), then a company's contacts (softphoneContacts).
+        +     '<div class="dl-as-block" data-modes="existingContact newContact">'
+        +       '<div class="dl-lbl dl-as-picklbl">Contact</div>'
+        +       '<div class="dl-qbox dl-as-qbox">'
+        +         '<svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_SEARCH + '</svg>'
+        +         '<input type="search" class="dl-q dl-as-q" aria-label="Search for a contact" placeholder="Search your book" autocomplete="off">'
+        +       '</div>'
+        +       '<div class="dl-sect dl-as-ctx" hidden></div>'
+        +       '<ul class="dl-list dl-as-results" aria-label="Results"></ul>'
+        +       '<div class="dl-msg dl-as-msg" role="status"></div>'
+        +       '<div class="dl-card dl-as-picked" hidden>'
+        +         '<span class="dl-row"><span class="dl-ricon">' + USER_SVG(16) + '</span><span class="dl-row-main"><span class="dl-row-name dl-as-pname"></span><span class="dl-row-sub dl-as-psub"></span></span></span>'
+        +         '<button type="button" class="dl-text dl-as-change">Change</button>'
+        +       '</div>'
+        +     '</div>'
+        +     '<label class="dl-afield" data-modes="newCompany">Company name<input type="text" class="dl-as-company" autocomplete="off"></label>'
+        +     '<div class="dl-as-two" data-modes="newContact newCompany">'
+        +       '<label class="dl-afield">First name<input type="text" class="dl-as-first" autocomplete="off"></label>'
+        +       '<label class="dl-afield">Last name<input type="text" class="dl-as-last" autocomplete="off"></label>'
+        +     '</div>'
+        +     '<label class="dl-afield" data-modes="newContact">Role<input type="text" class="dl-as-role" autocomplete="off"></label>'
+        +     '<label class="dl-afield" data-modes="existingContact">Phone field<span class="dl-sel"><select class="dl-as-field">'
+        +       AS_FIELDS.map(function (f) { return '<option value="' + f[0] + '">' + f[1] + '</option>'; }).join('')
+        +     '</select>' + SEL_CARET + '</span></label>'
+        +     '<div class="dl-as-block" data-modes="newCompany"><span class="dl-lbl" id="dl-as-status-lbl">Status</span>'
+        +       '<div class="dl-seg" role="group" aria-labelledby="dl-as-status-lbl"><button type="button" class="dl-as-status" data-status="lead" aria-pressed="true">Lead</button><button type="button" class="dl-as-status" data-status="prospect" aria-pressed="false">Prospect</button></div>'
+        +     '</div>'
+        +     '<label class="dl-check" data-modes="existingContact newContact"><input type="checkbox" class="dl-as-main">Make this the main phone</label>'
+        +     '<div class="dl-as-note" data-modes="logOnly">The Phone Call stays as it is, linked to no record.</div>'
+        +     '<div class="dl-alert dl-as-dups" data-tone="amber" role="status" hidden></div>'
+        +     '<div class="dl-as-err" role="alert" hidden></div>'
+        +     '<button type="button" class="dl-primary dl-as-save">Save</button>'
+        +   '</div>'
+        + '</div>'
+        // Voicemail (header button)
+        + '<div class="dl-vm-wrap dl-pane" hidden>'
+        +   '<div class="dl-body" style="padding-bottom:14px">'
+        +     '<div class="dl-sheet-top"><button type="button" class="dl-back dl-vm-back" aria-label="Back" title="Back">' + ICON_BACK + '</button><span class="dl-sheet-title">Voicemail</span></div>'
+        +     '<div class="dl-vm-list"></div>'
+        +     '<div class="dl-msg dl-vm-msg" role="status"></div>'
         +   '</div>'
         + '</div>';
 
@@ -404,21 +700,35 @@
         entity: q('.dl-entity'), av: q('.dl-av'), entityName: q('.dl-entity-name'), badge: q('.dl-badge'),
         contactRow: q('.dl-contact-row'), contact: q('.dl-contact'), numberRow: q('.dl-number-row'), number: q('.dl-number'),
         tiles: q('.dl-entity-tiles'), open: q('.dl-open'), bal: q('.dl-bal'), last: q('.dl-last'),
-        display: q('.dl-display'), clearBtn: q('.dl-clear'), dialpad: q('.dl-dialpad'),
-        call: q('.dl-call'), backspace: q('.dl-backspace'),
-        query: q('.dl-q'), chips: qa('.dl-chip'), searchLabel: q('.dl-search-label'),
+        display: q('.dl-display'), clearBtn: q('.dl-display-wrap .dl-clear'), dialpad: q('.dl-dialpad'),
+        match: q('.dl-match'), matchName: q('.dl-match-name'), matchType: q('.dl-match-type'), add: q('.dl-add'),
+        call: q('.dl-call'), backspace: q('.dl-backspace'), dialFoot: q('.dl-foot.dial'), tabRow: q('.dl-tabs'),
+        query: q('.dl-view[data-view="search"] .dl-q'), queryClear: q('.dl-qclear'),
+        filter: q('.dl-filter'), filterDot: q('.dl-fdot'), filterMenu: q('.dl-filter-menu'),
         results: q('.dl-results'), searchMsg: q('.dl-search-msg'),
-        recents: q('.dl-recent-list'), recentMsg: q('.dl-recent-msg'),
+        recents: q('.dl-recent-list'), recentMsg: q('.dl-recent-msg'), recentQuery: q('.dl-rq'),
+        vm: q('.dl-vm'), vmBadge: q('.dl-vm-badge'), vmPane: q('.dl-vm-wrap'), vmBack: q('.dl-vm-back'),
+        vmList: q('.dl-vm-list'), vmMsg: q('.dl-vm-msg'),
         liveAv: q('.dl-live-av'), liveName: q('.dl-live-name'), liveSub: q('.dl-live-sub'), liveTime: q('.dl-live-time'),
         liveTiles: q('.dl-live-tiles'), liveBal: q('.dl-live-bal'), liveOpps: q('.dl-live-opps'),
         dtmf: q('.dl-dtmf'), mute: q('.dl-mute'), muteLabel: q('.dl-mute-label'), end: q('.dl-end'), keys: q('.dl-keys'),
         answer: q('.dl-answer'), decline: q('.dl-decline'), ringActs: qa('.dl-ring-act'), callActs: qa('.dl-call-act'),
         head: q('.dl-head'), audio: q('.dl-audio-wrap'), audioBack: q('.dl-audio-back'), audioMsg: q('.dl-audio-msg'),
         inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit'),
+        exitBlock: q('.dl-exit-block'),
         remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
         alert: q('.dl-alert'), alertTitle: q('.dl-alert-title'), alertText: q('.dl-alert-text'), alertAct: q('.dl-alert-act'),
         refused: q('.dl-refused'), liveWarn: q('.dl-live-warn'),
-        alerts: q('.dl-alerts'), alertsBtn: q('.dl-alerts-btn'), alertsOff: q('.dl-alerts-off')
+        alerts: q('.dl-alerts'), alertsBtn: q('.dl-alerts-btn'), alertsOff: q('.dl-alerts-off'),
+        noteAdd: q('.dl-note-add'), liveAdd: q('.dl-live-add'),
+        asPane: q('.dl-as-wrap'), asBack: q('.dl-as-back'), asNum: q('.dl-as-num'),
+        asRadios: qa('.dl-as-radio'), asLogOpt: q('.dl-radio[data-mode="logOnly"]'), asBlocks: qa('.dl-as-wrap [data-modes]'),
+        asPickLbl: q('.dl-as-picklbl'), asQbox: q('.dl-as-qbox'), asQ: q('.dl-as-q'), asCtx: q('.dl-as-ctx'),
+        asResults: q('.dl-as-results'), asMsg: q('.dl-as-msg'),
+        asPicked: q('.dl-as-picked'), asPName: q('.dl-as-pname'), asPSub: q('.dl-as-psub'), asChange: q('.dl-as-change'),
+        asCompany: q('.dl-as-company'), asFirst: q('.dl-as-first'), asLast: q('.dl-as-last'), asRole: q('.dl-as-role'),
+        asField: q('.dl-as-field'), asStatus: qa('.dl-as-status'), asMain: q('.dl-as-main'),
+        asDups: q('.dl-as-dups'), asErr: q('.dl-as-err'), asSave: q('.dl-as-save')
     };
 
     // --- State ---
@@ -433,10 +743,23 @@
     var liveTimer = null;
     var snapshotCache = {};
     var searchType = '';
+    var searchSort = readSort();
     var searchSeq = 0;
     var searchTimer = null;
     var suggested = null;
     var bookCounts = null;
+    var shownRows = [];       // the rows the Search list draws from (suggested or results)
+    var shownCounts = null;   // the counts the filter menu shows
+    var openMenu = null;      // the open menu (Search filter and sort), or null
+    var vmOpen = false;       // Voicemail view in front
+    var vmRows = null;        // last softphoneVoicemails rows
+    var vmEmployee = '';      // employee id from the response (seen key)
+    var vmAt = 0;             // when Voicemail was last asked for
+    var vmSeq = 0;
+    var vmTimer = null;       // 5 min refresh while the panel shows
+    var vmShownSeen = null;   // the seen mark when this visit to the view began (null: not in one)
+    var panelShown = false;   // the panel is open (client: shown())
+    var wasLive = false;
     var recentsLoaded = false;
     var recentsAt = 0;        // when Recents was last asked for
     var recentsSeq = 0;
@@ -458,9 +781,24 @@
     var answerSent = false;
     var refusedTimer = null;
     var alertRun = null;
+    var matchKey = '';        // last-10 digits the slot is for ('' = none)
+    var matchShown = null;    // the match the slot shows, or null
+    var matchTimer = null;
+    var matchSeq = 0;
+    var matchCache = {};      // key -> match or null (no record)
+    var addOpen = false;      // Add to NetSuite sheet in front
+    var as = null;            // the sheet's state (openAdd)
+    var asSeq = 0;            // picker search / contacts requests
+    var asTimer = null;
+    var dupSeq = 0;
+    var addedKeys = {};       // last-10 digits saved this session: no more "Add"
+    var noteAdd = null;       // { phone, phoneCallId } the after-call note adds
+    var liveAddNum = '';      // the number the ring view's link adds
 
     // --- Helpers ---
-    function api(action, body) {
+    // raw: answers with { error } come back as data (Add to NetSuite:
+    // { ok: false, error, message }) instead of a rejection.
+    function api(action, body, raw) {
         if (!cfg.restletUrl) return Promise.reject(new Error('Phone data is not available on this page'));
         var payload = { action: action };
         if (body) for (var k in body) if (Object.prototype.hasOwnProperty.call(body, k)) payload[k] = body[k];
@@ -473,7 +811,7 @@
             if (!r.ok) throw new Error('HTTP ' + r.status);
             return r.json();
         }).then(function (d) {
-            if (d && d.error) throw new Error(String(d.error));
+            if (d && d.error && !raw) throw new Error(String(d.error));
             return d || {};
         });
     }
@@ -512,6 +850,114 @@
         return s;
     }
 
+    // localStorage, never fatal (blocked storage, private mode).
+    function readLocal(key) {
+        try { return window.localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function writeLocal(key, value) {
+        try { window.localStorage.setItem(key, value); } catch (e) { /* storage blocked */ }
+    }
+
+    function readSort() {
+        var v = readLocal(SORT_KEY);
+        return SORTS.some(function (s) { return s[0] === v; }) ? v : 'recent';
+    }
+
+    // --- Times (the browser's locale and time zone) ---
+    function dayKey(d) { return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); }
+
+    // "Today" / "Yesterday" / "Nov 6".
+    function dayLabel(d) {
+        var now = new Date(Date.now());
+        if (dayKey(d) === dayKey(now)) return 'Today';
+        var y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+        if (dayKey(d) === dayKey(y)) return 'Yesterday';
+        return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    // "2:14 PM".
+    function timeLabel(d) {
+        return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    }
+
+    // 'HH:MM' (24 h, the RESTlet's timeOfDay) -> "2:14 PM".
+    function clock12(hhmm) {
+        var m = /^([0-9]{1,2}):([0-9]{2})/.exec(String(hhmm || ''));
+        if (!m) return '';
+        var h = Number(m[1]);
+        return (h % 12 || 12) + ':' + m[2] + (h < 12 ? ' AM' : ' PM');
+    }
+
+    // A call's day group and time: from its ISO start, else the record's
+    // date and time of day as the RESTlet sent them.
+    function whenOf(iso, date, timeOfDay) {
+        var t = Date.parse(iso || '');
+        if (!isNaN(t)) {
+            var d = new Date(t);
+            return { key: dayKey(d), day: dayLabel(d), time: timeLabel(d) };
+        }
+        return { key: 'd:' + (date || ''), day: date || 'Earlier', time: clock12(timeOfDay) };
+    }
+
+    // Seconds -> "m:ss".
+    function lengthLabel(sec) {
+        var s = Math.max(0, Math.round(Number(sec) || 0));
+        if (!s) return '';
+        return Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
+    }
+
+    // Rows (newest first) into day groups: [{ label, rows }].
+    function groupByDay(rows, whenFn) {
+        var groups = [];
+        rows.forEach(function (r) {
+            var w = whenFn(r);
+            var g = groups[groups.length - 1];
+            if (!g || g.key !== w.key) {
+                g = { key: w.key, label: w.day, rows: [] };
+                groups.push(g);
+            }
+            g.rows.push({ r: r, time: w.time });
+        });
+        return groups;
+    }
+
+    // A group label followed by its list; returns the list.
+    function dayGroup(parent, label) {
+        var h = document.createElement('div');
+        h.className = 'dl-day';
+        h.setAttribute('role', 'heading');
+        h.setAttribute('aria-level', '3');
+        h.textContent = label;
+        parent.appendChild(h);
+        var ul = document.createElement('ul');
+        ul.className = 'dl-list';
+        ul.setAttribute('aria-label', label);
+        parent.appendChild(ul);
+        return ul;
+    }
+
+    // A go-green round Call for a list row.
+    function rowCall(label, onClick) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dl-row-call';
+        b.setAttribute('aria-label', label);
+        b.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>';
+        b.addEventListener('click', onClick);
+        return b;
+    }
+
+    // The 28 px go-green "Call back" (missed rows, voicemail).
+    function callBackButton(name, onClick) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dl-go dl-recent-cb';
+        b.textContent = 'Call back';
+        b.setAttribute('aria-label', 'Call back ' + name);
+        b.addEventListener('click', onClick);
+        return b;
+    }
+
     function isActive() { return !!(snap && ACTIVE[snap.phase]); }
     function isIncoming() { return !!(snap && snap.phase === 'incoming'); }
     function isRemote() { return !!(host.isRemote && host.isRemote()); }
@@ -530,8 +976,8 @@
         tab = next;
         ui.tabs.forEach(function (t) { t.setAttribute('aria-selected', t.getAttribute('data-tab') === next ? 'true' : 'false'); });
         ui.views.forEach(function (v) { v.hidden = v.getAttribute('data-view') !== next; });
-        ui.call.parentNode.hidden = next !== 'dial';
-        ui.backspace.parentNode.hidden = next !== 'dial';
+        ui.dialFoot.hidden = next !== 'dial';
+        closeMenu(false);
         if (next === 'search' && suggested === null) loadSuggested();
         if (next === 'recents' && (!recentsLoaded || Date.now() - recentsAt > RECENTS_STALE_MS)) loadRecents();
     }
@@ -555,7 +1001,59 @@
         ui.display.value = formatPhone(value) || String(value || '');
         manual = !!isManual;
         syncCallButton();
+        syncMatch();
     }
+
+    // --- Match slot (above the number) ---
+    function showMatch(m) {
+        matchShown = m || null;
+        ui.match.hidden = !m;
+        if (m) {
+            var type = TYPE_NAME[m.entityType] || '';
+            ui.matchName.textContent = m.name;
+            ui.matchType.textContent = type ? '\u00a0\u00b7 ' + type : ''; // nbsp: a flex item drops a leading space
+            var label = 'Load ' + m.name + (type ? ', ' + type : '');
+            ui.match.setAttribute('aria-label', label);
+            ui.match.title = label;
+        }
+        // No record: "Add to NetSuite" (opens the sheet with the typed number).
+        ui.add.hidden = !(ADD_TO_NETSUITE_ENABLED && !m && matchKey && matchCache[matchKey] === null);
+    }
+
+    // Look the typed number up once the rep stops typing. Only a number
+    // typed by hand (a loaded record already says whose number it is).
+    function syncMatch() {
+        var key = manual && !isActive() ? lastTen(ui.display.value) : '';
+        if (key.length < MATCH_MIN_DIGITS) key = '';
+        if (key === matchKey) return;
+        matchKey = key;
+        window.clearTimeout(matchTimer);
+        matchTimer = null;
+        matchSeq++;
+        if (!key || !cfg.restletUrl) { showMatch(null); return; }
+        if (Object.prototype.hasOwnProperty.call(matchCache, key)) { showMatch(matchCache[key]); return; }
+        showMatch(null);
+        var seq = matchSeq;
+        matchTimer = window.setTimeout(function () {
+            matchTimer = null;
+            api('lookupCaller', { phone: key }).then(function (d) {
+                var m = d && d.match && d.match.entityId && d.match.name ? d.match : null;
+                matchCache[key] = m;
+                if (seq === matchSeq) showMatch(m);
+            }).catch(function () { /* the slot stays empty */ });
+        }, MATCH_DEBOUNCE_MS);
+    }
+
+    ui.match.addEventListener('click', function () {
+        var m = matchShown;
+        if (!m) return;
+        var number = digitsOf(ui.display.value);
+        loadEntity({ entityId: m.entityId, entityName: m.name, entityType: m.entityType, phone: number });
+        ui.display.focus();
+    });
+    ui.add.addEventListener('click', function () {
+        openAdd({ phone: ui.display.value, phoneCallId: '', trigger: ui.add });
+    });
 
     function syncCallButton() {
         ui.clearBtn.hidden = !ui.display.value;
@@ -672,11 +1170,34 @@
         setDisplay(cur + d, true);
     }
 
+    // A press on 0 held LONG_PRESS_MS types + instead (as on the iPhone).
+    var zeroHold = null;
+    var zeroPlus = false;
+    function endZeroHold() {
+        if (zeroHold) { window.clearTimeout(zeroHold); zeroHold = null; }
+    }
+    ui.dialpad.addEventListener('pointerdown', function (e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        var k = e.target.closest('.dl-key');
+        zeroPlus = false;
+        endZeroHold();
+        if (!k || k.getAttribute('data-key') !== '0') return;
+        zeroHold = window.setTimeout(function () {
+            zeroHold = null;
+            zeroPlus = true;
+            typeDigit('+');
+        }, LONG_PRESS_MS);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(function (type) {
+        ui.dialpad.addEventListener(type, endZeroHold);
+    });
     ui.dialpad.addEventListener('click', function (e) {
         var k = e.target.closest('.dl-key');
-        if (k) typeDigit(k.getAttribute('data-key'));
+        if (!k) return;
+        if (zeroPlus) { zeroPlus = false; return; } // the long press typed +
+        typeDigit(k.getAttribute('data-key'));
     });
-    ui.display.addEventListener('input', function () { manual = true; syncCallButton(); });
+    ui.display.addEventListener('input', function () { manual = true; syncCallButton(); syncMatch(); });
     ui.display.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !ui.call.disabled) { e.preventDefault(); placeCall(); }
         // Esc clears the number first; on an empty field it closes the
@@ -750,12 +1271,170 @@
 
     ui.call.addEventListener('click', placeCall);
 
-    // --- Search tab ---
-    function setChipCounts(counts) {
-        qa('.dl-chip em').forEach(function (em) {
-            var key = em.getAttribute('data-count') || 'total';
-            em.textContent = counts && counts[key] != null ? String(counts[key]) : '';
+    // --- Menu (Search: filter and sort) ---
+    // A menu button opens a role="menu": groups (role="group", a label, a
+    // rule between) of menuitemradio items. Arrow keys, Home and End move
+    // between items (across groups); Enter picks; Esc closes it and focus
+    // goes back to its button; Tab, a click outside or a choice closes it.
+    function menuItems(m) { return Array.prototype.slice.call(m.menu.querySelectorAll('.dl-mi')); }
+
+    // groups: [{ key, label, active, items: [{ key, label, count }] }].
+    function fillMenu(m, groups) {
+        clear(m.menu);
+        groups.forEach(function (g, gi) {
+            if (gi) {
+                var hr = document.createElement('hr');
+                hr.className = 'dl-rule';
+                hr.setAttribute('role', 'separator');
+                m.menu.appendChild(hr);
+            }
+            var box = document.createElement('div');
+            box.className = 'dl-mgroup';
+            box.setAttribute('role', 'group');
+            box.setAttribute('aria-label', g.label);
+            var lbl = span('dl-mlabel', g.label);
+            lbl.setAttribute('aria-hidden', 'true');
+            box.appendChild(lbl);
+            g.items.forEach(function (it) {
+                var b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'dl-mi';
+                b.tabIndex = -1;
+                b.setAttribute('role', 'menuitemradio');
+                b.setAttribute('aria-checked', it.key === g.active ? 'true' : 'false');
+                b.setAttribute('data-group', g.key);
+                b.setAttribute('data-value', it.key);
+                b.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_CHECK + '</svg>';
+                b.appendChild(span('', it.label));
+                if (it.count != null) {
+                    var em = document.createElement('em');
+                    em.textContent = String(it.count);
+                    b.appendChild(em);
+                }
+                box.appendChild(b);
+            });
+            m.menu.appendChild(box);
         });
+    }
+
+    function showMenu(m, focusLast) {
+        if (openMenu && openMenu !== m) closeMenu(false);
+        m.fill();
+        m.menu.hidden = false;
+        m.button.setAttribute('aria-expanded', 'true');
+        openMenu = m;
+        var items = menuItems(m);
+        var checked = items.filter(function (b) { return b.getAttribute('aria-checked') === 'true'; })[0];
+        var first = focusLast ? items[items.length - 1] : (checked || items[0]);
+        if (first) first.focus();
+    }
+
+    function closeMenu(refocus) {
+        var m = openMenu;
+        if (!m) return;
+        openMenu = null;
+        m.menu.hidden = true;
+        m.button.setAttribute('aria-expanded', 'false');
+        if (refocus) m.button.focus();
+    }
+
+    function bindMenu(m) {
+        m.button.addEventListener('click', function () {
+            if (openMenu === m) closeMenu(true);
+            else showMenu(m, false);
+        });
+        m.button.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                showMenu(m, e.key === 'ArrowUp');
+            }
+        });
+        m.menu.addEventListener('click', function (e) {
+            var b = e.target.closest('.dl-mi');
+            if (!b) return;
+            closeMenu(true);
+            m.pick(b.getAttribute('data-group') || '', b.getAttribute('data-value') || '');
+        });
+        m.menu.addEventListener('keydown', function (e) {
+            var items = menuItems(m);
+            var i = items.indexOf(el.getRootNode().activeElement);
+            var next = null;
+            if (e.key === 'ArrowDown') next = items[(i + 1) % items.length];
+            else if (e.key === 'ArrowUp') next = items[(i - 1 + items.length) % items.length];
+            else if (e.key === 'Home') next = items[0];
+            else if (e.key === 'End') next = items[items.length - 1];
+            else if (e.key === 'Enter' && items[i]) {
+                e.preventDefault();
+                items[i].click();
+                return;
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation(); // the menu closes, not the panel
+                closeMenu(true);
+                return;
+            } else if (e.key === 'Tab') {
+                closeMenu(false);
+                return;
+            }
+            if (next) {
+                e.preventDefault();
+                next.focus();
+            }
+        });
+    }
+
+    // A press outside the open menu and its button closes it.
+    document.addEventListener('pointerdown', function (e) {
+        if (!openMenu) return;
+        var path = e.composedPath ? e.composedPath() : [];
+        if (path.indexOf(openMenu.menu) !== -1 || path.indexOf(openMenu.button) !== -1) return;
+        closeMenu(false);
+    }, true);
+
+    // --- Search tab ---
+    // One filter icon, one menu: Show (type, with counts) and Sort by.
+    var filterMenu = {
+        button: ui.filter,
+        menu: ui.filterMenu,
+        fill: function () {
+            fillMenu(filterMenu, [
+                { key: 'type', label: 'Show', active: searchType, items: FILTERS.map(function (f) {
+                    return { key: f[0], label: f[1], count: countOf(f[0]) };
+                }) },
+                { key: 'sort', label: 'Sort by', active: searchSort, items: SORTS.map(function (x) {
+                    return { key: x[0], label: x[1] };
+                }) }
+            ]);
+        },
+        pick: function (group, value) {
+            if (group === 'sort') {
+                searchSort = value;
+                writeLocal(SORT_KEY, value);
+            } else {
+                searchType = value;
+                renderFilter();
+            }
+            renderResults();
+        }
+    };
+    bindMenu(filterMenu);
+
+    // Counts: the whole book until the rep types, then the results.
+    function countOf(type) {
+        var c = shownCounts;
+        if (!c) return null;
+        var v = c[type || 'total'];
+        return v == null ? null : v;
+    }
+
+    // The filter icon carries a dot while Show is not All.
+    function renderFilter() {
+        ui.filterDot.hidden = !searchType;
+    }
+
+    function setCounts(counts) {
+        shownCounts = counts || null;
+        if (openMenu === filterMenu) filterMenu.fill();
     }
 
     function countRows(rows) {
@@ -764,45 +1443,65 @@
         return c;
     }
 
-    function renderResults(rows) {
-        clear(ui.results);
-        var shown = searchType ? rows.filter(function (r) { return r.type === searchType; }) : rows;
-        shown.forEach(function (r) {
-            var li = document.createElement('li');
-            li.className = 'dl-recent';
-            var b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'dl-row';
-            var av = span('dl-av', initials(r.companyName));
-            av.setAttribute('aria-hidden', 'true');
-            var main = document.createElement('span');
-            main.className = 'dl-row-main';
-            main.appendChild(span('dl-row-name', r.companyName));
-            main.appendChild(span('dl-row-sub', [r.contactName, formatPhone(r.phone) || 'No phone on file'].filter(Boolean).join(' · ')));
-            b.appendChild(av);
-            b.appendChild(main);
-            b.appendChild(span('dl-row-meta', TYPE_LABEL[r.type] || ''));
-            b.addEventListener('click', function () {
-                loadEntity({ entityId: r.id, entityName: r.companyName, entityType: r.type, phone: r.phone });
-                setTab('dial');
-                ui.display.focus();
-            });
-            li.appendChild(b);
-            if (r.phone) {
-                var call = document.createElement('button');
-                call.type = 'button';
-                call.className = 'dl-row-call';
-                call.setAttribute('aria-label', 'Call ' + r.companyName);
-                call.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>';
-                call.addEventListener('click', function () {
-                    callBack({ name: r.companyName || '', number: r.phone, entityId: r.id, entityType: r.type });
-                });
-                li.appendChild(call);
+    // Client-side sort: newest first by lastActivityAt / lastCalledAt (rows
+    // without one go last), or by name. Ties keep the RESTlet's order.
+    function sortRows(rows) {
+        var field = searchSort === 'lastCalled' ? 'lastCalledAt' : searchSort === 'recent' ? 'lastActivityAt' : '';
+        var keyed = rows.map(function (r, i) { return { r: r, i: i, t: field ? Date.parse(r[field] || '') : 0 }; });
+        keyed.sort(function (a, b) {
+            if (field) {
+                var at = isNaN(a.t) ? -Infinity : a.t;
+                var bt = isNaN(b.t) ? -Infinity : b.t;
+                if (at !== bt) return bt - at;
+            } else {
+                var n = String(a.r.companyName || '').localeCompare(String(b.r.companyName || ''), undefined, { sensitivity: 'base' });
+                if (n) return n;
             }
-            ui.results.appendChild(li);
+            return a.i - b.i;
         });
+        return keyed.map(function (k) { return k.r; });
+    }
+
+    function searchItem(r) {
+        var li = document.createElement('li');
+        li.className = 'dl-card';
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dl-row';
+        var icon = document.createElement('span');
+        icon.className = 'dl-ricon';
+        icon.innerHTML = USER_SVG(16);
+        var main = document.createElement('span');
+        main.className = 'dl-row-main';
+        main.appendChild(span('dl-row-name', r.companyName));
+        var type = TYPE_NAME[r.type] || '';
+        var detail = r.contactName || formatPhone(r.phone) || r.phone || 'No phone on file';
+        main.appendChild(span('dl-row-sub', [type, detail].filter(Boolean).join(' · ')));
+        b.appendChild(icon);
+        b.appendChild(main);
+        b.addEventListener('click', function () {
+            loadEntity({ entityId: r.id, entityName: r.companyName, entityType: r.type, phone: r.phone });
+            setTab('dial');
+            ui.display.focus();
+        });
+        li.appendChild(b);
+        if (r.phone) {
+            li.appendChild(rowCall('Call ' + r.companyName, function () {
+                callBack({ name: r.companyName || '', number: r.phone, entityId: r.id, entityType: r.type });
+            }));
+        }
+        return li;
+    }
+
+    // rows: the new list to draw from; left out = redraw the last one
+    // (filter or sort changed).
+    function renderResults(rows) {
+        if (rows) shownRows = rows;
+        clear(ui.results);
+        var list = searchType ? shownRows.filter(function (r) { return r.type === searchType; }) : shownRows;
+        sortRows(list).forEach(function (r) { ui.results.appendChild(searchItem(r)); });
         ui.searchMsg.className = 'dl-msg dl-search-msg';
-        ui.searchMsg.textContent = shown.length ? '' : 'No matches.';
+        ui.searchMsg.textContent = list.length ? '' : 'No matches.';
     }
 
     function loadSuggested() {
@@ -810,12 +1509,12 @@
         ui.searchMsg.textContent = 'Loading…';
         api('softphoneBookCounts').then(function (d) {
             bookCounts = d;
-            if (!ui.query.value.trim()) setChipCounts(bookCounts);
+            if (!ui.query.value.trim()) setCounts(bookCounts);
         }).catch(function () { /* row counts below stand in */ });
         api('softphoneSuggested', { limit: 30 }).then(function (d) {
             suggested = d.rows || [];
             if (ui.query.value.trim()) return;
-            if (!bookCounts) setChipCounts(countRows(suggested));
+            if (!bookCounts) setCounts(countRows(suggested));
             renderResults(suggested);
         }).catch(function (err) {
             ui.searchMsg.className = 'dl-msg dl-search-msg err';
@@ -826,22 +1525,22 @@
     function runSearch() {
         var query = ui.query.value.trim();
         var seq = ++searchSeq;
+        ui.queryClear.hidden = !ui.query.value;
         if (!query) {
-            ui.searchLabel.textContent = 'Suggested · your book';
-            setChipCounts(bookCounts || countRows(suggested || []));
+            setCounts(bookCounts || countRows(suggested || []));
             renderResults(suggested || []);
             return;
         }
-        ui.searchLabel.textContent = '“' + query + '” · your book';
         ui.searchMsg.className = 'dl-msg dl-search-msg';
         ui.searchMsg.textContent = 'Searching…';
         api('softphoneSearch', { query: query, typeFilter: '', limit: 20 }).then(function (d) {
             if (seq !== searchSeq) return;
             var rows = d.rows || [];
-            setChipCounts(countRows(rows));
+            setCounts(countRows(rows));
             renderResults(rows);
         }).catch(function (err) {
             if (seq !== searchSeq) return;
+            shownRows = [];
             clear(ui.results);
             ui.searchMsg.className = 'dl-msg dl-search-msg err';
             ui.searchMsg.textContent = 'Search failed: ' + err.message;
@@ -849,20 +1548,36 @@
     }
 
     ui.query.addEventListener('input', function () {
+        ui.queryClear.hidden = !ui.query.value;
         window.clearTimeout(searchTimer);
         searchTimer = window.setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
     });
-    ui.chips.forEach(function (chip) {
-        chip.addEventListener('click', function () {
-            searchType = chip.getAttribute('data-type') || '';
-            ui.chips.forEach(function (c) { c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'); });
-            runSearch();
-        });
+    ui.queryClear.addEventListener('click', function () {
+        ui.query.value = '';
+        window.clearTimeout(searchTimer);
+        runSearch();
+        ui.query.focus();
     });
+    // Esc in a search field clears it first; on an empty field it closes
+    // the panel (the panel's own Escape handler).
+    function escClears(input, onClear) {
+        input.addEventListener('keydown', function (e) {
+            if (e.key !== 'Escape' || !input.value) return;
+            e.preventDefault();
+            e.stopPropagation();
+            input.value = '';
+            onClear();
+        });
+    }
+    escClears(ui.query, function () { window.clearTimeout(searchTimer); runSearch(); });
+    renderFilter();
 
     // --- Recents tab ---
-    // Missed = status 'Missed' or a voicemail (the portlet's isMissedCall rule).
-    function isMissedRow(r) { return r.callStatus === 'Missed' || r.voicemail === true; }
+    // Missed = status 'Missed' or a voicemail (the portlet's isMissedCall
+    // rule), or the RESTlet's outcome says so.
+    function isMissedRow(r) {
+        return r.callStatus === 'Missed' || r.voicemail === true || r.outcome === 'missed' || r.outcome === 'voicemail';
+    }
 
     function lastTen(n) { return digitsOf(n).replace('+', '').slice(-10); }
 
@@ -873,7 +1588,7 @@
         i.setAttribute('role', 'img');
         i.setAttribute('aria-label', v.label);
         i.title = v.label;
-        i.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + v.path + '"></path></svg>';
+        i.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE2 + '><path d="' + v.path + '"></path></svg>';
         return i;
     }
 
@@ -897,10 +1612,18 @@
         focusPanel('call');
     }
 
-    function recentItem(r) {
+    // One flat Recents row: direction arrow, name (the number in mono when
+    // no record), Missed / Voicemail in coral text (no outcome chips: summary
+    // state lives on the Phone Call and in Call Central; 2026-11-13) and time; a green Call (missed: the
+    // 28 px Call back) on every row with a number. A call with no record
+    // (row.unknown, DESIGN.md §6): the number as the name, "Not in
+    // NetSuite" under it, and a small "Add" (the sheet, with the Phone Call).
+    function recentItem(r, time) {
         var missed = isMissedRow(r);
         var kind = missed ? 'missed' : (r.direction === 'inbound' ? 'in' : 'out');
-        var name = r.companyName || formatPhone(r.phone) || r.phone || 'Unknown';
+        var number = formatPhone(r.phone) || r.phone || '';
+        var unknown = r.unknown === true && !r.pending && !addedKeys[lastTen(r.phone)];
+        var name = (unknown ? '' : r.companyName) || number || 'Unknown';
         var li = document.createElement('li');
         li.className = 'dl-recent';
         li.setAttribute('data-dir', kind);
@@ -910,39 +1633,48 @@
         b.className = 'dl-row';
         var main = document.createElement('span');
         main.className = 'dl-row-main';
-        main.appendChild(span('dl-row-name', name));
-        var rest = r.pending ? [ago(r.at)] : [r.contactName, formatPhone(r.phone)];
-        rest = rest.filter(Boolean).join(' · ');
+        main.appendChild(span('dl-row-name' + (r.companyName && !unknown ? '' : ' mono'), name));
         var sub = span('dl-row-sub', '');
-        if (missed) {
-            sub.appendChild(span('dl-row-flag', r.voicemail ? 'Voicemail' : 'Missed'));
-            if (rest) sub.appendChild(document.createTextNode(' · ' + rest));
-        } else {
-            sub.textContent = rest;
-        }
+        if (unknown) sub.appendChild(span('dl-row-unknown', 'Not in NetSuite'));
+        else if (missed || r.pending) sub.appendChild(span('dl-row-miss', r.voicemail === true || r.outcome === 'voicemail' ? 'Voicemail' : 'Missed'));
+        var when = r.pending ? ago(r.at) : time;
+        if (when) sub.appendChild(span('dl-row-time', when));
         main.appendChild(sub);
-        var mins = r.duration ? Math.max(1, Math.round(r.duration / 60)) + ' min' : '';
         b.appendChild(dirIcon(kind));
         b.appendChild(main);
-        if (!r.pending) b.appendChild(span('dl-row-meta', [r.date, mins].filter(Boolean).join('\n')));
         b.addEventListener('click', function () {
             loadEntity({ entityId: r.companyId, entityName: r.companyName, entityType: r.entityType || 'customer', phone: r.phone });
             setTab('dial');
             ui.display.focus();
         });
         li.appendChild(b);
-        if (missed && r.phone) {
-            var cb = document.createElement('button');
-            cb.type = 'button';
-            cb.className = 'dl-go dl-recent-cb';
-            cb.textContent = 'Call back';
-            cb.setAttribute('aria-label', 'Call back ' + name);
-            cb.addEventListener('click', function () {
-                callBack({ name: r.companyName || '', number: r.phone, entityId: r.companyId || '', entityType: r.entityType || 'customer' });
+        if (unknown && ADD_TO_NETSUITE_ENABLED && cfg.restletUrl && r.phone) {
+            var add = document.createElement('button');
+            add.type = 'button';
+            add.className = 'dl-ghost dl-recent-add';
+            add.textContent = 'Add';
+            add.setAttribute('aria-label', 'Add ' + number + ' to NetSuite');
+            add.addEventListener('click', function () {
+                openAdd({ phone: r.phone, phoneCallId: r.id || '', trigger: add });
             });
-            li.appendChild(cb);
+            li.appendChild(add);
+        }
+        if (r.phone) {
+            var dial = function () {
+                callBack({ name: r.companyName || '', number: r.phone, entityId: r.companyId || '', entityType: r.entityType || 'customer' });
+            };
+            li.appendChild(missed ? callBackButton(name, dial) : rowCall('Call ' + name, dial));
         }
         return li;
+    }
+
+    // Recents search: name, company, contact or number (client side).
+    function recentMatches(r, query) {
+        if (!query) return true;
+        var text = [r.companyName, r.contactName].join(' ').toLowerCase();
+        if (text.indexOf(query.toLowerCase()) !== -1) return true;
+        var digits = query.replace(/[^0-9]/g, '');
+        return digits.length >= 3 && digitsOf(r.phone).indexOf(digits) !== -1;
     }
 
     // The newest missed call (missedUnseen.last) stays on top as a pending
@@ -956,20 +1688,34 @@
         });
     }
 
+    // Day groups (Today / Yesterday / date), newest first; the pending
+    // missed row heads Today.
     function renderRecents() {
         var rows = recentRows || [];
         if (pendingMissed && recentRows && missedLogged(pendingMissed, rows)) pendingMissed = null;
-        clear(ui.recents);
+        var query = ui.recentQuery.value.trim();
+        var list = rows.slice();
         if (pendingMissed) {
             var c = pendingMissed.caller;
-            ui.recents.appendChild(recentItem({
+            list.unshift({
                 pending: true, at: pendingMissed.at, callStatus: 'Missed', direction: 'inbound', voicemail: false,
+                startedAt: new Date(pendingMissed.at).toISOString(),
                 companyId: c.entityId || '', companyName: c.name || '', entityType: c.entityType || '', phone: c.number || ''
-            }));
+            });
         }
-        rows.forEach(function (r) { ui.recents.appendChild(recentItem(r)); });
-        if (recentRows) ui.recentMsg.textContent = rows.length || pendingMissed ? '' : 'No calls in the last 7 days.';
+        var shown = list.filter(function (r) { return recentMatches(r, query); });
+        clear(ui.recents);
+        groupByDay(shown, function (r) { return whenOf(r.startedAt, r.date, r.timeOfDay); }).forEach(function (g) {
+            var ul = dayGroup(ui.recents, g.label);
+            g.rows.forEach(function (x) { ul.appendChild(recentItem(x.r, x.time)); });
+        });
+        if (!recentRows) return;
+        ui.recentMsg.className = 'dl-msg dl-recent-msg';
+        ui.recentMsg.textContent = shown.length ? '' : (list.length ? 'No matches.' : 'No calls in the last 7 days.');
     }
+
+    ui.recentQuery.addEventListener('input', renderRecents);
+    escClears(ui.recentQuery, renderRecents);
 
     function loadRecents() {
         recentsLoaded = true;
@@ -989,6 +1735,192 @@
         });
     }
 
+    // --- Voicemail (header button + view) ---
+    // Unheard: `at` newer than the seen mark. The RESTlet may name the
+    // employee (employeeId); without it the mark is per browser.
+    function vmKey() { return VM_SEEN_PREFIX + (vmEmployee || 'me'); }
+
+    function vmTime(r) { return Date.parse((r && r.at) || ''); }
+
+    function vmSeenMark() { return Date.parse(readLocal(vmKey()) || ''); }
+
+    // seen: a seen mark in ms (NaN = none yet: every voicemail is unheard).
+    function isUnheard(r, seen) {
+        var t = vmTime(r);
+        return !isNaN(t) && (isNaN(seen) || t > seen);
+    }
+
+    function vmUnheard() {
+        if (!vmRows) return 0;
+        var seen = vmSeenMark();
+        return vmRows.filter(function (r) { return isUnheard(r, seen); }).length;
+    }
+
+    function renderVmBadge() {
+        var n = vmUnheard();
+        ui.vmBadge.hidden = !n;
+        ui.vmBadge.textContent = n ? String(n) : '';
+        ui.vm.setAttribute('aria-label', n ? 'Voicemail, ' + n + ' new' : 'Voicemail');
+    }
+
+    // The view is open: every voicemail in it is heard (the mark is the
+    // newest `at`, so one that arrives later still counts as new). The
+    // first mark of a visit keeps the mark from before it (vmShownSeen):
+    // rows that were unheard keep their dot until the view closes.
+    function markVmSeen() {
+        var best = NaN;
+        var newest = '';
+        (vmRows || []).forEach(function (r) {
+            var t = vmTime(r);
+            if (!isNaN(t) && (isNaN(best) || t > best)) { best = t; newest = String(r.at); }
+        });
+        var seen = vmSeenMark();
+        if (vmRows && vmShownSeen === null) vmShownSeen = seen;
+        if (newest && (isNaN(seen) || best > seen)) writeLocal(vmKey(), newest);
+        renderVmBadge();
+        if (vmRows) renderVm();
+    }
+
+    // One voicemail, two columns. Left: the name (a coral dot before it
+    // while unheard) and the AI brief. Right: time · length, then Open
+    // record (the Phone Call: the recording is deleted after
+    // transcription, so there is nothing to play) and Call back.
+    function vmItem(r, time, seen) {
+        var number = formatPhone(r.phone) || r.phone || '';
+        var known = !!(r.companyName || r.contactName);
+        var name = r.companyName || r.contactName || number || 'Unknown caller';
+        var li = document.createElement('li');
+        li.className = 'dl-vm-item';
+        var left = document.createElement('div');
+        left.className = 'dl-vm-l';
+        var who = document.createElement('div');
+        who.className = 'dl-vm-name';
+        if (isUnheard(r, seen)) {
+            var dot = span('dl-vm-dot', '');
+            dot.setAttribute('role', 'img');
+            dot.setAttribute('aria-label', 'Unheard');
+            who.appendChild(dot);
+        }
+        who.appendChild(span('dl-row-name' + (known ? '' : ' mono'), name));
+        left.appendChild(who);
+        if (r.brief) {
+            var p = document.createElement('p');
+            p.className = 'dl-vm-brief';
+            p.textContent = String(r.brief);
+            left.appendChild(p);
+        }
+        li.appendChild(left);
+        var right = document.createElement('div');
+        right.className = 'dl-vm-r';
+        var meta = [time, lengthLabel(r.durationSec)].filter(Boolean).join(' · ');
+        if (meta) right.appendChild(span('dl-vm-meta', meta));
+        var acts = document.createElement('div');
+        acts.className = 'dl-vm-acts';
+        if (r.phoneCallId) {
+            var a = document.createElement('a');
+            a.className = 'dl-vm-open';
+            a.href = '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.phoneCallId);
+            a.target = '_top';
+            a.title = 'Open record';
+            a.setAttribute('aria-label', 'Open record for ' + name);
+            a.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_OPEN + '</svg>';
+            acts.appendChild(a);
+        }
+        if (r.phone) {
+            acts.appendChild(callBackButton(name, function () {
+                setVmOpen(false);
+                callBack({ name: r.companyName || '', number: r.phone, entityId: r.companyId || '', entityType: r.entityType || 'customer' });
+            }));
+        }
+        if (acts.firstChild) right.appendChild(acts);
+        if (right.firstChild) li.appendChild(right);
+        return li;
+    }
+
+    function renderVm() {
+        clear(ui.vmList);
+        var rows = vmRows || [];
+        var seen = vmShownSeen !== null ? vmShownSeen : vmSeenMark();
+        groupByDay(rows, function (r) { return whenOf(r.at); }).forEach(function (g) {
+            var ul = dayGroup(ui.vmList, g.label);
+            g.rows.forEach(function (x) { ul.appendChild(vmItem(x.r, x.time, seen)); });
+        });
+        if (!vmRows) return;
+        ui.vmMsg.className = 'dl-msg dl-vm-msg';
+        ui.vmMsg.textContent = rows.length ? '' : 'No voicemail in the last 30 days.';
+    }
+
+    function loadVoicemails() {
+        if (!cfg.restletUrl) return;
+        vmAt = Date.now();
+        var seq = ++vmSeq;
+        if (!vmRows) {
+            ui.vmMsg.className = 'dl-msg dl-vm-msg';
+            ui.vmMsg.textContent = 'Loading…';
+        }
+        api('softphoneVoicemails', { limit: VM_LIMIT, days: 30 }).then(function (d) {
+            if (seq !== vmSeq) return;
+            if (d.employeeId != null && String(d.employeeId) !== '') vmEmployee = String(d.employeeId);
+            vmRows = Array.isArray(d.rows) ? d.rows : [];
+            if (vmOpen && panelShown) markVmSeen();
+            else {
+                renderVm();
+                renderVmBadge();
+            }
+        }).catch(function (err) {
+            if (seq !== vmSeq) return;
+            // The badge keeps its last count; the view says why.
+            ui.vmMsg.className = 'dl-msg dl-vm-msg err';
+            ui.vmMsg.textContent = 'Could not load voicemail: ' + err.message;
+        });
+    }
+
+    function loadVoicemailsSoon() {
+        if (!vmRows || Date.now() - vmAt >= VM_MIN_GAP_MS) loadVoicemails();
+    }
+
+    // Every VM_REFRESH_MS while the panel shows (not while the tab is hidden).
+    function scheduleVm() {
+        window.clearTimeout(vmTimer);
+        vmTimer = window.setTimeout(function () {
+            vmTimer = null;
+            if (!panelShown) return;
+            if (!document.hidden) loadVoicemails();
+            scheduleVm();
+        }, VM_REFRESH_MS);
+    }
+
+    function setVmOpen(open) {
+        vmOpen = open;
+        ui.vm.setAttribute('aria-pressed', open ? 'true' : 'false');
+        if (open) {
+            audioOpen = false;
+            addOpen = false;
+            ui.gear.setAttribute('aria-pressed', 'false');
+            closeMenu(false);
+            loadVoicemailsSoon();
+            markVmSeen();
+        }
+        render(snap);
+    }
+
+    ui.vm.hidden = !cfg.restletUrl;
+    ui.vm.addEventListener('click', function () {
+        setVmOpen(!vmOpen);
+        if (vmOpen) ui.vmBack.focus();
+    });
+    ui.vmBack.addEventListener('click', function () {
+        setVmOpen(false);
+        ui.vm.focus();
+    });
+    document.addEventListener('visibilitychange', function () {
+        if (!document.hidden && panelShown && Date.now() - vmAt >= VM_REFRESH_MS) loadVoicemails();
+    });
+    // Another tab marked them heard.
+    window.addEventListener('storage', function (e) {
+        if (e.key === vmKey()) renderVmBadge();
+    });
+
     // --- In-call ---
     function tickLive() {
         if (!snap || !snap.startedAt) { ui.liveTime.textContent = ''; return; }
@@ -1001,14 +1933,25 @@
     function renderLive() {
         var incoming = isIncoming();
         var number = formatPhone(snap.number) || snap.number || '';
+        // known: a NetSuite record or contact names the other side. Else the
+        // avatar is a user icon (never "initials" of a number).
+        var known = !!(snap.entityName || snap.contactName);
         var name = snap.entityName || snap.contactName || number || 'Call';
         var sub = [snap.entityName && snap.contactName ? snap.contactName : '', number].filter(function (x) { return x && x !== name; }).join(' · ');
+        var unknownNumber = ''; // "No match in NetSuite": the number the link adds
         if (incoming) {
             // Ringing in: caller name (after lookup) or number, Answer / Decline.
             var c = snap.caller || {};
+            known = !!c.name;
             number = formatPhone(c.number || snap.number) || c.number || number;
             name = c.name || number || 'Unknown caller';
-            sub = ['Incoming call', number !== name ? number : ''].filter(function (x) { return x; }).join(' · ');
+            sub = known
+                ? ['Incoming call', number !== name ? number : ''].filter(function (x) { return x; }).join(' · ')
+                : 'No match in NetSuite';
+            if (!known) unknownNumber = c.number || snap.number || '';
+        } else if (!known && snap.direction === 'inbound') {
+            sub = 'No match in NetSuite';
+            unknownNumber = (snap.caller && snap.caller.number) || snap.number || '';
         }
         // After Answer the call controls show at once (the ring view is gone).
         var ringing = incoming && !answerSent;
@@ -1016,9 +1959,14 @@
         ui.callActs.forEach(function (a) { a.hidden = ringing; });
         ui.answer.setAttribute('aria-label', 'Answer call from ' + name);
         ui.decline.setAttribute('aria-label', 'Decline call from ' + name);
-        ui.liveAv.textContent = initials(name);
+        if (known) ui.liveAv.textContent = initials(name);
+        else if (!ui.liveAv.querySelector('svg')) ui.liveAv.innerHTML = USER_SVG(28);
         ui.liveName.textContent = name;
         ui.liveSub.textContent = sub;
+        // "Add to NetSuite" under "No match in NetSuite" (no Phone Call yet).
+        liveAddNum = canAdd(unknownNumber) ? unknownNumber : '';
+        ui.liveAdd.hidden = !liveAddNum;
+        if (liveAddNum) ui.liveAdd.setAttribute('aria-label', 'Add ' + (formatPhone(liveAddNum) || liveAddNum) + ' to NetSuite');
         tickLive();
         if (snap.startedAt && !liveTimer) liveTimer = window.setInterval(tickLive, 1000);
         if (!snap.startedAt && liveTimer) { window.clearInterval(liveTimer); liveTimer = null; }
@@ -1062,6 +2010,9 @@
         render(snap);
     });
     ui.decline.addEventListener('click', function () { send('decline'); });
+    ui.liveAdd.addEventListener('click', function () {
+        if (liveAddNum) openAdd({ phone: liveAddNum, phoneCallId: '', trigger: ui.liveAdd });
+    });
     ui.keys.addEventListener('click', function () {
         var show = ui.dtmf.hidden;
         ui.dtmf.hidden = !show;
@@ -1085,6 +2036,8 @@
         ui.noteLink.hidden = !url;
         if (url) ui.noteLink.href = url;
         ui.noteCall.hidden = !(missed && missed.number);
+        noteAdd = null;
+        ui.noteAdd.hidden = true;
         ui.note.setAttribute('data-kind', kind);
     }
 
@@ -1092,7 +2045,36 @@
         stopNoteTimer();
         noteKey = null;
         noteMissed = null;
+        noteAdd = null;
+        ui.noteAdd.hidden = true;
         ui.note.hidden = true;
+    }
+
+    // The after-call note offers "Add to NetSuite" when the call's other
+    // side matched no record: the inbound caller (or the missed one) had
+    // no name, or an outbound call went to a number with no record. The
+    // Phone Call id comes from lastLog.recordUrl (…call.nl?id=N) when the
+    // call was logged; a missed call has none yet.
+    function noteAddFor(log) {
+        if (!snap || (log.status !== 'saved' && log.status !== 'missed')) return null;
+        var number = '';
+        if (snap.direction === 'inbound' || log.status === 'missed') {
+            var c = (log.status === 'missed' ? missedCaller || snap.caller : snap.caller) || {};
+            if (c.name || c.entityId) return null;
+            number = c.number || '';
+        } else {
+            if (snap.entityId || snap.entityName || snap.contactName) return null;
+            number = snap.number || '';
+        }
+        if (!canAdd(number)) return null;
+        var m = /[?&]id=([0-9]+)/.exec(String(log.recordUrl || ''));
+        return { phone: number, phoneCallId: m ? m[1] : '' };
+    }
+
+    function showNoteAdd(a) {
+        noteAdd = a || null;
+        ui.noteAdd.hidden = !a;
+        if (a) ui.noteAdd.setAttribute('aria-label', 'Add ' + (formatPhone(a.phone) || a.phone) + ' to NetSuite');
     }
 
     // The auto-hide pauses while the note is hovered or holds focus and
@@ -1143,8 +2125,9 @@
         var key = logKey(log);
         if (key === noteDismissed) { hideNote(); return; }
         if (key === noteKey && !ui.note.hidden) return;
-        if (log.status === 'missed') { showMissed(log, key); return; }
+        if (log.status === 'missed') { showMissed(log, key); showNoteAdd(noteAddFor(log)); return; }
         showNote(log.status, log.message || 'Call ended', log.recordUrl, key);
+        showNoteAdd(noteAddFor(log));
         if (log.status === 'saved' || log.status === 'skipped') {
             noteRemain = NOTE_HIDE_MS;
             runNoteTimer();
@@ -1173,6 +2156,10 @@
         if (noteKey) noteDismissed = noteKey;
         hideNote();
         callBack(c);
+    });
+
+    ui.noteAdd.addEventListener('click', function () {
+        if (noteAdd) openAdd({ phone: noteAdd.phone, phoneCallId: noteAdd.phoneCallId, trigger: ui.noteAdd });
     });
 
     ui.noteX.addEventListener('click', function () {
@@ -1217,6 +2204,7 @@
         var shell = window.__ctcShell;
         var remote = isRemote();
         ui.exit.hidden = remote || !(shell && typeof shell.exit === 'function');
+        ui.exitBlock.hidden = ui.exit.hidden; // the rule and the caption go with it
         // Remote control: says where the audio plays.
         ui.remote.hidden = !remote;
     }
@@ -1224,6 +2212,12 @@
     function setAudioOpen(open) {
         audioOpen = open;
         ui.gear.setAttribute('aria-pressed', open ? 'true' : 'false');
+        if (open) {
+            vmOpen = false;
+            addOpen = false;
+            ui.vm.setAttribute('aria-pressed', 'false');
+            closeMenu(false);
+        }
         render(snap);
     }
 
@@ -1252,6 +2246,425 @@
         if (e.key === 'Escape') { e.stopPropagation(); host.collapse(); }
     });
 
+    // --- Add to NetSuite sheet (DESIGN.md §6) ---
+    // A number with no record can go to an existing contact, a new contact
+    // at a company, a new lead or prospect, or (with a Phone Call) stay
+    // logged without a record. Choices 2 and 3 check for duplicates
+    // (softphoneFindDuplicates) before they save; "Use this one" moves to
+    // choice 1 or 2 with that record. Save: softphoneAddToNetSuite. Back
+    // and Esc close it without saving.
+    function canAdd(number) {
+        return !!(ADD_TO_NETSUITE_ENABLED && cfg.restletUrl && dialable(number) && !addedKeys[lastTen(number)]);
+    }
+
+    // o: { phone, phoneCallId, trigger } (trigger gets focus back on close).
+    function openAdd(o) {
+        var phone = dialable(o && o.phone);
+        if (!ADD_TO_NETSUITE_ENABLED || !cfg.restletUrl || !phone) return;
+        closeMenu(false);
+        audioOpen = false;
+        ui.gear.setAttribute('aria-pressed', 'false');
+        vmOpen = false;
+        ui.vm.setAttribute('aria-pressed', 'false');
+        as = {
+            phone: phone,
+            phoneCallId: String((o && o.phoneCallId) || ''),
+            trigger: (o && o.trigger) || null,
+            live: isActive() || isIncoming(), // opened during a call: a new call does not close it
+            mode: 'existingContact',
+            pick: { existingContact: null, newContact: null },
+            status: 'lead',
+            dupKey: null,
+            dups: null,
+            saving: false
+        };
+        addOpen = true;
+        ui.asNum.textContent = formatPhone(phone) || phone;
+        ui.asLogOpt.hidden = !as.phoneCallId;
+        [ui.asQ, ui.asCompany, ui.asFirst, ui.asLast, ui.asRole].forEach(function (i) { i.value = ''; });
+        ui.asField.value = '';
+        ui.asMain.checked = false;
+        setAddStatus('lead');
+        setAddMode('existingContact');
+        render(snap);
+        ui.asBack.focus();
+    }
+
+    function closeAdd(refocus) {
+        if (!addOpen) return;
+        var trigger = as && as.trigger;
+        addOpen = false;
+        asSeq++;
+        dupSeq++;
+        window.clearTimeout(asTimer);
+        render(snap);
+        if (!refocus) return;
+        if (trigger && trigger.isConnected && !trigger.hidden && !trigger.closest('[hidden]')) trigger.focus();
+        else focusPanel();
+    }
+
+    function setAddMode(mode) {
+        as.mode = mode;
+        ui.asRadios.forEach(function (r) { r.checked = r.value === mode; });
+        ui.asBlocks.forEach(function (b) {
+            b.hidden = b.getAttribute('data-modes').split(' ').indexOf(mode) === -1;
+        });
+        var contact = mode === 'existingContact';
+        ui.asPickLbl.textContent = contact ? 'Contact' : 'Company';
+        ui.asQ.setAttribute('aria-label', contact ? 'Search for a contact' : 'Search for a company');
+        ui.asQ.value = '';
+        asSeq++;
+        window.clearTimeout(asTimer);
+        clear(ui.asResults);
+        ui.asCtx.hidden = true;
+        setAddMsg('');
+        as.dupKey = null; // a new choice checks again
+        clearDups();
+        setAddError('');
+        renderPick();
+    }
+
+    function setAddStatus(status) {
+        if (as) as.status = status;
+        ui.asStatus.forEach(function (b) {
+            b.setAttribute('aria-pressed', b.getAttribute('data-status') === status ? 'true' : 'false');
+        });
+    }
+
+    function setAddMsg(text, err) {
+        ui.asMsg.className = 'dl-msg dl-as-msg' + (err ? ' err' : '');
+        ui.asMsg.textContent = text;
+    }
+
+    function setAddError(text) {
+        ui.asErr.textContent = text;
+        ui.asErr.hidden = !text;
+    }
+
+    // The picked contact (choice 1) or company (choice 2), else the search.
+    function renderPick() {
+        var p = as.pick[as.mode] || null;
+        ui.asPicked.hidden = !p;
+        ui.asQbox.hidden = !!p;
+        ui.asResults.hidden = !!p;
+        ui.asMsg.hidden = !!p;
+        if (p) {
+            ui.asCtx.hidden = true;
+            ui.asPName.textContent = p.name;
+            ui.asPSub.textContent = p.sub || '';
+            ui.asChange.setAttribute('aria-label', 'Change ' + (as.mode === 'existingContact' ? 'contact' : 'company'));
+        }
+        syncAddSave();
+    }
+
+    function pickAdd(p) {
+        as.pick[as.mode] = p;
+        clearDups();
+        setAddError('');
+        renderPick();
+        (as.mode === 'existingContact' ? ui.asField : ui.asFirst).focus();
+    }
+
+    function addRow(name, sub, onClick) {
+        var li = document.createElement('li');
+        li.className = 'dl-card';
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'dl-row';
+        var icon = document.createElement('span');
+        icon.className = 'dl-ricon';
+        icon.innerHTML = USER_SVG(16);
+        var main = document.createElement('span');
+        main.className = 'dl-row-main';
+        main.appendChild(span('dl-row-name', name));
+        if (sub) main.appendChild(span('dl-row-sub', sub));
+        b.appendChild(icon);
+        b.appendChild(main);
+        b.addEventListener('click', onClick);
+        li.appendChild(b);
+        return li;
+    }
+
+    // softphoneSearch rows are companies (customer / prospect / lead):
+    // choice 2 picks one; choice 1 opens its contacts.
+    function runAddSearch() {
+        var query = ui.asQ.value.trim();
+        var seq = ++asSeq;
+        clear(ui.asResults);
+        ui.asCtx.hidden = true;
+        if (!query) { setAddMsg(''); return; }
+        setAddMsg('Searching…');
+        api('softphoneSearch', { query: query, typeFilter: '', limit: 20 }).then(function (d) {
+            if (seq !== asSeq || !addOpen) return;
+            var rows = d.rows || [];
+            rows.forEach(function (r) {
+                var type = TYPE_NAME[r.type] || '';
+                ui.asResults.appendChild(addRow(r.companyName, [type, r.contactName].filter(Boolean).join(' · '), function () {
+                    if (as.mode === 'newContact') pickAdd({ companyId: String(r.id), name: r.companyName, sub: type });
+                    else showContacts(r);
+                }));
+            });
+            setAddMsg(rows.length ? '' : 'No matches.');
+        }).catch(function (err) {
+            if (seq !== asSeq || !addOpen) return;
+            setAddMsg('Search failed: ' + err.message, true);
+        });
+    }
+
+    function showContacts(company) {
+        var seq = ++asSeq;
+        clear(ui.asResults);
+        ui.asCtx.textContent = 'Contacts at ' + company.companyName;
+        ui.asCtx.hidden = false;
+        setAddMsg('Loading…');
+        ui.asQ.focus();
+        api('softphoneContacts', { entityId: company.id }).then(function (d) {
+            if (seq !== asSeq || !addOpen) return;
+            var rows = (d.rows || []).filter(function (c) { return c.contactId && String(c.contactId) !== '__company_main__'; });
+            rows.forEach(function (c) {
+                ui.asResults.appendChild(addRow(c.name, [c.title, company.companyName].filter(Boolean).join(' · '), function () {
+                    pickAdd({ contactId: String(c.contactId), name: c.name, sub: company.companyName });
+                }));
+            });
+            setAddMsg(rows.length ? '' : 'No contacts at ' + company.companyName + '.');
+        }).catch(function (err) {
+            if (seq !== asSeq || !addOpen) return;
+            setAddMsg('Could not load contacts: ' + err.message, true);
+        });
+    }
+
+    // Duplicates: the same number (choices 2 and 3) or company name (3).
+    function dupKeyOf() {
+        return as.mode + '|' + (as.mode === 'newCompany' ? ui.asCompany.value.trim().toUpperCase() : '');
+    }
+
+    function clearDups() {
+        if (as) as.dups = null;
+        clear(ui.asDups);
+        ui.asDups.hidden = true;
+        if (as) syncAddSave();
+    }
+
+    function dupHits(d) {
+        if (!d || d.ok === false) return [];
+        var seen = {};
+        var out = [];
+        [[d.byPhone, 'Same number'], [d.byName, 'Same name']].forEach(function (g) {
+            (g[0] || []).forEach(function (h) {
+                if (!h || !h.entityId) return;
+                var k = h.entityId + ':' + (h.contactId || '');
+                if (seen[k]) return;
+                seen[k] = true;
+                out.push({ h: h, reason: g[1] });
+            });
+        });
+        return out;
+    }
+
+    function showDups(hits) {
+        clearDups();
+        if (!hits.length) return;
+        as.dups = hits;
+        ui.asDups.appendChild(span('dl-alert-title', 'Already in NetSuite'));
+        var ul = document.createElement('ul');
+        ul.className = 'dl-dup-list';
+        hits.forEach(function (x) {
+            var h = x.h;
+            var li = document.createElement('li');
+            li.className = 'dl-dup';
+            var main = document.createElement('span');
+            main.className = 'dl-row-main';
+            var name = h.contactId && h.contactName && h.entityType === 'contact' ? h.contactName : h.name;
+            main.appendChild(span('dl-row-name', name));
+            var type = h.entityType === 'contact' ? 'Contact' : TYPE_NAME[h.entityType] || '';
+            var who = h.contactName && h.contactName !== name ? h.contactName : '';
+            main.appendChild(span('dl-row-sub', [type, who, x.reason].filter(Boolean).join(' · ')));
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'dl-ghost dl-dup-use';
+            b.textContent = 'Use this one';
+            b.setAttribute('aria-label', 'Use ' + (who ? who + ', ' : '') + name);
+            b.addEventListener('click', function () { useDup(h); });
+            li.appendChild(main);
+            li.appendChild(b);
+            ul.appendChild(li);
+        });
+        ui.asDups.appendChild(ul);
+        ui.asDups.hidden = false;
+        syncAddSave();
+    }
+
+    // A contact hit: choice 1 with that contact. A company: choice 2.
+    function useDup(h) {
+        if (h.contactId) {
+            setAddMode('existingContact');
+            pickAdd({ contactId: String(h.contactId), name: h.contactName || h.name, sub: h.entityType === 'contact' ? '' : h.name });
+        } else {
+            setAddMode('newContact');
+            pickAdd({ companyId: String(h.entityId), name: h.name, sub: TYPE_NAME[h.entityType] || '' });
+        }
+    }
+
+    // Resolves true when it found records (the warning shows).
+    function checkDups() {
+        var key = dupKeyOf();
+        var mode = as.mode;
+        var body = { phone: as.phone };
+        var company = ui.asCompany.value.trim();
+        if (mode === 'newCompany' && company) body.companyName = company;
+        var seq = ++dupSeq;
+        return api('softphoneFindDuplicates', body, true).then(function (d) {
+            if (seq !== dupSeq || !addOpen || as.mode !== mode) return null;
+            as.dupKey = key;
+            var hits = dupHits(d);
+            showDups(hits);
+            return hits.length > 0;
+        }, function () {
+            // The check is advice: a failed check does not block the save.
+            if (seq !== dupSeq || !addOpen || as.mode !== mode) return null;
+            as.dupKey = key;
+            return false;
+        });
+    }
+
+    function syncAddSave() {
+        if (!as) return;
+        var ready = as.mode === 'logOnly' ? !!as.phoneCallId
+            : as.mode === 'newCompany' ? !!ui.asCompany.value.trim()
+                : !!as.pick[as.mode];
+        ui.asSave.disabled = as.saving || !ready;
+        ui.asSave.textContent = as.saving ? 'Saving…' : as.dups ? 'Save anyway' : 'Save';
+    }
+
+    function addBody() {
+        var mode = as.mode;
+        if (mode === 'logOnly') return { mode: mode, phoneCallId: as.phoneCallId };
+        var b = { mode: mode };
+        var p = as.pick[mode];
+        var first = ui.asFirst.value.trim();
+        var last = ui.asLast.value.trim();
+        if (mode === 'existingContact') {
+            b.contactId = p.contactId;
+            b.phone = as.phone;
+            if (ui.asField.value) b.field = ui.asField.value;
+            if (ui.asMain.checked) b.makeMain = true;
+        } else if (mode === 'newContact') {
+            b.companyId = p.companyId;
+            b.firstName = first;
+            b.lastName = last;
+            if (ui.asRole.value.trim()) b.title = ui.asRole.value.trim();
+            b.phone = as.phone;
+            if (ui.asMain.checked) b.makeMain = true;
+        } else {
+            b.companyName = ui.asCompany.value.trim();
+            if (first) b.firstName = first;
+            if (last) b.lastName = last;
+            b.phone = as.phone;
+            b.status = as.status;
+        }
+        if (as.phoneCallId) b.phoneCallId = as.phoneCallId;
+        return b;
+    }
+
+    function saveAdd() {
+        if (!as || ui.asSave.disabled) return;
+        setAddError('');
+        var needsCheck = (as.mode === 'newContact' || as.mode === 'newCompany') && as.dupKey !== dupKeyOf();
+        as.saving = true;
+        syncAddSave();
+        if (!needsCheck) { sendAdd(); return; }
+        var mine = as;
+        checkDups().then(function (found) {
+            if (!addOpen || as !== mine) return;
+            if (found === null) { as.saving = false; syncAddSave(); return; } // superseded
+            if (found) { as.saving = false; syncAddSave(); ui.asDups.querySelector('.dl-dup-use').focus(); return; }
+            sendAdd();
+        });
+    }
+
+    function sendAdd() {
+        var mine = as;
+        var body = addBody();
+        api('softphoneAddToNetSuite', body, true).then(function (d) {
+            if (!addOpen || as !== mine) return;
+            as.saving = false;
+            if (!d || d.ok !== true) {
+                setAddError((d && d.message) || 'Could not save. Try again.');
+                syncAddSave();
+                return;
+            }
+            addDone(d, body);
+        }).catch(function (err) {
+            if (!addOpen || as !== mine) return;
+            as.saving = false;
+            setAddError('Could not save: ' + err.message);
+            syncAddSave();
+        });
+    }
+
+    // Saved: close the sheet, load the record as the Dial target (between
+    // calls), let the match slot know the number, and reload Recents so
+    // the row loses "Add".
+    function addDone(d, body) {
+        var phone = as.phone;
+        var p = as.pick[body.mode];
+        var key = lastTen(phone);
+        addedKeys[key] = true;
+        if (noteAdd && lastTen(noteAdd.phone) === key) showNoteAdd(null);
+        if (lastTen(liveAddNum) === key) { liveAddNum = ''; ui.liveAdd.hidden = true; }
+        var loaded = false;
+        if (body.mode !== 'logOnly' && d.entityId) {
+            var name = d.name || (p && p.name) || body.companyName || '';
+            var type = String(d.entityType || '');
+            matchCache[key] = { entityId: String(d.entityId), name: name, entityType: type };
+            if (!isActive() && !isIncoming()) {
+                loadEntity({ entityId: d.entityId, entityName: name, entityType: type, phone: phone });
+                setTab('dial');
+                loaded = true;
+            }
+        }
+        closeAdd(!loaded);
+        if (loaded) ui.display.focus();
+        recentsLoaded = false;
+        loadRecents();
+        if (d.linkError) showQuiet('Saved. The call could not be linked to it.');
+        else if (d.contactError) showQuiet('Saved. The contact could not be added.');
+    }
+
+    ui.asBack.addEventListener('click', function () { closeAdd(true); });
+    ui.asPane.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopPropagation(); // the sheet closes, not the panel
+        closeAdd(true);
+    });
+    ui.asRadios.forEach(function (r) {
+        r.addEventListener('change', function () { if (r.checked && as) setAddMode(r.value); });
+    });
+    ui.asQ.addEventListener('input', function () {
+        window.clearTimeout(asTimer);
+        asTimer = window.setTimeout(runAddSearch, SEARCH_DEBOUNCE_MS);
+    });
+    ui.asChange.addEventListener('click', function () {
+        as.pick[as.mode] = null;
+        clearDups();
+        renderPick();
+        ui.asQ.focus();
+    });
+    ui.asCompany.addEventListener('input', function () {
+        if (as.dups && as.dupKey !== dupKeyOf()) clearDups();
+        syncAddSave();
+    });
+    // Choice 3: the duplicate check runs when the company name is left.
+    ui.asCompany.addEventListener('blur', function () {
+        if (!addOpen || as.mode !== 'newCompany' || !ui.asCompany.value.trim() || as.saving) return;
+        if (as.dupKey !== dupKeyOf()) checkDups();
+    });
+    ui.asStatus.forEach(function (b) {
+        b.addEventListener('click', function () { setAddStatus(b.getAttribute('data-status')); });
+    });
+    ui.asSave.addEventListener('click', saveAdd);
+
     // --- Render from the anchor's snapshot ---
     function render(next) {
         snap = next || snap;
@@ -1265,6 +2678,7 @@
         el.style.setProperty('--dl-dot', view.dot);
         el.setAttribute('data-phase', phase);
         ui.statusLabel.textContent = view.label;
+        ui.status.title = view.label; // the chip may end in … (long labels)
 
         // A kept dial request goes out as soon as the anchor is ready.
         if (pending && phase === 'ready') {
@@ -1305,9 +2719,22 @@
         wasActive = active;
         // Incoming shows the live view too (caller + Answer / Decline).
         var live = active || isIncoming();
-        ui.idle.hidden = audioOpen || live;
-        ui.live.hidden = audioOpen || !live;
+        // A call that starts (or rings) takes the place of the Voicemail view.
+        if (live && !wasLive && vmOpen) {
+            vmOpen = false;
+            ui.vm.setAttribute('aria-pressed', 'false');
+        }
+        // ... and of an Add to NetSuite sheet opened between calls.
+        if (live && !wasLive && addOpen && !as.live) addOpen = false;
+        wasLive = live;
+        ui.idle.hidden = audioOpen || vmOpen || addOpen || live;
+        ui.tabRow.hidden = ui.idle.hidden;
+        if (ui.idle.hidden) closeMenu(false);
+        ui.live.hidden = audioOpen || vmOpen || addOpen || !live;
         ui.audio.hidden = !audioOpen;
+        ui.asPane.hidden = !addOpen;
+        ui.vmPane.hidden = !vmOpen;
+        if (!vmOpen) vmShownSeen = null;
         if (audioOpen) renderAudio();
         if (live) {
             renderLive();
@@ -1337,7 +2764,7 @@
         if (!answerSent) return;
         if (isIncoming()) return;
         answerSent = false;
-        if (!isActive() || audioOpen || el.hidden || el.classList.contains('closed')) return;
+        if (!isActive() || audioOpen || addOpen || el.hidden || el.classList.contains('closed')) return;
         ui.end.focus();
     }
 
@@ -1403,7 +2830,9 @@
     }
 
     function focusPanel(what) {
+        if (addOpen) { ui.asBack.focus(); return; }
         if (audioOpen) { ui.audioBack.focus(); return; }
+        if (vmOpen) { ui.vmBack.focus(); return; }
         if (isIncoming() && !answerSent) { ui.answer.focus(); return; }
         if (isActive() || answerSent) { ui.end.focus(); return; }
         if (what === 'call' && tab === 'dial' && !ui.call.disabled) { ui.call.focus(); return; }
@@ -1458,6 +2887,9 @@
             var c = opts && opts.ctx;
             audioOpen = false;
             ui.gear.setAttribute('aria-pressed', 'false');
+            vmOpen = false;
+            ui.vm.setAttribute('aria-pressed', 'false');
+            addOpen = false;
             if (!isActive() && hasRecord(c)) {
                 loadEntity(c);
                 setTab('dial');
@@ -1482,6 +2914,18 @@
         },
         // Wrap-up pill Call back: dial the last call through the Dial tab.
         callBack: function (c) { callBack(c); },
+        // The panel opened (true) or closed (false): Voicemail refreshes on
+        // open (at most once per VM_MIN_GAP_MS) and every VM_REFRESH_MS
+        // while it shows; menus close with it.
+        shown: function (open) {
+            panelShown = !!open;
+            window.clearTimeout(vmTimer);
+            vmTimer = null;
+            if (!panelShown) { closeMenu(false); vmShownSeen = null; return; }
+            loadVoicemailsSoon();
+            if (vmOpen) markVmSeen();
+            scheduleVm();
+        },
         // Shared UI state (client): the view in front, and a view to show.
         // 'call' shows by itself while a call is live; nothing else to do.
         view: currentView,

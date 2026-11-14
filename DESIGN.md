@@ -133,21 +133,24 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 
 ## 4. Dialer panel (L3 boards 06, 06b-1 … 06b-5)
 
-- **Size and shape:** `.pnl` 380 × 620, radius 28, on the dark v2.1 surface. It opens on the pill's snap point, and the pill hides while it is open.
+- **Size and shape:** `.pnl` 380 × 682 (10% taller than 620; decided 2026-11-14, asset 32), radius 28, on the dark v2.1 surface. It opens on the pill's snap point, and the pill hides while it is open.
 - **Header:** the grip centred at top, a status chip centred under it (copy "Ready", never "Ready to call"; decided 2026-11-13, asset 29), and on the right the voicemail button with an unheard-count badge (approved 2026-11-13; asset 29), the gear and a down chevron, "Collapse phone" (never ×: the phone collapses to the pill, it does not close).
+- **Recents rows (decided 2026-11-13; asset 31):** direction arrow, name (the number in mono when there is no record), then one sub line: "Missed" or "Voicemail" in coral `#FF9E8C` 12px/600 for those calls, else nothing, then the time. **No outcome chips** (Summary ready, Summarizing, Too short, Follow-up suggested, No answer, Failed): summary state lives on the Phone Call and in Call Central. The Voicemail view has its own row layout (below; findings #59, #66).
 - **Call back** (missed note, Recents missed row): a 28px go-green button, radius 8, 12px/600 white text. Shipped in asset 27.
-- **Tabs:** Dial · Search · Recents, centred, with a 28px gap. Selection is an **underline** (2px, ink-on-dark white, under the active label), not a filled pill (decided 2026-11-13; asset 29).
+- **Tabs:** Dial · Search · Recents on the **keypad's 3-column grid** (decided 2026-11-14, asset 32; finding #62): each label is centred over a keypad column (Dial over 1, Search over 2 / 0 / Call, Recents over 3), so the middle tab, the 0 key and Call share one centre line. The underline is the label's width. Selection is an **underline** (2px, ink-on-dark white, under the active label), not a filled pill (decided 2026-11-13; asset 29).
 - **Dial view:**
-  - **Footer (decided 2026-11-13; asset 29):** a 3-column grid that matches the keypad: empty · a 64px round go-green **Call** (centred under "0") · a 48px round ghost **Backspace** (under "#", vertically centred on Call). No text labels under the buttons; aria-label + tooltip instead.
+  - **Keypad (decided 2026-11-13; asset 30):** iPhone-style round keys that fill the panel's height between the number field and the footer: 3 columns of **65px** circles (10% smaller than 72; decided 2026-11-14, asset 32; finding #61), column gap 24px, the grid centred in the panel (row gap sized to fill), fill `rgba(255,255,255,.10)`, pressed `.22`, no border; digit **25px**/400 white, letters 12px/600 letter-spacing .12em `#94A6BF` (our 12px floor, not the iPhone's smaller letters); `*`, `#` and `0 / +` as on the iPhone (a long press on 0 types "+"). Header, tabs, number field and footer unchanged.
+  - **Add over the number (decided 2026-11-13; match slot built in asset 30, the "Add to NetSuite" link on in asset 31):** once the field has a digit, a link "Add to NetSuite" (14px/600, `#9FD0FA`) shows centred ABOVE the number; it opens the §6 sheet. When the typed number matches a record, the same slot shows the match instead ("7 Abbott Inc. · Customer", 14px/600 white + type in `#94A6BF`). Empty field → slot empty (no layout jump: the slot keeps its 20px height).
+  - **Footer (decided 2026-11-13; asset 30):** a 3-column grid that matches the keypad: empty · a 64px round go-green **Call** (centred under "0") · a 48px round ghost **Backspace** (under "#", vertically centred on Call). No text labels under the buttons; aria-label + tooltip instead.
   - An × inside the number field clears it.
   - Backspace deletes one digit. A long press clears the field.
   - Esc clears first, then closes.
-- **Search view:** one **filter chip** under the search field shows the active type and its count ("All 4 ▾"); it opens a menu: All · Customers · Prospects · Leads, each with its count and a check on the active one (decided 2026-11-13, replaces the four chips; build in asset 29). **Sort** is a small icon button at the right end of the search field, beside ×; it opens Recent activity · Name · Last called with a check on the active one (decided 2026-11-13; asset 29). No "Everyone" section. Each row with a number has its own 32px go-green Call (calls at once); a click on the row loads it into Dial (asset 26).
+- **Search view (decided 2026-11-14, asset 32; findings #63, #64):** no section heading ("Suggested · Your book" is gone): rows start under the field. The header has no filter chip on any view (replaces #57). One **filter icon** button (three dashes of decreasing length, 32px, at the field's right end beside ×) opens ONE menu with two groups: **Show** — All · Customers · Prospects · Leads, each with its count and a check on the active one; **Sort by** — Recent activity · Name · Last called with a check. Group labels 12px/600 uppercase `#94A6BF`, a rule between the groups. While the filter is not All, the icon carries a 6px `#9FD0FA` dot. No "Everyone" section. Each row with a number has its own 32px go-green Call (calls at once); a click on the row loads it into Dial (asset 26).
+- **Voicemail view (decided 2026-11-14, asset 32; findings #65, #66):** header = a back chevron icon + title "Voicemail" (the same back control as Audio settings and the Add to NetSuite sheet; no "Back" text button). Date group labels stay. Each row has two columns: **left** (flexible) — the name 14px/600 white (an unheard row has an 8px coral `#FF9D90` dot before it) and the AI brief under it, 13px `#C9D3E1`, at most 2 lines; **right** (right-aligned) — time · length on top (12px `#94A6BF`, tabular), and under it an **Open record** icon button (32px ghost circle, arrow-out icon, aria-label + tooltip) and a 28px go-green **Call back**. No "Voicemail" chip: every row in this view is a voicemail.
 - **States, grouped:** idle views (06b-1), outbound and in call (06b-2), call quality (06b-3), inbound and after call (06b-4), recover and blocked (06b-5).
 - **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. Shipped in asset 25.
 - **Incoming card (panel closed):** 320px wide, radius 16, a FLIP scale morph out of the pill (nine-piece window, shadow on its own opacity layer; no clip-path), with Answer in go green. Shipped in asset 25.
-- **Gear (Settings view):** mic and speaker, "Audio plays in your phone tab.", Exit phone mode. No "Move phone here" in the design (see §4a).
-- **Search view chips:** see Search view above. Sort (Recent activity · Name · Last called) is Planned.
+- **Gear (Settings view, asset 30):** a back chevron + title "Audio settings"; labelled Microphone and Speaker selects (40px, radius 10, fill `rgba(255,255,255,.06)`, a chevron at the right); "Audio plays in your phone tab."; a rule; Exit phone mode as a coral outline button with a one-line caption. No "Move phone here" in the design (see §4a).
 
 ## 4a. One phone, every tab (decided 2026-11-11)
 
@@ -190,7 +193,7 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
   - Recommended actions (Approve / Dismiss)
 - **Narrow screens (<1280px):** the legacy slide-over (M4) stays until B has a full-page drawer fallback.
 
-## 6. Add to NetSuite (unknown numbers) — designed, needs approval to build
+## 6. Add to NetSuite (unknown numbers) — approved 2026-11-13, built asset 31
 
 - **Entry points:** an incoming unknown caller, wrap-up for an unknown number, and a Recents row with no record.
 - **The sheet asks where the number goes:**
@@ -200,6 +203,9 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
   4. **Log without a record:** the call stays unlinked and owned by the rep.
 - **Option:** "Make this the main phone".
 - Duplicate check before create: same number, or same company name.
+- **Entry points also include** the Dial view slot above the number ("Add to NetSuite" while typing an unknown number) and Recents rows with no record ("Add").
+- **Default status for a new company:** Lead until a config setting exists (findings #58).
+- **Built (asset 31, not live-tested):** the sheet replaces the panel body like Audio settings: back chevron + "Add to NetSuite", the number under it, the four choices as a radio list ("Log without a record" only when a Phone Call exists). Add to a contact: search companies, then pick from that company's contacts (the RESTlet search returns companies only); phone field Fill an empty field (default) / Mobile / Office / Main. New contact: company search, First and Last name side by side, Role. New lead or prospect: Company name, names, a Lead | Prospect segment. Duplicates show in an amber "Already in NetSuite" box, each with "Use this one"; the button then reads "Save anyway". Errors show in coral above the button; inputs stay. Success loads the record on Dial. Recents rows with no record show the number as the name, "Not in NetSuite", and a ghost "Add" (no outcome chip). The ring view and the after-call note (inbound and outbound) carry an "Add to NetSuite" link; only the after-call note can pass the Phone Call.
 
 ## 7. Decisions log
 
@@ -213,6 +219,12 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
 | 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
+| 2026-11-13 | Add to NetSuite (§6) approved to build; unknown numbers will appear in Recents. |
+| 2026-11-13 | Asset 29 built (not deployed): underline tabs, "Ready", voicemail button + unheard badge + Voicemail list (no Play: recordings are deleted; Open record), one Search filter chip + menu, sort icon in the search field, Dial footer grid, unknown caller icon + "No match in NetSuite", Recents rows with outcome chips, Follow-up suggested, green Call, day groups and search; "Call ended" note; "Summarizing". |
+| 2026-11-14 | Panel batch (asset 32): panel 380 × 682; keypad 65px / digit 25px; tabs on the keypad's column grid; no Search heading; filter chip folded into one filter-icon menu (Show + Sort by); Voicemail view gets the back chevron and a two-column row (findings #60–#66). |
+| 2026-11-13 | Recents rows drop the outcome chips; Missed / Voicemail stay as coral text (finding #59; asset 31). |
+| 2026-11-13 | Asset 31: "Add to NetSuite" sheet (§6) with duplicate check; entry points Dial slot, Recents "Add", ring view, after-call note. Server: RESTlet softphoneFindDuplicates + softphoneAddToNetSuite; Recents includes the rep's calls with no company and no contact. |
+| 2026-11-13 | Asset 30: round 72px keypad that fills the Dial view, Call under 0 and Backspace under # (no labels), long press 0 = "+", 20px match slot over the number, Audio settings sheet (40px selects), Search filter chip at the header top-left (#57). "Add to NetSuite" link built behind a flag (off). |
 | 2026-11-13 | Panel: underline tabs, build the voicemail button + list, one Search filter chip with a menu, sort icon at the right end of the search field (findings #51–#54; asset 29). |
 | 2026-11-13 | State diagrams use §8b: owner tier on the frame, state-kind colour on each state (idle, active, waiting, error, done). |
 | 2026-11-13 | Diagram colour variant chosen: B "SaaS tiers" (§8a) for multi-owner architecture and data-flow diagrams; statecharts stay Mono. |

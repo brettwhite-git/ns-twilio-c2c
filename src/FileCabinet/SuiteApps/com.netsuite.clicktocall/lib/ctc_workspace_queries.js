@@ -10,7 +10,7 @@
  * both surfaces.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcTime) => {
+define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, query, log, ctcTime, ctcHtml) => {
 
     // NetSuite N/search returns SELECT field values inconsistently:
     //   - JOINED columns:    array `[{ value, text }]`
@@ -170,13 +170,16 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      *   limit?: number,
      *   bookCustomerIds?: Array<string>,
      *   missedOnly?: boolean,
+     *   voicemailOnly?: boolean,
      *   countTotal?: boolean,
      *   ownerIds?: Array<string>,
      *   dateFilter?: Array,
-     *   skipEntityType?: boolean
+     *   skipEntityType?: boolean,
+     *   includeUnlinked?: boolean
      * }} [params]
      * `missedOnly` keeps only missed calls and voicemails (status 'Missed'
-     * OR custevent_ctc_voicemail T). `countTotal` makes `total` the number
+     * OR custevent_ctc_voicemail T). `voicemailOnly` keeps only voicemails
+     * (custevent_ctc_voicemail T; the dock's Voicemail view). `countTotal` makes `total` the number
      * of matching calls, not only the rows returned (runPaged count, only
      * when the limit may have cut the list).
      * `ownerIds` (Reporting Central team view) scopes by the Phone Call's
@@ -188,6 +191,14 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
      * filter expression on `startdate`, used instead of `dateRange`.
      * `skipEntityType` (Reporting Central, which never shows the stage)
      * skips the stage lookup: one customer search less; `entityType` stays ''.
+     * `includeUnlinked` (the dock's Recents) also returns the user's own
+     * calls with no company (an unknown number): `assigned` = userId AND
+     * company empty, as an OR branch of the book scope in the same search,
+     * so the date filters, the sort and the limit apply to both and no
+     * call comes twice. Every row then carries `unknown`: true when it has
+     * no company and no contact (the number is in `phone`), else false.
+     * An empty book still returns the unknown calls. Ignored with
+     * `ownerIds`. Without it, rows have no `unknown` key.
      * @returns {{rows: Array<Object>, total: number, error?: string}} `{error}` on failure
      */
     const loadHistoryRows = (params) => {
@@ -214,13 +225,21 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
             const scopeIds = byOwner
                 ? p.ownerIds
                 : (Array.isArray(p.bookCustomerIds) ? p.bookCustomerIds : getBookCustomerIds({ userId: userId }));
-            if (!scopeIds.length) {
+            // Unknown numbers (includeUnlinked): the user's own calls with no company.
+            const ownerId = parseInt(String(userId || ''), 10);
+            const unlinked = !byOwner && p.includeUnlinked === true && !!ownerId
+                ? [['assigned', 'anyof', String(ownerId)], 'AND', ['company', 'anyof', '@NONE@']]
+                : null;
+            if (!scopeIds.length && !unlinked) {
                 // No accessible customers (or no team) → no rows. Short-circuit;
                 // the N/search `anyof` operator rejects empty arrays anyway.
                 return { rows: [], total: 0 };
             }
+            /** @type {Array} */
+            let scope = [byOwner ? 'assigned' : 'company', 'anyof', scopeIds];
+            if (unlinked) scope = scopeIds.length ? [scope, 'OR', unlinked] : unlinked;
             const searchFilters = [
-                [byOwner ? 'assigned' : 'company', 'anyof', scopeIds],
+                scope,
                 'AND',
                 ['custevent_ctc_call_sid', 'isnotempty', '']
             ];
@@ -260,6 +279,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     ['custevent_ctc_call_status', 'is', 'Missed'], 'OR', ['custevent_ctc_voicemail', 'is', 'T']
                 ]);
             }
+            if (p.voicemailOnly) searchFilters.push('AND', ['custevent_ctc_voicemail', 'is', 'T']);
 
             // `createddate` is the second sort key so calls on the same day
             // come newest first (startdate has no time part). The rows are
@@ -331,6 +351,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                     rows[i].ownerName = extractText(r.getText ? r.getText('assigned') : r.getValue('assigned'));
                 });
             }
+            // A call linked to a contact with no company is a known record, not unknown.
+            if (unlinked) rows.forEach((row) => { row.unknown = !row.companyId && !row.contactName; });
 
             // Stage isn't joinable from phonecall.company (NetSuite rejects
             // {name:'stage', join:'company'} with "An nlobjSearchColumn contains
@@ -702,6 +724,73 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
     };
 
     /**
+     * Pending follow-ups (proposed tasks with status Pending, Reporting
+     * Central's "To review") per source Phone Call, for the given calls.
+     * One search (10 units), none when `callIds` is empty. Up to
+     * FOLLOW_UP_LIMIT tasks are counted.
+     * @param {Array<string>} callIds
+     * @returns {Object<string, number>} call id → count (calls with none are absent)
+     */
+    const pendingFollowUpsByCall = (callIds) => {
+        /** @type {Object<string, number>} */
+        const out = {};
+        const ids = (callIds || []).map(String).filter((id) => !!id);
+        if (!ids.length) return out;
+        search.create({
+            type: 'customrecord_ctc_proposed_task',
+            filters: [
+                [PT_CALL, 'anyof', ids], 'AND',
+                [PT_STATUS, 'is', 'Pending']
+            ],
+            columns: [PT_CALL]
+        }).run().getRange({ start: 0, end: FOLLOW_UP_LIMIT }).forEach((r) => {
+            const id = extractId(r.getValue(PT_CALL));
+            if (id) out[id] = (out[id] || 0) + 1;
+        });
+        return out;
+    };
+
+    // The outcome keys the dock shows (RESTlet `outcome`). Every other
+    // ctcHtml.outcomeOf key ('no_transcript', and 'follow_up', which the
+    // dock reads from `followUps`) is sent as null.
+    const DOCK_OUTCOMES = ['summary_ready', 'summarizing', 'too_short', 'missed', 'no_answer', 'voicemail', 'failed'];
+
+    /**
+     * The dock's outcome key for a history row: ctcHtml.outcomeOf (the
+     * rule Reporting Central and the portlet use) without the follow-up
+     * step, mapped to DOCK_OUTCOMES, else null.
+     * @param {Object} row - loadHistoryRows row
+     * @returns {string|null}
+     */
+    const dockOutcomeOf = (row) => {
+        const key = ctcHtml.outcomeOf(row, 0).key;
+        return key && DOCK_OUTCOMES.indexOf(key) !== -1 ? key : null;
+    };
+
+    /**
+     * Adds `outcome` (dockOutcomeOf) and `followUps` (pending proposed
+     * tasks on that Phone Call) to each row, in place. One proposed-task
+     * search for all rows (pendingFollowUpsByCall). When that search fails,
+     * `followUps` is 0 on every row and the error is logged.
+     * @param {Array<Object>} rows - loadHistoryRows rows
+     * @returns {Array<Object>} the same rows
+     */
+    const addDockOutcomes = (rows) => {
+        const list = rows || [];
+        let pending = {};
+        try {
+            pending = pendingFollowUpsByCall(list.map((r) => r.id));
+        } catch (e) {
+            log.error({ title: 'CTC pendingFollowUpsByCall Failed', details: (e && e.message) || String(e) });
+        }
+        list.forEach((r) => {
+            r.outcome = dockOutcomeOf(r);
+            r.followUps = pending[String(r.id)] || 0;
+        });
+        return list;
+    };
+
+    /**
      * Compute headline stats from a set of history rows.
      * @param {Array<Object>} rows
      * @returns {{ callsToday: number, avgSat: string, talkTimeMinutes: number }}
@@ -914,6 +1003,67 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         };
     };
 
+    const ISO_DAY = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+
+    /**
+     * Adds `lastCalledAt` and `lastActivityAt` (ISO text or null) to packed
+     * entity rows, in place. One SuiteQL query for all rows (10 units),
+     * none when there are no rows:
+     *   - lastCalledAt: the newest CTC Phone Call (custevent_ctc_call_sid
+     *     set; the calls Recents lists) to the entity: its
+     *     custevent_ctc_call_started (ISO UTC), else its start date
+     *     ('YYYY-MM-DD') when that call has no start time;
+     *   - lastActivityAt: the newest Phone Call (any) or Task on the entity
+     *     (the Phone call and Task sources of the snapshot's Last activity
+     *     tile; Events link by attendee and are left out): lastCalledAt when
+     *     it is on that day, else the day ('YYYY-MM-DD').
+     * When the query fails, both stay null and the error is logged: the
+     * rows themselves are still returned.
+     * @param {Array<Object>} rows - packEntityRowSql rows
+     * @returns {Array<Object>} the same rows
+     */
+    const addLastDates = (rows) => {
+        rows.forEach((r) => { r.lastCalledAt = null; r.lastActivityAt = null; });
+        const ids = rows.map((r) => String(r.id)).filter((id) => /^[0-9]+$/.test(id));
+        if (!ids.length) return rows;
+        const marks = ids.map(() => '?').join(', ');
+        const sql =
+            'SELECT a.company AS id, MAX(a.ctcstarted) AS ctcstarted, MAX(a.ctcday) AS ctcday, MAX(a.actday) AS actday ' +
+            'FROM ( ' +
+            '  SELECT pc.company AS company, ' +
+            '    CASE WHEN pc.custevent_ctc_call_sid IS NOT NULL THEN TO_CHAR(pc.custevent_ctc_call_started) END AS ctcstarted, ' +
+            "    CASE WHEN pc.custevent_ctc_call_sid IS NOT NULL THEN TO_CHAR(pc.startdate, 'YYYY-MM-DD') END AS ctcday, " +
+            "    TO_CHAR(pc.startdate, 'YYYY-MM-DD') AS actday " +
+            '  FROM phonecall pc WHERE pc.company IN (' + marks + ') ' +
+            '  UNION ALL ' +
+            "  SELECT t.company AS company, NULL AS ctcstarted, NULL AS ctcday, TO_CHAR(t.createddate, 'YYYY-MM-DD') AS actday " +
+            '  FROM task t WHERE t.company IN (' + marks + ') ' +
+            ') a ' +
+            'GROUP BY a.company';
+        try {
+            /** @type {Object<string, Object>} */
+            const byId = {};
+            query.runSuiteQL({ query: sql, params: ids.concat(ids) }).asMappedResults().forEach((m) => {
+                byId[String(m.id)] = m;
+            });
+            rows.forEach((r) => {
+                const m = byId[String(r.id)];
+                if (!m) return;
+                const startedMs = ctcTime.parseIsoUtc(m.ctcstarted);
+                const started = startedMs === null ? '' : ctcTime.isoUtc(startedMs);
+                const ctcDay = ISO_DAY.test(String(m.ctcday || '')) ? String(m.ctcday) : '';
+                const actDay = ISO_DAY.test(String(m.actday || '')) ? String(m.actday) : '';
+                // A newer CTC call with no start time wins by its day.
+                const called = (ctcDay && ctcDay > started.slice(0, 10)) ? ctcDay : (started || ctcDay);
+                r.lastCalledAt = called || null;
+                r.lastActivityAt = (actDay && actDay > called.slice(0, 10)) ? actDay : (called || actDay || null);
+            });
+        } catch (e) {
+            log.error({ title: 'CTC addLastDates Failed', details: (e && e.message) || String(e) });
+        }
+        return rows;
+    };
+
     /**
      * Shared SuiteQL helper that returns customers/prospects/leads in the
      * current rep's "book" — defined as records where the rep is EITHER the
@@ -1043,7 +1193,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
                 ' | roles=' + JSON.stringify(roleCounts)
         });
 
-        return rows.map(packEntityRowSql);
+        return addLastDates(rows.map(packEntityRowSql));
     };
 
     /**
@@ -1454,6 +1604,10 @@ define(['N/search', 'N/query', 'N/log', './ctc_time'], (search, query, log, ctcT
         loadTaskGroups,
         loadFollowUpRows,
         FOLLOW_UP_LIMIT,
+        // Asset 29 — dock Recents / Voicemail rows
+        pendingFollowUpsByCall,
+        dockOutcomeOf,
+        addDockOutcomes,
         computeStats,
         // Phase 2 — softphone Search tab
         getSuggestedContacts,

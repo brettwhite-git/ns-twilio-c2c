@@ -101,8 +101,8 @@ define([], () => {
     //   dir   'missed' = a missed call (portlet isMissedCall)
     // A status not listed here shows "—".
     const CALL_STATUS_RULES = {
-        'Logged':        { text: 'Processing…' },
-        'Processing':    { text: 'Processing…' },
+        'Logged':        { text: 'Summarizing' },
+        'Processing':    { text: 'Summarizing' },
         'No transcript': { text: 'No transcript' },
         'Too short':     { text: 'Too short to summarize' },
         'Failed':        { text: 'Summary failed' },
@@ -144,27 +144,34 @@ define([], () => {
      * a voicemail reads "Voicemail"; an unanswered call reads the shared
      * unansweredRule words ("Missed call" coral / "No answer" quiet);
      * pending proposed tasks read "Follow-up suggested"; then the status:
-     * Logged / Processing → "Processing…", Too short (or No transcript
+     * Logged / Processing → "Summarizing", Too short (or No transcript
      * under SHORT_CALL_SECONDS) → "Too short", Transcribed or an AI brief →
      * "Summary ready", No transcript → "No transcript", Failed →
      * "Summary failed"; anything else "—".
+     * `key` names the outcome for data (the dock's Recents and Voicemail
+     * rows, RESTlet `outcome`): voicemail, missed, no_answer, follow_up,
+     * summarizing, too_short, summary_ready, no_transcript, failed, or
+     * null for "—".
      * @param {{voicemail?: boolean, callStatus?: string, direction?: string, duration?: number, brief?: string}} row
      * @param {number} [pending] - pending follow-ups from this call
-     * @returns {{text: string, tone: string}} tone: a key of OUTCOME_TONES
+     * @returns {{text: string, tone: string, key: (string|null)}} tone: a key of OUTCOME_TONES
      */
     const outcomeOf = (row, pending) => {
         const r = row || {};
-        if (r.voicemail === true) return { text: 'Voicemail', tone: 'voicemail' };
+        if (r.voicemail === true) return { text: 'Voicemail', tone: 'voicemail', key: 'voicemail' };
         const unanswered = unansweredRule(r);
-        if (unanswered) return { text: unanswered.text, tone: unanswered.chip === 'missed' ? 'missed' : 'quiet' };
-        if (pending > 0) return { text: 'Follow-up suggested', tone: 'followup' };
+        if (unanswered) {
+            const missed = unanswered.chip === 'missed';
+            return { text: unanswered.text, tone: missed ? 'missed' : 'quiet', key: missed ? 'missed' : 'no_answer' };
+        }
+        if (pending > 0) return { text: 'Follow-up suggested', tone: 'followup', key: 'follow_up' };
         const s = String(r.callStatus || '');
-        if (s === 'Logged' || s === 'Processing') return { text: 'Processing…', tone: 'quiet' };
-        if (s === 'Too short' || (s === 'No transcript' && Number(r.duration) < SHORT_CALL_SECONDS)) return { text: 'Too short', tone: 'quiet' };
-        if (s === 'Transcribed' || r.brief) return { text: 'Summary ready', tone: 'ready' };
-        if (s === 'No transcript') return { text: 'No transcript', tone: 'quiet' };
-        if (s === 'Failed') return { text: 'Summary failed', tone: 'quiet' };
-        return { text: '—', tone: 'quiet' };
+        if (s === 'Logged' || s === 'Processing') return { text: 'Summarizing', tone: 'quiet', key: 'summarizing' };
+        if (s === 'Too short' || (s === 'No transcript' && Number(r.duration) < SHORT_CALL_SECONDS)) return { text: 'Too short', tone: 'quiet', key: 'too_short' };
+        if (s === 'Transcribed' || r.brief) return { text: 'Summary ready', tone: 'ready', key: 'summary_ready' };
+        if (s === 'No transcript') return { text: 'No transcript', tone: 'quiet', key: 'no_transcript' };
+        if (s === 'Failed') return { text: 'Summary failed', tone: 'quiet', key: 'failed' };
+        return { text: '—', tone: 'quiet', key: null };
     };
 
     // Satisfaction bands: 1-3 Low, 4-6 Moderate, 7-10 High; no score (or

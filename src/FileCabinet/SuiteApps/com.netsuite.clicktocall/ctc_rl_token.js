@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -73,10 +73,13 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         if (body.action === 'softphoneSearch')      return softphoneSearch(body);
         if (body.action === 'softphoneContacts')    return softphoneContacts(body);
         if (body.action === 'softphoneRecents')     return softphoneRecents(body);
+        if (body.action === 'softphoneVoicemails')  return softphoneVoicemails(body);
         if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body);
         if (body.action === 'softphoneBookCounts')  return softphoneBookCounts(body);
         if (body.action === 'lookupCaller')         return lookupCaller(body);
         if (body.action === 'phoneHeartbeat')       return phoneHeartbeat(body);
+        if (body.action === 'softphoneFindDuplicates') return softphoneFindDuplicates(body);
+        if (body.action === 'softphoneAddToNetSuite')  return softphoneAddToNetSuite(body);
 
         return generateToken(body, gate.config);
     };
@@ -1399,17 +1402,161 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      * direction filter chips (All / Missed / Outbound / Inbound) filter the
      * returned rows in the popup.
      *
+     * Each row also carries `outcome` (workspaceQueries.dockOutcomeOf:
+     * summary_ready | summarizing | too_short | missed | no_answer |
+     * voicemail | failed | null) and `followUps` (pending proposed tasks on
+     * that Phone Call): one more proposed-task search for the whole list.
+     *
+     * Scope: calls to the rep's book, plus the rep's own calls with no
+     * company (an unknown number; "Add to NetSuite", DESIGN.md §6), in one
+     * search (loadHistoryRows `includeUnlinked`). Every row carries
+     * `unknown`: true for a call with no company (companyId '', the
+     * dialled or caller number in `phone`), else false.
+     * Governance: worst case 40 units, the same as before the unknown
+     * rows (book SuiteQL 10 + Phone Call search 10 + stage lookup 10 +
+     * proposed-task search 10).
+     *
      * @param {Object} body
      * @param {string} [body.dateRange='last7days'] — last7days | today | last30days
      * @param {number} [body.limit=50]
      * @returns {Object} { rows: [...], total } or { error }
      */
     const softphoneRecents = (body) => {
-        return workspaceQueries.loadHistoryRows({
+        const result = workspaceQueries.loadHistoryRows({
             userId: runtime.getCurrentUser().id,
             dateRange: body.dateRange || 'last7days',
-            limit: body.limit || 50
+            limit: body.limit || 50,
+            includeUnlinked: true
         });
+        if (result && !result.error) workspaceQueries.addDockOutcomes(result.rows);
+        return result;
+    };
+
+    /**
+     * softphoneVoicemails — asset 29: the dock's Voicemail view. The rep's
+     * voicemails (custevent_ctc_voicemail T), newest first, in the same
+     * scope as softphoneRecents (calls to the rep's book). Cost: the book
+     * query plus one Phone Call search (and the stage lookup).
+     * `at` is the call start (custevent_ctc_call_started, ISO UTC), null
+     * when the Phone Call has none. The dock marks a voicemail new by
+     * comparing `at` with its own seen time; there is no server field.
+     *
+     * @param {Object} body
+     * @param {number} [body.limit=30] - 1 to 50
+     * @param {number} [body.days=30] - 1 to 365: calls on or after that many days ago
+     * @returns {{rows: Array<{phoneCallId: string, at: (string|null), durationSec: number,
+     *   companyId: string, companyName: string, entityType: string, contactName: string,
+     *   phone: string, outcome: (string|null), brief: string}>, error?: string}}
+     */
+    const softphoneVoicemails = (body) => {
+        const limit = Math.min(50, Math.max(1, parseInt(String(body.limit || ''), 10) || 30));
+        const days = Math.min(365, Math.max(1, parseInt(String(body.days || ''), 10) || 30));
+        const result = workspaceQueries.loadHistoryRows({
+            userId: runtime.getCurrentUser().id,
+            dateFilter: ['startdate', 'onorafter', 'daysago' + days],
+            voicemailOnly: true,
+            limit: limit
+        });
+        if (!result || result.error) return { error: (result && result.error) || 'Voicemails fetch failed', rows: [] };
+        return {
+            employeeId: String(runtime.getCurrentUser().id),
+            rows: (result.rows || []).map((r) => ({
+                phoneCallId: String(r.id),
+                at: r.startedAt || null,
+                durationSec: r.duration || 0,
+                companyId: r.companyId || '',
+                companyName: r.companyName || '',
+                entityType: r.entityType || '',
+                contactName: r.contactName || '',
+                phone: r.phone || '',
+                outcome: workspaceQueries.dockOutcomeOf(r),
+                brief: r.brief || ''
+            }))
+        };
+    };
+
+    // --- Add to NetSuite (unknown numbers, DESIGN.md §6; lib/ctc_add_to_netsuite) ---
+
+    /**
+     * softphoneFindDuplicates — records that already hold this number, and
+     * companies with this name, before the rep creates anything. Only
+     * `phone` and `companyName` are read from the body.
+     * Governance: ≤ 30 units (lib findDuplicates).
+     *
+     * @param {Object} body
+     * @param {string} [body.phone]
+     * @param {string} [body.companyName]
+     * @returns {Object} lib findDuplicates result: { ok: true, byPhone, byName }
+     *   or { ok: false, error, message }
+     */
+    const softphoneFindDuplicates = (body) => addToNetSuite.findDuplicates({
+        phone: body.phone,
+        companyName: body.companyName
+    });
+
+    /**
+     * The write per softphoneAddToNetSuite mode. Each passes only its own
+     * whitelisted body fields to the lib (never the body itself).
+     */
+    const ADD_TO_NETSUITE_MODES = {
+        existingContact: (b) => addToNetSuite.addToExistingContact({
+            contactId: b.contactId, phone: b.phone, field: b.field, makeMain: b.makeMain
+        }),
+        newContact: (b) => addToNetSuite.newContactAtCompany({
+            companyId: b.companyId, firstName: b.firstName, lastName: b.lastName,
+            title: b.title, phone: b.phone, makeMain: b.makeMain
+        }),
+        newCompany: (b) => addToNetSuite.newCompany({
+            companyName: b.companyName, firstName: b.firstName, lastName: b.lastName,
+            phone: b.phone, status: b.status
+        })
+    };
+
+    /**
+     * softphoneAddToNetSuite — put an unknown number into NetSuite and
+     * link the call (DESIGN.md §6). body.mode:
+     *   - 'existingContact': contactId, phone, field?, makeMain?
+     *   - 'newContact':      companyId, firstName?, lastName?, title?, phone, makeMain?
+     *   - 'newCompany':      companyName, firstName?, lastName?, phone, status? ('lead' | 'prospect')
+     *   - 'logOnly':         phoneCallId (required); writes nothing
+     * Other modes → { ok: false, error: 'invalid' }.
+     * With body.phoneCallId, a successful write then links the Phone Call
+     * to the result's companyId / contactId (lib linkPhoneCall). The
+     * answer is the lib result plus `linked` (true / false; false when no
+     * phoneCallId was given) and, when the link fails, `linkError` (its
+     * error code). A failed link does not undo the write: `ok` stays true.
+     * A failed write returns the lib failure as it is (no link attempt).
+     * Governance: ≤ 46 units (write ≤ 30 + link ≤ 16); logOnly 1.
+     *
+     * @param {Object} body
+     * @returns {Object} { ok: true, ...lib result, linked, linkError? }
+     *   | lib logOnly result | { ok: false, error, message }
+     */
+    const softphoneAddToNetSuite = (body) => {
+        const mode = body.mode;
+        if (mode === 'logOnly') {
+            if (!body.phoneCallId) return { ok: false, error: 'invalid', message: 'The call is missing.' };
+            return addToNetSuite.logOnly({ phoneCallId: body.phoneCallId });
+        }
+        if (typeof mode !== 'string' || !Object.prototype.hasOwnProperty.call(ADD_TO_NETSUITE_MODES, mode)) {
+            return { ok: false, error: 'invalid', message: 'Pick where the number goes.' };
+        }
+        const result = ADD_TO_NETSUITE_MODES[mode](body);
+        if (!result || result.ok !== true) return result;
+
+        const out = Object.assign({}, result, { linked: false });
+        if (!body.phoneCallId) return out;
+        const link = addToNetSuite.linkPhoneCall({
+            phoneCallId: body.phoneCallId,
+            companyId: result.companyId || '',
+            contactId: result.contactId || ''
+        });
+        if (link && link.ok === true) {
+            out.linked = true;
+        } else {
+            out.linkError = (link && link.error) || 'failed';
+        }
+        return out;
     };
 
     /**

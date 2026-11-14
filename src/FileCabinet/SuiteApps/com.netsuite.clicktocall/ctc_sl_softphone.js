@@ -2751,7 +2751,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     logStatusEl.className = 'log-status error';
                     setDockLog('error', 'Failed to log call');
                 } else {
-                    setDockLog('saved', 'Phone Call saved', data.recordId);
+                    setDockLog('saved', 'Call ended', data.recordId);
                     logStatusEl.textContent = data.duplicate
                         ? 'Call already logged \\u2714 \\u2014 Fetching transcript\\u2026'
                         : 'Call logged \\u2714 \\u2014 Fetching transcript\\u2026';
@@ -3700,7 +3700,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         // outbound-only phone (no incoming grant: it never registers).
         function deviceReady() {
             if (!activeCall && !pendingInbound) {
-                setStatus('Ready to call', '');
+                setStatus('Ready', '');
                 setButtons(true, false, false);
                 setCallView('idle');
             }
@@ -4035,7 +4035,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
 
         function inboundEnded(status, message) {
             afterCallSettled();
-            setStatus('Ready to call', '');
+            setStatus('Ready', '');
             setButtons(true, false, false);
             setCallView('idle');
             setDockLog(status, message);

@@ -108,7 +108,7 @@ define(['N/format', './ctc_html', './ctc_workspace_queries', './ctc_rc_shell'], 
         if (unanswered) return { text: unanswered.text, tone: 'muted', chip: unanswered.chip };
         if (pending > 0) return { text: pending + ' follow-up' + (pending === 1 ? '' : 's') + ' to approve', tone: 'warn' };
         const status = String(row.callStatus || '');
-        if (status === 'Logged' || status === 'Processing') return { text: 'Processing…', tone: 'muted' };
+        if (status === 'Logged' || status === 'Processing') return { text: 'Summarizing', tone: 'muted' };
         if (status === 'Transcribed') return { text: 'Summary ready', tone: 'muted' };
         if (status === 'No transcript') {
             return { text: row.duration < SHORT_CALL_SECONDS ? 'Too short to summarize' : 'No transcript', tone: 'muted' };
@@ -634,8 +634,8 @@ ${SAT_CSS}
     'No answer': ['No answer', 'quiet'],
     'Too short': ['Too short', 'quiet'],
     'No transcript': ['No transcript', 'quiet'],
-    'Processing': ['Processing', 'quiet'],
-    'Logged': ['Processing', 'quiet'],
+    'Processing': ['Summarizing', 'quiet'],
+    'Logged': ['Summarizing', 'quiet'],
     'Failed': ['Summary failed', 'quiet']
   };
   var openId = '';

@@ -165,7 +165,7 @@
     var PANEL_W = 380;
     // One panel height for every view: the Search view at full size. Views
     // that need less leave room at the bottom; views that need more scroll.
-    var PANEL_H = 620;
+    var PANEL_H = 682;
     var EDGE = 16;
     var BOTTOM_GAP = 24; // bottom row sits a little higher than the side margin
     var DRAG_THRESHOLD = 4;
@@ -1017,7 +1017,7 @@
     // Ready, but Twilio cannot ring this phone (snap.canReceive === false:
     // inbound is on and the anchor is re-registering). Quiet: amber dot and
     // tooltip / aria text only.
-    var READY_NOT_RECEIVING = { dot: T.amber, label: 'Ready to call · not receiving calls — reconnecting' };
+    var READY_NOT_RECEIVING = { dot: T.amber, label: 'Ready · not receiving calls — reconnecting' };
     // What the panel draws before the first snapshot.
     var STARTING_SNAP = { phase: 'starting' };
     var ARROWS_HINT = ' Arrow keys move the dock.';
@@ -1693,6 +1693,7 @@
 
     function setExpanded(next, animate) {
         var opening = next && !expanded;
+        var closing = !next && expanded;
         expanded = next;
         vchipEl.hidden = next;
         if (next) {
@@ -1705,6 +1706,8 @@
             place(false);
             // Opening the phone shows the missed calls: reset the count.
             if (opening && missedCount() > 0) send('markMissedSeen');
+            // The dialer refreshes its voicemail list while it shows.
+            if ((opening || closing) && panel.shown) panel.shown(next);
             syncIncoming(); // open panel: its ring view replaces the card
             return;
         }
@@ -1863,7 +1866,7 @@
         }
     }
 
-    // Panel size: 380 x 620, capped by the screen (16 px each side, safe
+    // Panel size: 380 x 682, capped by the screen (16 px each side, safe
     // top to 24 px above the bottom).
     function panelSize() {
         var avail = Math.max(0, window.innerHeight - safeTop() - BOTTOM_GAP);
