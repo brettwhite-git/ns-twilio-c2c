@@ -134,14 +134,15 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 ## 4. Dialer panel (L3 boards 06, 06b-1 … 06b-5)
 
 - **Size and shape:** `.pnl` 380 × 620, radius 28, on the dark v2.1 surface. It opens on the pill's snap point, and the pill hides while it is open.
-- **Header:** the grip centred at top, a status chip centred under it, and on the right the voicemail button (badge; Planned, gated), the gear and a down chevron, "Collapse phone" (never ×: the phone collapses to the pill, it does not close).
+- **Header:** the grip centred at top, a status chip centred under it (copy "Ready", never "Ready to call"; decided 2026-11-13, asset 29), and on the right the voicemail button with an unheard-count badge (approved 2026-11-13; asset 29), the gear and a down chevron, "Collapse phone" (never ×: the phone collapses to the pill, it does not close).
 - **Call back** (missed note, Recents missed row): a 28px go-green button, radius 8, 12px/600 white text. Shipped in asset 27.
-- **Tabs:** Dial · Search · Recents, centred, with a 28px gap.
+- **Tabs:** Dial · Search · Recents, centred, with a 28px gap. Selection is an **underline** (2px, ink-on-dark white, under the active label), not a filled pill (decided 2026-11-13; asset 29).
 - **Dial view:**
+  - **Footer (decided 2026-11-13; asset 29):** a 3-column grid that matches the keypad: empty · a 64px round go-green **Call** (centred under "0") · a 48px round ghost **Backspace** (under "#", vertically centred on Call). No text labels under the buttons; aria-label + tooltip instead.
   - An × inside the number field clears it.
   - Backspace deletes one digit. A long press clears the field.
   - Esc clears first, then closes.
-- **Search view:** type chips All · Customers · Prospects · Leads with counts filter the rep's book (no "Everyone" section). Each row with a number has its own 32px go-green Call (calls at once); a click on the row loads it into Dial. Shipped in asset 26. Sort is Planned.
+- **Search view:** one **filter chip** under the search field shows the active type and its count ("All 4 ▾"); it opens a menu: All · Customers · Prospects · Leads, each with its count and a check on the active one (decided 2026-11-13, replaces the four chips; build in asset 29). **Sort** is a small icon button at the right end of the search field, beside ×; it opens Recent activity · Name · Last called with a check on the active one (decided 2026-11-13; asset 29). No "Everyone" section. Each row with a number has its own 32px go-green Call (calls at once); a click on the row loads it into Dial (asset 26).
 - **States, grouped:** idle views (06b-1), outbound and in call (06b-2), call quality (06b-3), inbound and after call (06b-4), recover and blocked (06b-5).
 - **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. Shipped in asset 25.
 - **Incoming card (panel closed):** 320px wide, radius 16, a FLIP scale morph out of the pill (nine-piece window, shadow on its own opacity layer; no clip-path), with Answer in go green. Shipped in asset 25.
@@ -212,6 +213,7 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
 | 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
+| 2026-11-13 | Panel: underline tabs, build the voicemail button + list, one Search filter chip with a menu, sort icon at the right end of the search field (findings #51–#54; asset 29). |
 | 2026-11-13 | State diagrams use §8b: owner tier on the frame, state-kind colour on each state (idle, active, waiting, error, done). |
 | 2026-11-13 | Diagram colour variant chosen: B "SaaS tiers" (§8a) for multi-owner architecture and data-flow diagrams; statecharts stay Mono. |
 | 2026-11-13 | User journeys (L1) adopt the "Swimlane journey" contract (§9): stage columns, Interactions and Descriptions lanes, numbered cards and step diamonds. |
