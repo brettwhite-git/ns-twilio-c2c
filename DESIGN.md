@@ -212,6 +212,7 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
 | 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
+| 2026-11-13 | State diagrams use §8b: owner tier on the frame, state-kind colour on each state (idle, active, waiting, error, done). |
 | 2026-11-13 | Diagram colour variant chosen: B "SaaS tiers" (§8a) for multi-owner architecture and data-flow diagrams; statecharts stay Mono. |
 | 2026-11-13 | User journeys (L1) adopt the "Swimlane journey" contract (§9): stage columns, Interactions and Descriptions lanes, numbered cards and step diamonds. |
 | 2026-11-13 | Architecture and flow diagrams adopt the "Mono blueprint" contract (§8): monochrome, dashed connectors, black pills and numbered step markers. |
@@ -284,6 +285,27 @@ Architecture and data-flow diagrams with more than one owner use the SaaS tiers 
 - Colour-blind safe: the tab fills sit on a lightness ladder (L* 22 / 43 / 57 / 71 / 85); the closest simulated pair is ΔE 21. Never tell tiers apart by hue alone in text either: each group keeps its name on its tab.
 - A legend row (tier chip + name) sits under the title of every coloured diagram.
 - Generic hues only: no vendor brand colours or logos.
+
+### 8b. State diagrams — owner tier + state kind (decided 2026-11-13)
+
+Applies to state machines and statecharts (L2.0, L2.1). Two layers of colour, each with one meaning:
+
+1. **Owner tier on the frame.** The section tab and the machine's group use its owner's §8a tier: Browser phone (L2.0a, SC1) = Client · Call record and AI (L2.0b, SC2) and Follow-up (SC3) = Data · Telephony publish (L2.0c, SC4) = Twilio · Admin console and setup (L2.0d, SC6) = NetSuite. A board that holds machines of several owners colours each section separately.
+2. **State kind on each state node.** A white node with a 4px top rule and a small kind chip (22px, radius 12, 12px/600), using the §1 chip colours:
+
+| Kind | Rule / chip | Examples |
+|---|---|---|
+| Idle / ready | `#5C5955` on `#F1EFEA` | ready, offline, not published |
+| Active / live | `#436B1D` on `#EBF8DE` | calling, connected, live |
+| Waiting / in progress | `#8F520A` on `#FDF2E5` | starting, summarizing, reconnecting, pending |
+| Error / failed | `#B3311F` on `#FFF1EF` | error, failed, mic blocked |
+| Done / final | `#00688C` on `#EDF6F9` | call ended, summary ready, completed |
+
+- Initial state = 12px ink dot; final state = ink ring — they stay ink.
+- Transitions, event pills, guards and step markers stay ink.
+- Composite states are groups in the owner tier's tint.
+- The kind is also written in the chip, so colour is never the only cue.
+- A legend row under each board title: the owner tier(s) used and the five kinds.
 
 ## 9. User journeys — "Swimlane journey" contract (decided 2026-11-13)
 
