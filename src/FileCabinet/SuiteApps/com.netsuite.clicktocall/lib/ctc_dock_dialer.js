@@ -59,12 +59,11 @@
         error: { dot: T.stopDot, label: 'Phone error' },
         ready: { dot: T.goDot, label: 'Ready to call' },
         dialing: { dot: T.amber, label: 'Calling…' },
-        ringing: { dot: T.amber, label: 'Ringing…' },
+        ringing: { dot: T.amber, label: 'Calling…' },
         incoming: { dot: T.ring, label: 'Incoming call' }, // ring: ringing reads apart from talking
         answering: { dot: T.goDot, label: 'Connecting…' },
         connected: { dot: T.goDot, label: 'Connected' },
-        reconnecting: { dot: T.amber, label: 'Reconnecting…' },
-        moved: { dot: T.offline, label: 'Phone moved to another tab' }
+        reconnecting: { dot: T.amber, label: 'Reconnecting…' }
     };
     // Header badge for snap.error.kind between calls.
     var ERROR_VIEW = {
@@ -284,10 +283,6 @@
         '.dl-afield select[disabled]{opacity:0.5;cursor:default}',
         '.dl-audio-msg{text-align:left;padding:0}',
         '.dl-exit{align-self:flex-start;margin-top:8px}',
-        // "Move phone here" while a call is live: disabled, with the reason.
-        '.dl-use-here[disabled]{opacity:0.5;cursor:default}',
-        '.dl-use-here[disabled]:hover{background:transparent}',
-        '.dl-move-why{font-size:12px;color:#94A6BF;margin-top:-6px}',
         '@media (prefers-reduced-motion: reduce){.dl *{transition:none}.dl[data-phase="incoming"] .dl-status .dot::before{animation:none}.dl.closed,.dl[data-side].closed{transform:none}}'
     ].join('\n'));
 
@@ -395,8 +390,6 @@
         +     '<label class="dl-afield dl-out-row">Speaker<select class="dl-out"></select></label>'
         +     '<div class="dl-remote" hidden>Audio plays in your phone tab.</div>'
         +     '<button type="button" class="dl-text dl-exit">Exit phone mode</button>'
-        +     '<button type="button" class="dl-text dl-exit dl-use-here" aria-describedby="dl-move-why" hidden>Move phone here</button>'
-        +     '<div class="dl-move-why" id="dl-move-why" hidden>You can move the phone when the call ends.</div>'
         +   '</div>'
         + '</div>';
 
@@ -421,8 +414,8 @@
         dtmf: q('.dl-dtmf'), mute: q('.dl-mute'), muteLabel: q('.dl-mute-label'), end: q('.dl-end'), keys: q('.dl-keys'),
         answer: q('.dl-answer'), decline: q('.dl-decline'), ringActs: qa('.dl-ring-act'), callActs: qa('.dl-call-act'),
         head: q('.dl-head'), audio: q('.dl-audio-wrap'), audioBack: q('.dl-audio-back'), audioMsg: q('.dl-audio-msg'),
-        inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit:not(.dl-use-here)'),
-        useHere: q('.dl-use-here'), moveWhy: q('.dl-move-why'), remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
+        inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit'),
+        remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
         alert: q('.dl-alert'), alertTitle: q('.dl-alert-title'), alertText: q('.dl-alert-text'), alertAct: q('.dl-alert-act'),
         refused: q('.dl-refused'), liveWarn: q('.dl-live-warn'),
         alerts: q('.dl-alerts'), alertsBtn: q('.dl-alerts-btn'), alertsOff: q('.dl-alerts-off')
@@ -1224,14 +1217,8 @@
         var shell = window.__ctcShell;
         var remote = isRemote();
         ui.exit.hidden = remote || !(shell && typeof shell.exit === 'function');
-        // Remote control: where the audio is, and "Move phone here" instead
-        // of Exit. While a call is live (here or ringing) it is disabled and
-        // says why: the anchor refuses a takeover during a call.
+        // Remote control: says where the audio plays.
         ui.remote.hidden = !remote;
-        var live = active || isIncoming();
-        ui.useHere.hidden = !remote;
-        ui.useHere.disabled = remote && live;
-        ui.moveWhy.hidden = !remote || !live;
     }
 
     function setAudioOpen(open) {
@@ -1253,10 +1240,6 @@
     ui.exit.addEventListener('click', function () {
         var shell = window.__ctcShell;
         if (shell && typeof shell.exit === 'function') shell.exit();
-    });
-    ui.useHere.addEventListener('click', function () {
-        if (ui.useHere.disabled || isActive() || isIncoming()) return;
-        if (host.useHere) host.useHere();
     });
     ui.alertsBtn.addEventListener('click', function () {
         if (host.unlockAudio) host.unlockAudio();
@@ -1506,7 +1489,7 @@
             if ((v === 'dial' || v === 'search' || v === 'recents') && v !== tab) setTab(v);
         },
         // A quiet error from the client (a request dropped before the anchor
-        // was ready, or lost in a hand-over).
+        // was ready, or lost in an anchor change).
         quiet: showQuiet
     });
 })();

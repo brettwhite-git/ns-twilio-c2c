@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '27';
+    const DOCK_ASSET_VERSION = '28';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -47,8 +47,8 @@ define(['./ctc_html'], (ctcHtml) => {
     //       both, or with a nonce it saw before (replay). A refused request
     //       comes back as snap.refused with the same nonce (see below).
     //     from: the sending tab's id (REQUEST_SENDER_PATTERN), one per page
-    //       load, shared by every sender in that window (the shell page and
-    //       its dock). seq: a positive integer, +1 per new command of that
+    //       load (window.__ctcBusTab, kept by the dock; the shell page sends
+    //       no requests). seq: a positive integer, +1 per new command of that
     //       tab. The anchor runs each (from, seq) once: it keeps the last
     //       SEQ_MEMORY seqs of the last SENDER_MEMORY tabs, drops a repeat
     //       silently and acks it again. A dock sends the SAME seq again (fresh
@@ -56,12 +56,12 @@ define(['./ctc_html'], (ctcHtml) => {
     //       double-click on Call is one 'dial'; never for 'digits'). Old docks
     //       send no from / seq: no dedupe for them (nonce and rate limits
     //       only). Acks: snap.acks (below).
-    //     A request that reaches an anchor after it started a hand-over
-    //     ('takeover' accepted, or it lost to another anchor) is dropped
-    //     (not run, not acked), so a command sent during a hand-over is never
+    //     A request that reaches an anchor after it started to step aside
+    //     (it lost to another anchor, see One anchor) is dropped (not run,
+    //     not acked), so a command sent while the anchor changes is never
     //     doubled. Docks never replay a sent request.
-    //   Readiness handshake (docks): a dock says 'hello' at load and after a
-    //     hand-over (its anchor said 'moved' / 'offline'). It sends no request
+    //   Readiness handshake (docks): a dock says 'hello' at load and after an
+    //     anchor change (its anchor said 'moved' / 'offline'). It sends no request
     //     until a snapshot from a working anchor with a compatible bus version
     //     (snap.bus, below) arrives; before the first one its pill shows
     //     'starting' (disabled slot). Requests made meanwhile wait at most
@@ -79,7 +79,6 @@ define(['./ctc_html'], (ctcHtml) => {
     //     'setInput' | 'setOutput'  { id }  (refused during a call)
     //     'answer' | 'decline'      (only while phase is 'incoming')
     //     'markMissedSeen'          resets snap.missedUnseen to count 0
-    //     'takeover'                "Use phone here": see Multi-tab below
     //     'unlockAudio'             handled by the SHELL, not the anchor: send
     //                               it from a user gesture (click / key) in a
     //                               top-level page of the shell tab (the dock in
@@ -137,9 +136,11 @@ define(['./ctc_html'], (ctcHtml) => {
     //     trying to restore it (Call 'reconnecting'). The call, timer and mute
     //     state are kept; the phase goes back to 'connected' on 'reconnected'
     //     (or the call ends). Treat it as a live call (End stays available).
-    //   moved: this anchor handed the phone to another tab ('takeover'); it is
-    //     unregistered and its frame is stopped next. The new tab's anchor
-    //     publishes its own snapshots ('starting' → 'ready') soon after.
+    //   moved: this anchor lost to another anchor (One anchor) and stepped
+    //     aside; it is unregistered and its shell stops its frame next. The
+    //     winning anchor answers with its own snapshot at once. Docks draw
+    //     'moved' from the anchor they follow as 'starting' (readiness
+    //     handshake) and ignore 'offline' / 'moved' from any other anchor.
     //   Live phases (a call exists): dialing, ringing, incoming, answering, connected, reconnecting.
     // direction: 'outbound' | 'inbound' (the current or last call)
     // caller: null | { number, name, entityId, entityType } for an inbound call; name and the
@@ -199,33 +200,21 @@ define(['./ctc_html'], (ctcHtml) => {
     //   should not offer Call.
     // refused: null | { action, reason, nonce, at } — the last request the
     //   anchor refused. reason: 'busy' | 'invalid-number' | 'rate'
-    //   | 'hourly-limit' | 'call-live' (takeover during a call) | 'paused'
-    //   (dial while Click-to-Call is paused). Match nonce to
+    //   | 'hourly-limit' | 'paused' (dial while Click-to-Call is paused). Match nonce to
     //   your own request. Requests without origin / nonce are dropped silently.
     //
-    // ---- Multi-tab ("Move phone here") ----
+    // ---- Multi-tab (one phone, every tab) ----
     //   One shell holds the Web Lock PHONE_LOCK_NAME and runs the anchor. A
     //   second shell tab waits and queues a normal lock request, so it takes
     //   over by itself when the first tab closes / crashes / is discarded.
-    //   While it waits (lock 'waiting' / 'stealing' / 'moving') its dock is a
-    //   remote control of the anchor in the other tab, like an outside tab;
-    //   the busy banner shows only when the shell has no dock.
-    //   window.__ctcShell.takeover() (the dock's gear item "Move phone here",
-    //   or the banner's "Use phone here") in a waiting shell sends 'takeover'.
-    //   The shell refuses at once while the anchor's last snapshot (less than
-    //   ANCHOR_SILENT_MS old) shows a live phase. The anchor refuses during a
-    //   live call (refused.reason 'call-live'); else it unregisters, publishes
-    //   phase 'moved' and tells its shell (PHONE_MOVED_MESSAGE). The waiting
-    //   shell then takes the lock with { steal: true } and starts its phone;
-    //   the old shell stops its phone frame and waits in turn. No answer in
-    //   3 s: the shell steals only when the anchor's last known phase is not
-    //   live, or it sent nothing for ANCHOR_SILENT_MS. A shell whose lock is
-    //   stolen during a live call of its own keeps its phone (lock
-    //   'yielding'): the anchor steps aside after the call (One anchor), and
-    //   the shell stops the phone frame when the call ends. An outside
-    //   (normal) tab cannot hold the phone: its "Move phone here" opens the
-    //   shell in the same tab with u=<its path>; the shell then calls
-    //   takeover() itself when it finds the phone busy (see TAKEOVER_PARAM).
+    //   While it waits (lock 'waiting') its dock is a remote control of the
+    //   anchor in the other tab, like an outside tab; the busy banner shows
+    //   only when the shell has no dock. No tab moves the phone by hand and
+    //   no shell steals the lock. A shell whose lock is stolen anyway (by
+    //   another page, e.g. an older shell still open) during a live call of
+    //   its own keeps its phone (lock 'yielding'): the anchor steps aside
+    //   after the call (One anchor), and the shell stops the phone frame when
+    //   the call ends.
     //
     // ---- Shared UI state (docks, localStorage UI_STATE_KEY) ----
     //   { v: UI_STATE_VERSION, open, view, corner, at }: panel open or
@@ -243,7 +232,6 @@ define(['./ctc_html'], (ctcHtml) => {
     //   anchor → shell: { v: 1, type: OPEN_RECORD_MESSAGE, path } after Answer on a
     //     matched caller (screen-pop). Accepted only from #ctc-phone-frame, same
     //     origin, and only an entity record path (/app/common/entity/custjob.nl|contact.nl?id=<digits>).
-    //   anchor → shell: { v: 1, type: PHONE_MOVED_MESSAGE } after a takeover.
     //   anchor → shell: { v: 1, type: PHONE_DISABLED_MESSAGE } on not_a_phone_user.
     //   anchor → shell: { v: 1, type: PHONE_DUPLICATE_MESSAGE } when it lost
     //     to another anchor (see One anchor). The shell stops its phone frame
@@ -282,8 +270,6 @@ define(['./ctc_html'], (ctcHtml) => {
     const COALESCE_MS = 1000;
     // Dock: requests made before the readiness handshake wait this long.
     const REQUEST_QUEUE_MS = 2000;
-    // Shell: an anchor silent this long no longer blocks a takeover.
-    const ANCHOR_SILENT_MS = 10000;
     // localStorage key and version of the shared dock UI state.
     const UI_STATE_KEY = 'ctc-dock-ui';
     const UI_STATE_VERSION = 1;
@@ -298,18 +284,16 @@ define(['./ctc_html'], (ctcHtml) => {
     // postMessage type the anchor sends the shell for the screen-pop.
     const OPEN_RECORD_MESSAGE = 'ctc-open-record';
 
-    // Phases added for call resilience and multi-tab.
+    // Phases added for call resilience and one anchor (a duplicate steps aside).
     const PHASE_RECONNECTING = 'reconnecting';
     const PHASE_MOVED = 'moved';
-    // Requests added: audio unlock (shell), missed-call reset, takeover.
+    // Requests added: audio unlock (shell), missed-call reset.
     const REQUEST_UNLOCK_AUDIO = 'unlockAudio';
     const REQUEST_MARK_MISSED_SEEN = 'markMissedSeen';
-    const REQUEST_TAKEOVER = 'takeover';
     // Every request carries origin: REQUEST_ORIGIN and a nonce matching this.
     const REQUEST_ORIGIN = 'dock';
     const REQUEST_NONCE_PATTERN = '^[A-Za-z0-9_-]{8,64}$';
     // postMessage types between the anchor and its shell (see the contract).
-    const PHONE_MOVED_MESSAGE = 'ctc-phone-moved';
     const SHELL_STATE_MESSAGE = 'ctc-shell-state';
     const UNLOCK_AUDIO_MESSAGE = 'ctc-unlock-audio';
     const PHONE_DISABLED_MESSAGE = 'ctc-phone-disabled';
@@ -320,9 +304,6 @@ define(['./ctc_html'], (ctcHtml) => {
     const ERROR_SIGNED_OUT = 'signed_out';
     // sessionStorage key (shell tab) for snap.missedUnseen.
     const MISSED_STORAGE_KEY = 'ctc-missed-unseen';
-    // Shell URL parameter: takeover=1 makes a shell that finds the phone
-    // busy ask for it at once ("Use phone here" from an outside tab).
-    const TAKEOVER_PARAM = 'takeover';
 
     // Web Lock the shell holds for its whole life while it runs the phone.
     const PHONE_LOCK_NAME = 'ctc-phone-anchor';
@@ -416,7 +397,6 @@ define(['./ctc_html'], (ctcHtml) => {
         ACK_MEMORY,
         COALESCE_MS,
         REQUEST_QUEUE_MS,
-        ANCHOR_SILENT_MS,
         UI_STATE_KEY,
         UI_STATE_VERSION,
         PHASE_INCOMING,
@@ -428,10 +408,8 @@ define(['./ctc_html'], (ctcHtml) => {
         PHASE_MOVED,
         REQUEST_UNLOCK_AUDIO,
         REQUEST_MARK_MISSED_SEEN,
-        REQUEST_TAKEOVER,
         REQUEST_ORIGIN,
         REQUEST_NONCE_PATTERN,
-        PHONE_MOVED_MESSAGE,
         SHELL_STATE_MESSAGE,
         UNLOCK_AUDIO_MESSAGE,
         PHONE_DISABLED_MESSAGE,
@@ -439,7 +417,6 @@ define(['./ctc_html'], (ctcHtml) => {
         ERROR_NOT_A_PHONE_USER,
         ERROR_SIGNED_OUT,
         MISSED_STORAGE_KEY,
-        TAKEOVER_PARAM,
         PHONE_LOCK_NAME,
         EXIT_KEY,
         dockAttributes,

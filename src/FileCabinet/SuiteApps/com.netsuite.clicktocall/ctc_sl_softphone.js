@@ -1816,8 +1816,9 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var pendingInbound = null;
         var callDirection = 'outbound';
         var dockCaller = null;
-        // The phone was handed to another tab (bus 'takeover'): the device
-        // is unregistered and stays so until the shell stops this frame.
+        // This anchor lost to another phone in this browser (one anchor) and
+        // stepped aside: the device is unregistered and stays so until the
+        // shell stops this frame.
         var movedAway = false;
         // Snapshot fields the shell owns (postMessage SHELL_STATE_MESSAGE).
         var shellAudioUnlocked = false;
@@ -2229,23 +2230,16 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             makeCall();
         }
 
-        // "Use phone here" from a waiting shell tab. Refused while a call is
-        // live or ringing. Else: stop the registration watchdog, unregister
-        // (Twilio stops ringing this tab), publish 'moved' and tell the
-        // shell, which stops this frame once the other tab took the lock.
+        // Live phases: a call exists (the duplicate-anchor check waits for it).
         var LIVE_PHASES = { dialing: 1, ringing: 1, incoming: 1, answering: 1, connected: 1, reconnecting: 1 };
-        var TAKEOVER_UNREGISTER_WAIT_MS = 1500;
+        // stepAside waits at most this long for unregister() to settle.
+        var UNREGISTER_WAIT_MS = 1500;
 
-        function dockTakeover(m) {
-            if (activeCall || pendingInbound || LIVE_PHASES[dockPhase]) { refuseRequest(m, 'call-live'); return; }
-            if (movedAway) { publishDock(); return; }
-            stepAside('${escapeJs(ctcDock.PHONE_MOVED_MESSAGE)}', 'Phone moved to another tab');
-        }
-
-        // Stop being the anchor: unregister (Twilio stops ringing this
-        // tab), publish phase 'moved' and tell the shell (shellType), which
-        // stops this frame. Used by a takeover and by a duplicate anchor.
-        function stepAside(shellType, why) {
+        // Stop being the anchor (it lost to another anchor): stop the
+        // registration watchdog, unregister (Twilio stops ringing this tab),
+        // publish phase 'moved' and tell the shell (PHONE_DUPLICATE_MESSAGE),
+        // which stops this frame.
+        function stepAside(why) {
             movedAway = true;
             clearRegisterRetry();
             var done = false;
@@ -2258,13 +2252,13 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 sendHeartbeat('moved');
                 if (window.parent !== window) {
                     try {
-                        window.parent.postMessage({ v: 1, type: shellType }, window.location.origin);
+                        window.parent.postMessage({ v: 1, type: '${escapeJs(ctcDock.PHONE_DUPLICATE_MESSAGE)}' }, window.location.origin);
                     } catch (err) { console.error('[CTC] moved message failed', err); }
                 }
             }
             var d = device;
             if (d && d.state === 'registered') {
-                setTimeout(finish, TAKEOVER_UNREGISTER_WAIT_MS);
+                setTimeout(finish, UNREGISTER_WAIT_MS);
                 try {
                     Promise.resolve(d.unregister()).then(finish, finish);
                 } catch (err) { finish(); }
@@ -2320,7 +2314,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                 }
                 return;
             }
-            stepAside('${escapeJs(ctcDock.PHONE_DUPLICATE_MESSAGE)}', 'Another phone is open in this browser; this one stopped');
+            stepAside('Another phone is open in this browser; this one stopped');
         }
 
         if (dockBus) {
@@ -2343,10 +2337,10 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     console.warn('[CTC] Bus request dropped: ' + m.action + ' (' + why + ')');
                     return;
                 }
-                // Handing the phone over (or handed over): run nothing, ack
-                // nothing, so a command sent during a hand-over is never doubled.
-                if (movedAway && m.action !== '${escapeJs(ctcDock.REQUEST_TAKEOVER)}') {
-                    console.warn('[CTC] Bus request dropped: ' + m.action + ' (phone moving)');
+                // Stepping aside (lost to another anchor): run nothing, ack
+                // nothing, so a command sent while the anchor changes is never doubled.
+                if (movedAway) {
+                    console.warn('[CTC] Bus request dropped: ' + m.action + ' (phone stepped aside)');
                     return;
                 }
                 // The same command again (same tab, same seq): ran once already.
@@ -2370,8 +2364,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
                     dockSetOutput(m.id);
                 } else if (m.action === '${escapeJs(ctcDock.REQUEST_MARK_MISSED_SEEN)}') {
                     markMissedSeen();
-                } else if (m.action === '${escapeJs(ctcDock.REQUEST_TAKEOVER)}') {
-                    dockTakeover(m);
                 } else if ((m.action === 'mute' || m.action === 'unmute')
                         && activeCall && activeCall.isMuted() !== (m.action === 'mute')) {
                     toggleMute();
@@ -2430,7 +2422,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         function setStatus(text, pillClass) {
             statusEl.textContent = text;
             statusEl.className = 'status-pill' + (pillClass ? ' ' + pillClass : '');
-            // After a takeover the phase stays 'moved' until this frame stops.
+            // After stepping aside the phase stays 'moved' until this frame stops.
             if (pillClass !== undefined && !movedAway && DOCK_PHASE_BY_PILL.hasOwnProperty(pillClass)) {
                 dockPhase = DOCK_PHASE_BY_PILL[pillClass];
                 publishDock();

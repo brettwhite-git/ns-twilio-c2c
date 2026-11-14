@@ -42,7 +42,6 @@
 
     var LOCK_NAME = 'ctc-phone-anchor';  // PHONE_LOCK_NAME in lib/ctc_dock.js
     var EXIT_KEY = 'ctc-phone-exit';     // EXIT_KEY in lib/ctc_dock.js
-    var TAKEOVER_PARAM = 'takeover';     // TAKEOVER_PARAM in lib/ctc_dock.js
     // localStorage: '1' while the phone is not enabled for this user
     // (snapshot error.kind 'not_enabled'); NOT_ENABLED_AT_KEY holds the epoch
     // ms it was set. Expires after NOT_ENABLED_TTL_MS; cleared when a token
@@ -94,18 +93,16 @@
     // the shell.
     if (mode === 'outside' && window.opener && window.opener !== window) return;
 
-    // Address of this page inside the shell. takeover: the shell asks the
-    // tab that holds the phone to hand it over ("Use phone here").
-    function shellHref(takeover) {
+    // Address of this page inside the shell.
+    function shellHref() {
         var sep = cfg.shellUrl.indexOf('?') === -1 ? '?' : '&';
-        return cfg.shellUrl + sep + 'u=' + encodeURIComponent(location.pathname + location.search)
-            + (takeover ? '&' + TAKEOVER_PARAM + '=1' : '');
+        return cfg.shellUrl + sep + 'u=' + encodeURIComponent(location.pathname + location.search);
     }
 
-    function goShell(takeover) {
+    function goShell() {
         if (!cfg.shellUrl) return;
         try { window.sessionStorage.removeItem(EXIT_KEY); } catch (e) { /* storage blocked */ }
-        window.top.location.href = shellHref(takeover === true);
+        window.top.location.href = shellHref();
     }
 
     // --- Phone not enabled for this user (outside tabs, dashboard loader) ---
@@ -221,8 +218,6 @@
     var UI_KEY = 'ctc-dock-ui';
     var UI_VERSION = 1;
     var UI_VIEWS = { dial: 1, search: 1, recents: 1, call: 1 };
-    // Shell lock states in which another tab runs the phone (phoneState()).
-    var SHELL_WAITING = { waiting: 1, stealing: 1, moving: 1 };
     var NOT_READY_TEXT = 'The phone is not ready yet. Try again.';
     // Shell: the phone frame loads after the dock. While it boots (up to
     // this long) a silent bus means "starting", not "offline".
@@ -354,8 +349,6 @@
         /* each shape shows only its own words / timer */
         '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
         '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
-        /* the moved pill's one line is fixed copy, never a name: show it whole */
-        '.vchip[data-stage="moved"] .h-words{max-width:none}',
         '.h-l1,.h-l2{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.h-l1{font-size:13px;font-weight:600;line-height:16px;color:#FFFFFF}',
         '.h-l2{font-size:12px;line-height:16px;color:#94A6BF}',
@@ -393,7 +386,7 @@
         '.v-main.offline{background:#F4F2EE}',
         '.v-main.retry{background:#FCE9E7}',
         /* disabled slot: a stage with no action (Starting, Calling paused,
-           moved, mirror idle) keeps the 40 px main slot, so the pill never
+           no-dialer idle) keeps the 40 px main slot, so the pill never
            shrinks to a nub. Not a control: aria-hidden, out of the tab
            order, and presses fall through to the pill body. */
         '.v-main.disabled{background:rgba(255,255,255,0.10);cursor:default;pointer-events:none}',
@@ -411,17 +404,6 @@
         '.vchip.light .h-l1{color:#161513}',
         '.vchip.light .h-l2{color:#5C5955}',
         '.vchip.light.err .h-l1{color:#9A2A23}',
-        /* small menu on the pill (phase moved: "Use phone here") */
-        '.v-menu{position:absolute;left:0;bottom:calc(100% + 8px);min-width:168px;padding:4px;border-radius:12px;background:#1A2B47;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 10px 24px rgba(15,27,48,0.26);transform-origin:bottom left;transition:opacity 150ms cubic-bezier(0.23,1,0.32,1),transform 150ms cubic-bezier(0.23,1,0.32,1)}',
-        '.v-menu.closed{opacity:0;transform:scale(0.97)}',
-        '.dock[data-col="c"] .v-menu{left:50%;translate:-50% 0;transform-origin:bottom center}',
-        '.dock[data-col="r"] .v-menu{left:auto;right:0;transform-origin:bottom right}',
-        '.dock[data-row="t"] .v-menu{bottom:auto;top:calc(100% + 8px);transform-origin:top left}',
-        '.dock[data-row="t"][data-col="r"] .v-menu{transform-origin:top right}',
-        '.dock[data-row="m"] .v-menu{bottom:auto;top:50%;translate:0 -50%;left:calc(100% + 8px);transform-origin:left center}',
-        '.dock[data-row="m"][data-col="r"] .v-menu{left:auto;right:calc(100% + 8px);transform-origin:right center}',
-        '.v-menu-item{display:block;width:100%;padding:9px 12px;border-radius:8px;background:transparent;text-align:left;font-size:13px;font-weight:500;color:#FFFFFF;white-space:nowrap}',
-        '.v-menu-item:hover{background:rgba(255,255,255,0.08)}',
         /* incoming card: rises out of the pill (placed by script with
            translate; the enter / exit morph runs on transform + opacity,
            WAAPI, see animateIncoming). Row: sky dot, caller text, Decline,
@@ -479,7 +461,7 @@
         '.dl-lift{position:fixed;left:0;top:0;border-radius:28px;pointer-events:none;opacity:0;box-shadow:0 24px 56px rgba(15,27,48,0.16);transition:opacity 140ms ease-out,scale 140ms ease-out}',
         '.dl-lift.settling{transition:opacity 140ms ease-out,scale 140ms ease-out,translate ' + SETTLE + '}',
         '.dl-lift.lifted{opacity:1;scale:' + (1 + LIFT) + '}',
-        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button,.v-menu{transition:opacity 150ms linear}.card.closed,.v-menu.closed{transform:none}button:active{transform:none}.v-main svg{transition:none}.vchip .v-dot,.v-dot::before,.v-main.answer::after{animation:none}.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + '}.vchip[data-live="true"][data-stage="dialing"] .v-dot,.vchip[data-live="true"][data-stage="ringing"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.amber, 0.20) + '}.v-main.answer::before{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button{transition:opacity 150ms linear}.card.closed{transform:none}button:active{transform:none}.v-main svg{transition:none}.vchip .v-dot,.v-dot::before,.v-main.answer::after{animation:none}.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + '}.vchip[data-live="true"][data-stage="dialing"] .v-dot,.vchip[data-live="true"][data-stage="ringing"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.amber, 0.20) + '}.v-main.answer::before{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
     ].join('\n');
 
     var HTML = ''
@@ -501,9 +483,6 @@
         +       '<svg class="v-ico ico-offline" width="16" height="16" viewBox="0 0 24 24" fill="#345D7E" aria-hidden="true">' + ICON_PHONE + '</svg>'
         +       '<svg class="v-ico ico-retry" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#9A2A23" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICON_RETRY + '</svg>'
         +     '</button>'
-        +   '</div>'
-        +   '<div class="v-menu closed" role="menu" aria-label="Phone" hidden>'
-        +     '<button type="button" class="v-menu-item v-use-here" role="menuitem">Use phone here</button>'
         +   '</div>'
         +   '<div class="card navy closed" role="region" aria-label="Current call">'
         +     '<button type="button" class="card-top" aria-label="Collapse call card">'
@@ -572,12 +551,11 @@
     // first lock query answers; null when the browser has no Web Locks.
     var lockHeld = mode === 'outside' ? 'pending' : false;
     // What a click on the pill does beyond opening: 'unlock' (Turn on
-    // phone) | 'menu' (phase moved) | 'signin' (signed out) | ''. pressAction keeps the value seen
+    // phone) | 'signin' (signed out) | ''. pressAction keeps the value seen
     // at pointerdown / keydown: the shell's own gesture listener may unlock
     // audio (and a new snapshot re-render the pill) before the click lands.
     var pillAction = '';
     var pressAction = null;
-    var menuOpen = false;
     // Incoming card: incShown = it shows (or enters); incAnim = the running
     // enter / exit of the card (WAAPI); incSideAnims = its content and pill
     // fades; incDismissed = the ring (callSid) the rep already answered or
@@ -643,8 +621,6 @@
     var muteBtn = $('.mute');
     var endBtn = $('.key.end');
     var vCount = $('.v-count');
-    var menuEl = $('.v-menu');
-    var useHereItem = $('.v-use-here');
     var incEl = $('.inc');
     var incShade = $('.inc-shade');
     var incSurf = $('.inc-surf');
@@ -755,9 +731,9 @@
     }
 
     // Shell mode while another tab runs the phone (this shell waits for the
-    // lock, takes it, or just handed it over).
+    // lock; it takes the phone by itself when that tab goes away).
     function shellWaiting() {
-        return mode === 'shell' && !!SHELL_WAITING[shellLock()];
+        return mode === 'shell' && shellLock() === 'waiting';
     }
 
     // The dialer loaded and the phone in another tab: the shell's pill +
@@ -801,20 +777,6 @@
         if (!snap) return;
         if (errorKind() === 'not_enabled' || (mode === 'shell' && shellLock() === 'disabled')) setNotEnabledFlag(true);
         else if (snap.phase === 'ready' || snap.phase === 'incoming' || ACTIVE[snap.phase]) setNotEnabledFlag(false);
-    }
-
-    // "Use phone here": only when no call is live. Shell: ask the tab that
-    // holds the phone to hand it over. Outside: open this page in the shell
-    // with takeover=1 (the shell asks for the phone when it finds it busy).
-    function useHere() {
-        if (isActive() || (snap && snap.phase === 'incoming')) return false;
-        if (mode === 'shell') {
-            var s = shellObject();
-            return !!(s && typeof s.takeover === 'function' && s.takeover() !== false);
-        }
-        if (!cfg.shellUrl) return false;
-        goShell(true);
-        return true;
     }
 
     // "Turn on phone" / "Get call alerts": from the click itself. In the
@@ -939,8 +901,8 @@
         return m;
     }
 
-    // This tab's sender id and command counter (request from / seq), shared
-    // with the shell page in this window.
+    // This tab's sender id and command counter (request from / seq), one
+    // per page load (window.__ctcBusTab).
     function busSender() {
         var s = window.__ctcBusTab;
         if (!s || typeof s.id !== 'string' || typeof s.seq !== 'number') {
@@ -1021,7 +983,7 @@
         });
     }
 
-    // The anchor went away or handed the phone over: what it never acked
+    // The anchor went away or stepped aside: what it never acked
     // was dropped there (bus contract), and is never sent again.
     function dropInflight() {
         var lost = inflight.length > 0;
@@ -1046,12 +1008,11 @@
         starting: { dot: T.amber, label: 'Starting phone…' },
         ready: { dot: T.goDot, label: 'Phone ready' }, // aria-label only: the ready pill has no text
         dialing: { dot: T.amber, label: 'Calling…' },
-        ringing: { dot: T.amber, label: 'Ringing…' },
+        ringing: { dot: T.amber, label: 'Calling…' },
         incoming: { dot: T.ring, label: 'Incoming call' }, // ring: ringing reads apart from talking
         answering: { dot: T.goDot, label: 'Connecting…' }, // Answer sent, Twilio not accepted yet
         connected: { dot: T.goDot, label: 'Connected' },
-        reconnecting: { dot: AMBER, label: 'Reconnecting…' },
-        moved: { dot: T.offline, label: 'Phone moved to another tab' }
+        reconnecting: { dot: AMBER, label: 'Reconnecting…' }
     };
     // Ready, but Twilio cannot ring this phone (snap.canReceive === false:
     // inbound is on and the anchor is re-registering). Quiet: amber dot and
@@ -1108,9 +1069,8 @@
         enterTimer = window.setTimeout(function () { entering = false; }, dur);
     }
 
-    // No pill (not_enabled): the panel closes and the menu with it.
+    // No pill (not_enabled): the panel closes.
     function hideDock() {
-        setMenu(false);
         if (expanded || (panel && !panel.el.hidden)) setExpanded(false, false);
         if (timerId) { window.clearInterval(timerId); timerId = null; }
         dockEl.hidden = true;
@@ -1123,7 +1083,6 @@
         if (!phoneElsewhere()) {
             if (!cfg.shellUrl) { hideDock(); return; }
             // "Open phone" (offline style): this tab moves into phone mode.
-            setMenu(false);
             dockEl.hidden = false;
             dockEl.style.setProperty('--dot', PHASE_VIEW.offline.dot);
             renderPill({ stage: 'offline', dot: true, light: true, main: 'offline', label: 'Open phone.' + ARROWS_HINT, title: 'Open phone', l1: 'Open phone' });
@@ -1139,37 +1098,39 @@
             setExpanded(expanded, false);
             return;
         }
-        // No dialer on this page: mirror the other tab's call (card only).
+        // No dialer on this page (its script did not load; the client does
+        // not know its URL): the same pill, but no panel, so between calls
+        // the main slot is disabled; a live call opens the call card.
         renderChip(snap ? snap.phase : 'starting', true);
         if (snap) renderCard();
         if (!isActive()) expanded = false;
         setExpanded(expanded, false);
     }
 
-    // mirror: outside mode with no dialer, the phone runs in another tab.
+    // mirror: outside mode with no dialer (no panel): the same pill words,
+    // no idle views and no main action between calls.
     function renderChip(phaseIn, mirror) {
         var phase = PHASE_VIEW[phaseIn] ? phaseIn : 'offline';
         var view = PHASE_VIEW[phase];
-        if (!mirror && phase === 'ready' && snap && snap.canReceive === false) view = READY_NOT_RECEIVING;
+        if (phase === 'ready' && snap && snap.canReceive === false) view = READY_NOT_RECEIVING;
         var active = isActive();
-        var light = !mirror && (phase === 'offline' || phase === 'error');
+        var light = phase === 'offline' || phase === 'error';
         var name = active ? callName() : '';
-        var idleLabel = mirror ? 'Phone open in another tab' : view.label;
+        var idleLabel = view.label;
 
         if (!active && !panel) expanded = false;
-        if (phase !== 'moved') setMenu(false);
 
         dockEl.hidden = false;
         // The light error pill takes the stop button colour (stopDot is for dark).
         dockEl.style.setProperty('--dot', light && phase === 'error' ? T.stop : view.dot);
         if (phase === 'incoming') {
             // Ringing in: the incoming card above / beside the pill holds
-            // Answer / Decline (here and in a mirror tab: the anchor answers;
+            // Answer / Decline (here and in a tab without the dialer: the anchor answers;
             // the audio plays in the tab that holds the phone). The pill
             // says "Ringing" (horizontal), rings its sky dot, and shows a
             // green Answer button with a ring orb (both shapes).
             var who = callerText();
-            var words0 = pillWords(phase, mirror, active);
+            var words0 = pillWords(phase, active);
             renderPill({
                 stage: phase,
                 dot: true,
@@ -1203,8 +1164,8 @@
             if (timerId) { window.clearInterval(timerId); timerId = null; }
             return;
         }
-        // Idle states that replace the plain pill: phase moved, errors,
-        // wrap-up, Turn on phone, missed calls (see idleView).
+        // Idle states that replace the plain pill: errors, wrap-up, Turn on
+        // phone, missed calls (see idleView).
         var idle = active || mirror ? null : idleView(phase, view);
         if (idle) {
             dockEl.style.setProperty('--dot', idle.dot);
@@ -1230,11 +1191,11 @@
             return;
         }
         // Tooltip text. Ready: dot + green phone button only, no label.
-        var chipText = active ? name : (!mirror && phase === 'ready' ? '' : idleLabel);
+        var chipText = active ? name : (phase === 'ready' ? '' : idleLabel);
         var label = active
             ? name + ', ' + view.label + '. Open call card.' + ARROWS_HINT
             : idleLabel + '.' + (mirror ? '' : ' Open phone.') + ARROWS_HINT;
-        var words = pillWords(phase, mirror, active);
+        var words = pillWords(phase, active);
         renderPill({
             stage: phase,
             dot: true,
@@ -1260,15 +1221,12 @@
     }
 
     // The pill between calls when something needs the rep (null: the plain
-    // pill). Shell and remote tabs only. Order: phase moved, an error kind,
-    // wrap-up (a call just ended), Turn on phone (shell tab, audio still
-    // locked), missed calls.
+    // pill). Shell and remote tabs only. Order: an error kind, wrap-up (a
+    // call just ended), Turn on phone (shell tab, audio still locked),
+    // missed calls.
     //   { dot, l1, l2, label (title / aria), main, mainLabel, action, light,
     //     err, amber, count, stage, timer }
     function idleView(phase, view) {
-        if (phase === 'moved') {
-            return { dot: view.dot, light: true, l1: 'Phone moved to another tab', label: 'Phone moved to another tab. Open menu', action: 'menu' };
-        }
         var kind = errorKind();
         if (kind === 'mic') return { dot: T.stop, light: true, err: true, main: 'retry', l1: 'Microphone blocked', label: 'Microphone blocked. Open phone' };
         if (kind === 'twilio') return { dot: T.stop, light: true, err: true, main: 'retry', l1: 'Phone error', label: 'Phone error. Open phone' };
@@ -1311,11 +1269,10 @@
     // Horizontal pill words (two lines; '' = line not shown). The vertical
     // pill shows none. Answering and wrap-up set their own (renderChip,
     // idleView).
-    function pillWords(phase, mirror, active) {
+    function pillWords(phase, active) {
         if (phase === 'incoming') return { l1: 'Ringing', l2: '' }; // the card names the caller
         var number = active ? formatPhone(snap.number) || snap.number || '' : '';
         var name = active ? snap.entityName || snap.contactName || number || 'Call' : '';
-        if (mirror) return { l1: 'Phone open in another tab', l2: name };
         if (phase === 'offline') return { l1: 'Phone offline', l2: 'Open phone mode' };
         if (phase === 'error') return { l1: 'Phone error', l2: 'Click to reconnect' };
         if (phase === 'starting') return { l1: 'Starting phone', l2: '' };
@@ -1335,7 +1292,7 @@
     //   main: 'call' (open phone) | 'end' (hang up) | 'offline' (open phone)
     //         | 'retry' (open phone) | 'answer' | 'callback' (wrap-up: dial
     //         the last call again) | null (no action: starting, answering,
-    //         paused, moved, mirror idle; a disabled slot is drawn)
+    //         paused, no-dialer idle; a disabled slot is drawn)
     // The body button opens the phone / call card. When the main button does
     // that same thing, the body leaves the tab order so keyboard users meet
     // one control per action.
@@ -1392,41 +1349,17 @@
         syncExpandedAria();
     }
 
-    // aria-expanded (and aria-haspopup for the menu) on the control that
-    // opens something: the body when it is in the tab order, else the main
-    // button. Nothing when the click navigates or only turns the phone on.
+    // aria-expanded on the control that opens something: the body when it
+    // is in the tab order, else the main button. Nothing when the click
+    // navigates or only turns the phone on.
     function syncExpandedAria() {
         vBody.removeAttribute('aria-expanded');
-        vBody.removeAttribute('aria-haspopup');
         vMain.removeAttribute('aria-expanded');
-        vMain.removeAttribute('aria-haspopup');
         var opener = vBody.tabIndex === 0 ? vBody : vMain;
-        if (pillAction === 'menu') {
-            opener.setAttribute('aria-haspopup', 'menu');
-            opener.setAttribute('aria-expanded', menuOpen ? 'true' : 'false');
-            return;
-        }
         if (pillAction === 'unlock' || pillAction === 'signin') return;
         if (opener === vMain && vMain.classList.contains('end')) return;
         var opens = (mode !== 'outside' || phoneElsewhere()) && (!!panel || isActive());
         if (opens) opener.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    }
-
-    // The small pill menu (phase moved): opens with a 150 ms fade + scale
-    // 0.97 -> 1 from the pill (fade only under reduced motion), closes at once.
-    function setMenu(open) {
-        if (!open && !menuOpen && menuEl.hidden) return;
-        menuOpen = !!open;
-        if (open) {
-            menuEl.hidden = false;
-            void menuEl.offsetWidth; // commit the closed state so the transition runs
-            menuEl.classList.remove('closed');
-            useHereItem.focus();
-        } else {
-            menuEl.classList.add('closed');
-            menuEl.hidden = true;
-        }
-        syncExpandedAria();
     }
 
     // --- Compositor morph (FLIP) ---
@@ -1764,7 +1697,6 @@
         vchipEl.hidden = next;
         if (next) {
             pillFit.size = 0; // reappears at its own size, no ease
-            setMenu(false);
         }
         syncExpandedAria();
         if (panel) {
@@ -2544,7 +2476,6 @@
     function runPillAction(a) {
         if (a === 'unlock') { unlock(); return true; }
         if (a === 'signin') { signIn(); return true; }
-        if (a === 'menu') { setMenu(!menuOpen); return true; }
         return false;
     }
     function onPillClick() {
@@ -2567,19 +2498,6 @@
         else if (vMain.classList.contains('callback')) callBackFromWrap();
         else if (!runPillAction(a)) openFromPill();
     });
-    useHereItem.addEventListener('click', function () {
-        setMenu(false);
-        useHere();
-    });
-    menuEl.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') { e.stopPropagation(); setMenu(false); focusPill(); }
-    });
-    // A press anywhere else closes the menu.
-    document.addEventListener('pointerdown', function (e) {
-        if (!menuOpen) return;
-        var path = typeof e.composedPath === 'function' ? e.composedPath() : [];
-        if (path.indexOf(menuEl) === -1 && path.indexOf(vchipEl) === -1) setMenu(false);
-    }, true);
     incAnswer.addEventListener('click', function () { respondIncoming('answer'); });
     incDecline.addEventListener('click', function () { respondIncoming('decline'); });
     vMute.addEventListener('click', function () { send(snap && snap.muted ? 'unmute' : 'mute'); });
@@ -2607,9 +2525,9 @@
         return typeof v === 'number' && v >= BUS_MIN_VERSION;
     }
 
-    // Readiness handshake + hand-over. A working anchor (not offline /
+    // Readiness handshake + anchor change. A working anchor (not offline /
     // moved) makes this tab ready and sends what waited. A new anchor id, or
-    // our anchor saying offline / moved, is a hand-over: what the old one
+    // our anchor saying offline / moved, is an anchor change: what the old one
     // never acked is dropped; after offline / moved requests wait again, and
     // this tab says hello (no time-out: the next anchor speaks when it starts).
     function trackAnchor(s) {
@@ -2631,16 +2549,29 @@
         bus.postMessage({ v: 1, type: 'hello' });
     }
 
+    // A stopped anchor (offline / moved) that is not the one this tab
+    // follows: never drawn, so the tab stays on the live anchor (an anchor
+    // that lost the one-anchor check sends 'moved', then 'offline' as its
+    // frame unloads).
+    function otherStoppedAnchor(s) {
+        var id = typeof s.anchorId === 'string' ? s.anchorId : '';
+        return (s.phase === 'offline' || s.phase === 'moved') && !!id && !!anchorId && id !== anchorId;
+    }
+
     bus.onmessage = function (e) {
         var m = e.data;
         if (!m || m.v !== 1 || m.type !== 'snapshot' || !m.snap) return;
         // An anchor too old for this dock: not drawn, never sent to.
         if (!busCompatible(m.snap)) return;
+        var ignore = otherStoppedAnchor(m.snap);
         trackAnchor(m.snap);
+        if (ignore) return;
         window.clearTimeout(helloTimer);
         gotSnapshot = true;
         var prev = snap;
-        snap = m.snap;
+        // Our anchor stepped aside ('moved'): like any tab before the
+        // handshake, the Starting pill until the winning anchor speaks.
+        snap = m.snap.phase === 'moved' ? { phase: 'starting' } : m.snap;
         announce(prev, snap);
         trackWrap(prev, snap);
         render();
@@ -2767,10 +2698,9 @@
         host: {
             cfg: cfg,
             mode: mode,
-            // Outside mode with the phone in another tab: the panel is a
-            // remote control (no audio here; "Use phone here" replaces Exit).
+            // The phone in another tab (outside mode, or a waiting shell):
+            // the panel is a remote control (no audio here, no Exit).
             isRemote: function () { return remote(); },
-            useHere: useHere,
             unlockAudio: unlock,
             reloadPhone: reloadPhone,
             signIn: signIn,

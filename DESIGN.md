@@ -11,6 +11,7 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 | L2 | State model | https://claude.ai/artifact/YNGkUJDGG2GFQPDWFHR3ax |
 | L3 | Design system (tokens, components, phone pill, dialer) | https://claude.ai/artifact/Jw98h4kH2Vk1m4NJgu9sy9 |
 | L4 | Screens (wizard, console, rep, manager) | https://claude.ai/artifact/GYfzs3wQ7b7fDHqcjQoSxt |
+| L5 | Demo callers (ElevenLabs agents on a Twilio number) | https://claude.ai/artifact/DuRKbSv33K4oyJVEoS5r1v |
 
 ## 0. Keeping design, canvas and code in sync
 
@@ -29,7 +30,19 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 
 4. A "Design change" or "Gap" sets the board tag to *Drift* until the board is fixed.
 
-**Board tags** (end of each L3/L4 board title, after "  —  "): *Shipped · asset NN*, *Shipped* (not dock code), *Planned* or *Drift (reason)*. Maps and notes carry no tag.
+**Status badges** (every board on L1–L5, and every step on a flow map). Each board shows its badge twice: at the end of its title (after "  —  ") and as a coloured badge note above the board. Map steps carry the same chip.
+
+| Badge | Colour (chip / sticky) | Means |
+|---|---|---|
+| **Shipped · asset NN** (or *Shipped* for non-dock code) | green `#EBF8DE`/`#436B1D` | The code does what the board shows |
+| **Pending build · Phase N** | blue `#EDF6F9`/`#00688C` | Approved and in `tasks/todo.md`, not built yet |
+| **Design only** | grey `#F1EFEA`/`#5C5955` | Designed, not approved to build (gated) |
+| **Drift (reason)** | amber `#FDF2E5`/`#8F520A` | Board and code differ: fix one, then re-badge |
+| **Legacy · remove** | red `#FFF1EF`/`#B3311F` | Superseded or contradicts a decision; delete after the user confirms |
+
+Maps, notes and thesis boards are *Reference* and carry no badge. A part of a board can carry its own small chip (e.g. a *Design only* sort control on a *Shipped* board). Inventory: `docs/testing/<date>/board-inventory.md`.
+
+**Gate:** a change is not done until every affected board's badge is right. A code change that ships what a *Pending build* or *Design only* board shows moves it to *Shipped · asset NN*; a decision that a board contradicts makes it *Drift* or *Legacy · remove*.
 
 **Version log:** each `DOCK_ASSET_VERSION` bump adds a §7 line that says what changed in the design (or "no design change").
 
@@ -132,7 +145,7 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 - **States, grouped:** idle views (06b-1), outbound and in call (06b-2), call quality (06b-3), inbound and after call (06b-4), recover and blocked (06b-5).
 - **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. Shipped in asset 25.
 - **Incoming card (panel closed):** 320px wide, radius 16, a FLIP scale morph out of the pill (nine-piece window, shadow on its own opacity layer; no clip-path), with Answer in go green. Shipped in asset 25.
-- **Gear (Settings view):** mic and speaker, "Audio plays in your phone tab.", "Move phone here" (disabled during a call), Exit phone mode. Shipped; not yet drawn on 06b-1.
+- **Gear (Settings view):** mic and speaker, "Audio plays in your phone tab.", Exit phone mode. No "Move phone here" in the design (see §4a).
 - **Search view chips:** see Search view above. Sort (Recent activity · Name · Last called) is Planned.
 
 ## 4a. One phone, every tab (decided 2026-11-11)
@@ -147,8 +160,8 @@ Source of truth for how the product looks and behaves. Code follows this file; c
   These are written to shared storage. A tab applies them on load, and again when it becomes visible. A tab you open or return to shows the phone exactly as you left it. A live call shows in every tab.
 - **No hand-over gap:** the phone never moves on its own while the anchor is alive.
 - **When the anchor tab closes**, a waiting phone-mode tab takes the lock automatically. This is existing behaviour.
-- **"Move phone here"** is a quiet item in the gear menu, for when the user wants the audio device in this tab. It is refused while a call is live.
-- **No page banner** for "phone in another tab". The pill states "In another tab" on L3 05 cover only the case where an anchor exists but this tab cannot control it (no bus).
+- **No "pass to another tab" design.** The phone is present in every tab, so the design has no hand-over control, no "Move phone here" item and no "In another tab" pill.
+- **No page banner** for "phone in another tab".
 - **Reliable commands:**
   - **Sequence numbers.** Every command (Dial, Answer, Mute, End and so on) carries the anchor id and a per-tab sequence number. The anchor runs each command once and acknowledges it. A double-click on Call places one call. A command sent during a hand-over is never doubled.
   - **Readiness handshake.** A newly opened tab shows the Starting pill (disabled slot) until it hears a compatible anchor. That is usually under a second. Commands sent before then are held for up to 2 s, then dropped with a quiet error.
@@ -199,7 +212,82 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 | 2026-11-11 | Call Central direction B chosen; A and C were removed. The portlet with Tasks is the gold standard. |
 | 2026-11-11 | Answer opens the panel. Add quick clear, voicemail link and "Add to NetSuite" (the last two are gated). |
 | 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
+| 2026-11-13 | User journeys (L1) adopt the "Swimlane journey" contract (§9): stage columns, Interactions and Descriptions lanes, numbered cards and step diamonds. |
+| 2026-11-13 | Architecture and flow diagrams adopt the "Mono blueprint" contract (§8): monochrome, dashed connectors, black pills and numbered step markers. |
+| 2026-11-13 | Deleted 4 Legacy boards (user OK): L2 Phone ownership statechart and Multi-tab scenarios, L3 03b v1 Controls, L4 M5 report placeholder. |
+| 2026-11-13 | Asset 28: Move phone here removed from code (gear item, takeover request, step-aside steal, Use phone here, moved and other-tab pill copy). A tab that stands down shows Starting, then becomes a full remote. Status badges added to every board (§0). |
+| 2026-11-13 | Removed all "pass to another tab" design work: Move phone here, the "In another tab" pills, the R15 fallback inset. The phone is present in every tab. |
 | 2026-11-12 | Motion tokens follow the code: phone enter easing (.23,1,.32,1); incoming card 1280/880ms; panel 200ms (findings #21, #22). Asset 27 bug batch: text ≥12px, Oracle Sans stack, reduced motion 150ms, missed dot #FF9D90, retry 40px circle, glass amber Unmute, calling halo loop, portlet Call go green. |
 | 2026-11-12 | Decided: ringing = "Calling…" (no ring timer); wrap-up = "Call ended"; Call back is go green (asset 27); signed out stays dark + amber (light = blocked/paused only); panel close is the "Collapse phone" chevron. Findings #6, #7, #11, #12, #16/#42. |
 | 2026-11-12 | Asset 26: Search rows get their own go-green Call; type chips stay; no "Everyone" section (Design change, findings #3). |
 | 2026-11-12 | Asset 25 deployed (Phase 1). Sync loop §0 added; L3/L4 boards tagged Shipped / Planned / Drift. §4 corrected to the shipped FLIP morph, Settings view and search chips. |
+
+## 8. Architecture and flow diagrams — "Mono blueprint" contract (decided 2026-11-13)
+
+Applies to every architecture, sequence and data-flow diagram: `docs/architecture/system-architecture.html`, the L2.3 boards, and new diagrams on any canvas. Product screens keep §1–§6. Reference: `docs/architecture/reference/diagram-style-reference.jpg`. Kit board: L2 "Diagram kit".
+
+**Look:** monochrome on white. Black ink, white boxes, dashed connectors, black pill labels and black numbered step markers. No colour fills, no gradients, no shadows other than the node lift below. Status colour appears only in §0 badges, never inside a diagram.
+
+**Tokens**
+
+| Token | Value |
+|---|---|
+| Canvas | `#FFFFFF` |
+| Ink (text, strokes, fills of pills/markers) | `#161513` |
+| Muted ink (secondary labels) | `#5C5955` |
+| Font | `'Oracle Sans','Helvetica Neue',Helvetica,Arial,sans-serif` |
+| Diagram title | 48–56px / 700, letter-spacing −0.02em, centred |
+| Node label | 16px / 400 |
+| Group label | 18px / 400, bottom centre of the group |
+| Pill / marker text | 12px / 600, white |
+| Line weight | nodes 1px, groups 1px, sections 2px, connectors 1.25px |
+| Dash | `4 4` |
+
+**Parts** (each is one reusable shape; build from separate placed elements on a canvas, inline SVG in an HTML file)
+
+1. **Section** — a big rounded panel, radius 28, 2px ink stroke, with a **tab** on its top-left edge: ink fill, white 20/600 text, padding 10×16, top corners radius 14, bottom edge sitting on the panel stroke. One section per view (e.g. "Phone mode", "Call record and AI").
+2. **Group** — a boundary for a runtime or system (e.g. "Shell tab", "NetSuite", "Twilio"): white, radius 16, 1px stroke, label at bottom centre.
+3. **Node** — a component: white, radius 10, 1px stroke, padding 12×22, min height 48, centred label, lift = `0 2px 0 rgba(22,21,19,.18)`.
+4. **Actor node** — a person: a 40px ink circle with a white stroke icon above the label (Rep, Manager, Admin, Caller).
+5. **Service node** — an external API or store: a 28px ink circle with a white stroke icon to the left of the label (Twilio Voice, Studio, Conversational Intelligence, N/llm).
+6. **Pill** — a label on or beside a connector (message, payload, request): ink fill, radius 6, padding 4×10, white 12/600. Short nouns or verbs, 1–3 words.
+7. **Callout** — an example value or utterance: ink fill, radius 10, white 13px text, padding 12×16, max width 200, with an 8px triangle pointing at its node.
+8. **Step marker** — order of a flow: 20px ink circle, white 12/700 numeral, placed on the connector at its start. Numbers follow time order across the whole diagram; a step that repeats keeps its number.
+9. **Connector** — dashed 1.25px ink, orthogonal routing with 10px rounded elbows, solid ink triangle arrowhead (8px). Two-way traffic is two connectors, never a double-headed arrow. Never cross a node; cross another connector only at right angles.
+
+**Composition rules**
+- Read left to right, top to bottom; the actor starts on the left.
+- One idea per section. Split a diagram that needs more than ~12 nodes or ~9 steps.
+- Every connector that carries a message has a pill or a step marker (or both); unlabeled connectors mean "contains" or "hosts".
+- Spacing: 24px between nodes inside a group, 48px between groups, 40px section padding.
+- Text ≥12px, contrast ≥4.5:1 (ink on white, white on ink).
+- A legend is a single row under the title only when a diagram uses a part the reader may not know (callout, marker).
+- Status of a diagram (Shipped / Design only) is its board badge (§0), not a colour in the drawing.
+
+## 9. User journeys — "Swimlane journey" contract (decided 2026-11-13)
+
+Applies to every user journey and service blueprint (L1 canvas). Reference: `docs/architecture/reference/journey-style-reference.jpg`. Kit board: L1 "Journey kit". Architecture and data flow stay §8.
+
+**Layout:** one board = one journey, read left to right.
+- **Stage columns** across the top: a white header row, 56px tall, stage names in UPPERCASE 12px/600 with letter-spacing 0.2em, centred; a small ink arrow glyph in the top-left corner cell. Columns are divided by 1px dashed `#C9C6C1` lines (dash `4 4`) running the full height.
+- **Lanes** down the left: a 32px coloured band with the lane name rotated 90° (UPPERCASE 12px/600, letter-spacing 0.2em, ink text). Two lanes per journey:
+  - **Interactions** (band `#7FCFCF`, body `#F5F5F6`): who touches what, as cards and connectors.
+  - **Descriptions** (band `#FFC97F`, body white): the numbered notes that explain the cards and steps.
+  - A blueprint may add **Frontstage / Backstage** lanes (band `#B8C4F0` and `#D4D0CA`).
+- **Scenario band** (optional, inside a lane): a full-width 24px strip of 45° hatching (`#E4E2DE` on `#F5F5F6`, 12px stripes) with its label UPPERCASE 12px/600, letter-spacing 0.2em, muted ink, centred. Use it to split a lane into alternative paths (e.g. "Outbound from Home" / "From a record").
+
+**Parts**
+1. **Card** — a touchpoint (a person, screen, record or system): white, radius 4, no border, shadow `0 2px 6px rgba(22,21,19,.10)`, padding 14, label UPPERCASE 12px/600 letter-spacing 0.08em ink, centred; min 96 × 64. Badges sit under the label.
+2. **Card badge** — a 20px circle `#4A4845` with a white 12px/700 numeral = the card's note number in Descriptions. Two badges join with "&".
+3. **Connector** — 1.25px solid `#5C5955`, orthogonal with 8px rounded elbows, a 6px hollow circle at its start and an 8px solid arrowhead at its end. Fan-outs merge with rounded joins.
+4. **Step diamond** — a 22px white diamond with a 1px ink border and a 12px/600 numeral, sitting on a connector: the step's note number in Descriptions. Cards are numbered with circles, steps with diamonds; the two number series are separate.
+5. **Note (Descriptions lane)** — one per badge or diamond, in the column where it happens: the badge or diamond, then a title UPPERCASE 12px/700 letter-spacing 0.08em, then body 12px/400 `#5C5955`, line-height 1.5, max width 200. Two notes in a column stack with 20px between; related notes share a thin vertical guide line.
+6. **Pain / opportunity marker** (our addition) — a note may end with a chip: "Pain" (`#FFF1EF`/`#B3311F`) or "Opportunity" (`#EBF8DE`/`#436B1D`), 22px, radius 12, 12px/600.
+
+**Rules**
+- Board background `#FFFFFF`, lane bodies as above; no gradients, no drop shadow other than the card shadow, no decoration outside the board.
+- Text ≥12px everywhere (the reference uses smaller; we do not). Contrast ≥4.5:1: lane labels are ink on the band colour, never white.
+- 4–6 stage columns per journey (a service blueprint, e.g. L1.5, may use up to 8); split a journey that needs more.
+- Every card and step that appears in the Interactions lane has a note; every note has its marker.
+- Copy follows §2.8 words and the shipped behaviour (e.g. "Calling…", "Call ended", one phone in every tab).
+- Status of a journey is its board badge (§0) — journeys are Reference, so they carry none; a step that is not built yet gets a grey "Design only" chip on its card.
