@@ -18,7 +18,7 @@
  * The shell page itself draws the one dock pill + dialer (lib/ctc_dock_client.js
  * in shell mode). Docks on NetSuite pages inside the frame stay silent and
  * send Call clicks here through window.__ctcShell.call(ctx).
- * The shell also adds a session banner, a call-aware leave guard and a
+ * The shell also adds an unreadable-page banner, a call-aware leave guard and a
  * top.document.getElementById shim. Shell events go to the console.
  */
 // eslint-disable-next-line suitescript/no-log-module
@@ -142,7 +142,6 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             framePath: o.framePath,
             shellBase: o.shellBase,
             softphoneUrl: o.softphoneUrl || '',
-            signInUrl: '/app/center/card.nl',
             lockName: ctcDock.PHONE_LOCK_NAME,
             exitKey: ctcDock.EXIT_KEY,
             openRecordType: ctcDock.OPEN_RECORD_MESSAGE,
@@ -156,6 +155,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
             phoneDuplicateType: ctcDock.PHONE_DUPLICATE_MESSAGE,
             shellStateType: ctcDock.SHELL_STATE_MESSAGE,
             unlockAudioType: ctcDock.UNLOCK_AUDIO_MESSAGE,
+            sessionCheckType: ctcDock.SESSION_CHECK_MESSAGE,
             phoneTab: o.phoneTab === true
         };
         return `<!DOCTYPE html>
@@ -194,7 +194,6 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
   .ctc-pt-card p { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: #5F5B55; }
   #ctc-pt-why { font-size: 13px; color: #8A5300; }
   #ctc-pt-open { margin-top: 4px; background: #345D7E; color: #FFFFFF; border: 0; height: 36px; padding: 0 16px; border-radius: 6px; font-size: 14px; font-weight: 600; }
-  #ctc-pm-signin { background: #345D7E; color: #FFFFFF; border: 0; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 600; flex: none; }
 
 </style>
 </head>
@@ -214,11 +213,10 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   <div class="ctc-pm-banner" id="ctc-pm-banner" role="alert" hidden>
     <span class="dot" aria-hidden="true"></span>
     <div class="text">
-      <div class="title" id="ctc-pm-banner-title">Your NetSuite session ended</div>
-      <div class="sub" id="ctc-pm-banner-sub">Sign in again to keep working.</div>
+      <div class="title" id="ctc-pm-banner-title">This page cannot show inside phone mode</div>
+      <div class="sub" id="ctc-pm-banner-sub">Reload to go back. If you were signed out, sign in again.</div>
     </div>
     <button type="button" id="ctc-pm-reload">Reload page</button>
-    <button type="button" id="ctc-pm-signin">Sign in again</button>
   </div>
   <div class="ctc-pm-banner" id="ctc-pm-busy" role="alert" hidden>
     <span class="dot" aria-hidden="true"></span>
@@ -404,41 +402,56 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     if (!flashTimer) document.title = t;
   }
 
-  // ---- Session banner ----
-  // bannerKind 'session': a login page, or the phone says signed_out.
+  // ---- Session lost + the unreadable-page banner ----
+  // bannerKind 'session': a login page, or the phone says signed_out. No
+  // banner for a sign-out (asset 37, DESIGN.md §3): the pill, the panel's
+  // Signed out card and NetSuite's own modal say it. The state still drives
+  // the phone restart after the rep signs in (sessionBack).
   // 'unreadable': the frame shows a page of another origin (often the
   // sign-in host, or another NetSuite account): it may not be a sign-out.
+  // Only this kind shows the banner.
   var bannerKind = 'session';
   function bannerText() {
-    if (bannerKind === 'unreadable') {
-      bannerTitle.textContent = 'This page cannot show inside phone mode';
-      bannerSub.textContent = (ACTIVE[phase] ? 'Your call is still connected. ' : '') +
-        'Reload to go back. If you were signed out, sign in again.';
-      return;
-    }
-    bannerTitle.textContent = 'Your NetSuite session ended';
-    bannerSub.textContent = ACTIVE[phase] ? 'Your call is still connected.' : 'Sign in again to keep working.';
+    bannerTitle.textContent = 'This page cannot show inside phone mode';
+    bannerSub.textContent = (ACTIVE[phase] ? 'Your call is still connected. ' : '') +
+      'Reload to go back. If you were signed out, sign in again.';
   }
   // fromPhone: the phone reported 'signed_out' (else the NetSuite frame
-  // landed on a login page). A banner from the phone hides by itself when
+  // landed on a login page). A sign-out from the phone ends by itself when
   // the phone recovers.
   var bannerFromPhone = false;
   function showBanner(fromPhone, kind) {
     if (!sessionLost || !fromPhone) bannerFromPhone = !!fromPhone;
     // A sign-out (phone or login page) is certain: it wins over an
-    // unreadable frame, which never replaces a session banner.
+    // unreadable frame, which never replaces a sign-out.
     if (kind !== 'unreadable' || fromPhone) bannerKind = 'session';
     else if (!sessionLost) bannerKind = 'unreadable';
     sessionLost = true;
+    if (bannerKind !== 'unreadable') {
+      if (!banner.hidden) {
+        banner.hidden = true;
+        logEvent('banner hidden', 'signed out');
+      }
+      return;
+    }
     bannerText();
     if (banner.hidden) {
       banner.hidden = false;
       logEvent('banner shown', 'phase=' + phase);
     }
   }
-  document.getElementById('ctc-pm-signin').addEventListener('click', function () {
-    window.open(CFG.signInUrl, '_blank');
-  });
+  // Load the NetSuite frame again: the rep's page, or NetSuite's sign-in when
+  // the session is gone. The banner's Reload page and the dock's Sign in
+  // (__ctcShell.reloadFrame, client signIn) both use it: the last good page,
+  // so a blanked frame (login page, unreadable page) comes back too.
+  function reloadFrame(reason) {
+    if (!nsFrame) return false;
+    banner.hidden = true;
+    logEvent('frame reload', reason + ': ' + lastGoodPath);
+    nsFrame.src = lastGoodPath;
+    return true;
+  }
+  window.__ctcShell.reloadFrame = function () { return reloadFrame('sign in'); };
   // The phone frame kept the old session. Restart it, unless a call is live
   // (the call does not need the NetSuite session until it is logged; the
   // softphone renews its own token and rebuilds after the call).
@@ -451,9 +464,10 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     logEvent('phone restart', reason);
     phoneFrame.src = phoneUrl();
   }
-  // The first normal page after the session banner means the rep signed in
-  // again: hide the banner and restart the phone. The Reload button only
-  // reloads the NetSuite frame; a login page there shows the banner again.
+  // The first normal page after a sign-out (or the unreadable banner) means
+  // the rep signed in again: hide any banner and restart the phone. Sign in
+  // and Reload page only reload the NetSuite frame; a login page there marks
+  // the session lost again.
   // The phone's latest snapshot: error kind and canReceive. The phone
   // recovers by itself after a new sign-in (token retry), so a restart is
   // needed only when it has not (a restart is a few seconds with no ringing).
@@ -476,8 +490,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     restartPhone('signed in again');
   }
   document.getElementById('ctc-pm-reload').addEventListener('click', function () {
-    banner.hidden = true;
-    if (nsFrame) nsFrame.src = lastGoodPath;
+    reloadFrame('reload page');
   });
 
   // ---- Frame watcher ----
@@ -490,6 +503,9 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     nsFrame.src = 'about:blank';
     logEvent('left-frame', reason);
     showBanner(false, kind);
+    // Likely a sign-out: the phone checks its session now, so the pill and
+    // the panel say "Signed out" in a second or two (no banner; asset 37).
+    postToPhone({ v: 1, type: CFG.sessionCheckType });
   }
   function currentFramePath() {
     try {
@@ -712,9 +728,10 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   }
 
   // ---- Signed out (phone error kind signed_out) ----
-  // The phone found the NetSuite session gone: show the session banner and,
-  // when the rep is away, one system notification. Both go away when the
-  // phone recovers (the rep signed in, in any tab).
+  // The phone found the NetSuite session gone: mark the session lost (no
+  // banner) and, when the tab is hidden at that moment, one system
+  // notification. It closes when the phone recovers (the rep signed in, in
+  // any tab).
   var signedOutNotif = null;
   function closeSignedOutNotice() {
     if (!signedOutNotif) return;
@@ -745,7 +762,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     if (phoneErrKind === CFG.errorSignedOut) {
       if (!sessionLost) logEvent('phone signed out', '');
       showBanner(true);
-      if (isAway()) showSignedOutNotice();
+      if (document.hidden) showSignedOutNotice();
       return;
     }
     closeSignedOutNotice();
@@ -753,7 +770,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
       sessionLost = false;
       bannerFromPhone = false;
       banner.hidden = true;
-      logEvent('banner hidden', 'phone signed in again');
+      logEvent('session back', 'phone signed in again');
     }
   }
   if (typeof BroadcastChannel === 'function') {

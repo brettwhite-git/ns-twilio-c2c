@@ -48,6 +48,19 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 
 **Guards:** a git pre-commit warning fires when dock or Call Central files change and this file does not. Claude Code hooks (`.claude/hooks/`) remind the agent of this loop when a prompt mentions testing or screenshots, and when it edits those files.
 
+## 0a. Taste principles (learned from decisions 2026-11-13/14)
+
+Check every proposal against these before drawing it:
+1. **One voice, one action** — say a thing once, in one place, with one button.
+2. **No needless boxes** — plain lines of text beat cards, bordered fields and tiles; use one contained control only when it carries state (the target pill).
+3. **One centre line** — number, middle tab, 0 key and Call share the panel axis.
+4. **Phone-native** — round keypad that fills the height; text above/below the number like a call screen; underline tabs.
+5. **Icons for chrome** — back chevron, filter icon, the name as the link; no extra link icons.
+6. **Person icon, never initials.**
+7. **Don't repeat what another place says** — no outcome chips in lists, no duplicated number or "called" date.
+8. **Plain, true status words** — "Ready", "Signed out"; never contradict another surface.
+9. **Keys are sacred** — the keypad is never clipped or pushed under the footer.
+
 ## 1. Foundations
 
 - **Font:** `'Oracle Sans','Helvetica Neue',Helvetica,Arial,sans-serif`. Text is 12px minimum. Contrast is 4.5:1 minimum.
@@ -113,6 +126,14 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 - **Unmute:** a glass amber tile (`rgba(244,199,106,.16)` with an amber ring and amber icon), not a solid amber tile.
 - **Dark surface v2.1 ("phone CSS"):** a grain layer, a coral bloom at bottom right, teal glows and a navy gradient `#1C3344 → #15283A → #11203A`, with a 1px `rgba(255,255,255,.07)` border. The light surface (offline, error, paused) is white with a `#E5E2DD` border.
 - **Which surface:** light = blocked or stopped (offline, mic blocked, phone error, calling paused). Dark with an amber dot = recoverable and in progress (signed out → "Sign in to NetSuite", reconnecting, calls won't ring).
+- **Signed out of NetSuite (decided 2026-11-14; built in asset 37, not live-tested; board 06b-5; finding #76):** one voice, one action.
+  - **Status chip:** amber dot + "Signed out" (never "Ready · reconnecting" while signed out). Pill: "Sign in to NetSuite" as today.
+  - **Panel (Dial view):** one compact card at the top, on the dark surface: title "Signed out of NetSuite" 14/600 white, line "Calls won't ring until you sign in." 13px `#B2C0D3`, one primary "Sign in" button (36px, radius 10, white fill, ink text). The keypad and Call are dimmed (opacity .4) and disabled; the empty match slot above the number hides (lookups need the session) so the whole keypad fits. No "in this tab". A login page or unreadable frame makes the shell ask the phone for an immediate session check, so the card shows within a second or two.
+  - **Sign in (everywhere):** reloads the NetSuite frame to its login page, the same as NetSuite's own "Log In"; safe during a call (the phone lives in its own frame). No new-tab sign-in, no "Reload page".
+  - **Top banner:** not shown for a sign-out (the pill, the panel and NetSuite's own modal already say it). It stays only for a page from another origin inside phone mode ("This page cannot show inside phone mode").
+  - **During a live call:** the call view is unchanged plus one amber 12px line under the timer: "Signed out — this call will still be logged." (true: if the browser cannot log it, reconciliation logs every finished call within 15 minutes, SPEC §7).
+  - **After sign-in:** the chip reads "Signed in · Ready" for 3 s, then "Ready"; the card and the dimming leave (opacity 160ms).
+  - **System notification:** only while the tab is hidden; text unchanged.
 - **Motion:**
 
   | Token | Value |
@@ -142,7 +163,7 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
   - **Keypad (decided 2026-11-13; asset 30):** iPhone-style round keys that fill the panel's height between the number field and the footer: 3 columns of **65px** circles (10% smaller than 72; decided 2026-11-14, asset 32; finding #61), column gap 24px, the grid centred in the panel (row gap sized to fill), fill `rgba(255,255,255,.10)`, pressed `.22`, no border; digit **25px**/400 white, letters 12px/600 letter-spacing .12em `#94A6BF` (our 12px floor, not the iPhone's smaller letters); `*`, `#` and `0 / +` as on the iPhone (a long press on 0 types "+"). Header, tabs, number field and footer unchanged.
   - **Add over the number (decided 2026-11-13; match slot built in asset 30, the "Add to NetSuite" link on in asset 31):** once the field has a digit, a link "Add to NetSuite" (14px/600, `#9FD0FA`) shows centred ABOVE the number; it opens the §6 sheet. When the typed number matches a record, the same slot shows the match instead ("7 Abbott Inc. · Customer", 14px/600 white + type in `#94A6BF`). Empty field → slot empty (no layout jump: the slot keeps its 20px height).
   - **Footer (decided 2026-11-13; asset 30):** a 3-column grid that matches the keypad: empty · a 64px round go-green **Call** (centred under "0") · a 48px round ghost **Backspace** (under "#", vertically centred on Call). No text labels under the buttons; aria-label + tooltip instead.
-  - An × inside the number field clears it.
+  - An × inside the number field clears it. Clearing, editing or typing a number by hand lets a loaded record go (no header, no pill; the match slot is back); the page that record came from does not load it again until the rep moves to another record (finding #75, asset 36).
   - Backspace deletes one digit. A long press clears the field.
   - Esc clears first, then closes.
 - **Record icon (decided 2026-11-14; findings #69):** a record (company, contact, caller) is shown with the Search row's person icon (`ICON_USER`: stroke person, `#94A6BF`, no fill), never an initials avatar ("AI", "NT"). Applies to the loaded record, the live call view and the incoming card; an unknown number uses the same icon. Built in asset 33 (dialer header and live view, client call card).
@@ -161,6 +182,9 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 - **Answer opens the panel straight into the in-call view.** The card's exit and the panel open start together. Shipped in asset 25.
 - **Incoming card (panel closed):** 320px wide, radius 16, a FLIP scale morph out of the pill (nine-piece window, shadow on its own opacity layer; no clip-path), with Answer in go green. Shipped in asset 25.
 - **Gear (Settings view, asset 30):** a back chevron + title "Audio settings"; labelled Microphone and Speaker selects (40px, radius 10, fill `rgba(255,255,255,.06)`, a chevron at the right); "Audio plays in your phone tab."; a rule; Exit phone mode as a coral outline button with a one-line caption. No "Move phone here" in the design (see §4a).
+
+- **Account context on the call screen (decided 2026-11-15; board 06d row L):** a three-number KPI grid under the timer — titles above (12/600 `#94A6BF`: "Outstanding" with a 6px `#FF9D90` dot when an invoice is overdue, "Last touch", "90-day orders"), values below (20/600 white), 6px between them; the grid spans the full content width (three equal cells, ~113px, middle cell on the panel axis), two 1px dividers `rgba(255,255,255,.10)` 48px tall, ≥16px between any text and a divider; 24px above and below the grid. Under it "Recent activity": rows with a 16px stroke icon (call / email / order), text `#C9D3E1` with ellipsis, the age right-aligned ("2d"). No separate "Last touch" line (the grid and the list carry it). Open choice: K5 keeps this call's Follow-ups under the list (recommended), K4 drops them. Needs server data: recent activity (calls, emails, orders) and the 90-day order total.
+- **Call screens (PROPOSAL 2026-11-14, Design only; L3 board 06d; finding #77):** one identity block in every call state (person icon, name 22/600, contact · title 13px `#B2C0D3`, number in SF Mono without +1, then a fixed-height slot: "Calling…" / "Ringing…" / the 32px timer / "Call ended · 03:12"). Under it a context stack with no boxes (hairline rules, 12/600 section labels): Last call (date · length + 2-line AI summary), Follow-ups (open ones with due dates), Account ("$12,400 open · 2 open opps · Customer since 2019"). Controls are 65px circles on the keypad's 3 columns with sentence-case 12/600 labels on one baseline (Mute · End · Keypad; Decline · — · Answer; wrap-up — · Call back · Done). The in-call keypad uses the Dial keys. Wrap-up stays on the call screen (8 s or until the rep acts; Done → Dial with the record loaded); never jump to Search. Ringing shows the context (the rep decides then); an unknown caller shows "Not in NetSuite" + "Add to NetSuite" and "No history for this number". The incoming card adds one hint line ("Dana Bright · Last call Nov 12" / "Not in NetSuite"). A missed call lands on Dial with a compact note (Call back) above the loaded record. Needs one server query for the last call + follow-ups per record.
 
 ## 4a. One phone, every tab (decided 2026-11-11)
 
@@ -231,6 +255,11 @@ Maps, notes and thesis boards are *Reference* and carry no badge. A part of a bo
 | 2026-11-12 | Stages 1–2 catch-up: L3 06b-1, 06, 03 icons, 05i and L4 R1–R5, R10–R18 and the rep map redrawn to asset 25. 19 code-vs-design findings logged in docs/testing/2026-11-12/findings.md; open items await decision. |
 | 2026-11-13 | Add to NetSuite (§6) approved to build; unknown numbers will appear in Recents. |
 | 2026-11-13 | Asset 29 built (not deployed): underline tabs, "Ready", voicemail button + unheard badge + Voicemail list (no Play: recordings are deleted; Open record), one Search filter chip + menu, sort icon in the search field, Dial footer grid, unknown caller icon + "No match in NetSuite", Recents rows with outcome chips, Follow-up suggested, green Call, day groups and search; "Call ended" note; "Summarizing". |
+| 2026-11-15 | Call-screen account context decided (board 06d row L): full-width KPI grid (Outstanding · Last touch · 90-day orders) with dividers and titles above, then Recent activity; K4 vs K5 (follow-ups) still open. |
+| 2026-11-14 | Font stays Oracle Sans (compared with SF Pro in the phone): brand match with NetSuite; SF Pro is Apple-only and cannot be served as a web font. Numbers stay SF Mono. |
+| 2026-11-14 | Asset 37: signed-out experience built (chip "Signed out", one card + Sign in that reloads the NetSuite frame, dimmed keypad, no CTC banner for a sign-out, in-call line "this call will still be logged", "Signed in · Ready" 3 s, OS notice only when hidden, instant session check on a login page) (finding #76). |
+| 2026-11-14 | Signed-out experience redesigned (Design only): status "Signed out", one panel card with one Sign in (reloads the NetSuite frame), dimmed keypad, no top banner for a sign-out, one amber line during a call (finding #76). |
+| 2026-11-14 | Asset 36: clearing, editing or typing the number lets the loaded record go; the same page does not reload it (finding #75, Bug). |
 | 2026-11-14 | Asset 35: performance, no visible change. Dialer: one 60 s record cache (contacts + account summary, shared in-flight requests), prefetch when the match chip shows or a Search/Recents row is hovered, opt-in timing logs (localStorage ctc-perf = 1). Server: lookupCaller searches the rep's book first (full scan only on a miss), softphoneContacts uses one customer lookup, perf:true returns server timing (findings #72, #73). |
 | 2026-11-14 | Asset 34: dead code removed, no visible change (initials helper, ADD_TO_NETSUITE_ENABLED flag inlined, unused CSS); RESTlet actions searchEntities and getWorkspaceTasks removed; the snapshot drops its unused last-invoice search. |
 | 2026-11-14 | Asset 33: "Looking up…" + match chip; record header (name = record link, insight line, no tiles or selects); centred number; target pill with last-called dot; people-first list with a filter from 7 numbers; default = lastCalled (RESTlet softphoneContacts + lastCallForRecord); contacts load for leads too; person icon replaces initials (findings #67, #69–#71). |

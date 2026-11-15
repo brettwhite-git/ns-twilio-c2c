@@ -128,8 +128,15 @@
         session: { dot: T.amber, label: 'Signing in…' },
         network: { dot: T.amber, label: 'Reconnecting…' },
         twilio: { dot: T.stopDot, label: 'Phone error' },
-        paused: { dot: T.offline, label: 'Calling paused' }
+        paused: { dot: T.offline, label: 'Calling paused' },
+        // Never "Ready · reconnecting" while signed out (asset 37).
+        signed_out: { dot: T.amber, label: 'Signed out' }
     };
+    // The first plain Ready after a sign-out, for SIGNED_IN_MS (asset 37).
+    var SIGNED_IN_VIEW = { dot: T.goDot, label: 'Signed in \u00b7 Ready' };
+    var SIGNED_IN_MS = 3000;
+    // The Signed out card and the dimming leave with an opacity fade.
+    var SO_LEAVE_MS = 160;
     var PAUSED_TEXT = 'Calling is paused by your administrator';
     // snap.callWarning (contract names, and the raw Twilio names) -> one line.
     var WARN_MIC = 'We can\'t hear your microphone';
@@ -491,6 +498,28 @@
         '.dl-live-sub{font-size:12px;color:#94A6BF}',
         '.dl-live-time{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;font-size:26px;font-weight:300;letter-spacing:0.04em;margin-top:8px;min-height:32px}',
         '.dl-live-warn{font-size:12px;color:#F4C76A;margin-top:2px}',
+        // Signed out during a call: one amber line under the timer (asset 37).
+        '.dl-live-so{font-size:12px;color:#F4C76A;margin-top:2px}',
+        // Signed out of NetSuite (DESIGN.md §3, asset 37): one card at the
+        // top of the Dial view; the number field, keypad, Call and Backspace
+        // dim to .4 and are disabled (Call and Backspace by .dl-btn[disabled]).
+        '.dl-so{flex-shrink:0;padding:14px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10);display:flex;flex-direction:column;gap:4px}',
+        '.dl-so-title{font-size:14px;font-weight:600;line-height:1.35;color:#FFFFFF}',
+        '.dl-so-text{font-size:13px;line-height:1.4;color:#B2C0D3}',
+        '.dl-so-btn{margin-top:10px;width:100%;height:36px;padding:0 14px;border-radius:10px;background:#FFFFFF;color:#161513;font-size:14px;font-weight:600}',
+        '.dl-so-btn:hover{background:#E9EEF5}',
+        '.dl-so-btn:active{transform:scale(0.98)}',
+        '.dl-so-btn:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
+        '.dl-signedout .dl-display-wrap,.dl-signedout .dl-dialpad{opacity:0.4}',
+        // The card takes room: the keypad rows close to 4 px (board 06b-5),
+        // and the match slot goes (its lookups need the NetSuite session).
+        '.dl-signedout .dl-pad.dl-dialpad{row-gap:4px;min-height:calc(4 * 65px + 3 * 4px)}',
+        '.dl-signedout .dl-slot{display:none}',
+        '.dl-display[disabled],.dl-dialpad .dl-key[disabled]{cursor:default}',
+        '.dl-dialpad .dl-key[disabled]:active{transform:none;background:rgba(255,255,255,0.10)}',
+        // Leaving (signed in again): the card fades out, the dimming fades up.
+        '.dl-so-leaving .dl-so{opacity:0;transition:opacity ' + SO_LEAVE_MS + 'ms ease-out}',
+        '.dl-so-leaving .dl-display-wrap,.dl-so-leaving .dl-dialpad,.dl-so-leaving .dl-foot.dial .dl-btn{transition:opacity ' + SO_LEAVE_MS + 'ms ease-out}',
         '.dl-live .dl-tiles{width:100%;margin-top:18px}',
         '.dl-live .dl-pad{width:100%;margin-top:14px}',
         '.dl-text{background:transparent;color:#B6DCFA;font-size:12.5px;padding:6px 8px;border-radius:8px}',
@@ -610,6 +639,12 @@
         + '<div class="dl-idle dl-pane">'
         +   '<div class="dl-body">'
         +     '<div class="dl-view" data-view="dial" role="tabpanel" style="display:flex;flex-direction:column;gap:10px;position:relative">'
+        // Signed out of NetSuite: one card, one action (asset 37).
+        +       '<div class="dl-so" role="status" hidden>'
+        +         '<div class="dl-so-title">Signed out of NetSuite</div>'
+        +         '<div class="dl-so-text">Calls won\'t ring until you sign in.</div>'
+        +         '<button type="button" class="dl-so-btn">Sign in</button>'
+        +       '</div>'
         // The loaded record: person icon, the name (the link to the record)
         // and the insight line.
         +       '<div class="dl-rec" hidden>'
@@ -669,6 +704,7 @@
         +     '<div class="dl-live-sub"></div>'
         +     '<button type="button" class="dl-link dl-live-add" hidden>Add to NetSuite</button>'
         +     '<div class="dl-live-time" aria-label="Call time"></div>'
+        +     '<div class="dl-live-so" role="status" hidden>Signed out \u2014 this call will still be logged.</div>'
         +     '<div class="dl-live-warn" role="status" hidden></div>'
         +     '<div class="dl-tiles two dl-live-tiles" hidden>'
         +       '<div class="dl-tile"><span class="dl-k">BALANCE</span><span class="dl-v gold dl-live-bal">—</span></div>'
@@ -785,7 +821,8 @@
         exitBlock: q('.dl-exit-block'),
         remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
         alert: q('.dl-alert'), alertTitle: q('.dl-alert-title'), alertText: q('.dl-alert-text'), alertAct: q('.dl-alert-act'),
-        refused: q('.dl-refused'), liveWarn: q('.dl-live-warn'),
+        refused: q('.dl-refused'), liveWarn: q('.dl-live-warn'), liveSo: q('.dl-live-so'),
+        so: q('.dl-so'), soBtn: q('.dl-so-btn'),
         alerts: q('.dl-alerts'), alertsBtn: q('.dl-alerts-btn'), alertsOff: q('.dl-alerts-off'),
         noteAdd: q('.dl-note-add'), liveAdd: q('.dl-live-add'),
         asPane: q('.dl-as-wrap'), asBack: q('.dl-as-back'), asNum: q('.dl-as-num'),
@@ -1141,8 +1178,14 @@
 
     // --- Dial tab: the loaded record and its numbers (DESIGN.md §4, asset 33) ---
     function setDisplay(value, isManual) {
-        ui.display.value = formatPhone(value) || String(value || '');
-        manual = !!isManual;
+        var v = formatPhone(value) || String(value || '');
+        // A number typed, edited or cleared by hand is no longer the loaded
+        // record's: the record lets go (finding #75).
+        if (isManual && target) dropRecord();
+        ui.display.value = v;
+        // An empty field is not a hand-typed number: the Dial tab follows
+        // the next page again (except the record the rep just let go).
+        manual = !!isManual && !!v.trim();
         syncCallButton();
         syncMatch();
         syncDial();
@@ -1219,7 +1262,7 @@
     function syncCallButton() {
         ui.clearBtn.hidden = !ui.display.value;
         var hasNumber = !!digitsOf(ui.display.value).replace('+', '');
-        ui.call.disabled = !hasNumber || isActive() || errKind() === 'paused';
+        ui.call.disabled = !hasNumber || isActive() || errKind() === 'paused' || dimmed;
     }
 
     // target: { entityId, entityName, entityType, parties, rows, sel,
@@ -1230,6 +1273,7 @@
     // rep last called here ('' = none); pending: softphoneContacts runs.
     var contactsSeq = 0;
     function loadEntity(t) {
+        dismissedId = ''; // an explicit load always wins
         closeTargets(false);
         target = {
             entityId: String(t.entityId || ''),
@@ -1649,7 +1693,7 @@
 
     // --- Dialpad ---
     function typeDigit(d) {
-        if (isActive()) return;
+        if (isActive() || dimmed) return;
         var cur = manual ? ui.display.value : '';
         setDisplay(cur + d, true);
     }
@@ -1681,7 +1725,11 @@
         if (zeroPlus) { zeroPlus = false; return; } // the long press typed +
         typeDigit(k.getAttribute('data-key'));
     });
-    ui.display.addEventListener('input', function () { manual = true; syncCallButton(); syncMatch(); });
+    ui.display.addEventListener('input', function () {
+        if (target) dropRecord();
+        manual = !!ui.display.value.trim();
+        syncCallButton(); syncMatch(); syncDial();
+    });
     ui.display.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !ui.call.disabled) { e.preventDefault(); placeCall(); }
         // Esc clears the number first; on an empty field it closes the
@@ -1705,6 +1753,7 @@
     }
     ui.backspace.addEventListener('pointerdown', function (e) {
         if (e.button !== undefined && e.button !== 0) return;
+        if (dimmed) return;
         backCleared = false;
         endBackHold();
         backHold = window.setTimeout(function () {
@@ -2735,6 +2784,10 @@
     ui.alertAct.addEventListener('click', function () {
         if (alertRun) alertRun();
     });
+    // The one Sign in action (client signIn: reloads the NetSuite frame here).
+    ui.soBtn.addEventListener('click', function () {
+        if (typeof host.signIn === 'function') host.signIn();
+    });
     ui.close.addEventListener('click', function () { host.collapse(); });
     el.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') { e.stopPropagation(); host.collapse(); }
@@ -3166,6 +3219,7 @@
     function render(next) {
         snap = next || snap;
         if (isActive() || isIncoming()) closeTargets(false);
+        renderSignedOut();
         var phase = snap && PHASE_VIEW[snap.phase] ? snap.phase : 'offline';
         var view = PHASE_VIEW[phase];
         if (pending && phase !== 'ready' && !ACTIVE[phase]) view = PHASE_VIEW.starting;
@@ -3173,6 +3227,21 @@
         if (phase === 'ready' && snap && snap.canReceive === false) view = READY_NOT_RECEIVING;
         // Between calls an error kind names the problem.
         if (!ACTIVE[phase] && phase !== 'incoming' && ERROR_VIEW[errKind()]) view = ERROR_VIEW[errKind()];
+        // Signed in again: the first plain Ready reads "Signed in · Ready"
+        // for SIGNED_IN_MS, then "Ready".
+        if (view === PHASE_VIEW.ready) {
+            if (signedInPending) {
+                signedInPending = false;
+                signedInUntil = Date.now() + SIGNED_IN_MS;
+                window.clearTimeout(signedInTimer);
+                signedInTimer = window.setTimeout(function () {
+                    signedInTimer = null;
+                    signedInUntil = 0;
+                    render(snap);
+                }, SIGNED_IN_MS);
+            }
+            if (signedInUntil > Date.now()) view = SIGNED_IN_VIEW;
+        }
         el.style.setProperty('--dl-dot', view.dot);
         el.setAttribute('data-phase', phase);
         ui.statusLabel.textContent = view.label;
@@ -3271,8 +3340,63 @@
         ui.end.focus();
     }
 
+    // --- Signed out of NetSuite (DESIGN.md §3, asset 37) ---
+    // Between calls: the card on top of Dial, the number field, keypad, Call
+    // and Backspace dimmed and disabled. During a call: one amber line under
+    // the timer (reconciliation logs the call, SPEC §7). When signed_out
+    // clears, the card and the dimming fade out (instant with reduced
+    // motion) and the next plain Ready chip reads "Signed in · Ready".
+    var dimmed = false;          // the Dial view is signed out
+    var wasSignedOut = false;    // the last snapshot said signed_out
+    var signedInPending = false; // signed_out cleared, Ready not shown yet
+    var signedInUntil = 0;
+    var signedInTimer = null;
+    var soLeaveTimer = null;
+    function reducedMotion() {
+        try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { return false; }
+    }
+    function renderSignedOut() {
+        var out = errKind() === 'signed_out';
+        if (out) {
+            signedInPending = false;
+            signedInUntil = 0;
+            window.clearTimeout(signedInTimer);
+            signedInTimer = null;
+        } else if (wasSignedOut) {
+            signedInPending = true;
+        }
+        wasSignedOut = out;
+        ui.liveSo.hidden = !(out && isActive());
+        setDimmed(out && !isActive() && !isIncoming());
+    }
+    function setDimmed(on) {
+        ui.display.disabled = on;
+        ui.clearBtn.disabled = on;
+        ui.backspace.disabled = on;
+        Array.prototype.forEach.call(ui.dialpad.querySelectorAll('.dl-key'), function (k) { k.disabled = on; });
+        if (on === dimmed) return;
+        dimmed = on;
+        window.clearTimeout(soLeaveTimer);
+        soLeaveTimer = null;
+        if (on) {
+            el.classList.remove('dl-so-leaving');
+            el.classList.add('dl-signedout');
+            ui.so.hidden = false;
+            return;
+        }
+        el.classList.remove('dl-signedout');
+        if (reducedMotion()) { ui.so.hidden = true; return; }
+        el.classList.add('dl-so-leaving');
+        soLeaveTimer = window.setTimeout(function () {
+            soLeaveTimer = null;
+            el.classList.remove('dl-so-leaving');
+            ui.so.hidden = true;
+        }, SO_LEAVE_MS);
+    }
+
     // Error banner (snap.error.kind): one action. In a remote tab the phone
     // cannot be reloaded from here, so Reload / Retry stay in the phone tab.
+    // signed_out has no banner: the Dial view's card (renderSignedOut).
     function renderAlert() {
         var kind = errKind();
         var live = isActive() || isIncoming();
@@ -3280,8 +3404,6 @@
         var a = null;
         if (kind === 'mic') {
             a = { tone: 'red', title: 'Microphone blocked', text: 'Click the lock icon in the address bar › Allow microphone › reload', act: 'Reload', run: host.reloadPhone, phone: true };
-        } else if (kind === 'signed_out') {
-            a = { tone: 'amber', title: 'Your NetSuite session ended. Sign in again in this tab.', text: '', act: 'Sign in', run: host.signIn };
         } else if (kind === 'session') {
             a = { tone: 'amber', title: 'Reconnecting the phone…', text: '', act: '', run: null };
         } else if (kind === 'paused') {
@@ -3339,18 +3461,30 @@
         if (isIncoming() && !answerSent) { ui.answer.focus(); return; }
         if (isActive() || answerSent) { ui.end.focus(); return; }
         if (what === 'call' && tab === 'dial' && !ui.call.disabled) { ui.call.focus(); return; }
+        if (tab === 'dial' && dimmed) { ui.soBtn.focus(); return; }
         if (tab === 'search') ui.query.focus();
         else if (tab === 'recents') ui.tabs[2].focus();
         else ui.display.focus();
     }
 
     // Clear the Dial tab's record (the frame left the record page).
-    function clearEntity() {
+    // The record the rep let go by clearing or editing its number: the
+    // page it came from does not load it again until the page changes.
+    var dismissedId = '';
+    function unloadRecord() {
         closeTargets(false);
         target = null;
         contactsSeq++;
         renderTrig();
         renderInsight(null);
+    }
+    function dropRecord() {
+        if (!target) return;
+        dismissedId = String(target.entityId || '');
+        unloadRecord();
+    }
+    function clearEntity() {
+        unloadRecord();
         setDisplay('', false);
     }
 
@@ -3359,6 +3493,8 @@
     // Follow the NetSuite frame's record, unless the rep typed a number.
     function followContext(c) {
         if (manual) return;
+        if (hasRecord(c) && dismissedId && String(c.entityId || '') === dismissedId) return;
+        dismissedId = '';
         if (hasRecord(c)) {
             loadEntity(c);
             if (el.hidden) setTab('dial');

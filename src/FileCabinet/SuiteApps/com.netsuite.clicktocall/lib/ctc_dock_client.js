@@ -802,10 +802,16 @@
         }
     }
 
-    // Session ended: load NetSuite again so it asks for the sign-in. In the
-    // shell, the NetSuite frame (the shell shows its sign-in banner there).
+    // Session ended: load NetSuite again so it asks for the sign-in. The one
+    // Sign in action (pill, panel card; asset 37). In the shell, the NetSuite
+    // frame only (the phone keeps its own frame, so a call stays up): the
+    // shell's reloadFrame also brings back a frame it blanked (login page).
     function signIn() {
         if (mode === 'shell') {
+            try {
+                var shell = window.__ctcShell;
+                if (shell && typeof shell.reloadFrame === 'function' && shell.reloadFrame()) return;
+            } catch (e) { /* fall through */ }
             var f = document.getElementById('ctc-ns-frame');
             try { f.contentWindow.location.reload(); return; } catch (e) { /* fall through */ }
         }
@@ -1012,6 +1018,9 @@
     // inbound is on and the anchor is re-registering). Quiet: amber dot and
     // tooltip / aria text only.
     var READY_NOT_RECEIVING = { dot: T.amber, label: 'Ready · not receiving calls — reconnecting' };
+    // Signed out of NetSuite (error kind signed_out): never "not receiving"
+    // (asset 37, DESIGN.md §3).
+    var SIGNED_OUT_VIEW = { dot: AMBER, label: 'Signed out' };
     // What the panel draws before the first snapshot.
     var STARTING_SNAP = { phase: 'starting' };
     var ARROWS_HINT = ' Arrow keys move the dock.';
@@ -1108,6 +1117,7 @@
         var view = PHASE_VIEW[phase];
         if (phase === 'ready' && snap && snap.canReceive === false) view = READY_NOT_RECEIVING;
         var active = isActive();
+        if (!active && phase !== 'incoming' && errorKind() === 'signed_out') view = SIGNED_OUT_VIEW;
         var light = phase === 'offline' || phase === 'error';
         var name = active ? callName() : '';
         var idleLabel = view.label;

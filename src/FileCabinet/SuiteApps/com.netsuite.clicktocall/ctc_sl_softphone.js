@@ -2332,6 +2332,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         // --- Shell messages (postMessage, not the bus) ---
         // Only from the shell (window.parent), same origin.
         // SHELL_STATE_MESSAGE: { audioUnlocked, notify } for the snapshot.
+        // SESSION_CHECK_MESSAGE: run the session ping now (pingSession).
         // UNLOCK_AUDIO_MESSAGE: a gesture in the shell; resume the audio
         // context Twilio plays the ringtone through (autoplay may have
         // suspended it) and play one silent sample to prime it.
@@ -2362,6 +2363,10 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                 publishDock();
             } else if (m.type === '${escapeJs(ctcDock.UNLOCK_AUDIO_MESSAGE)}') {
                 unlockAudioHere();
+            } else if (m.type === '${escapeJs(ctcDock.SESSION_CHECK_MESSAGE)}') {
+                // The shell's NetSuite frame hit a login (or unreadable)
+                // page: check the session now (asset 37).
+                pingSession('shell: frame left NetSuite');
             }
         });
 

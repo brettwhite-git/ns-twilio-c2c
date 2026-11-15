@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '35';
+    const DOCK_ASSET_VERSION = '37';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -239,6 +239,10 @@ define(['./ctc_html'], (ctcHtml) => {
     //   shell → anchor: { v: 1, type: SHELL_STATE_MESSAGE, audioUnlocked, notify }
     //     on phone-frame load and on change; the anchor copies both into snap.
     //   shell → anchor: { v: 1, type: UNLOCK_AUDIO_MESSAGE } from a gesture.
+    //   shell → anchor: { v: 1, type: SESSION_CHECK_MESSAGE } when the NetSuite
+    //     frame lands on a login page or an unreadable page: the anchor runs
+    //     its session ping now (not at the next 60 s tick), so a sign-out shows
+    //     as error kind signed_out within a second or two (asset 37).
     //   The anchor accepts these only from window.parent, same origin.
     //
     // Dock modes (ctc_dock_client.js picks one at load):
@@ -296,6 +300,7 @@ define(['./ctc_html'], (ctcHtml) => {
     // postMessage types between the anchor and its shell (see the contract).
     const SHELL_STATE_MESSAGE = 'ctc-shell-state';
     const UNLOCK_AUDIO_MESSAGE = 'ctc-unlock-audio';
+    const SESSION_CHECK_MESSAGE = 'ctc-session-check';
     const PHONE_DISABLED_MESSAGE = 'ctc-phone-disabled';
     const PHONE_DUPLICATE_MESSAGE = 'ctc-phone-duplicate';
     // RESTlet error (and snap.error.code) for a user who may not use the phone.
@@ -412,6 +417,7 @@ define(['./ctc_html'], (ctcHtml) => {
         REQUEST_NONCE_PATTERN,
         SHELL_STATE_MESSAGE,
         UNLOCK_AUDIO_MESSAGE,
+        SESSION_CHECK_MESSAGE,
         PHONE_DISABLED_MESSAGE,
         PHONE_DUPLICATE_MESSAGE,
         ERROR_NOT_A_PHONE_USER,
