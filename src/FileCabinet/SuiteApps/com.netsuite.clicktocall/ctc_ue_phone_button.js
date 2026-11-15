@@ -12,7 +12,7 @@
  * the rep presses Call there. No popup window.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_config', './lib/ctc_dock', './lib/ctc_html'], (url, runtime, log, file, ctcEntity, ctcConfig, ctcDock, ctcHtml) => {
+define(['N/url', 'N/log', 'N/file', './lib/ctc_entity', './lib/ctc_config', './lib/ctc_dock', './lib/ctc_html'], (url, log, file, ctcEntity, ctcConfig, ctcDock, ctcHtml) => {
 
     const resolveEntityName = ctcEntity.resolveEntityName;
 

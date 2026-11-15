@@ -172,11 +172,6 @@ define(['./ctc_html', './ctc_fonts', './ctc_rc_scope'], (ctcHtml, ctcFonts, rcSc
             (o.label ? ' role="img" aria-label="' + escapeHtml(o.label) + '"' : ' aria-hidden="true"') + '><path d="' + path + '"></path></svg>';
     };
 
-    const segLinks = (label, items) =>
-        '<nav class="rc-seg" aria-label="' + label + '">' + items.map((it) =>
-            '<a data-nav href="' + escapeHtml(it.href) + '"' + (it.on ? ' aria-current="true"' : '') + '>' + escapeHtml(it.label) + '</a>'
-        ).join('') + '</nav>';
-
     const stateBox = (title, sub, action) =>
         '<div class="rc-state"><span class="rc-state-title">' + escapeHtml(title) + '</span>' +
         (sub ? '<span class="rc-state-sub">' + escapeHtml(sub) + '</span>' : '') + (action || '') + '</div>';
@@ -327,8 +322,8 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
     const shellCss = () => `
   :root {
     --ink: #161513; --muted: #5C5955; --faint: #8B8780; --line: #E5E2DD; --line-soft: #F1EFEA;
-    --seg: #F4F2EE; --panel: #FAFAF8; --input: #D9D5CF; --link: #1B6097; --link-hover: #345D7E;
-    --blue: #345D7E; --blue-hover: #2B4D69; --focus: #74C0FC;
+    --panel: #FAFAF8; --input: #D9D5CF; --link: #1B6097; --link-hover: #345D7E;
+    --blue: #345D7E; --focus: #74C0FC;
     --navy: #1F3550; --band-muted: #C9D6E6; --amber: #F2B33D; --avatar: #38507A;
     --good-fg: #0E6B45; --good-bg: #E3F5EC; --mid-fg: #8A5A00; --mid-bg: #FFF3D6; --low-fg: #9A2A23; --low-bg: #FCE9E7;
     --in-fg: var(--link); --in-bg: #E8F3FC; --out-fg: var(--muted); --out-bg: var(--line-soft); --missed-fg: #9A3A2C; --missed-bg: #FCE9E7;
@@ -382,15 +377,8 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   .rc-custom label { display: inline-flex; align-items: center; gap: 6px; }
   .rc-custom input { height: 32px; padding: 0 8px; border: 0; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--input); font: 13px var(--font); color: var(--ink); background: #FFFFFF; }
   .rc-hint { font-size: 12px; }
-  .rc-seg { display: inline-flex; max-width: 100%; overflow-x: auto; padding: 2px; border-radius: 8px; background: var(--seg); }
-  .rc-seg a { flex: none; display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 6px; font-size: 13px; font-weight: 500;
-    color: var(--muted); text-decoration: none; white-space: nowrap; transition: background-color 120ms ease, color 120ms ease; }
-  .rc-seg a:hover { color: var(--ink); }
-  .rc-seg a[aria-current="true"] { background: #FFFFFF; color: var(--ink); box-shadow: 0 1px 2px rgba(22,21,19,0.10); }
   .rc-truncated { margin: 0; padding: 10px 14px; border-radius: 10px; background: var(--mid-bg); color: var(--mid-fg); font-size: 13px; }
   .rc-content { display: flex; flex-direction: column; gap: 24px; }
-  .rc-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  .rc-toolbar-end { justify-content: flex-end; }
   .rc-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; font: 500 13px var(--font);
     color: var(--ink); background: transparent; text-decoration: none; cursor: pointer; white-space: nowrap;
     transition: background-color 120ms ease, transform 140ms ease-out, opacity 120ms ease; }
@@ -399,8 +387,6 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
   .rc-btn:disabled { opacity: 0.4; cursor: default; transform: none; }
   .rc-btn-outline { box-shadow: inset 0 0 0 1px var(--input); background: #FFFFFF; }
   .rc-btn-outline:hover { background: var(--panel); }
-  .rc-btn-primary { height: 32px; background: var(--blue); color: #FFFFFF; font-weight: 600; font-size: 12.5px; }
-  .rc-btn-primary:hover { background: var(--blue-hover); color: #FFFFFF; }
   .rc-btn-quiet { height: 30px; color: var(--link); }
   .rc-btn-quiet:hover { color: var(--link-hover); }
   .rc-card { border-radius: 12px; background: #FFFFFF; box-shadow: 0 0 0 1px rgba(22,21,19,0.08), 0 1px 2px rgba(22,21,19,0.04); }
@@ -482,7 +468,7 @@ ${(p.scripts || []).map((js) => '<script>' + js + '</script>').join('\n')}
     return {
         DASHBOARD_URL, TABS, FTABS, DUES, DEFAULTS, MAX_QUERY,
         parseParams, buildUrl, formTarget, hiddenInput, stateInputs,
-        svgIcon, segLinks, stateBox, errorBox, initials,
+        svgIcon, stateBox, errorBox, initials,
         buildAppBar, buildPageHeader, buildCustomForm, buildPage, shellCss,
         SHELL_CLIENT_JS
     };

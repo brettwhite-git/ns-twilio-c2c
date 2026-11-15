@@ -31,7 +31,7 @@ define(['N/query', 'N/format', 'N/runtime', 'N/log', './ctc_time'], (query, form
     const RANGE_ALIASES = { last7days: 'last7', last30days: 'last30' };
 
     // NetSuite search date keywords: the range itself, and the period
-    // before it (lib/ctc_workspace_queries REPORT_PREVIOUS_RANGE).
+    // before it.
     const KEYWORD = { today: 'today', yesterday: 'yesterday', thisweek: 'thisweek', lastweek: 'lastweek', thismonth: 'thismonth' };
     const PREVIOUS_KEYWORD = { today: 'yesterday', thisweek: 'lastweektodate', lastweek: 'weekbeforelast', thismonth: 'lastmonthtodate' };
     const PREVIOUS_LABEL = {

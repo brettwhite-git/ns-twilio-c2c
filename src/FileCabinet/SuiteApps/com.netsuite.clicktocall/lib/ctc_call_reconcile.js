@@ -88,7 +88,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
 
     // Governance. Per page: 1 https.get (10) + 1 SuiteQL (10). Per created
     // call: re-check SuiteQL (10) + employee lookupFields (1) + 1 https.get
-    // for the child / parent leg (10) + lookupCallerByPhone (3 SuiteQL, 30)
+    // for the child / parent leg (10) + lookupCallerByPhone (2-5 SuiteQL, ≤ 50)
     // + record.create/save (15) = about 70 units. A missed inbound call or
     // a PSTN parent leg adds one recordings GET (10) and maybe the parent
     // call GET (10). Once per run, at the first create: the time zone

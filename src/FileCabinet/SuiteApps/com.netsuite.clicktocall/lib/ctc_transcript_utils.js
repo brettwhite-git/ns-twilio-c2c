@@ -7,8 +7,8 @@
  * and the RESTlet checkTranscript action.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/llm', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis'],
-       (https, llm, log, record, search, llmAnalysis) => {
+define(['N/https', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis'],
+       (https, log, record, search, llmAnalysis) => {
 
     const TWILIO_API_BASE = 'https://api.twilio.com/2010-04-01/Accounts';
     const TWILIO_INTEL_BASE = 'https://intelligence.twilio.com/v2';

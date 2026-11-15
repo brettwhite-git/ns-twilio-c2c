@@ -21,7 +21,7 @@
  *     from before 6:00 am local (see the XML comment).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/https', 'N/record', 'N/search', 'N/encode', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile', './lib/ctc_call_claim', './lib/ctc_time'], (https, record, search, encode, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile, callClaim, ctcTime) => {
+define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_call_reconcile', './lib/ctc_call_claim', './lib/ctc_time'], (record, search, log, runtime, task, utils, ctcConfig, twilioAdmin, callOwnership, llmAnalysis, callReconcile, callClaim, ctcTime) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. Use API Key SecureString path.

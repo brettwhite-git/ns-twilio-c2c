@@ -431,7 +431,8 @@
         '.card.closed{opacity:0;transform:scale(0.96)}',
         '.card-top{width:100%;padding:14px 16px;display:flex;align-items:center;gap:12px;background:transparent;text-align:left;border-radius:0}',
         '.card-top:active{transform:none}',
-        '.avatar{width:36px;height:36px;border-radius:999px;background:linear-gradient(135deg,#38507A 0%,#1F2F4D 100%);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}',
+        // The other side: the person icon, never initials (DESIGN.md §4, asset 33).
+        '.avatar{width:36px;height:36px;border-radius:999px;background:transparent;color:#94A6BF;display:flex;align-items:center;justify-content:center;flex-shrink:0}',
         '.who{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
         '.who-name{font-size:14px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.who-sub{font-size:12px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
@@ -486,7 +487,7 @@
         +   '</div>'
         +   '<div class="card navy closed" role="region" aria-label="Current call">'
         +     '<button type="button" class="card-top" aria-label="Collapse call card">'
-        +       '<span class="avatar" aria-hidden="true"></span>'
+        +       '<span class="avatar" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg></span>'
         +       '<span class="who"><span class="who-name"></span><span class="who-sub"></span></span>'
         +       '<span class="card-time mono"></span>'
         +     '</button>'
@@ -613,7 +614,6 @@
     var vMain = $('.v-main');
     var cardEl = $('.card');
     var cardTop = $('.card-top');
-    var avatarEl = $('.avatar');
     var whoName = $('.who-name');
     var whoSub = $('.who-sub');
     var cardTime = $('.card-time');
@@ -846,12 +846,6 @@
         } else {
             say(srPolite, 'Call ended');
         }
-    }
-
-    function initials(name) {
-        var parts = String(name || '').replace(/[^A-Za-z0-9 ]/g, ' ').trim().split(/\s+/);
-        if (!parts[0]) return '?';
-        return (parts[0].charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : '')).toUpperCase();
     }
 
     function clockText(s) {
@@ -1667,7 +1661,6 @@
         var name = callName();
         var sub = snap.entityName && snap.contactName ? snap.contactName : (snap.number || '');
         if (sub === name) sub = '';
-        avatarEl.textContent = initials(name);
         whoName.textContent = name;
         whoSub.textContent = sub;
         whoSub.hidden = !sub;
@@ -2646,9 +2639,8 @@
     window.__ctcDock = {
         mode: mode,
 
-        // Shared display helpers for ctc_dock_dialer.js.
+        // Shared display helper for ctc_dock_dialer.js.
         formatPhone: formatPhone,
-        initials: initials,
 
         /**
          * Shell: open the dialer on Dial with `ctx` loaded and focus Call (it
@@ -2712,7 +2704,6 @@
                 st.textContent = text;
                 root.appendChild(st);
             },
-            getSnap: function () { return snap; },
             send: function (action, extra) { return request(action, extra); },
             // The user picked a view in the panel: share it (UI_KEY).
             saveUi: saveUi,

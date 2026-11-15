@@ -7,7 +7,7 @@
  * Receives phone, entityId, entityName as URL parameters.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock', './lib/ctc_workspace_queries'], (url, runtime, log, file, search, ctcHtml, ctcEntity, ctcDock, workspaceQueries) => {
+define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_entity', './lib/ctc_dock', './lib/ctc_workspace_queries'], (url, log, file, search, ctcHtml, ctcEntity, ctcDock, workspaceQueries) => {
 
     const escapeHtml = ctcHtml.escapeHtml;
     const escapeJs = ctcHtml.escapeJs;
@@ -559,52 +559,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         }
         .action-icon { width: 20px; height: 20px; pointer-events: none; }
         .action-icon-lg { width: 24px; height: 24px; pointer-events: none; }
-        .device-selectors {
-            width: 100%;
-            margin-bottom: 12px;
-            display: none;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-        }
-        .device-selectors.visible { display: grid; }
-        .device-row {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            min-width: 0;
-        }
-        .device-row label {
-            font-size: 9.5px;
-            color: var(--phone-text-faint);
-            min-width: 24px;
-            flex-shrink: 0;
-            text-align: right;
-            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-        .device-row select {
-            flex: 1;
-            min-width: 0;
-            background: var(--phone-card);
-            color: var(--phone-text);
-            border: 1px solid var(--phone-card-border);
-            border-radius: 7px;
-            padding: 7px 9px;
-            font-size: 11px;
-            font-family: inherit;
-            outline: none;
-            cursor: pointer;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            min-height: 30px;
-        }
-        .device-row select option {
-            background: var(--phone-bg-2);
-            color: var(--phone-text);
-        }
-        .device-row select:focus { border-color: rgba(255, 255, 255, 0.22); }
         .log-status {
             font-size: 11.5px;
             color: var(--phone-text-muted);
@@ -730,7 +684,7 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             cursor: pointer;
         }
         .result-list .row:last-child { border-bottom: none; }
-        .result-list .row:hover, .result-list .row.is-active { background: rgba(255, 255, 255, 0.07); }
+        .result-list .row:hover { background: rgba(255, 255, 255, 0.07); }
         .result-list .swatch {
             width: 26px;
             height: 26px;
@@ -1718,10 +1672,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
             if (noPhoneCtaEl) noPhoneCtaEl.classList.remove('visible');
             return '—';
         }
-        // Phase 4: the legacy device-selectors wrapper was removed when the
-        // mic/speaker selects moved into the audio-overlay. Variable kept as
-        // a no-op (null) so any straggling references don't throw.
-        var deviceSelectors = null;
         var inputSelect = document.getElementById('inputDevice');
         var outputSelect = document.getElementById('outputDevice');
         var outputRow = document.getElementById('outputRow');
@@ -4975,7 +4925,6 @@ define(['N/url', 'N/runtime', 'N/log', 'N/file', 'N/search', './lib/ctc_html', '
         var recentsEmpty         = document.getElementById('recentsEmpty');
         var recentsLoading       = document.getElementById('recentsLoading');
         var recentsChips         = document.getElementById('recentsChips');
-        var recentsCountEl       = document.getElementById('recentsCount');
         var rcntAll              = document.getElementById('rcnt-all');
         var rcntMissed           = document.getElementById('rcnt-missed');
         var rcntOut              = document.getElementById('rcnt-out');

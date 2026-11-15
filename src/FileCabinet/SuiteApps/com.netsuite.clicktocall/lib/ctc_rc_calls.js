@@ -21,7 +21,6 @@ define(['N/format', './ctc_html', './ctc_workspace_queries', './ctc_rc_shell'], 
     const DEFAULTS = rcShell.DEFAULTS;
 
     const CALL_URL = '/app/crm/calendar/call.nl?id=';
-    const ENTITY_URL = '/app/common/entity/custjob.nl?id=';
     const SHORT_CALL_SECONDS = ctcHtml.SHORT_CALL_SECONDS;
 
     // The list filters (segmented tabs, URL `dir`). Counts use the same rule

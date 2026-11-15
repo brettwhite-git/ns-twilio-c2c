@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite'], (search, runtime, log, record, https, encode, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -19,13 +19,75 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     const buildSecureAuthHeader = twilioAdmin.buildSecureAuthHeader;
 
     /**
+     * Runs fn and adds its ms to steps[name] (body.perf timings). Returns
+     * what fn returns; a throw still counts the time.
+     * @template T
+     * @param {Object<string, number>} steps
+     * @param {string} name
+     * @param {function(): T} fn
+     * @returns {T}
+     */
+    const timeStep = (steps, name, fn) => {
+        const t0 = Date.now();
+        try {
+            return fn();
+        } finally {
+            steps[name] = (steps[name] || 0) + (Date.now() - t0);
+        }
+    };
+
+    /** Governance units left, or null when the runtime cannot say. */
+    const remainingUnits = () => {
+        try {
+            const n = runtime.getCurrentScript().getRemainingUsage();
+            return typeof n === 'number' ? n : null;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    /**
      * POST handler — routes to token generation, call logging, transcript check,
-     * entity search, workspace data fetches, or proposed-task review actions.
+     * workspace data fetches, or proposed-task review actions.
+     *
+     * Timing: every request logs `CTC perf` (debug) as '<action> <ms>ms'.
+     * With body.perf === true an object answer also gains
+     * `_perf: { ms, units, steps }`: ms in the whole request (gate
+     * included), units used (getRemainingUsage before minus after; null
+     * when unknown) and the ms of named steps (gate, and the steps of
+     * lookupCaller, softphoneContacts, softphoneAccountSnapshot).
+     * Without the flag the answer is unchanged.
      * @param {Object} requestBody
      * @returns {Object}
      */
     const post = (requestBody) => {
         const body = requestBody || {};
+        const wantPerf = body.perf === true;
+        const t0 = Date.now();
+        const units0 = wantPerf ? remainingUnits() : null;
+        /** @type {Object<string, number>} */
+        const steps = {};
+        const result = route(body, steps);
+        const ms = Date.now() - t0;
+        log.debug({ title: 'CTC perf', details: String(body.action || 'token') + ' ' + ms + 'ms' });
+        if (!wantPerf || !result || typeof result !== 'object' || Array.isArray(result)) return result;
+        const units1 = remainingUnits();
+        return Object.assign({}, result, {
+            _perf: {
+                ms: ms,
+                units: (units0 !== null && units1 !== null) ? units0 - units1 : null,
+                steps: steps
+            }
+        });
+    };
+
+    /**
+     * Routes one request (post). `steps` collects named step timings.
+     * @param {Object} body
+     * @param {Object<string, number>} steps
+     * @returns {Object}
+     */
+    const route = (body, steps) => {
 
         // Session check for the phone (no gate): NetSuite itself answers
         // 401 SESSION_TIMED_OUT before this runs when the session is gone,
@@ -38,9 +100,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         // data to the session user's book; getCallDetail uses Reporting
         // Central's own scope (the book, or a manager's team); the
         // follow-up actions share one access rule (isAuthorizedForProposedTask).
-        if (body.action === 'searchEntities')       return searchEntities(body);
         if (body.action === 'getWorkspaceHistory')  return getWorkspaceHistory(body);
-        if (body.action === 'getWorkspaceTasks')    return getWorkspaceTasks(body);
         if (body.action === 'getCallDetail')        return getCallDetail(body);
         if (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(FOLLOW_UP_ACTIONS, body.action)) {
             // The manager rule reads the team once per request, never from
@@ -52,7 +112,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         // Phone actions act for the session user: only phone users
         // (isPhoneUser). Decided once per request, never cached across
         // requests: an assignment change applies at the next request.
-        const gate = isPhoneUser();
+        const gate = timeStep(steps, 'gate', isPhoneUser);
         if (!gate.ok) {
             log.audit({
                 title: 'CTC RESTlet — not a phone user',
@@ -71,12 +131,12 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         if (body.action === 'checkTranscript')      return checkTranscript(body);
         if (body.action === 'softphoneSuggested')   return softphoneSuggested(body);
         if (body.action === 'softphoneSearch')      return softphoneSearch(body);
-        if (body.action === 'softphoneContacts')    return softphoneContacts(body);
+        if (body.action === 'softphoneContacts')    return softphoneContacts(body, steps);
         if (body.action === 'softphoneRecents')     return softphoneRecents(body);
         if (body.action === 'softphoneVoicemails')  return softphoneVoicemails(body);
-        if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body);
+        if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body, steps);
         if (body.action === 'softphoneBookCounts')  return softphoneBookCounts(body);
-        if (body.action === 'lookupCaller')         return lookupCaller(body);
+        if (body.action === 'lookupCaller')         return lookupCaller(body, steps);
         if (body.action === 'phoneHeartbeat')       return phoneHeartbeat(body);
         if (body.action === 'softphoneFindDuplicates') return softphoneFindDuplicates(body);
         if (body.action === 'softphoneAddToNetSuite')  return softphoneAddToNetSuite(body);
@@ -236,12 +296,14 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      * workspaceQueries.lookupCallerByPhone).
      * @param {Object} body
      * @param {string} body.phone - caller number as Twilio sent it (E.164)
+     * @param {Object<string, number>} [steps] - perf step timings (post)
      * @returns {Object} { match: {entityId, entityType, name, contactName, contactId, inBook} | null } or { error, match: null }
      */
-    const lookupCaller = (body) => {
+    const lookupCaller = (body, steps) => {
         return workspaceQueries.lookupCallerByPhone({
             userId: runtime.getCurrentUser().id,
-            phone: body.phone
+            phone: body.phone,
+            perfSteps: steps
         });
     };
 
@@ -935,111 +997,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
     };
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Phase 2 — Workspace data + entity search + proposed-task review actions
+    // Phase 2 — Workspace data + proposed-task review actions
     // ─────────────────────────────────────────────────────────────────────────────
-
-    const ENTITY_SEARCH_MAX_PER_TYPE = 8;
-
-    /**
-     * searchEntities — typeahead lookup across Customer / Contact / Lead / Prospect.
-     * Used by the dashboard-mode softphone (no preset entityId) to let the rep
-     * type a name and pick a target before dialing.
-     * @param {Object} body
-     * @param {string} body.q - search term (min 2 chars)
-     * @returns {Object} { results: [{ id, name, type, phone }] } or { error }
-     */
-    const searchEntities = (body) => {
-        try {
-            const q = String(body.q || '').trim();
-            if (q.length < 2) return { results: [] };
-
-            const out = [];
-
-            // Customer + Prospect — companyname or entityid or phone
-            ['customer', 'prospect'].forEach((type) => {
-                try {
-                    const res = search.create({
-                        type: type,
-                        filters: [[
-                            ['companyname', 'contains', q], 'OR',
-                            ['entityid',    'contains', q], 'OR',
-                            ['phone',       'contains', q]
-                        ]],
-                        columns: ['entityid', 'companyname', 'phone']
-                    }).run().getRange({ start: 0, end: ENTITY_SEARCH_MAX_PER_TYPE });
-
-                    res.forEach((r) => {
-                        out.push({
-                            id: r.id,
-                            name: r.getValue('companyname') || r.getValue('entityid') || '',
-                            type: type,
-                            phone: r.getValue('phone') || ''
-                        });
-                    });
-                } catch (e) {
-                    log.error({ title: `CTC searchEntities ${type} failed`, details: e.message || e });
-                }
-            });
-
-            // Contact — firstname/lastname or entityid or phone
-            try {
-                const res = search.create({
-                    type: search.Type.CONTACT,
-                    filters: [[
-                        ['firstname', 'contains', q], 'OR',
-                        ['lastname',  'contains', q], 'OR',
-                        ['entityid',  'contains', q], 'OR',
-                        ['phone',     'contains', q]
-                    ]],
-                    columns: ['firstname', 'lastname', 'entityid', 'phone', 'company']
-                }).run().getRange({ start: 0, end: ENTITY_SEARCH_MAX_PER_TYPE });
-
-                res.forEach((r) => {
-                    const fn = r.getValue('firstname') || '';
-                    const ln = r.getValue('lastname') || '';
-                    const fullName = (fn + ' ' + ln).trim() || r.getValue('entityid') || '';
-                    out.push({
-                        id: r.id,
-                        name: fullName,
-                        type: 'contact',
-                        phone: r.getValue('phone') || ''
-                    });
-                });
-            } catch (e) {
-                log.error({ title: 'CTC searchEntities contact failed', details: e.message || e });
-            }
-
-            // Lead — companyname or entityid or phone
-            try {
-                const res = search.create({
-                    type: search.Type.LEAD,
-                    filters: [[
-                        ['companyname', 'contains', q], 'OR',
-                        ['entityid',    'contains', q], 'OR',
-                        ['phone',       'contains', q]
-                    ]],
-                    columns: ['entityid', 'companyname', 'phone']
-                }).run().getRange({ start: 0, end: ENTITY_SEARCH_MAX_PER_TYPE });
-
-                res.forEach((r) => {
-                    out.push({
-                        id: r.id,
-                        name: r.getValue('companyname') || r.getValue('entityid') || '',
-                        type: 'lead',
-                        phone: r.getValue('phone') || ''
-                    });
-                });
-            } catch (e) {
-                log.error({ title: 'CTC searchEntities lead failed', details: e.message || e });
-            }
-
-            // Entries with no phone aren't dialable — filter them
-            return { results: out.filter((row) => row.phone) };
-        } catch (e) {
-            log.error({ title: 'CTC searchEntities Failed', details: e.message || e });
-            return { error: 'Entity search failed' };
-        }
-    };
 
     /**
      * getWorkspaceHistory — fetch the current user's recent CTC-tracked Phone Calls.
@@ -1084,25 +1043,6 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
                 : { rows: missed.rows || [], total: missed.total || 0 };
         }
         return result;
-    };
-
-    /**
-     * getWorkspaceTasks — fetch proposed_task rows for the current user, grouped by source call.
-     * Used by the Workspace AI Tasks tab AND the Portlet Pending Tasks tab.
-     *
-     * @param {Object} body
-     * @param {string} [body.tab='pending']   - 'pending' | 'awaiting' | 'completed' | 'rejected' | 'all'
-     * @param {string} [body.phoneCallId]     - optional scope to a single source call
-     * @param {number} [body.limit=50]
-     * @returns {Object} { groups: [{ call, tasks: [...] }], totalTasks } or { error }
-     */
-    const getWorkspaceTasks = (body) => {
-        return workspaceQueries.loadTaskGroups({
-            userId: runtime.getCurrentUser().id,
-            tab: body.tab,
-            phoneCallId: body.phoneCallId,
-            limit: body.limit
-        });
     };
 
     // --- Reporting Central call detail ---
@@ -1329,15 +1269,26 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
      * file. The softphone uses this to hydrate the multi-contact picker when
      * the user selects an entity from the Search tab.
      *
+     * `lastCalled` is the session user's most recent Phone Call to this
+     * record in the last 90 days with a number on it
+     * (workspaceQueries.lastCallForRecord): contactId ('' when the call had
+     * no contact), number (Phone Call `phone`), at
+     * (custevent_ctc_call_started, ISO UTC; '' on older calls). null when
+     * there is none or the search fails (logged; the rows still return).
+     * Governance: contacts search (10) + one customer lookupFields (1) +
+     * one Phone Call search (10) = 21 units.
+     *
      * @param {Object} body
      * @param {string|number} body.entityId
-     * @returns {Object} { rows: [...] } or { error }
+     * @param {Object<string, number>} [steps] - perf step timings (post)
+     * @returns {{rows: Array<Object>, lastCalled: ({contactId: string, number: string, at: string}|null)}|{error: string, rows: Array}}
      */
-    const softphoneContacts = (body) => {
+    const softphoneContacts = (body, steps) => {
         const entityId = body.entityId;
         if (!entityId) return { error: 'entityId required', rows: [] };
+        const perf = steps || {};
 
-        const contacts = ctcEntity.getContactsAtEntity(entityId);
+        const contacts = timeStep(perf, 'contacts', () => ctcEntity.getContactsAtEntity(entityId));
 
         // Mirror the Suitelet's record-launch behavior: when the entity
         // has a record-level phone (company switchboard / customer main
@@ -1345,53 +1296,50 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
         // reach the switchboard from this picker too. Without this, the
         // dashboard → search → select-Customer path was missing the
         // main line that the direct-toolbar-launch path showed.
+        // One customer lookupFields (customer, prospect and lead share the
+        // customer record). It throws for an id that is not a customer
+        // (a contact, a vendor): then there is no main line (debug log
+        // only, as when the old type probe failed).
+        let main = null;
         try {
-            const entityType = resolveEntityType(entityId);
-            if (entityType === 'customer' || entityType === 'lead' || entityType === 'prospect') {
-                const r = search.lookupFields({
-                    type: search.Type.CUSTOMER,
-                    id: entityId,
-                    columns: ['phone', 'companyname', 'entityid']
-                });
-                const phone = r.phone || '';
-                const name = r.companyname || r.entityid || '';
-                if (phone && name) {
-                    contacts.forEach((c) => {
-                        (c.phones || []).forEach((p) => { p.isPrimary = false; });
-                    });
-                    contacts.unshift({
-                        contactId: '__company_main__',
-                        name: name + ' (main line)',
-                        title: 'Company switchboard',
-                        email: '',
-                        phones: [{ number: phone, type: 'Main', isPrimary: true }]
-                    });
-                }
-            }
-        } catch (e) {
-            log.error({ title: 'CTC softphoneContacts main-line lookup failed',
-                        details: e.message || String(e) });
-            // Fall through with just the contacts.
-        }
-
-        return { rows: contacts };
-    };
-
-    /**
-     * Best-effort entity-type resolver for softphoneContacts. Tries the
-     * top three entity types — customer record covers lead/prospect/
-     * customer (all share the entity stage). Returns null if not found.
-     */
-    const resolveEntityType = (entityId) => {
-        try {
-            search.lookupFields({
+            main = timeStep(perf, 'mainLine', () => search.lookupFields({
                 type: search.Type.CUSTOMER,
                 id: entityId,
-                columns: ['internalid']
+                columns: ['phone', 'companyname', 'entityid']
+            }));
+        } catch (e) {
+            log.debug({ title: 'CTC softphoneContacts no customer main line',
+                        details: (e && e.message) || String(e) });
+        }
+        const phone = (main && main.phone) || '';
+        const name = (main && (main.companyname || main.entityid)) || '';
+        if (phone && name) {
+            contacts.forEach((c) => {
+                (c.phones || []).forEach((p) => { p.isPrimary = false; });
             });
-            return 'customer';
-        } catch (e) { /* not a customer */ }
-        return null;
+            contacts.unshift({
+                contactId: '__company_main__',
+                name: name + ' (main line)',
+                title: 'Company switchboard',
+                email: '',
+                phones: [{ number: phone, type: 'Main', isPrimary: true }]
+            });
+        }
+
+        let lastCalled = null;
+        try {
+            lastCalled = timeStep(perf, 'lastCalled', () => workspaceQueries.lastCallForRecord({
+                userId: runtime.getCurrentUser().id,
+                entityId: entityId,
+                days: 90
+            }));
+        } catch (e) {
+            log.error({ title: 'CTC softphoneContacts last-called lookup failed',
+                        details: e.message || String(e) });
+            lastCalled = null;
+        }
+
+        return { rows: contacts, lastCalled: lastCalled };
     };
 
     /**
@@ -1561,17 +1509,17 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/https', 'N/encode', './
 
     /**
      * softphoneAccountSnapshot — Iteration B Phase 6.
-     * Returns the 4-tile rollup (outstanding / open opps / last invoice /
-     * last activity) for an entity. Fetched once when a call connects in
-     * the softphone popup; cached in popup scope for the call lifetime.
+     * Returns the account rollup (outstanding / open opps / last activity)
+     * for an entity: the dock dialer's insight line and live-call tiles.
      *
      * @param {Object} body
      * @param {string|number} body.entityId
-     * @returns {Object} {outstanding, openOpps, lastInvoice, lastActivity} or {error}
+     * @param {Object<string, number>} [steps] - perf step timings (post)
+     * @returns {Object} {outstanding, openOpps, lastActivity} or {error}
      */
-    const softphoneAccountSnapshot = (body) => {
+    const softphoneAccountSnapshot = (body, steps) => {
         if (!body.entityId) return { error: 'entityId required' };
-        return workspaceQueries.getAccountSnapshot({ entityId: body.entityId });
+        return workspaceQueries.getAccountSnapshot({ entityId: body.entityId, perfSteps: steps });
     };
 
     /**

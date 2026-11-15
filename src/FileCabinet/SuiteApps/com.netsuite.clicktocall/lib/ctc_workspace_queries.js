@@ -4,8 +4,8 @@
  * @NModuleScope SameAccount
  *
  * Shared workspace queries — used by the Portlet (server-side at render time)
- * and by the RESTlet (`getWorkspaceHistory` / `getWorkspaceTasks` actions for
- * the future Workspace Suitelet). Centralizing the search logic here avoids
+ * and by the RESTlet (`getWorkspaceHistory` for the portlet's history tabs).
+ * Centralizing the search logic here avoids
  * an HTTP roundtrip from the portlet, and keeps row shape consistent across
  * both surfaces.
  */
@@ -27,6 +27,29 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
         if (Array.isArray(val) && val.length) return val[0].value || '';
         return val ? String(val) : '';
     };
+
+    /**
+     * Runs fn and adds its ms to steps[name] when steps is given (the
+     * RESTlet's perf flag, body.perf). Returns what fn returns; a throw
+     * still counts the time and goes on to the caller.
+     * @template T
+     * @param {Object<string, number>|null|undefined} steps
+     * @param {string} name
+     * @param {function(): T} fn
+     * @returns {T}
+     */
+    const timeStep = (steps, name, fn) => {
+        const t0 = Date.now();
+        try {
+            return fn();
+        } finally {
+            if (steps) steps[name] = (steps[name] || 0) + (Date.now() - t0);
+        }
+    };
+
+    // Ids per `IN (…)` list in a SuiteQL book query (same size as
+    // ctc_call_reconcile SQL_CHUNK).
+    const LOOKUP_ID_CHUNK = 200;
 
     // Map NetSuite customer.stage codes (LEAD / PROSPECT / CUSTOMER / OTHER) to
     // the display labels we show in the portlet's Type column. Anything else
@@ -811,12 +834,6 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
 
     // ─── Reporting Central ──────────────────────────────────────────────────
 
-    // NetSuite search date keyword for the period before each Reporting Central
-    // range (only where one compares fairly). Ranges with no keyword for the
-    // period before (yesterday, last7, last30) get explicit dates from
-    // lib/ctc_rc_scope.js; custom has none.
-    const REPORT_PREVIOUS_RANGE = { today: 'yesterday', thisweek: 'lastweektodate', lastweek: 'weekbeforelast', thismonth: 'lastmonthtodate' };
-
     /**
      * Satisfaction band for a 1-10 score: 'high' (7+), 'mid' (5-6), 'low'
      * (1-4) or 'none' (unscored). Callers map the band to their CSS class.
@@ -881,30 +898,6 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
             if (names.indexOf(text) !== -1) return true;
             return digits.length >= 3 && String(r.phone || '').replace(/[^0-9]/g, '').indexOf(digits) !== -1;
         });
-    };
-
-    /**
-     * Headline numbers for a set of calls. Pure: no queries.
-     * @param {Array<Object>} rows
-     * @returns {{calls: number, connected: number, connectedPct: number|null,
-     *   talkSeconds: number, talkMinutes: number, avgTalkSeconds: number|null,
-     *   satAvg: number|null, satCount: number}}
-     */
-    const computeReportKpis = (rows) => {
-        const list = rows || [];
-        const connected = list.filter((r) => !isUnconnected(r));
-        const talkSeconds = connected.reduce((a, r) => a + r.duration, 0);
-        const scored = list.filter((r) => typeof r.satisfaction === 'number' && r.satisfaction > 0);
-        return {
-            calls: list.length,
-            connected: connected.length,
-            connectedPct: list.length ? Math.round((connected.length / list.length) * 100) : null,
-            talkSeconds: talkSeconds,
-            talkMinutes: Math.round(talkSeconds / 60),
-            avgTalkSeconds: connected.length ? Math.round(talkSeconds / connected.length) : null,
-            satAvg: scored.length ? scored.reduce((a, r) => a + r.satisfaction, 0) / scored.length : null,
-            satCount: scored.length
-        };
     };
 
     /**
@@ -1352,16 +1345,20 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
     };
 
     /**
-     * Iteration B Phase 6 — single rollup powering the in-call account
-     * snapshot card. Four mini-queries against the entity's transactions,
-     * opportunities, and activity history; combined into the wire shape
-     * the softphone client renders into the 4-tile grid.
+     * Iteration B Phase 6 — account rollup for the dock dialer's insight
+     * line and live-call tiles (balance, open opps, last activity). Mini-
+     * queries against the entity's open invoices, opportunities, and
+     * activity history.
      *
-     * @param {{entityId?: string|number}} [params]
+     * Cost: 5 searches (invoices, opportunities, then the newest Phone
+     * Call, Task and Event; 50 units). The last activity stays 3 searches:
+     * no one Activity search is proven in this repo.
+     *
+     * @param {{entityId?: string|number, perfSteps?: Object<string, number>}} [params]
+     *   perfSteps: optional; gets the ms of each step (RESTlet perf flag)
      * @returns {{
      *   outstanding: { sum: any, count: any, avgAgeDays: any },
      *   openOpps:    { count: any, sum: any },
-     *   lastInvoice: { docNumber: any, amount: any, ageDays: any } | null,
      *   lastActivity:{ type: any, ageDays: any, date: any } | null,
      *   error?: string
      * }}
@@ -1369,11 +1366,11 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
     const getAccountSnapshot = (params) => {
         const p = params || {};
         const entityId = p.entityId;
+        const steps = p.perfSteps || null;
 
         const empty = {
             outstanding:  { sum: 0, count: 0, avgAgeDays: null },
             openOpps:     { count: 0, sum: 0 },
-            lastInvoice:  null,
             lastActivity: null
         };
 
@@ -1381,77 +1378,54 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
 
         try {
             // ── Outstanding invoices: open + partially-paid balances ──
-            try {
-                const invResults = search.create({
-                    type: search.Type.INVOICE,
-                    filters: [
-                        ['entity', 'anyof', entityId], 'AND',
-                        ['mainline', 'is', 'T'], 'AND',
-                        ['status', 'anyof', ['CustInvc:A', 'CustInvc:B']] // Open / Partially paid
-                    ],
-                    columns: [
-                        'amountremaining',
-                        'trandate'
-                    ]
-                }).run().getRange({ start: 0, end: 200 });
+            timeStep(steps, 'outstanding', () => {
+                try {
+                    const invResults = search.create({
+                        type: search.Type.INVOICE,
+                        filters: [
+                            ['entity', 'anyof', entityId], 'AND',
+                            ['mainline', 'is', 'T'], 'AND',
+                            ['status', 'anyof', ['CustInvc:A', 'CustInvc:B']] // Open / Partially paid
+                        ],
+                        columns: [
+                            'amountremaining',
+                            'trandate'
+                        ]
+                    }).run().getRange({ start: 0, end: 200 });
 
-                empty.outstanding.count = invResults.length;
-                empty.outstanding.sum   = sumColumn(invResults, 'amountremaining');
-                if (invResults.length) {
-                    let ageTotal = 0, ageCount = 0;
-                    invResults.forEach((r) => {
-                        const d = daysSince(r.getValue('trandate'));
-                        if (d !== null) { ageTotal += d; ageCount++; }
-                    });
-                    empty.outstanding.avgAgeDays = ageCount ? Math.round(ageTotal / ageCount) : null;
+                    empty.outstanding.count = invResults.length;
+                    empty.outstanding.sum   = sumColumn(invResults, 'amountremaining');
+                    if (invResults.length) {
+                        let ageTotal = 0, ageCount = 0;
+                        invResults.forEach((r) => {
+                            const d = daysSince(r.getValue('trandate'));
+                            if (d !== null) { ageTotal += d; ageCount++; }
+                        });
+                        empty.outstanding.avgAgeDays = ageCount ? Math.round(ageTotal / ageCount) : null;
+                    }
+                } catch (e) {
+                    log.error({ title: 'CTC snapshot outstanding failed', details: e.message || e });
                 }
-            } catch (e) {
-                log.error({ title: 'CTC snapshot outstanding failed', details: e.message || e });
-            }
+            });
 
             // ── Open opportunities: count + sum projectedtotal ──
-            try {
-                const oppResults = search.create({
-                    type: search.Type.OPPORTUNITY,
-                    filters: [
-                        ['entity', 'anyof', entityId], 'AND',
-                        ['status', 'noneof', ['Opprtnty:D', 'Opprtnty:G']] // exclude Closed Won / Lost
-                    ],
-                    columns: ['projectedtotal']
-                }).run().getRange({ start: 0, end: 200 });
+            timeStep(steps, 'openOpps', () => {
+                try {
+                    const oppResults = search.create({
+                        type: search.Type.OPPORTUNITY,
+                        filters: [
+                            ['entity', 'anyof', entityId], 'AND',
+                            ['status', 'noneof', ['Opprtnty:D', 'Opprtnty:G']] // exclude Closed Won / Lost
+                        ],
+                        columns: ['projectedtotal']
+                    }).run().getRange({ start: 0, end: 200 });
 
-                empty.openOpps.count = oppResults.length;
-                empty.openOpps.sum   = sumColumn(oppResults, 'projectedtotal');
-            } catch (e) {
-                log.error({ title: 'CTC snapshot opps failed', details: e.message || e });
-            }
-
-            // ── Last invoice: most-recent by trandate desc ──
-            try {
-                const lastInvResults = search.create({
-                    type: search.Type.INVOICE,
-                    filters: [
-                        ['entity', 'anyof', entityId], 'AND',
-                        ['mainline', 'is', 'T']
-                    ],
-                    columns: [
-                        { name: 'trandate', sort: search.Sort.DESC },
-                        'tranid',
-                        'total'
-                    ]
-                }).run().getRange({ start: 0, end: 1 });
-
-                if (lastInvResults.length) {
-                    const r = lastInvResults[0];
-                    empty.lastInvoice = {
-                        docNumber: r.getValue('tranid') || '',
-                        amount:    parseFloat(r.getValue('total')) || 0,
-                        ageDays:   daysSince(r.getValue('trandate'))
-                    };
+                    empty.openOpps.count = oppResults.length;
+                    empty.openOpps.sum   = sumColumn(oppResults, 'projectedtotal');
+                } catch (e) {
+                    log.error({ title: 'CTC snapshot opps failed', details: e.message || e });
                 }
-            } catch (e) {
-                log.error({ title: 'CTC snapshot lastInvoice failed', details: e.message || e });
-            }
+            });
 
             // ── Last activity: most-recent Phone Call / Task / Event ──
             // Phone Call and Task searches both expose a `company` filter
@@ -1468,7 +1442,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
                 { label: 'Event',      type: search.Type.CALENDAR_EVENT, filter: 'attendee', dateCol: 'startdate' }
             ];
             const candidates = [];
-            activitySources.forEach((src) => {
+            activitySources.forEach((src) => timeStep(steps, 'lastActivity:' + src.label, () => {
                 try {
                     const rows = search.create({
                         type: src.type,
@@ -1479,7 +1453,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
                 } catch (e) {
                     log.error({ title: 'CTC snapshot lastActivity failed (' + src.label + ')', details: e.message || e });
                 }
-            });
+            }));
 
             if (candidates.length) {
                 candidates.sort((a, b) => Date.parse(b.date || 0) - Date.parse(a.date || 0));
@@ -1511,7 +1485,16 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
      * A contact with a company returns the company as the entity and the
      * contact as contactName / contactId (same shape logCall takes).
      *
-     * @param {{userId?: string|number, phone?: string}} [params]
+     * Book first: the customer and contact queries run first limited to
+     * the book (`c.id IN (…)` / `ct.company IN (…)`, LOOKUP_ID_CHUNK ids
+     * per query) and the first book hit returns at once (inBook true).
+     * Only on a book miss do the two scans over all customers and all
+     * contacts run. Inside each pass, customer-level numbers come before
+     * contact numbers. SuiteQL count: 2 on a book customer hit, 3 on a
+     * book contact hit, 5 on a miss (empty book: 3); 10 units each.
+     *
+     * @param {{userId?: string|number, phone?: string, perfSteps?: Object<string, number>}} [params]
+     *   perfSteps: optional; gets the ms of each step (RESTlet perf flag)
      * @returns {{match: ({entityId: string, entityType: string, name: string,
      *            contactName: string, contactId: string, inBook: boolean}|null), error?: string}}
      */
@@ -1525,68 +1508,104 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
         const key = digits.slice(-10);
         const n = key.length; // 7..10, from the checks above: safe to inline
         const tail = (col) => 'SUBSTR(REGEXP_REPLACE(' + col + ", '[^0-9]', ''), -" + n + ')';
+        const steps = p.perfSteps || null;
+
+        // `scope` is '' (all records) or an extra AND with id bind marks.
+        const customerSql = (scope) =>
+            'SELECT c.id AS id, c.companyname AS companyname, c.firstname AS firstname, ' +
+            '       c.lastname AS lastname, c.stage AS stage ' +
+            'FROM customer c ' +
+            "WHERE c.isInactive = 'F' " +
+            "  AND c.stage IN ('CUSTOMER', 'PROSPECT', 'LEAD') " +
+            '  AND (' + tail('c.phone') + ' = ? OR ' + tail('c.altphone') + ' = ?) ' +
+            scope +
+            'FETCH FIRST 20 ROWS ONLY';
+        const contactSql = (scope) =>
+            'SELECT ct.id AS id, ct.firstname AS firstname, ct.lastname AS lastname, ' +
+            '       ct.company AS company, c.companyname AS companyname, c.stage AS stage ' +
+            'FROM contact ct ' +
+            'LEFT JOIN customer c ON c.id = ct.company ' +
+            "WHERE ct.isInactive = 'F' " +
+            '  AND (' + tail('ct.phone') + ' = ? OR ' + tail('ct.mobilephone') + ' = ? OR ' +
+            tail('ct.homephone') + ' = ?) ' +
+            scope +
+            'FETCH FIRST 20 ROWS ONLY';
 
         try {
+            const bookIds = timeStep(steps, 'book', () => getBookCustomerIds({ userId: p.userId }));
             const book = {};
-            getBookCustomerIds({ userId: p.userId }).forEach((id) => { book[String(id)] = true; });
+            bookIds.forEach((id) => { book[String(id)] = true; });
 
-            const candidates = [];
-
-            const customerSql =
-                'SELECT c.id AS id, c.companyname AS companyname, c.firstname AS firstname, ' +
-                '       c.lastname AS lastname, c.stage AS stage ' +
-                'FROM customer c ' +
-                "WHERE c.isInactive = 'F' " +
-                "  AND c.stage IN ('CUSTOMER', 'PROSPECT', 'LEAD') " +
-                '  AND (' + tail('c.phone') + ' = ? OR ' + tail('c.altphone') + ' = ?) ' +
-                'FETCH FIRST 20 ROWS ONLY';
-            query.runSuiteQL({ query: customerSql, params: [key, key] }).asMappedResults().forEach((r) => {
+            const customerCandidate = (r) => {
                 const id = String(r.id);
-                candidates.push({
+                return {
                     entityId: id,
                     entityType: STAGE_TO_WIRE[String(r.stage || '').toUpperCase()] || 'customer',
                     name: r.companyname || personName(r.firstname, r.lastname),
                     contactName: '',
                     contactId: '',
                     inBook: !!book[id]
-                });
-            });
-
-            const contactSql =
-                'SELECT ct.id AS id, ct.firstname AS firstname, ct.lastname AS lastname, ' +
-                '       ct.company AS company, c.companyname AS companyname, c.stage AS stage ' +
-                'FROM contact ct ' +
-                'LEFT JOIN customer c ON c.id = ct.company ' +
-                "WHERE ct.isInactive = 'F' " +
-                '  AND (' + tail('ct.phone') + ' = ? OR ' + tail('ct.mobilephone') + ' = ? OR ' +
-                tail('ct.homephone') + ' = ?) ' +
-                'FETCH FIRST 20 ROWS ONLY';
-            query.runSuiteQL({ query: contactSql, params: [key, key, key] }).asMappedResults().forEach((r) => {
+                };
+            };
+            const contactCandidate = (r) => {
                 const contactName = personName(r.firstname, r.lastname);
                 const companyId = r.company ? String(r.company) : '';
                 if (companyId && r.stage) {
-                    candidates.push({
+                    return {
                         entityId: companyId,
                         entityType: STAGE_TO_WIRE[String(r.stage).toUpperCase()] || 'customer',
                         name: r.companyname || contactName,
                         contactName: contactName,
                         contactId: String(r.id),
                         inBook: !!book[companyId]
-                    });
-                } else {
-                    candidates.push({
-                        entityId: String(r.id),
-                        entityType: 'contact',
-                        name: contactName,
-                        contactName: '',
-                        contactId: '',
-                        inBook: false
-                    });
+                    };
                 }
+                return {
+                    entityId: String(r.id),
+                    entityType: 'contact',
+                    name: contactName,
+                    contactName: '',
+                    contactId: '',
+                    inBook: false
+                };
+            };
+
+            // First in-book candidate of one query run over the book ids,
+            // LOOKUP_ID_CHUNK ids per query, in chunk order.
+            const firstBookHit = (sqlFor, col, keyParams, toCandidate) => {
+                for (let i = 0; i < bookIds.length; i += LOOKUP_ID_CHUNK) {
+                    const chunk = bookIds.slice(i, i + LOOKUP_ID_CHUNK).map(String);
+                    const scope = '  AND ' + col + ' IN (' + chunk.map(() => '?').join(', ') + ') ';
+                    const hit = query.runSuiteQL({ query: sqlFor(scope), params: keyParams.concat(chunk) })
+                        .asMappedResults().map(toCandidate).filter((c) => c.inBook)[0];
+                    if (hit) return hit;
+                }
+                return null;
+            };
+
+            const customerKeys = [key, key];
+            const contactKeys = [key, key, key];
+
+            if (bookIds.length) {
+                const bookHit =
+                    timeStep(steps, 'bookCustomers', () => firstBookHit(customerSql, 'c.id', customerKeys, customerCandidate)) ||
+                    timeStep(steps, 'bookContacts', () => firstBookHit(contactSql, 'ct.company', contactKeys, contactCandidate));
+                if (bookHit) return { match: bookHit };
+            }
+
+            // Book miss: scan every customer, then every contact.
+            const candidates = [];
+            timeStep(steps, 'allCustomers', () => {
+                query.runSuiteQL({ query: customerSql(''), params: customerKeys }).asMappedResults()
+                    .forEach((r) => { candidates.push(customerCandidate(r)); });
+            });
+            timeStep(steps, 'allContacts', () => {
+                query.runSuiteQL({ query: contactSql(''), params: contactKeys }).asMappedResults()
+                    .forEach((r) => { candidates.push(contactCandidate(r)); });
             });
 
-            // Book first; inside each group the query order holds
-            // (customer-level numbers before contact numbers).
+            // Book first (kept as a guard); inside each group the query
+            // order holds (customer-level numbers before contact numbers).
             const match = candidates.filter((c) => c.inBook)[0] || candidates[0] || null;
             return { match: match };
         } catch (e) {
@@ -1596,6 +1615,52 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
             });
             return { error: 'Lookup failed', match: null };
         }
+    };
+
+
+    /**
+     * The user's most recent Phone Call to one record, for the dock's
+     * "last called" mark on the contact list (RESTlet softphoneContacts).
+     * Filters: `assigned` = userId, `company` = entityId, `phone` not empty,
+     * `startdate` on or after `daysago<days>`. Newest first (startdate, then
+     * createddate), one row. Fields are the ones logCall writes: `contact`,
+     * `phone`, `custevent_ctc_call_started` (ISO UTC; '' on older calls).
+     * Throws on a search error: the caller decides the fallback.
+     * Governance: one search, 10 units.
+     *
+     * @param {Object} p
+     * @param {string|number} p.userId
+     * @param {string|number} p.entityId
+     * @param {number} [p.days=90]
+     * @returns {{contactId: string, number: string, at: string}|null}
+     */
+    const lastCallForRecord = (p) => {
+        const params = /** @type {{userId?: (string|number), entityId?: (string|number), days?: number}} */ (p || {});
+        if (!params.userId || !params.entityId) return null;
+        const days = Math.max(1, parseInt(String(params.days || ''), 10) || 90);
+        const results = search.create({
+            type: search.Type.PHONE_CALL,
+            filters: [
+                ['assigned', 'anyof', String(params.userId)], 'AND',
+                ['company', 'anyof', String(params.entityId)], 'AND',
+                ['phone', 'isnotempty', ''], 'AND',
+                ['startdate', 'onorafter', 'daysago' + days]
+            ],
+            columns: [
+                { name: 'startdate', sort: search.Sort.DESC },
+                { name: 'createddate', sort: search.Sort.DESC },
+                'contact',
+                'phone',
+                'custevent_ctc_call_started'
+            ]
+        }).run().getRange({ start: 0, end: 1 });
+        const r = results && results[0];
+        if (!r) return null;
+        return {
+            contactId: extractId(r.getValue('contact')),
+            number: String(r.getValue('phone') || ''),
+            at: String(r.getValue('custevent_ctc_call_started') || '')
+        };
     };
 
     return {
@@ -1622,11 +1687,11 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
         isMissedCall,
         satClass,
         filterCallRows,
-        computeReportKpis,
         countCalls,
         getRepPhoneNumber,
-        REPORT_PREVIOUS_RANGE,
         // Inbound spike — caller match
-        lookupCallerByPhone
+        lookupCallerByPhone,
+        // Dock contact list — last called
+        lastCallForRecord
     };
 });
