@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '37';
+    const DOCK_ASSET_VERSION = '39';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the

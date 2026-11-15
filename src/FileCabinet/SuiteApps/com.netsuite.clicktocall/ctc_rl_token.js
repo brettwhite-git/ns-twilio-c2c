@@ -55,7 +55,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
      * `_perf: { ms, units, steps }`: ms in the whole request (gate
      * included), units used (getRemainingUsage before minus after; null
      * when unknown) and the ms of named steps (gate, and the steps of
-     * lookupCaller, softphoneContacts, softphoneAccountSnapshot).
+     * lookupCaller, softphoneContacts, softphoneAccountSnapshot,
+     * softphoneCallContext).
      * Without the flag the answer is unchanged.
      * @param {Object} requestBody
      * @returns {Object}
@@ -135,6 +136,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         if (body.action === 'softphoneRecents')     return softphoneRecents(body);
         if (body.action === 'softphoneVoicemails')  return softphoneVoicemails(body);
         if (body.action === 'softphoneAccountSnapshot') return softphoneAccountSnapshot(body, steps);
+        if (body.action === 'softphoneCallContext') return softphoneCallContext(body, steps);
         if (body.action === 'softphoneBookCounts')  return softphoneBookCounts(body);
         if (body.action === 'lookupCaller')         return lookupCaller(body, steps);
         if (body.action === 'phoneHeartbeat')       return phoneHeartbeat(body);
@@ -1520,6 +1522,31 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
     const softphoneAccountSnapshot = (body, steps) => {
         if (!body.entityId) return { error: 'entityId required' };
         return workspaceQueries.getAccountSnapshot({ entityId: body.entityId, perfSteps: steps });
+    };
+
+    /**
+     * softphoneCallContext — asset 38 call screen account context
+     * (workspaceQueries.getCallContext): outstanding, lastTouchDays,
+     * orders90, activity (max 4), followUps (max 3). `errors` (the
+     * sources that failed) only with body.perf === true.
+     * Governance: 70 units (7 searches) + the gate.
+     *
+     * @param {Object} body
+     * @param {string|number} body.entityId
+     * @param {string|number} [body.contactId]
+     * @param {Object<string, number>} [steps] - perf step timings (post)
+     * @returns {Object}
+     */
+    const softphoneCallContext = (body, steps) => {
+        if (!body.entityId) return { error: 'entityId required' };
+        const out = workspaceQueries.getCallContext({
+            userId: runtime.getCurrentUser().id,
+            entityId: body.entityId,
+            contactId: body.contactId,
+            steps: steps
+        });
+        if (body.perf !== true) delete out.errors;
+        return out;
     };
 
     /**

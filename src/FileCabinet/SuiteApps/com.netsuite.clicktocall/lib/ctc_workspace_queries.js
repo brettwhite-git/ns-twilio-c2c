@@ -1345,6 +1345,49 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
     };
 
     /**
+     * Open and partially paid invoices of an entity (status CustInvc:A /
+     * CustInvc:B, mainline), up to 200. One search (10 units). Throws on a
+     * search error (the caller decides).
+     *   - sum: amountremaining; count: invoices
+     *   - avgAgeDays / oldestDays: from trandate (daysSince), null with none
+     *   - overdueCount: duedate before today
+     * @param {string|number} entityId
+     * @returns {{sum: number, count: number, avgAgeDays: (number|null), overdueCount: number, oldestDays: (number|null)}}
+     */
+    const loadOutstanding = (entityId) => {
+        const invResults = search.create({
+            type: search.Type.INVOICE,
+            filters: [
+                ['entity', 'anyof', entityId], 'AND',
+                ['mainline', 'is', 'T'], 'AND',
+                ['status', 'anyof', ['CustInvc:A', 'CustInvc:B']] // Open / Partially paid
+            ],
+            columns: ['amountremaining', 'trandate', 'duedate']
+        }).run().getRange({ start: 0, end: 200 });
+
+        let ageTotal = 0, ageCount = 0, overdueCount = 0;
+        /** @type {number|null} */
+        let oldestDays = null;
+        invResults.forEach((r) => {
+            const d = daysSince(r.getValue('trandate'));
+            if (d !== null) {
+                ageTotal += d;
+                ageCount++;
+                if (oldestDays === null || d > oldestDays) oldestDays = d;
+            }
+            const due = daysSince(r.getValue('duedate'));
+            if (due !== null && due > 0) overdueCount++;
+        });
+        return {
+            sum: sumColumn(invResults, 'amountremaining'),
+            count: invResults.length,
+            avgAgeDays: ageCount ? Math.round(ageTotal / ageCount) : null,
+            overdueCount: overdueCount,
+            oldestDays: oldestDays
+        };
+    };
+
+    /**
      * Iteration B Phase 6 — account rollup for the dock dialer's insight
      * line and live-call tiles (balance, open opps, last activity). Mini-
      * queries against the entity's open invoices, opportunities, and
@@ -1380,29 +1423,10 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
             // ── Outstanding invoices: open + partially-paid balances ──
             timeStep(steps, 'outstanding', () => {
                 try {
-                    const invResults = search.create({
-                        type: search.Type.INVOICE,
-                        filters: [
-                            ['entity', 'anyof', entityId], 'AND',
-                            ['mainline', 'is', 'T'], 'AND',
-                            ['status', 'anyof', ['CustInvc:A', 'CustInvc:B']] // Open / Partially paid
-                        ],
-                        columns: [
-                            'amountremaining',
-                            'trandate'
-                        ]
-                    }).run().getRange({ start: 0, end: 200 });
-
-                    empty.outstanding.count = invResults.length;
-                    empty.outstanding.sum   = sumColumn(invResults, 'amountremaining');
-                    if (invResults.length) {
-                        let ageTotal = 0, ageCount = 0;
-                        invResults.forEach((r) => {
-                            const d = daysSince(r.getValue('trandate'));
-                            if (d !== null) { ageTotal += d; ageCount++; }
-                        });
-                        empty.outstanding.avgAgeDays = ageCount ? Math.round(ageTotal / ageCount) : null;
-                    }
+                    const o = loadOutstanding(entityId);
+                    empty.outstanding.count = o.count;
+                    empty.outstanding.sum = o.sum;
+                    empty.outstanding.avgAgeDays = o.avgAgeDays;
                 } catch (e) {
                     log.error({ title: 'CTC snapshot outstanding failed', details: e.message || e });
                 }
@@ -1470,6 +1494,249 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
             log.error({ title: 'CTC getAccountSnapshot failed', details: e.message || e });
             return Object.assign({ error: 'Snapshot fetch failed' }, empty);
         }
+    };
+
+    // ─── Asset 38 — call screen account context ────────────────────────────
+
+    const CALL_CONTEXT_ACTIVITY_MAX = 4;
+    const CALL_CONTEXT_FOLLOW_UP_MAX = 3;
+    // Pending follow-ups read before the earliest-due sort (one page).
+    const CALL_CONTEXT_FOLLOW_UP_READ = 100;
+
+    /**
+     * The date part of a NetSuite date or date/time value ('11/15/2026',
+     * '11/15/2026 3:04 pm', or ISO), the form daysSince reads; '' when empty.
+     * @param {*} value
+     * @returns {string}
+     */
+    const dayToken = (value) => {
+        const s = String(value == null ? '' : value).trim();
+        if (!s) return '';
+        return /^[0-9]{4}-[0-9]{2}-[0-9]{2}/.test(s) ? s.slice(0, 10) : s.split(' ')[0];
+    };
+
+    /**
+     * The epoch ms of a value's date part (dayToken), or null.
+     * @param {*} value
+     * @returns {number|null}
+     */
+    const dayMs = (value) => {
+        const token = dayToken(value);
+        if (!token) return null;
+        const t = Date.parse(token);
+        return isNaN(t) ? null : t;
+    };
+
+    /**
+     * 'YYYY-MM-DD' of a NetSuite date or date/time value, or ''.
+     * @param {*} value
+     * @returns {string}
+     */
+    const isoDay = (value) => {
+        const t = dayMs(value);
+        if (t === null) return '';
+        const token = dayToken(value);
+        if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(token)) return token;
+        const d = new Date(t);
+        const p2 = (n) => (n < 10 ? '0' : '') + n;
+        return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate());
+    };
+
+    /** '$8,200' (whole units, thousands separators). */
+    const money = (n) => {
+        const v = Math.round(Number(n) || 0);
+        return (v < 0 ? '-$' : '$') + String(Math.abs(v)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    };
+
+    /** The first name in a contact's display text ('Abbott Inc. : Pat Lee' → 'Pat'). */
+    const firstNameOf = (contactText) => {
+        const parts = String(contactText || '').split(' : ');
+        const name = parts[parts.length - 1].trim();
+        return name ? name.split(/\s+/)[0] : '';
+    };
+
+    /**
+     * Account context for the dock call screen (DESIGN.md §4 "Account
+     * context on the call screen"): the KPI grid (outstanding, last touch,
+     * 90-day orders), Recent activity and the pending follow-ups of one
+     * entity. Each source is its own search in its own try/catch: a
+     * failing source is logged (log.error), named in `errors`, and left
+     * out (its numbers stay 0 / null).
+     *
+     * Sources (7 searches, 10 units each = 70 units):
+     *   - outstanding: loadOutstanding (open invoices)
+     *   - orders: Sales Orders, entity, mainline, trandate in the last 90
+     *     days, newest first (up to 1000): count, total (`amount`), newest 2
+     *     as activity
+     *   - calls: Phone Calls, company = entity, newest 3
+     *   - emails: Messages, `entity` = entity, newest 2 (unproven filter)
+     *   - tasks / events: the newest one each, for lastTouchDays only
+     *     (same filters as getAccountSnapshot)
+     *   - followUps: Pending proposed tasks whose call's company is the
+     *     entity, earliest due first (no due last), 3
+     * activity: calls + emails + orders, newest first, 4. lastTouchDays:
+     * the newest of every source above (days, daysSince).
+     *
+     * `userId` and `contactId` are accepted for the call shape; no source
+     * filters on them.
+     * @param {{userId?: (string|number), entityId?: (string|number), contactId?: (string|number),
+     *   steps?: Object<string, number>}} params
+     * @returns {{
+     *   outstanding: {sum: number, count: number, overdueCount: number, oldestDays: (number|null)},
+     *   lastTouchDays: (number|null),
+     *   orders90: {count: number, total: number},
+     *   activity: Array<{kind: string, text: string, at: string, ageDays: (number|null)}>,
+     *   followUps: Array<{id: string, title: string, due: (string|null)}>,
+     *   errors: Array<string>,
+     *   error?: string
+     * }}
+     */
+    const getCallContext = (params) => {
+        const p = params || {};
+        const entityId = p.entityId ? String(p.entityId) : '';
+        const steps = p.steps || null;
+        const out = {
+            outstanding: { sum: 0, count: 0, overdueCount: 0, oldestDays: null },
+            lastTouchDays: null,
+            orders90: { count: 0, total: 0 },
+            activity: [],
+            followUps: [],
+            errors: []
+        };
+        if (!entityId) return Object.assign(out, { error: 'entityId required' });
+
+        /** @type {Array<{kind: string, text: string, ms: number, raw: *}>} */
+        const items = [];
+        /** @type {Array<number>} */
+        const touches = [];
+        const touch = (value) => {
+            const t = dayMs(value);
+            if (t !== null) touches.push(t);
+            return t;
+        };
+        const add = (kind, text, value) => {
+            const t = touch(value);
+            if (t !== null) items.push({ kind: kind, text: text, ms: t, raw: value });
+        };
+        const source = (name, fn) => timeStep(steps, name, () => {
+            try {
+                fn();
+            } catch (e) {
+                out.errors.push(name);
+                log.error({ title: 'CTC getCallContext ' + name + ' failed', details: (e && e.message) || String(e) });
+            }
+        });
+        const text = (r, col) => {
+            if (r.getText) {
+                const t = r.getText(col);
+                if (t) return String(t);
+            }
+            return extractText(r.getValue(col));
+        };
+
+        source('outstanding', () => {
+            const o = loadOutstanding(entityId);
+            out.outstanding = { sum: o.sum, count: o.count, overdueCount: o.overdueCount, oldestDays: o.oldestDays };
+        });
+
+        source('orders', () => {
+            const rows = search.create({
+                type: search.Type.SALES_ORDER,
+                filters: [
+                    ['entity', 'anyof', entityId], 'AND',
+                    ['mainline', 'is', 'T'], 'AND',
+                    ['trandate', 'onorafter', 'daysago90']
+                ],
+                columns: [
+                    { name: 'trandate', sort: search.Sort.DESC },
+                    { name: 'internalid', sort: search.Sort.DESC },
+                    'tranid', 'amount', 'status'
+                ]
+            }).run().getRange({ start: 0, end: 1000 });
+            out.orders90 = { count: rows.length, total: sumColumn(rows, 'amount') };
+            rows.slice(0, 2).forEach((r) => {
+                const parts = ['Order ' + String(r.getValue('tranid') || '').trim(), money(r.getValue('amount'))];
+                const status = text(r, 'status');
+                if (status) parts.push(status);
+                add('order', parts.join(' · '), r.getValue('trandate'));
+            });
+        });
+
+        source('calls', () => {
+            search.create({
+                type: search.Type.PHONE_CALL,
+                filters: [['company', 'anyof', entityId]],
+                columns: [
+                    { name: 'startdate', sort: search.Sort.DESC },
+                    { name: 'createddate', sort: search.Sort.DESC },
+                    'title', 'contact', 'company'
+                ]
+            }).run().getRange({ start: 0, end: 3 }).forEach((r) => {
+                const who = firstNameOf(text(r, 'contact')) || text(r, 'company');
+                const title = String(r.getValue('title') || '').trim();
+                const head = who ? 'Call with ' + who : 'Call';
+                add('call', title ? head + ' · ' + title : head, r.getValue('startdate'));
+            });
+        });
+
+        source('emails', () => {
+            search.create({
+                type: search.Type.MESSAGE,
+                filters: [['entity', 'anyof', entityId]],
+                columns: [
+                    { name: 'messagedate', sort: search.Sort.DESC },
+                    'subject'
+                ]
+            }).run().getRange({ start: 0, end: 2 }).forEach((r) => {
+                const subject = String(r.getValue('subject') || '').trim();
+                add('email', subject ? 'Email · ' + subject : 'Email', r.getValue('messagedate'));
+            });
+        });
+
+        // Tasks and events: the last touch only (not in Recent activity).
+        [
+            { name: 'tasks', type: search.Type.TASK, filter: 'company', dateCol: 'createddate' },
+            { name: 'events', type: search.Type.CALENDAR_EVENT, filter: 'attendee', dateCol: 'startdate' }
+        ].forEach((src) => source(src.name, () => {
+            const rows = search.create({
+                type: src.type,
+                filters: [[src.filter, 'anyof', entityId]],
+                columns: [{ name: src.dateCol, sort: search.Sort.DESC }]
+            }).run().getRange({ start: 0, end: 1 });
+            if (rows.length) touch(rows[0].getValue(src.dateCol));
+        }));
+
+        source('followUps', () => {
+            const rows = search.create({
+                type: 'customrecord_ctc_proposed_task',
+                filters: [
+                    [PT_CALL + '.company', 'anyof', entityId], 'AND',
+                    [PT_STATUS, 'is', 'Pending']
+                ],
+                columns: [
+                    { name: 'created', sort: search.Sort.ASC },
+                    { name: 'internalid', sort: search.Sort.ASC },
+                    'custrecord_ctc_pt_text', 'custrecord_ctc_pt_proposed_due'
+                ]
+            }).run().getRange({ start: 0, end: CALL_CONTEXT_FOLLOW_UP_READ });
+            out.followUps = rows.map((r, i) => {
+                const due = isoDay(r.getValue('custrecord_ctc_pt_proposed_due'));
+                return { id: String(r.id), title: String(r.getValue('custrecord_ctc_pt_text') || '').trim(), due: due || null, i: i };
+            }).sort((a, b) => {
+                if (a.due && b.due && a.due !== b.due) return a.due < b.due ? -1 : 1;
+                if (!a.due !== !b.due) return a.due ? -1 : 1;
+                return a.i - b.i;
+            }).slice(0, CALL_CONTEXT_FOLLOW_UP_MAX).map((f) => ({ id: f.id, title: f.title, due: f.due }));
+        });
+
+        out.activity = items
+            .map((it, i) => ({ it: it, i: i }))
+            .sort((a, b) => (b.it.ms - a.it.ms) || (a.i - b.i))
+            .slice(0, CALL_CONTEXT_ACTIVITY_MAX)
+            .map(({ it }) => ({ kind: it.kind, text: it.text, at: isoDay(it.raw), ageDays: daysSince(dayToken(it.raw)) }));
+
+        if (touches.length) out.lastTouchDays = daysSince(new Date(Math.max.apply(null, touches)).toISOString());
+        return out;
     };
 
     // ─── Inbound spike — caller match ──────────────────────────────────────
@@ -1680,6 +1947,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
         getBookCounts,
         // Phase 6 — in-call account snapshot
         getAccountSnapshot,
+        // Asset 38 — call screen account context
+        getCallContext,
         // Reporting Central
         getBookCustomerIds,
         parseTimeOfDay,
