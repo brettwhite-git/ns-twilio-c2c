@@ -250,10 +250,28 @@
         '.dl-note-x{width:24px;height:24px;flex-shrink:0;margin:-4px -4px -4px 0;border-radius:6px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-note-x:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
         '.dl-note .dl-text{flex-shrink:0;padding:4px 8px;font-size:12px}',
-        // Missed call: text + close on the first row, Call back + Open record under it.
-        '.dl-note[data-kind="missed"]{flex-wrap:wrap;row-gap:4px}',
-        '.dl-note[data-kind="missed"] .dl-note-text{order:-2;flex-basis:calc(100% - 32px)}',
-        '.dl-note[data-kind="missed"] .dl-note-x{order:-1}',
+        // Missed call on Dial (asset 40): a compact note in the signed-out
+        // card style between the pill row and the number. Line 1 "Missed
+        // call" (coral) · age; line 2 the name as the record link (the
+        // number in SF Mono when unknown); a 36 px go-green Call back and ×.
+        '.dl-miss{flex-shrink:0;display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10)}',
+        '.dl-miss-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
+        '.dl-miss-l1{font-size:12px;line-height:16px;color:#B2C0D3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.dl-miss-k{font-weight:600;color:' + T.stopDot + '}',
+        '.dl-miss-name{align-self:flex-start;max-width:100%;font-size:14px;font-weight:600;line-height:20px;color:#FFFFFF;text-decoration:none;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.dl-miss-name[href]{text-decoration:underline;text-decoration-color:rgba(255,255,255,0.45);text-underline-offset:3px}',
+        '.dl-miss-name[href]:hover{text-decoration-color:#FFFFFF}',
+        '.dl-miss-name:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
+        '.dl-miss-name.mono{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-weight:400;font-variant-numeric:tabular-nums}',
+        '.dl-miss-call{flex-shrink:0;height:36px;padding:0 12px;border-radius:10px;background:' + T.go + ';color:#FFFFFF;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px}',
+        '.dl-miss-call:hover{background:' + T.goHover + '}',
+        '.dl-miss-call:active{transform:scale(0.97)}',
+        '.dl-miss-call:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
+        '.dl-miss-x{width:24px;height:24px;flex-shrink:0;margin-right:-4px;border-radius:6px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-miss-x:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
+        // The fit rule (keys never shrink): hidden while the note shows and
+        // the view would not fit (the insight line first, then an empty row).
+        '.dl-fit-out{display:none !important}',
         // Error banner (snap.error.kind): what happened, what to do, one action.
         '.dl-alert{flex-shrink:0;margin:10px 14px 0;padding:10px 12px;border-radius:14px;background:' + rgba(T.stopDot, 0.12) + ';border:1px solid ' + rgba(T.stopDot, 0.30) + ';display:flex;flex-direction:column;align-items:flex-start;gap:4px;font-size:12px}',
         '.dl-alert[data-tone="amber"]{background:rgba(244,199,106,0.10);border-color:rgba(244,199,106,0.30)}',
@@ -345,13 +363,6 @@
         '.dl-roll{animation:dl-roll 200ms cubic-bezier(0.23,1,0.32,1) both}',
         '@keyframes dl-roll{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}',
         '@keyframes dl-fade{from{opacity:0}to{opacity:1}}',
-        '.dl-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}',
-        '.dl-tiles.two{grid-template-columns:repeat(2,minmax(0,1fr))}',
-        '.dl-tile{padding:6px 8px;border-radius:8px;border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;gap:2px;min-width:0;color:#FFFFFF;text-decoration:none}',
-        '.dl-k{font-size:12px;font-weight:600;letter-spacing:0.04em;color:#94A6BF}',
-        '.dl-v{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.dl-v.gold{color:#F4C76A;font-weight:600;font-size:13px}',
-        '.dl-v.mint{color:#B5EFD0;font-weight:600;font-size:13px}',
         '.dl-display{width:100%;height:40px;background:transparent;border:0;border-bottom:1px solid rgba(255,255,255,0.08);color:#FFFFFF;text-align:center;font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-size:20px;font-weight:300;letter-spacing:0.02em}',
         '.dl-display::placeholder{color:#6B7B95}',
         '.dl-display:focus-visible{outline:none;border-bottom-color:' + T.ring + '}',
@@ -537,7 +548,6 @@
         // Leaving (signed in again): the card fades out, the dimming fades up.
         '.dl-so-leaving .dl-so{opacity:0;transition:opacity ' + SO_LEAVE_MS + 'ms ease-out}',
         '.dl-so-leaving .dl-display-wrap,.dl-so-leaving .dl-dialpad,.dl-so-leaving .dl-foot.dial .dl-btn{transition:opacity ' + SO_LEAVE_MS + 'ms ease-out}',
-        '.dl-live .dl-tiles{width:100%;margin-top:18px}',
         '.dl-live .dl-pad{width:100%;margin-top:14px}',
         '.dl-text{background:transparent;color:#B6DCFA;font-size:12.5px;padding:6px 8px;border-radius:8px}',
         '.dl-text:hover{background:rgba(255,255,255,0.06)}',
@@ -630,6 +640,8 @@
         '.dl-live-wrap.cs .dl-live-time{flex-shrink:0;height:40px;min-height:0;margin-top:4px;display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:500;letter-spacing:0.02em;line-height:40px}',
         '.dl-live-wrap.cs .dl-live-time:not([data-slot="timer"]){font-family:inherit;font-size:15px;font-weight:400;letter-spacing:0;color:#B2C0D3}',
         '.dl-live-wrap.cs .dl-live-time[data-slot="reconnecting"]{color:' + T.amber + '}',
+        // Ringing, unknown caller (asset 40): "No history for this number".
+        '.dl-live-wrap.cs .dl-live-none{margin-top:24px;font-size:13px;line-height:18px;color:#94A6BF;text-align:center}',
         // Account block (K5): a KPI grid over the content width (three equal
         // cells, two 1 px dividers 48 px tall, 16 px from any text; 24 px
         // above and below), Recent activity (32 px rows, hairlines), then
@@ -705,7 +717,6 @@
         +   '<button type="button" class="dl-tab" role="tab" data-tab="recents" aria-selected="false">Recents</button>'
         + '</div>'
         + '<div class="dl-note" role="status" hidden><span class="dl-note-text"></span>'
-        +   '<button type="button" class="dl-go dl-note-call" hidden>Call back</button>'
         +   '<button type="button" class="dl-text dl-note-add" hidden>Add to NetSuite</button>'
         +   '<a class="dl-note-link" href="#" target="_top">Open record →</a>'
         +   '<button type="button" class="dl-note-x" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" ' + STROKE + '><path d="M6 6l12 12M18 6L6 18"></path></svg></button>'
@@ -737,6 +748,15 @@
         +         '<button type="button" class="dl-match" hidden><span class="dl-match-name"></span><span class="dl-match-type"></span>' + CHEVRON_SVG + '</button>'
         +         '<button type="button" class="dl-add" aria-label="Add this number to NetSuite" hidden>Add to NetSuite</button>'
         +       '</div>'
+        +       '</div>'
+        // Missed call (asset 40): the compact note between the row and the number.
+        +       '<div class="dl-miss" role="status" hidden>'
+        +         '<div class="dl-miss-text">'
+        +           '<div class="dl-miss-l1"><span class="dl-miss-k">Missed call</span><span class="dl-miss-ago"></span></div>'
+        +           '<a class="dl-miss-name" target="_top"></a>'
+        +         '</div>'
+        +         '<button type="button" class="dl-miss-call"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>Call back</button>'
+        +         '<button type="button" class="dl-miss-x" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" ' + STROKE + '>' + ICON_X + '</svg></button>'
         +       '</div>'
         +       '<div class="dl-display-wrap">'
         +         '<input type="tel" class="dl-display" aria-label="Number to call" placeholder="Enter a number" autocomplete="off">'
@@ -786,10 +806,8 @@
         +     '<div class="dl-live-time" aria-label="Call time"></div>'
         +     '<div class="dl-live-so" role="status" hidden>Signed out \u2014 this call will still be logged.</div>'
         +     '<div class="dl-live-warn" role="status" hidden></div>'
-        +     '<div class="dl-tiles two dl-live-tiles" hidden>'
-        +       '<div class="dl-tile"><span class="dl-k">BALANCE</span><span class="dl-v gold dl-live-bal">—</span></div>'
-        +       '<div class="dl-tile"><span class="dl-k">OPEN OPPS</span><span class="dl-v mint dl-live-opps">—</span></div>'
-        +     '</div>'
+        // Ringing, unknown caller: one quiet line in the account block's place.
+        +     '<div class="dl-live-none" hidden>No history for this number</div>'
         // Account block (call screen; softphoneCallContext).
         +     '<div class="dl-acc" hidden>'
         +       '<div class="dl-acc-sum" hidden><div class="dl-acc-lbl">Summary \u00b7 Summarizing\u2026</div><div class="dl-acc-bars" aria-hidden="true"><span class="dl-ph" style="width:100%"></span><span class="dl-ph" style="width:70%"></span></div></div>'
@@ -804,8 +822,9 @@
         +     '<div class="dl-pad dl-dtmf" hidden>' + keyHtml + '</div>'
         +   '</div>'
         +   '<div class="dl-foot">'
-        +     '<span class="dl-act dl-ring-act" hidden><button type="button" class="dl-btn big end dl-decline" aria-label="Decline call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>DECLINE</span>'
-        +     '<span class="dl-act dl-ring-act" hidden><button type="button" class="dl-btn big call dl-answer" aria-label="Answer call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg></button>ANSWER</span>'
+        +     '<span class="dl-act dl-ring-act" hidden><button type="button" class="dl-btn big end dl-decline" aria-label="Decline call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>Decline</span>'
+        +     '<span class="dl-ring-act" aria-hidden="true" hidden></span>'
+        +     '<span class="dl-act dl-ring-act" hidden><button type="button" class="dl-btn big call dl-answer" aria-label="Answer call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg></button>Answer</span>'
         +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn dl-mute" aria-label="Mute" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '>' + ICON_MIC + '</svg></button><span class="dl-mute-label">Mute</span></span>'
         +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn big end dl-end" aria-label="End call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>End</span>'
         +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn dl-keys" aria-label="Show keypad" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '><circle cx="6" cy="5" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="18" cy="5" r="1"></circle><circle cx="6" cy="11" r="1"></circle><circle cx="12" cy="11" r="1"></circle><circle cx="18" cy="11" r="1"></circle><circle cx="6" cy="17" r="1"></circle><circle cx="12" cy="17" r="1"></circle><circle cx="18" cy="17" r="1"></circle><circle cx="12" cy="22" r="1"></circle></svg></button>Keypad</span>'
@@ -896,7 +915,9 @@
         idle: q('.dl-idle'), live: q('.dl-live-wrap'),
         tabs: qa('.dl-tab'), views: qa('.dl-view'),
         rec: q('.dl-rec'), recName: q('.dl-rec-name'), recInsight: q('.dl-rec-insight'),
-        slot: q('.dl-slot'), looking: q('.dl-looking'), trig: q('.dl-trig'),
+        slot: q('.dl-slot'), looking: q('.dl-looking'), trig: q('.dl-trig'), mrow: q('.dl-mrow'),
+        dialBody: q('.dl-idle .dl-body'), miss: q('.dl-miss'), missAgo: q('.dl-miss-ago'), missName: q('.dl-miss-name'),
+        missCall: q('.dl-miss-call'), missX: q('.dl-miss-x'),
         tsheet: q('.dl-tsheet'), tflt: q('.dl-flt'), tfilter: q('.dl-tfilter'), tcount: q('.dl-flt-cnt'), tlist: q('.dl-lst'),
         displayWrap: q('.dl-display-wrap'), display: q('.dl-display'), clearBtn: q('.dl-display-wrap .dl-clear'), dialpad: q('.dl-dialpad'),
         match: q('.dl-match'), matchName: q('.dl-match-name'), matchType: q('.dl-match-type'), add: q('.dl-add'),
@@ -908,13 +929,13 @@
         vm: q('.dl-vm'), vmBadge: q('.dl-vm-badge'), vmPane: q('.dl-vm-wrap'), vmBack: q('.dl-vm-back'),
         vmList: q('.dl-vm-list'), vmMsg: q('.dl-vm-msg'),
         liveAv: q('.dl-live-av'), liveName: q('.dl-live-name'), liveSub: q('.dl-live-sub'), liveTime: q('.dl-live-time'),
-        liveTiles: q('.dl-live-tiles'), liveBal: q('.dl-live-bal'), liveOpps: q('.dl-live-opps'),
+        liveNone: q('.dl-live-none'),
         dtmf: q('.dl-dtmf'), mute: q('.dl-mute'), muteLabel: q('.dl-mute-label'), end: q('.dl-end'), keys: q('.dl-keys'),
         answer: q('.dl-answer'), decline: q('.dl-decline'), ringActs: qa('.dl-ring-act'), callActs: qa('.dl-call-act'),
         head: q('.dl-head'), audio: q('.dl-audio-wrap'), audioBack: q('.dl-audio-back'), audioMsg: q('.dl-audio-msg'),
         inRow: q('.dl-in-row'), inSel: q('.dl-in'), outRow: q('.dl-out-row'), outSel: q('.dl-out'), exit: q('.dl-exit'),
         exitBlock: q('.dl-exit-block'),
-        remote: q('.dl-remote'), noteCall: q('.dl-note-call'),
+        remote: q('.dl-remote'),
         alert: q('.dl-alert'), alertTitle: q('.dl-alert-title'), alertText: q('.dl-alert-text'), alertAct: q('.dl-alert-act'),
         refused: q('.dl-refused'), liveWarn: q('.dl-live-warn'), liveSo: q('.dl-live-so'),
         so: q('.dl-so'), soBtn: q('.dl-so-btn'),
@@ -983,8 +1004,12 @@
     var noteDeadline = 0;
     var noteHover = false;
     var noteFocus = false;
-    var noteMissed = null;    // { name, number, entityId, entityType } the missed note calls back
     var missedCaller = null;  // newest snap.missedUnseen.last (kept after markMissedSeen)
+    var missedAt = 0;         // ... and when it was missed (snap.missedUnseen.at)
+    // The missed note on Dial (asset 40): { key, name, number, entityId,
+    // entityType, at }; key = the lastLog it shows. null = not shown.
+    var miss = null;
+    var missTimer = null;
     var ownNonces = {};       // nonces of requests this panel sent (refused lines)
     // Answer sent from this tab (panel ring view, pill or incoming card):
     // the live view shows the call controls at once, and End takes focus
@@ -1311,10 +1336,12 @@
     // unless a record's own number is in the field (never both).
     function syncDial() {
         var hasRec = !!(target && (target.entityId || target.entityName));
-        ui.rec.hidden = !hasRec;
+        // The missed note names this record (and links it): no header.
+        ui.rec.hidden = !hasRec || !!(miss && miss.entityId && miss.entityId === target.entityId);
         ui.trig.hidden = manual || !selRow();
         ui.slot.hidden = !ui.trig.hidden || (hasRec && !manual);
         if (manual) closeTargets(false);
+        fitDial();
     }
 
     // --- Match slot (above the number) ---
@@ -1457,6 +1484,11 @@
     // null when it failed (the type alone). Contacts get no line. Nothing
     // to say: the line is left out (never "—").
     function renderInsight(s) {
+        paintInsight(s);
+        fitDial();
+    }
+
+    function paintInsight(s) {
         var line = ui.recInsight;
         clear(line);
         line.classList.remove('loading');
@@ -2592,14 +2624,16 @@
         ui.liveTime.textContent = clockOf(Math.max(0, Math.floor((Date.now() - snap.startedAt) / 1000)));
     }
 
-    // --- Call screen (DESIGN.md §4, asset 38) ---
+    // --- Call screen (DESIGN.md §4, asset 38; ringing asset 40) ---
     // One screen for an outbound call (dialing / ringing / connected /
-    // reconnecting) and an inbound call once answered; the inbound ring
-    // view (incoming, Answer not sent) keeps its own layout (asset 39).
+    // reconnecting) and an inbound call, ringing (asset 40: "Ringing…",
+    // Decline · — · Answer) and once answered. The account block of a
+    // ringing caller loads as soon as the caller is matched (the same
+    // recordCache key as the connected screen, so Answer shows it at once).
     // After a call it stays as the wrap-up for WRAP_MS (or until the rep
     // acts): "Call ended · 03:12", Summary, Call back and Done.
     var WRAP_MS = 8000;
-    var SLOT_TEXT = { calling: 'Calling…', answering: 'Connecting…', reconnecting: 'Reconnecting…' };
+    var SLOT_TEXT = { calling: 'Calling…', incoming: 'Ringing…', answering: 'Connecting…', reconnecting: 'Reconnecting…' };
     var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     // Recent activity icons (16 px stroke): call, email, order, task, event.
     var ACT_ICON = {
@@ -2609,7 +2643,6 @@
         task: '<circle cx="12" cy="12" r="9"></circle><path d="M8 12l3 3 5-6"></path>',
         event: '<rect x="3" y="5" width="18" height="16" rx="2"></rect><path d="M3 10h18M8 3v4M16 3v4"></path>'
     };
-    var liveFor = null;     // ring view tiles: the record they show
     var callContact = null; // { entityId, id, name, title }: the contact this panel dialled
     var lastInfo = null;    // the live call's screen (kept for the wrap-up)
     var wrapUp = null;      // { info, seconds, timed, touched, phoneCallId } while the wrap-up shows
@@ -2670,23 +2703,26 @@
     function slotOf(phase) {
         if (phase === 'connected') return 'timer';
         if (phase === 'reconnecting' || phase === 'answering') return phase;
+        // Incoming with Answer sent (not connected yet): "Connecting…".
+        if (phase === 'incoming') return answerSent ? 'answering' : 'incoming';
         return 'calling';
     }
 
     function renderLive() {
         var incoming = isIncoming();
-        // After Answer the call screen shows at once (the ring view is gone).
+        // Ringing: the call screen with Decline · — · Answer. After Answer
+        // the same screen goes on (Connecting…, then the timer).
         var ringing = incoming && !answerSent;
-        ui.live.classList.toggle('cs', !ringing);
+        ui.live.classList.add('cs');
         ui.ringActs.forEach(function (a) { a.hidden = !ringing; });
         ui.callActs.forEach(function (a) { a.hidden = ringing; });
         ui.wrapActs.forEach(function (a) { a.hidden = true; });
+        lastInfo = liveInfo();
+        paintCall(lastInfo, slotOf(snap.phase));
         if (ringing) {
-            lastInfo = null;
-            renderRing();
-        } else {
-            lastInfo = liveInfo();
-            paintCall(lastInfo, slotOf(snap.phase));
+            var who = lastInfo.known ? lastInfo.name : (callNumber(lastInfo.raw) || 'Unknown caller');
+            ui.answer.setAttribute('aria-label', 'Answer call from ' + who);
+            ui.decline.setAttribute('aria-label', 'Decline call from ' + who);
         }
         tickLive();
         if (snap.startedAt && !liveTimer) liveTimer = window.setInterval(tickLive, 1000);
@@ -2707,49 +2743,8 @@
         ui.keys.disabled = !TALKING[snap.phase];
     }
 
-    // The inbound ring view (unchanged; asset 39 redraws it): caller name
-    // (after lookup) or number, BALANCE / OPEN OPPS, Answer / Decline.
-    function renderRing() {
-        var c = snap.caller || {};
-        var known = !!c.name;
-        var number = formatPhone(c.number || snap.number) || c.number || formatPhone(snap.number) || snap.number || '';
-        var name = c.name || number || 'Unknown caller';
-        ui.answer.setAttribute('aria-label', 'Answer call from ' + name);
-        ui.decline.setAttribute('aria-label', 'Decline call from ' + name);
-        ui.liveName.textContent = name;
-        ui.liveName.classList.remove('mono');
-        ui.liveSub.textContent = known
-            ? ['Incoming call', number !== name ? number : ''].filter(function (x) { return x; }).join(' · ')
-            : 'No match in NetSuite';
-        ui.liveSub.hidden = false;
-        ui.liveNum.hidden = true;
-        ui.liveTime.setAttribute('data-slot', 'ring');
-        ui.liveTime.textContent = '';
-        ui.acc.hidden = true;
-        // "Add to NetSuite" under "No match in NetSuite" (no Phone Call yet).
-        var unknownNumber = known ? '' : (c.number || snap.number || '');
-        liveAddNum = canAdd(unknownNumber) ? unknownNumber : '';
-        ui.liveAdd.hidden = !liveAddNum;
-        if (liveAddNum) ui.liveAdd.setAttribute('aria-label', 'Add ' + (formatPhone(liveAddNum) || liveAddNum) + ' to NetSuite');
-
-        var key = snap.entityId && snap.entityType !== 'contact' ? snap.entityId : '';
-        if (key !== liveFor) {
-            liveFor = key;
-            ui.liveTiles.hidden = !key;
-            ui.liveBal.textContent = '—';
-            ui.liveOpps.textContent = '—';
-            if (key) {
-                recordSnapshot(key).p.then(function (d) {
-                    if (liveFor !== key) return;
-                    ui.liveBal.textContent = money(d.outstanding && d.outstanding.sum);
-                    ui.liveOpps.textContent = d.openOpps ? String(d.openOpps.count || 0) : '—';
-                }).catch(function () { /* keep dashes */ });
-            }
-        }
-    }
-
     // The identity block, the slot and the account block. slot: 'calling'
-    // | 'answering' | 'timer' | 'reconnecting' | 'ended' (wrap-up).
+    // | 'incoming' | 'answering' | 'timer' | 'reconnecting' | 'ended' (wrap-up).
     function paintCall(info, slot) {
         var number = callNumber(info.raw);
         ui.liveName.textContent = info.known ? info.name : (number || 'Unknown caller');
@@ -2769,8 +2764,8 @@
         } else if (slot !== 'timer') {
             ui.liveTime.textContent = SLOT_TEXT[slot] || '';
         }
-        ui.liveTiles.hidden = true;
-        liveFor = null;
+        // A ringing unknown caller: one quiet line, no account block.
+        ui.liveNone.hidden = !(slot === 'incoming' && !info.known);
         renderAccount(info);
     }
 
@@ -2793,6 +2788,8 @@
                         accData = d;
                         fillAcc();
                         syncAcc();
+                        // The incoming card's hint (client) reads it too.
+                        if (typeof host.contextChanged === 'function') host.contextChanged();
                     }, function () {
                         if (accKey !== key) return;
                         accState = 'error'; // the block hides quietly
@@ -2804,6 +2801,12 @@
         }
         syncAcc();
     }
+
+    // The ringing caller's account context once loaded (else null), for
+    // the incoming card's hint line in the client (asset 40).
+    host.ringContext = function () {
+        return isIncoming() && accKey && accState === 'ok' ? accData : null;
+    };
 
     // Which parts show: the keypad replaces the block; an error hides it;
     // the wrap-up puts Summary in the grid's place.
@@ -3037,15 +3040,13 @@
 
     // --- Header, note ---
     // key: the lastLog this note shows; leave it out for a local note.
-    function showNote(kind, text, url, key, missed) {
+    function showNote(kind, text, url, key) {
         stopNoteTimer();
         noteKey = key || null;
-        noteMissed = missed || null;
         ui.note.hidden = false;
         ui.noteText.textContent = text;
         ui.noteLink.hidden = !url;
         if (url) ui.noteLink.href = url;
-        ui.noteCall.hidden = !(missed && missed.number);
         noteAdd = null;
         ui.noteAdd.hidden = true;
         ui.note.setAttribute('data-kind', kind);
@@ -3054,22 +3055,21 @@
     function hideNote() {
         stopNoteTimer();
         noteKey = null;
-        noteMissed = null;
         noteAdd = null;
         ui.noteAdd.hidden = true;
         ui.note.hidden = true;
     }
 
     // The after-call note offers "Add to NetSuite" when the call's other
-    // side matched no record: the inbound caller (or the missed one) had
-    // no name, or an outbound call went to a number with no record. The
-    // Phone Call id comes from lastLog.recordUrl (…call.nl?id=N) when the
-    // call was logged; a missed call has none yet.
+    // side matched no record: the inbound caller had no name, or an
+    // outbound call went to a number with no record. The Phone Call id
+    // comes from lastLog.recordUrl (…call.nl?id=N). (A missed unknown
+    // caller: the Dial slot's "Add to NetSuite", asset 40.)
     function noteAddFor(log) {
-        if (!snap || (log.status !== 'saved' && log.status !== 'missed')) return null;
+        if (!snap || log.status !== 'saved') return null;
         var number = '';
-        if (snap.direction === 'inbound' || log.status === 'missed') {
-            var c = (log.status === 'missed' ? missedCaller || snap.caller : snap.caller) || {};
+        if (snap.direction === 'inbound') {
+            var c = snap.caller || {};
             if (c.name || c.entityId) return null;
             number = c.number || '';
         } else {
@@ -3142,9 +3142,14 @@
     // stays closed for that lastLog.
     function showLog(log) {
         var key = logKey(log);
+        // A missed call: the note on Dial (asset 40), once per lastLog.
+        if (log.status === 'missed') {
+            hideNote();
+            if (key !== noteDismissed && !(miss && miss.key === key)) showMissed(key);
+            return;
+        }
         if (key === noteDismissed) { hideNote(); return; }
         if (key === noteKey && !ui.note.hidden) return;
-        if (log.status === 'missed') { showMissed(log, key); showNoteAdd(noteAddFor(log)); return; }
         // The call that ended in a wrap-up: no "Call ended · Open record"
         // note (asset 38); its Phone Call id goes to the wrap-up's Add.
         if (wrapLogSkip && (log.status === 'saved' || log.status === 'skipped')) {
@@ -3163,29 +3168,111 @@
         }
     }
 
-    // "Missed call from <name or number>" with Call back (the normal dial
-    // path) and Open record (when the caller matched a record). The caller
-    // comes from snap.missedUnseen.last, kept here because opening the
-    // panel resets it (markMissedSeen); else the call's caller.
-    function showMissed(log, key) {
+    // --- Missed call on Dial (DESIGN.md §4, asset 40) ---
+    // The panel lands on Dial: the note (between the pill row and the
+    // number) and the caller loaded under it (a record: its numbers with
+    // the caller's selected; an unknown number: typed, so the slot offers
+    // Add to NetSuite). The caller comes from snap.missedUnseen.last, kept
+    // because opening the panel resets it (markMissedSeen); else the
+    // call's caller. The note stays until ×, Call back or a new call.
+    function showMissed(key) {
         var c = missedCaller || (snap && snap.caller) || {};
-        var who = c.name || formatPhone(c.number) || c.number || '';
-        var url = c.entityId ? recordUrl(c.entityType, c.entityId) : (log.recordUrl || '');
-        showNote('missed', who ? 'Missed call from ' + who : (log.message || 'Missed call'), url, key, {
+        miss = {
+            key: key,
             name: String(c.name || ''),
             number: String(c.number || ''),
             entityId: String(c.entityId || ''),
-            entityType: String(c.entityType || '')
-        });
+            entityType: String(c.entityType || ''),
+            at: missedAt || Date.now()
+        };
+        if (miss.entityId) {
+            loadEntity({ entityId: miss.entityId, entityName: miss.name, entityType: miss.entityType, phone: miss.number });
+        } else if (miss.number) {
+            clearEntity();
+            setDisplay(miss.number, true);
+        }
+        setTab('dial');
+        if (host.saveUi) host.saveUi();
+        paintMiss();
     }
 
-    ui.noteCall.addEventListener('click', function () {
-        var c = noteMissed;
+    // "Just now", "2 min ago", "3 h ago", else the date.
+    function agoText(at) {
+        var sec = Math.max(0, Math.floor((Date.now() - at) / 1000));
+        if (sec < 60) return 'Just now';
+        var min = Math.floor(sec / 60);
+        if (min < 60) return min + ' min ago';
+        if (min < 1440) return Math.floor(min / 60) + ' h ago';
+        var d = new Date(at);
+        return MONTHS[d.getMonth()] + ' ' + d.getDate();
+    }
+
+    function paintMissAgo() {
+        if (miss) ui.missAgo.textContent = ' \u00b7 ' + agoText(miss.at);
+    }
+
+    function paintMiss() {
+        ui.miss.hidden = !miss;
+        window.clearInterval(missTimer);
+        missTimer = null;
+        if (miss) {
+            var url = miss.entityId ? recordUrl(miss.entityType, miss.entityId) : '';
+            var who = miss.name || callNumber(miss.number) || 'Unknown caller';
+            ui.missName.textContent = who;
+            ui.missName.classList.toggle('mono', !miss.name && !!miss.number);
+            if (url) {
+                ui.missName.href = url;
+                ui.missName.title = 'Open record in NetSuite';
+            } else {
+                ui.missName.removeAttribute('href');
+                ui.missName.removeAttribute('title');
+            }
+            ui.missCall.hidden = !miss.number;
+            ui.missCall.setAttribute('aria-label', 'Call back ' + who);
+            paintMissAgo();
+            missTimer = window.setInterval(paintMissAgo, 30000);
+        }
+        syncDial();
+    }
+
+    // drop: true = this lastLog's note stays closed (×, Call back).
+    function hideMiss(drop) {
+        if (!miss) return;
+        if (drop) noteDismissed = miss.key;
+        miss = null;
+        paintMiss();
+    }
+
+    ui.missCall.addEventListener('click', function () {
+        var c = miss;
         if (!c || !c.number) return;
-        if (noteKey) noteDismissed = noteKey;
-        hideNote();
+        hideMiss(true);
         callBack(c);
     });
+
+    ui.missX.addEventListener('click', function () {
+        var hadFocus = el.getRootNode().activeElement === ui.missX;
+        hideMiss(true);
+        if (hadFocus) focusPanel();
+    });
+
+    // The fit rule (keys are sacred): while the missed note shows and the
+    // Dial view does not fit above the footer, the record's insight line
+    // goes first, then the 34 px row when it is empty; never the keys.
+    function fitDial() {
+        ui.recInsight.classList.remove('dl-fit-out');
+        ui.mrow.classList.remove('dl-fit-out');
+        if (!miss || tab !== 'dial' || ui.idle.hidden) return;
+        var body = ui.dialBody;
+        var over = function () { return body.scrollHeight > body.clientHeight; };
+        if (!over()) return;
+        if (!ui.rec.hidden && !ui.recInsight.hidden) ui.recInsight.classList.add('dl-fit-out');
+        var empty = ui.trig.hidden && (ui.slot.hidden || (ui.looking.hidden && ui.match.hidden && ui.add.hidden));
+        if (over() && empty) ui.mrow.classList.add('dl-fit-out');
+    }
+    if (typeof window.ResizeObserver === 'function') {
+        try { new window.ResizeObserver(function () { fitDial(); }).observe(ui.dialBody); } catch (e) { /* no observer: fit on render */ }
+    }
 
     ui.noteAdd.addEventListener('click', function () {
         if (noteAdd) openAdd({ phone: noteAdd.phone, phoneCallId: noteAdd.phoneCallId, trigger: ui.noteAdd });
@@ -3743,6 +3830,7 @@
         var m = snap && snap.missedUnseen;
         if (m && m.count > 0 && m.last) {
             missedCaller = m.last;
+            missedAt = typeof m.at === 'number' && m.at ? m.at : (missedAt || Date.now());
             // A new miss: pending row on top of Recents (kept after markMissedSeen).
             var at = typeof m.at === 'number' ? m.at : 0;
             var p = pendingMissed;
@@ -3801,12 +3889,13 @@
         if (audioOpen) renderAudio();
         if (live) {
             renderLive();
-            // A new call: its lastLog shows even if it reads like the last one.
+            // A new call: its lastLog shows even if it reads like the last
+            // one; the missed note goes.
             hideNote();
+            hideMiss(false);
             noteDismissed = null;
         } else {
             if (liveTimer) { window.clearInterval(liveTimer); liveTimer = null; }
-            liveFor = null;
             ui.dtmf.hidden = true;
             ui.keys.setAttribute('aria-pressed', 'false');
             ui.keys.setAttribute('aria-label', 'Show keypad');
@@ -3818,12 +3907,13 @@
             var kind = ui.note.getAttribute('data-kind');
             if (kind !== 'error') {
                 if (log) showLog(log);
-                // A missed note stays until the rep closes it, also when the
-                // anchor restarts without a lastLog.
-                else if (kind !== 'missed' || ui.note.hidden) hideNote();
+                // (The missed note on Dial stays until the rep closes it,
+                // also when the anchor restarts without a lastLog.)
+                else hideNote();
             }
             if (wrapping) renderWrap();
             if (focusDone) ui.done.focus();
+            fitDial();
         }
         syncCallButton();
         followAnswer();

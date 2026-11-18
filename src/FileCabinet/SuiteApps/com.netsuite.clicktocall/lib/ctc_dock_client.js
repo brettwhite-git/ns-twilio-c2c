@@ -33,7 +33,9 @@
  * Decline) rises out of the pill (above it on the bottom row, below it on the
  * top row, beside it on ml / mr); the pill itself only says "Ringing". The
  * shell and remote tabs both draw it. With the panel open, the panel's ring
- * view takes its place.
+ * view takes its place. Under the name one hint line (asset 40): "contact ·
+ * Last call Nov 12" (the date from the dialer's call context once loaded:
+ * host.ringContext) or "Not in NetSuite".
  */
 (function () {
     'use strict';
@@ -415,7 +417,8 @@
         '.inc-text{flex:1;min-width:0;display:flex;flex-direction:column}',
         '.inc-label{font-size:12px;font-weight:500;line-height:16px;color:#9FC9EE}',
         '.inc-name{margin-top:2px;font-size:15px;font-weight:600;line-height:20px;letter-spacing:-0.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-        '.inc-sub{margin-top:1px;font-size:12px;line-height:16px;color:#94A6BF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+        '.inc-name.mono{font-family:"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;font-weight:500;font-variant-numeric:tabular-nums;letter-spacing:0}',
+        '.inc-sub{margin-top:1px;font-size:12px;line-height:16px;color:#B2C0D3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.inc-acts{display:flex;gap:8px;flex-shrink:0}',
         '.inc-btn{width:36px;height:36px;border-radius:999px;padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}',
         '.inc-decline{background:' + T.stop + ';box-shadow:0 4px 12px ' + rgba(T.stop, 0.40) + '}',
@@ -1998,21 +2001,43 @@
         return ringKey() !== incDismissed;
     }
 
-    // Name line: caller name, else the number in display form. Sub line:
-    // "number · contact", each part only when it adds something.
+    var CARD_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+    // "Last call Nov 12": the newest 'call' row of the call context's
+    // activity ('' when there is none or the context is not loaded).
+    function lastCallText(ctx) {
+        var best = null;
+        var bestT = -Infinity;
+        ((ctx && Array.isArray(ctx.activity)) ? ctx.activity : []).forEach(function (a) {
+            if (!a || a.kind !== 'call') return;
+            var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(a.at || ''));
+            var d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+            if (!d && a.ageDays != null && a.ageDays !== '' && !isNaN(Number(a.ageDays))) d = new Date(Date.now() - Number(a.ageDays) * 86400000);
+            if (d && !isNaN(d.getTime()) && d.getTime() > bestT) { best = d; bestT = d.getTime(); }
+        });
+        return best ? 'Last call ' + CARD_MONTHS[best.getMonth()] + ' ' + best.getDate() : '';
+    }
+
+    // Name line: caller name, else the number in display form (SF Mono).
+    // Hint line (asset 40): "contact · Last call Nov 12", each part only
+    // when known; "Not in NetSuite" for a number with no record.
     function fillIncoming() {
         var c = snap.caller || {};
-        var raw = String(c.number || snap.number || '');
-        var number = formatPhone(raw) || raw;
         var name = String(c.name || '');
         var contact = String(snap.contactName || '');
         var title = callerText();
-        var sub = [];
-        if (name && number) sub.push(number);
-        if (contact && contact !== title) sub.push(contact);
+        var hint;
+        if (!name) {
+            hint = 'Not in NetSuite';
+        } else {
+            var x = window.__ctcDock && window.__ctcDock.host;
+            var ctx = x && typeof x.ringContext === 'function' ? x.ringContext() : null;
+            hint = [contact && contact !== title ? contact : '', lastCallText(ctx)].filter(function (v) { return v; }).join(' · ');
+        }
         incName.textContent = title;
-        incSub.textContent = sub.join(' · ');
-        incSub.hidden = !sub.length;
+        incName.classList.toggle('mono', !name);
+        incSub.textContent = hint;
+        incSub.hidden = !hint;
         incEl.setAttribute('aria-label', 'Incoming call from ' + title);
         incAnswer.setAttribute('aria-label', 'Answer call from ' + title);
         incDecline.setAttribute('aria-label', 'Decline call from ' + title);
@@ -2718,6 +2743,11 @@
             // The user picked a view in the panel: share it (UI_KEY).
             saveUi: saveUi,
             collapse: function () { setExpanded(false, true); saveUi(); focusPill(); },
+            // Set by the dialer: the ringing caller's call context once
+            // loaded, else null (the incoming card's hint, asset 40).
+            ringContext: null,
+            // The dialer loaded that context: the card's hint fills in.
+            contextChanged: function () { if (snap && snap.phase === 'incoming') syncIncoming(); },
             registerPanel: function (p) {
                 panel = p;
                 p.el.hidden = true;
