@@ -128,10 +128,12 @@
         connected: { dot: T.goDot, label: 'Connected' },
         reconnecting: { dot: T.amber, label: 'Reconnecting…' }
     };
+    // Wrap-up: the chip says what the pill says (asset 42).
+    var WRAP_VIEW = { dot: T.wrap, label: 'Call ended' };
     // Header badge for snap.error.kind between calls.
     var ERROR_VIEW = {
         mic: { dot: T.stopDot, label: 'Microphone blocked' },
-        session: { dot: T.amber, label: 'Signing in…' },
+        session: { dot: T.amber, label: 'Reconnecting…' }, // one name with the pill (asset 42)
         network: { dot: T.amber, label: 'Reconnecting…' },
         twilio: { dot: T.stopDot, label: 'Phone error' },
         paused: { dot: T.offline, label: 'Calling paused' },
@@ -231,12 +233,31 @@
         '.dl-head .dl-status{grid-column:2;justify-self:center;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden;white-space:nowrap}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:12px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
         '.dl-status .dot{position:relative;width:6px;height:6px;background:var(--dl-dot,#94A6BF)}',
-        // incoming: the status dot rings like the pill dot: a disc under the
-        // dot (6 px, ring colour at .55) scales to 20 px (the old 7 px
-        // spread) and fades. Transform and opacity only.
+        // Ring rule (DESIGN.md §3, asset 41): one signal per state, every
+        // ring ends 6 px beyond its element, 1.6 s loop, transform and
+        // opacity only. Incoming: the status dot rings (6 -> 18 px, ring
+        // colour) and Answer pulses. Calling: the status dot breathes amber.
+        // Nothing else moves; the caller's icon stays still.
         '.dl-status{isolation:isolate}',
         '.dl[data-phase="incoming"] .dl-status .dot::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + rgba(T.ring, 0.55) + ';opacity:0;z-index:-1;pointer-events:none;animation:ctc-ring-sm 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-ring-sm{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(3.333);opacity:0}}',
+        '.dl[data-phase="dialing"] .dl-status .dot::before,.dl[data-phase="ringing"] .dl-status .dot::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + rgba(T.amber, 0.45) + ';opacity:0;z-index:-1;pointer-events:none;animation:ctc-ring-sm 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '.dl-answer{position:relative}',
+        // Call end (asset 42, DESIGN.md §3 call-end rule): End becomes Call
+        // back in place. A red disc over the new go button fades out while
+        // the glyph turns back from 135 deg (transform and opacity only).
+        '.dl-wrap-call{position:relative}',
+        '.dl-live-wrap.cs .dl-foot{position:relative}', // ghosts of Mute / Keypad sit here
+        '.dl-wrap-call svg{position:relative}',
+        '.dl-wrap-call.dl-morph::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + T.stop + ';pointer-events:none;animation:dl-endfade 300ms cubic-bezier(0.23,1,0.32,1) forwards}',
+        '.dl-wrap-call.dl-morph svg{animation:dl-turn 300ms cubic-bezier(0.23,1,0.32,1)}',
+        '@keyframes dl-endfade{from{opacity:1}to{opacity:0}}',
+        '@keyframes dl-turn{from{transform:rotate(135deg)}to{transform:none}}',
+        '.dl-ghost-fx{position:absolute;margin:0;pointer-events:none;box-sizing:border-box}',
+        '.dl-ring-act{isolation:isolate}', // the orb draws over the footer, under the button
+        '.dl-answer::after{content:"";position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none;background:' + rgba(T.goDot, 0.55) + ';opacity:0;animation:dl-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '.dl-answer:active::after{visibility:hidden}',
+        '@keyframes dl-orb{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(1.185);opacity:0}}',
+        '@keyframes ctc-ring-sm{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(3);opacity:0}}',
         '.dl-icon{position:relative;width:32px;height:32px;border-radius:10px;background:transparent;color:#94A6BF;display:inline-flex;align-items:center;justify-content:center}',
         '.dl-icon:hover{background:rgba(255,255,255,0.08);color:#FFFFFF}',
         '.dl-icon[aria-pressed="true"]{background:rgba(255,255,255,0.12);color:#FFFFFF}',
@@ -519,7 +540,7 @@
         '.dl-link:focus-visible{outline:2px solid ' + T.ring + ';outline-offset:2px}',
         '.dl-msg{font-size:12px;color:#94A6BF;text-align:center;padding:12px 0}',
         '.dl-msg.err{color:#FCA5A5}',
-        '.dl-live{flex:1 1 auto;min-height:0;overflow:auto;padding:24px 14px 0;display:flex;flex-direction:column;align-items:center;gap:4px}',
+        '.dl-live{position:relative;flex:1 1 auto;min-height:0;overflow:auto;padding:24px 14px 0;display:flex;flex-direction:column;align-items:center;gap:4px}',
         // The other side: the person icon, never initials (DESIGN.md §4, asset 33).
         '.dl-live-av{width:68px;height:68px;border-radius:999px;background:transparent;color:#94A6BF;display:flex;align-items:center;justify-content:center;margin-bottom:10px}',
         '.dl-live-name{font-size:20px;font-weight:600;letter-spacing:-0.01em;text-align:center}',
@@ -669,8 +690,15 @@
         '.dl-ph{display:inline-block;height:12px;border-radius:6px;background:rgba(255,255,255,0.08);vertical-align:middle}',
         '.dl-kpi-v .dl-ph{width:56px}',
         '.dl-acc-row .dl-ph{flex:1}',
-        '.dl-acc-bars{display:flex;flex-direction:column;gap:8px;padding-top:4px}',
-        '.dl-acc-bars .dl-ph{display:block;height:10px;border-radius:5px}',
+        // Wrap-up status line and summary (asset 43, DESIGN.md §4).
+        '.dl-stl{display:flex;align-items:center;gap:8px;min-height:20px;padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.10);font-size:13px;line-height:18px;color:#C9D3E1}',
+        '.dl-stl-text b{font-weight:600;color:#FFFFFF}',
+        '.dl-stl-mark{width:14px;height:14px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center}',
+        '.dl-stl-mark.is-dot::before{content:"";width:7px;height:7px;border-radius:999px;background:var(--stl,#94A6BF)}',
+        '.dl-sum{padding-bottom:14px;border-bottom:1px solid rgba(255,255,255,0.10)}',
+        '.dl-sum-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}',
+        '.dl-sum-link{font-size:12px;font-weight:600;color:#8FC1D3;text-decoration:underline;text-underline-offset:2px}',
+        '.dl-sum-text{margin-top:6px;font-size:13px;line-height:19px;color:#E4EBF2;overflow-wrap:anywhere}',
         // In-call keypad: the Dial keys in the account block's place.
         '.dl-live-wrap .dl-pad.dl-dtmf{width:auto;margin-top:20px;grid-template-columns:var(--dl-cols);grid-template-rows:repeat(4,65px);column-gap:var(--dl-gap);row-gap:8px;justify-content:center;flex-shrink:0}',
         // Controls: 65 px circles on the keypad's 3 columns (--dl-cols),
@@ -682,7 +710,7 @@
         '.dl-live-wrap.cs .dl-act .dl-btn svg{width:22px;height:22px}',
         '.dl-btn.dl-done{background:rgba(255,255,255,0.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.16);color:#FFFFFF}',
         '.dl-btn.dl-done:hover{background:rgba(255,255,255,0.16)}',
-        '@media (prefers-reduced-motion: reduce){.dl *,.dl-dialpad .dl-key{transition:none}.dl-dialpad .dl-key:active{transform:none}.dl[data-phase="incoming"] .dl-status .dot::before{animation:none}.dl.closed,.dl[data-side].closed{transform:none}.dl .dl-tsheet{transform:none;transition:opacity 160ms ease-out}.dl-roll{animation:dl-fade 150ms ease-out both}}'
+        '@media (prefers-reduced-motion: reduce){.dl *,.dl-dialpad .dl-key{transition:none}.dl-dialpad .dl-key:active{transform:none}.dl .dl-status .dot::before,.dl-answer::after{animation:none}.dl.closed,.dl[data-side].closed{transform:none}.dl .dl-tsheet{transform:none;transition:opacity 160ms ease-out}.dl-roll{animation:dl-fade 150ms ease-out both}}'
     ]).join('\n'));
 
     // --- Markup (static; data goes in with textContent) ---
@@ -810,7 +838,12 @@
         +     '<div class="dl-live-none" hidden>No history for this number</div>'
         // Account block (call screen; softphoneCallContext).
         +     '<div class="dl-acc" hidden>'
-        +       '<div class="dl-acc-sum" hidden><div class="dl-acc-lbl">Summary \u00b7 Summarizing\u2026</div><div class="dl-acc-bars" aria-hidden="true"><span class="dl-ph" style="width:100%"></span><span class="dl-ph" style="width:70%"></span></div></div>'
+        // Wrap-up (asset 43): one true status line, then the real summary
+        // once the transcript check returns it. No skeleton.
+        +       '<div class="dl-acc-sum" hidden>'
+        +         '<div class="dl-stl" role="status"><span class="dl-stl-mark" aria-hidden="true"></span><span class="dl-stl-text"></span></div>'
+        +         '<div class="dl-sum" hidden><div class="dl-sum-head"><span class="dl-acc-lbl">Summary</span><a class="dl-sum-link" href="#" target="_top">Open call record</a></div><div class="dl-sum-text"></div></div>'
+        +       '</div>'
         +       '<div class="dl-kpis">'
         +         '<div class="dl-kpi"><span class="dl-kpi-k">Outstanding<span class="dl-kpi-dot" hidden></span></span><span class="dl-kpi-v dl-kpi-out"></span></div>'
         +         '<div class="dl-kpi"><span class="dl-kpi-k">Last touch</span><span class="dl-kpi-v dl-kpi-touch"></span></div>'
@@ -943,7 +976,8 @@
         noteAdd: q('.dl-note-add'), liveAdd: q('.dl-live-add'),
         liveBody: q('.dl-live'), liveNum: q('.dl-live-num'), wrapActs: qa('.dl-wrap-act'),
         wrapCall: q('.dl-wrap-call'), done: q('.dl-done'),
-        acc: q('.dl-acc'), accSum: q('.dl-acc-sum'), kpis: q('.dl-kpis'), kpiOut: q('.dl-kpi-out'), kpiDot: q('.dl-kpi-dot'),
+        acc: q('.dl-acc'), accSum: q('.dl-acc-sum'), stl: q('.dl-stl'), stlMark: q('.dl-stl-mark'), stlText: q('.dl-stl-text'),
+        sum: q('.dl-sum'), sumLink: q('.dl-sum-link'), sumText: q('.dl-sum-text'), kpis: q('.dl-kpis'), kpiOut: q('.dl-kpi-out'), kpiDot: q('.dl-kpi-dot'),
         kpiTouch: q('.dl-kpi-touch'), kpiOrders: q('.dl-kpi-orders'),
         accAct: q('.dl-acc-act'), accActs: q('.dl-acc-acts'), accFu: q('.dl-acc-fu'), accFuLbl: q('.dl-acc-fulbl'), accFus: q('.dl-acc-fus'),
         asPane: q('.dl-as-wrap'), asBack: q('.dl-as-back'), asNum: q('.dl-as-num'),
@@ -2950,7 +2984,8 @@
             timed: !!info.startedAt,
             seconds: info.startedAt ? Math.max(0, Math.floor((Date.now() - info.startedAt) / 1000)) : 0,
             touched: false,
-            phoneCallId: ''
+            phoneCallId: '',
+            fresh: true
         };
         wrapLogSkip = true;
         wrapTimer = window.setTimeout(function () {
@@ -2964,6 +2999,7 @@
     function endWrap() {
         window.clearTimeout(wrapTimer);
         wrapTimer = null;
+        stopStl();
         if (!wrapUp) return false;
         wrapUp = null;
         accKey = null;
@@ -2975,16 +3011,186 @@
         var w = wrapUp;
         if (!w) return;
         var hadFocus = ui.live.contains(el.getRootNode().activeElement);
+        var log = snap && snap.lastLog;
+        var carry = transcriptPending(log);
         endWrap();
         if (!target && w.info.known && w.info.entityId) {
             loadEntity({ entityId: w.info.entityId, entityName: w.info.name, entityType: w.info.entityType, phone: w.info.raw });
         }
         setTab('dial');
         render(snap);
+        if (carry) {
+            tNote = { key: logKey(log), name: w.info.known ? w.info.name : callNumber(w.info.raw), text: '' };
+            paintTNote(log);
+        }
+        playToDial();
         if (hadFocus) focusPanel();
     }
 
+    // --- Call end motion (asset 42) ---
+    // One signal: End becomes Call back in place (the pill does the same).
+    // Mute and Keypad shrink away (ghost copies, since the real ones hide at
+    // once), Done rises in, the timer holds a beat then gives way to "Call
+    // ended", the summary rises in. Done / 8 s: Dial rises in 8 px.
+    // Reduced motion: 150 ms fades only. Transform and opacity only.
+    var EASE_OUT = 'cubic-bezier(0.23,1,0.32,1)';
+    var EASE_EXIT = 'cubic-bezier(0.4,0,0.2,1)';
+    function canAnimate() { return typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function'; }
+    function fx(node, frames, ms, ease, delay) {
+        if (!node || !canAnimate()) return null;
+        try { return node.animate(frames, { duration: ms, easing: ease || EASE_OUT, delay: delay || 0, fill: 'backwards' }); } catch (e) { return null; }
+    }
+    // A still copy of a node at its place in the footer, for an exit.
+    function ghostOf(node, box) {
+        if (!node || node.hidden) return null;
+        var r = node.getBoundingClientRect();
+        if (!r.width || !r.height) return null;
+        var g = node.cloneNode(true);
+        g.classList.add('dl-ghost-fx');
+        g.setAttribute('aria-hidden', 'true');
+        g.removeAttribute('id');
+        Array.prototype.forEach.call(g.querySelectorAll('button'), function (b) { b.disabled = true; b.tabIndex = -1; });
+        g.style.left = (r.left - box.left) + 'px';
+        g.style.top = (r.top - box.top) + 'px';
+        g.style.width = r.width + 'px';
+        g.style.height = r.height + 'px';
+        return { node: g, rect: r };
+    }
+    function captureEnd() {
+        if (!canAnimate() || ui.live.hidden) return null;
+        var foot = ui.wrapCall.closest('.dl-foot');
+        if (!foot) return null;
+        var box = foot.getBoundingClientRect();
+        var t = ui.liveTime.getBoundingClientRect();
+        var live = ui.liveTime.parentNode.getBoundingClientRect();
+        var timer = ui.liveTime.textContent ? ui.liveTime.cloneNode(true) : null;
+        if (timer) {
+            timer.classList.add('dl-ghost-fx');
+            timer.setAttribute('aria-hidden', 'true');
+            timer.style.left = (t.left - live.left) + 'px';
+            timer.style.top = (t.top - live.top) + 'px';
+            timer.style.width = t.width + 'px';
+        }
+        return {
+            foot: foot,
+            ghosts: [ghostOf(ui.mute.parentNode, box), ghostOf(ui.keys.parentNode, box)].filter(Boolean),
+            timer: timer
+        };
+    }
+    function playEnd(cap) {
+        if (!cap) return;
+        var reduced = reducedMotion();
+        cap.ghosts.forEach(function (g) {
+            cap.foot.appendChild(g.node);
+            var a = fx(g.node, reduced ? [{ opacity: 1 }, { opacity: 0 }] : [{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(0.8)' }], reduced ? 150 : 180, EASE_EXIT);
+            var drop = function () { if (g.node.parentNode) g.node.parentNode.removeChild(g.node); };
+            if (a) { a.onfinish = drop; a.oncancel = drop; } else drop();
+            g.node.style.opacity = '0';
+        });
+        var done = ui.done.parentNode;
+        if (reduced) {
+            fx(done, [{ opacity: 0 }, { opacity: 1 }], 150);
+            fx(ui.liveTime, [{ opacity: 0 }, { opacity: 1 }], 150);
+            fx(ui.accSum, [{ opacity: 0 }, { opacity: 1 }], 150);
+            return;
+        }
+        ui.wrapCall.classList.remove('dl-morph');
+        void ui.wrapCall.offsetWidth; // restart the CSS animation
+        ui.wrapCall.classList.add('dl-morph');
+        fx(ui.wrapCall, [{ transform: 'scale(1)' }, { transform: 'scale(0.94)' }, { transform: 'scale(1)' }], 300);
+        fx(done, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 260, EASE_OUT, 140);
+        if (cap.timer) {
+            ui.liveTime.parentNode.appendChild(cap.timer);
+            // The time holds 200 ms, then fades in 120 ms; "Call ended" rises
+            // only once it is gone (delays, not hold keyframes: the easing
+            // runs over the whole effect and would pull a hold early).
+            var ta = fx(cap.timer, [{ opacity: 1 }, { opacity: 0 }], 120, EASE_EXIT, 200);
+            var dropT = function () { if (cap.timer.parentNode) cap.timer.parentNode.removeChild(cap.timer); };
+            if (ta) { ta.onfinish = dropT; ta.oncancel = dropT; } else dropT();
+            cap.timer.style.opacity = '0';
+        }
+        fx(ui.liveTime, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 260, EASE_OUT, 320);
+        fx(ui.accSum, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 260, EASE_OUT, 300);
+    }
+    function playToDial() {
+        if (ui.idle.hidden) return;
+        fx(ui.idle, reducedMotion() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], reducedMotion() ? 150 : 240);
+    }
+
+    // --- Wrap-up status line (asset 43, DESIGN.md §4) ---
+    // One true line in place of a summary skeleton: the stage of the call's
+    // log and transcript (snap.lastLog.transcript, moved on by the phone's
+    // transcript check), then the real AI summary once it exists. Plain
+    // words, said once; the dot or check carries the tone.
+    var STL_CHECK = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + T.goDot + '" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>';
+    var stlKey = null;
+    var stlTimer = null;
+    function elapsedText(since) {
+        var sec = Math.max(0, Math.floor((Date.now() - since) / 1000));
+        var min = Math.floor(sec / 60);
+        return min ? min + ' min ' + (sec % 60) + ' s' : sec + ' s';
+    }
+    // { mark: 'check' | 'dot', dot, bold, rest, tick } or { summary }.
+    function transcriptView(log) {
+        if (!log) return { mark: 'dot', dot: T.amber, bold: 'Logging call\u2026', rest: '' };
+        if (log.status === 'skipped') return { mark: 'dot', dot: T.offline, bold: 'Call too brief to log', rest: '' };
+        if (log.status === 'error') return { mark: 'dot', dot: T.stopDot, bold: 'Couldn\u2019t log the call', rest: '' };
+        if (log.status !== 'saved') return { mark: 'dot', dot: T.offline, bold: 'Call ended', rest: '' };
+        var t = log.transcript || {};
+        if (t.stage === 'transcribing') return { mark: 'dot', dot: T.amber, bold: 'Transcribing\u2026', rest: t.since ? elapsedText(t.since) : '', tick: !!t.since };
+        if (t.stage === 'done') return t.summary ? { summary: String(t.summary) } : { mark: 'check', bold: 'Summary ready', rest: '' };
+        if (t.stage === 'none') return { mark: 'dot', dot: T.offline, bold: 'Call logged', rest: 'Too short to transcribe' };
+        if (t.stage === 'later') return { mark: 'dot', dot: T.offline, bold: 'Call logged', rest: 'Summary on the record later' };
+        return { mark: 'check', bold: 'Call logged', rest: 'Transcript in about 2 min' };
+    }
+    function stopStl() {
+        if (stlTimer) { window.clearInterval(stlTimer); stlTimer = null; }
+    }
+    // animate: a stage change fades the new words in (150 ms, opacity only:
+    // the old words go at once, so two never read together); the summary
+    // rises 8 px (200 ms). The first paint rides the call-end motion.
+    function paintStatus(animate) {
+        var log = snap && snap.lastLog;
+        var v = transcriptView(log);
+        var key = v.summary ? 'summary' : v.mark + '|' + v.bold + '|' + (v.dot || '');
+        var changed = stlKey !== null && key !== stlKey;
+        stlKey = key;
+        ui.stl.hidden = !!v.summary;
+        ui.sum.hidden = !v.summary;
+        if (v.summary) {
+            ui.sumText.textContent = v.summary;
+            fitAcc(); // the summary takes room: Recent activity gives rows back first
+            ui.sumLink.hidden = !log.recordUrl;
+            if (log.recordUrl) ui.sumLink.href = log.recordUrl;
+            if (changed && animate) {
+                fx(ui.sum, reducedMotion() ? [{ opacity: 0 }, { opacity: 1 }] : [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], reducedMotion() ? 150 : 200);
+            }
+        } else {
+            ui.stlMark.className = 'dl-stl-mark' + (v.mark === 'dot' ? ' is-dot' : '');
+            ui.stlMark.innerHTML = v.mark === 'check' ? STL_CHECK : '';
+            ui.stlMark.style.setProperty('--stl', v.dot || '#94A6BF');
+            clear(ui.stlText);
+            var b = document.createElement('b');
+            b.textContent = v.bold;
+            ui.stlText.appendChild(b);
+            if (v.rest) ui.stlText.appendChild(document.createTextNode(' \u00b7 ' + v.rest));
+            if (changed && animate) fx(ui.stl, [{ opacity: 0 }, { opacity: 1 }], 150);
+        }
+        // "Transcribing… · 1 min 40 s": the time counts while it shows.
+        if (v.tick && !stlTimer) {
+            stlTimer = window.setInterval(function () {
+                if (!wrapUp) { stopStl(); return; }
+                paintStatus(false);
+            }, 1000);
+        } else if (!v.tick) {
+            stopStl();
+        }
+    }
+
     function renderWrap() {
+        var cap = wrapUp.fresh ? captureEnd() : null;
+        if (wrapUp.fresh) stlKey = null;
+        wrapUp.fresh = false;
         ui.live.classList.add('cs');
         ui.ringActs.forEach(function (a) { a.hidden = true; });
         ui.callActs.forEach(function (a) { a.hidden = true; });
@@ -2994,6 +3200,8 @@
         ui.wrapCall.disabled = !dialable(info.raw);
         ui.wrapCall.setAttribute('aria-label', 'Call back ' + (info.known ? info.name : callNumber(info.raw)));
         paintCall(info, 'ended');
+        paintStatus(!cap);
+        playEnd(cap);
     }
 
     // A pointer or key in the wrap-up keeps it until the rep acts.
@@ -3054,6 +3262,7 @@
 
     function hideNote() {
         stopNoteTimer();
+        tNote = null;
         noteKey = null;
         noteAdd = null;
         ui.noteAdd.hidden = true;
@@ -3140,8 +3349,31 @@
     // The after-call note. Each snapshot repeats lastLog, so the note and its
     // 10 s timer start only when a different lastLog arrives. A closed note
     // stays closed for that lastLog.
+    // After the wrap-up (asset 43): the transcript stage carries on in the
+    // after-call note ("Abbott Inc. · Transcribing…" + Open). It updates in
+    // place and hides by itself (NOTE_HIDE_MS) once the stage is final.
+    // Same key as the call's lastLog, so × or the timer close it for good.
+    var tNote = null; // { key, name, text }
+    var T_NOTE_WORD = { logged: 'Call logged', transcribing: 'Transcribing\u2026', done: 'Summary ready', none: 'Too short to transcribe', later: 'Summary on the record later' };
+    function transcriptPending(log) {
+        var st = log && log.status === 'saved' && log.transcript && log.transcript.stage;
+        return st === 'logged' || st === 'transcribing';
+    }
+    function paintTNote(log) {
+        var t = log.transcript || {};
+        var text = tNote.name + ' \u00b7 ' + (T_NOTE_WORD[t.stage] || T_NOTE_WORD.logged);
+        if (text === tNote.text && !ui.note.hidden) return;
+        tNote.text = text;
+        showNote('transcript', text, log.recordUrl, tNote.key);
+        if (!transcriptPending(log)) {
+            noteRemain = NOTE_HIDE_MS;
+            runNoteTimer();
+        }
+    }
+
     function showLog(log) {
         var key = logKey(log);
+        if (tNote && tNote.key === key) { paintTNote(log); return; }
         // A missed call: the note on Dial (asset 40), once per lastLog.
         if (log.status === 'missed') {
             hideNote();
@@ -3870,6 +4102,12 @@
         if (live && !wasLive) { wrapLogSkip = false; accKey = null; }
         if (!live) lastInfo = null;
         var wrapping = !live && !!wrapUp;
+        // The chip follows the wrap-up (a plain Ready only: an error wins).
+        if (wrapping && view === PHASE_VIEW.ready) {
+            el.style.setProperty('--dl-dot', WRAP_VIEW.dot);
+            ui.statusLabel.textContent = WRAP_VIEW.label;
+            ui.status.title = WRAP_VIEW.label;
+        }
         // A call that starts (or rings) takes the place of the Voicemail view.
         if (live && !wasLive && vmOpen) {
             vmOpen = false;
@@ -3993,7 +4231,7 @@
         if (kind === 'mic') {
             a = { tone: 'red', title: 'Microphone blocked', text: 'Click the lock icon in the address bar › Allow microphone › reload', act: 'Reload', run: host.reloadPhone, phone: true };
         } else if (kind === 'session') {
-            a = { tone: 'amber', title: 'Reconnecting the phone…', text: '', act: '', run: null };
+            a = null; // the header chip already says "Reconnecting…" (asset 42: say it once)
         } else if (kind === 'paused') {
             a = { tone: 'amber', title: PAUSED_TEXT, text: '', act: '', run: null };
         } else if (kind === 'twilio') {

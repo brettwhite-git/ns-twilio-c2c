@@ -2054,6 +2054,23 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                 message: message || '',
                 recordUrl: recordId ? '/app/crm/calendar/call.nl?id=' + encodeURIComponent(recordId) : ''
             } : null;
+            // A logged call: the transcript stage starts (asset 43).
+            if (dockLastLog && status === 'saved' && recordId) {
+                dockLastLog.transcript = { stage: 'logged', since: Date.now(), summary: '', recordId: String(recordId) };
+            }
+            publishDock();
+        }
+
+        // The transcript stage of the last logged call, on the bus for the
+        // dock's wrap-up status line and after-call note (asset 43):
+        // logged, transcribing, done (with the summary), none (too short)
+        // or later (the check failed or ran out: the 15-min job finishes).
+        // Only for the call it belongs to: a newer call replaces lastLog.
+        function setDockTranscript(recordId, stage, summary) {
+            var t = dockLastLog && dockLastLog.transcript;
+            if (!t || t.recordId !== String(recordId) || t.stage === stage) return;
+            t.stage = stage;
+            if (summary) t.summary = String(summary);
             publishDock();
         }
 
@@ -2761,6 +2778,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
             // CLAUDE.md template-literal gotcha — the entire HTML
             // body is a template literal.)
             function surfaceTerminalError() {
+                setDockTranscript(recordId, 'later');
                 logStatusEl.textContent = 'Transcript check failed \\u2014 admin will retry';
                 logStatusEl.className = 'log-status error';
             }
@@ -2770,6 +2788,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                 // will pick this up on next cycle. Not styled as error
                 // because no failure occurred; the transcript may still
                 // be processing on Twilio's side.
+                setDockTranscript(recordId, 'later');
                 logStatusEl.textContent = 'Transcript still pending \\u2014 check back later';
                 logStatusEl.className = 'log-status';
             }
@@ -2818,6 +2837,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                         return;
                     }
                     if (data.status === 'completed') {
+                        setDockTranscript(recordId, 'done', data.summary);
                         logStatusEl.textContent = 'Transcript saved \\u2714';
                         logStatusEl.className = 'log-status';
                         return;
@@ -2825,6 +2845,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                     if (data.status === 'terminal') {
                         // Twilio confirmed no transcript will exist (call too short,
                         // recording absent, or Intelligence returned a failure status).
+                        setDockTranscript(recordId, 'none');
                         logStatusEl.textContent = 'Transcription unavailable \\u2014 call too brief';
                         logStatusEl.className = 'log-status';
                         return;
@@ -2833,6 +2854,8 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                         surfacePollCapPending();
                         return;
                     }
+                    // pending, transient or no recording yet: on its way.
+                    setDockTranscript(recordId, 'transcribing');
                     setTimeout(poll, POLL_INTERVAL_MS);
                 })
                 .catch(function (err) {

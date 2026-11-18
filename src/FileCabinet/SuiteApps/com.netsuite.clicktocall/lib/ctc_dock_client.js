@@ -335,19 +335,20 @@
            (ease-out), so ringing reads apart from a green connected call.
            Only the dot moves; reduced motion keeps a still halo. */
         /* The ring is a disc under the dot (8 px, ring colour at .55) that
-           scales to 22 px (the old 7 px spread) and fades: transform and
-           opacity only. While it runs the still halo steps aside. */
+           scales to 20 px and fades: transform and opacity only. While it
+           runs the still halo steps aside. Ring rule (DESIGN.md §3, asset
+           41): every ring ends 6 px beyond its element, 1.6 s loop. */
         '.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:none}',
         '.v-dot::before{content:"";position:absolute;inset:0;border-radius:inherit;background:' + rgba(T.ring, 0.55) + ';opacity:0;z-index:-1;pointer-events:none}',
         '.vchip[data-live="true"][data-stage="incoming"] .v-dot::before{animation:ctc-ring 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-ring{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(2.75);opacity:0}}',
+        '@keyframes ctc-ring{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(2.5);opacity:0}}',
         /* calling (dialing, ringing out): the halo breathes out of the dot.
-           The same disc as the ring, in amber, grows to the 3 px halo
-           (8 -> 14 px) and fades, 1.6 s: transform and opacity only. While
+           The same disc as the ring, in amber, grows 8 -> 20 px (the ring
+           rule) and fades, 1.6 s: transform and opacity only. While
            it runs the still halo steps aside; reduced motion keeps it. */
         '.vchip[data-live="true"][data-stage="dialing"] .v-dot,.vchip[data-live="true"][data-stage="ringing"] .v-dot{box-shadow:none}',
         '.vchip[data-live="true"][data-stage="dialing"] .v-dot::before,.vchip[data-live="true"][data-stage="ringing"] .v-dot::before{background:' + rgba(T.amber, 0.45) + ';animation:ctc-halo 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-halo{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(1.75);opacity:0}}',
+        '@keyframes ctc-halo{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(2.5);opacity:0}}',
         /* each shape shows only its own words / timer */
         '.dock.vert .h-words,.dock.vert .h-time,.dock:not(.vert) .v-time{display:none}',
         '.h-words{display:flex;flex-direction:column;justify-content:center;min-width:0;max-width:168px}',
@@ -370,13 +371,13 @@
         '.v-main.callback{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
         // Ringing: the Answer button (go) wears a ring orb that pulses out.
         // The orb: a disc under the button (goDot at .55) that scales from
-        // 40 to 60 px (the old 10 px spread) and fades, over the still drop
+        // 40 to 52 px (the ring rule: 6 px beyond) and fades, over the still drop
         // shadow (::before). Transform and opacity only.
         '.v-main.answer{position:relative;background:' + T.go + '}',
         '.v-main.answer::before,.v-main.answer::after{content:"";position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none}',
         '.v-main.answer::before{box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
         '.v-main.answer::after{background:' + rgba(T.goDot, 0.55) + ';opacity:0;animation:ctc-orb 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
-        '@keyframes ctc-orb{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(1.5);opacity:0}}',
+        '@keyframes ctc-orb{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(1.3);opacity:0}}',
         // Pressed (scale 0.97 makes the button its own layer, so the disc
         // would draw over its face): no orb while held.
         '.v-main.answer:active::after{visibility:hidden}',
@@ -425,6 +426,11 @@
         '.inc-decline:hover{background:' + T.stopHover + '}',
         '.inc-decline svg{transform:rotate(135deg)}',
         '.inc-answer{background:' + T.go + ';box-shadow:0 4px 12px ' + rgba(T.go, 0.36) + '}',
+        // The card's Answer pulses like the pill's (ring rule: 36 -> 48 px).
+        '.inc-answer{position:relative}',
+        '.inc-answer::after{content:"";position:absolute;inset:0;border-radius:inherit;z-index:-1;pointer-events:none;background:' + rgba(T.goDot, 0.55) + ';opacity:0;animation:ctc-orb-card 1.6s cubic-bezier(0.23,1,0.32,1) infinite}',
+        '.inc-answer:active::after{visibility:hidden}',
+        '@keyframes ctc-orb-card{0%{transform:scale(1);opacity:1}70%,100%{transform:scale(1.333);opacity:0}}',
         '.inc-answer:hover{background:' + T.goHover + '}',
         /* screen-reader-only live regions */
         '.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}',
@@ -465,7 +471,7 @@
         '.dl-lift{position:fixed;left:0;top:0;border-radius:28px;pointer-events:none;opacity:0;box-shadow:0 24px 56px rgba(15,27,48,0.16);transition:opacity 140ms ease-out,scale 140ms ease-out}',
         '.dl-lift.settling{transition:opacity 140ms ease-out,scale 140ms ease-out,translate ' + SETTLE + '}',
         '.dl-lift.lifted{opacity:1;scale:' + (1 + LIFT) + '}',
-        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button{transition:opacity 150ms linear}.card.closed{transform:none}button:active{transform:none}.v-main svg{transition:none}.vchip .v-dot,.v-dot::before,.v-main.answer::after{animation:none}.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + '}.vchip[data-live="true"][data-stage="dialing"] .v-dot,.vchip[data-live="true"][data-stage="ringing"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.amber, 0.20) + '}.v-main.answer::before{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
+        '@media (prefers-reduced-motion: reduce){.card,.card.dl,button{transition:opacity 150ms linear}.card.closed{transform:none}button:active{transform:none}.v-main svg{transition:none}.vchip .v-dot,.v-dot::before,.v-main.answer::after,.inc-answer::after{animation:none}.vchip[data-live="true"][data-stage="incoming"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.ring, 0.20) + '}.vchip[data-live="true"][data-stage="dialing"] .v-dot,.vchip[data-live="true"][data-stage="ringing"] .v-dot{box-shadow:0 0 0 3px ' + rgba(T.amber, 0.20) + '}.v-main.answer::before{box-shadow:0 0 0 3px ' + rgba(T.goDot, 0.35) + '}}'
     ].join('\n');
 
     var HTML = ''
@@ -2256,6 +2262,9 @@
     function trackWrap(prev, next) {
         if (!next || next.phase !== 'ready') { clearWrap(); return; }
         if (!prev || !ACTIVE[prev.phase]) return;
+        // An inbound call that never connected is a missed call, not a
+        // wrap-up: the pill shows it as missed, like the panel (asset 42).
+        if (prev.direction === 'inbound' && !prev.startedAt) { clearWrap(); return; }
         var c = (prev.direction === 'inbound' && prev.caller) || {};
         var number = String(prev.number || c.number || '');
         clearWrap();

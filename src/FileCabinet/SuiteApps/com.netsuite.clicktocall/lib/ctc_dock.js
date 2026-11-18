@@ -24,7 +24,7 @@ define(['./ctc_html'], (ctcHtml) => {
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '40';
+    const DOCK_ASSET_VERSION = '43';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -147,6 +147,9 @@ define(['./ctc_html'], (ctcHtml) => {
     //   entity fill in after the anchor's lookupCaller answer (a second snapshot).
     // callSid: '' | the Twilio CallSid of the ringing or live call ('' until Twilio gives one).
     // lastLog: null | { status: 'saved' | 'skipped' | 'error' | 'missed', message, recordUrl }
+    //   + transcript (saved calls, asset 43): { stage: 'logged' | 'transcribing' |
+    //     'done' | 'none' | 'later', since (ms, when logged), summary (when done),
+    //     recordId }. The softphone's transcript check moves it on.
     //   missed: an inbound call that stopped ringing before Answer ("Missed call from …").
     // canReceive: null (the token does not grant inbound) | true (Twilio can ring this phone:
     //   the device is registered) | false (inbound is on but the device is not registered;

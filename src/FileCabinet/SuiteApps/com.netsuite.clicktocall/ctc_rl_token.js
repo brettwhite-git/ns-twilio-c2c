@@ -989,7 +989,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
                 }
             }
 
-            return { status: 'completed' };
+            // The dock's wrap-up shows the summary as soon as it exists
+            // (asset 43); the record keeps the full analysis.
+            return { status: 'completed', summary: String((analysis && analysis.summary) || '').slice(0, 600) };
         } catch (e) {
             log.error({ title: 'CTC Check Transcript Failed', details: e.message || e });
             // Give the claim back (Failed + processed F) so the poller retries.
