@@ -1852,6 +1852,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                     audioUnlocked: shellAudioUnlocked,
                     notify: shellNotify,
                     missedUnseen: missedUnseen,
+                    voicemail: dockVoicemail,
                     error: phoneError || { kind: '', code: 0, message: '' },
                     refused: dockRefused,
                     // { <from>: [seq, ...] }: requests this anchor ran, per tab.
@@ -2050,12 +2051,14 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
             persistAudioPref('outputDeviceId', id);
         }
 
-        function setDockLog(status, message, recordId) {
+        function setDockLog(status, message, recordId, declined) {
             dockLastLog = status ? {
                 status: status,
                 message: message || '',
                 recordUrl: recordId ? '/app/crm/calendar/call.nl?id=' + encodeURIComponent(recordId) : ''
             } : null;
+            // A ring the rep declined: the dock's missed note says Declined.
+            if (dockLastLog && declined) dockLastLog.declined = true;
             // A logged call: the transcript stage starts (asset 43).
             if (dockLastLog && status === 'saved' && recordId) {
                 dockLastLog.transcript = { stage: 'logged', since: Date.now(), summary: '', recordId: String(recordId) };
@@ -2766,8 +2769,21 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         var POLL_INTERVAL_MS = 15000;
         var POLL_MAX_ATTEMPTS = 12;
 
-        function pollForTranscript(callSid, recordId) {
+        // onStage (optional): where the stages go instead of the last
+        // call's lastLog.transcript and the page's log status line. The
+        // voicemail check uses it (asset 49): its stages go to
+        // snapshot voicemail.summary.
+        function pollForTranscript(callSid, recordId, onStage) {
             var attempts = 0;
+            function stage(st, summary) {
+                if (onStage) onStage(st, summary);
+                else setDockTranscript(recordId, st, summary);
+            }
+            function note(text, cls) {
+                if (onStage) return;
+                logStatusEl.textContent = text;
+                logStatusEl.className = cls;
+            }
 
             // Sprint 2 U3 (HIGH-11) — surface non-network failures so
             // the rep can tell genuine pending state apart from a
@@ -2780,9 +2796,8 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
             // CLAUDE.md template-literal gotcha — the entire HTML
             // body is a template literal.)
             function surfaceTerminalError() {
-                setDockTranscript(recordId, 'later');
-                logStatusEl.textContent = 'Transcript check failed \\u2014 admin will retry';
-                logStatusEl.className = 'log-status error';
+                stage('later');
+                note('Transcript check failed \\u2014 admin will retry', 'log-status error');
             }
 
             function surfacePollCapPending() {
@@ -2790,9 +2805,8 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                 // will pick this up on next cycle. Not styled as error
                 // because no failure occurred; the transcript may still
                 // be processing on Twilio's side.
-                setDockTranscript(recordId, 'later');
-                logStatusEl.textContent = 'Transcript still pending \\u2014 check back later';
-                logStatusEl.className = 'log-status';
+                stage('later');
+                note('Transcript still pending \\u2014 check back later', 'log-status');
             }
 
             function poll() {
@@ -2839,17 +2853,15 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                         return;
                     }
                     if (data.status === 'completed') {
-                        setDockTranscript(recordId, 'done', data.summary);
-                        logStatusEl.textContent = 'Transcript saved \\u2714';
-                        logStatusEl.className = 'log-status';
+                        stage('done', data.summary);
+                        note('Transcript saved \\u2714', 'log-status');
                         return;
                     }
                     if (data.status === 'terminal') {
                         // Twilio confirmed no transcript will exist (call too short,
                         // recording absent, or Intelligence returned a failure status).
-                        setDockTranscript(recordId, 'none');
-                        logStatusEl.textContent = 'Transcription unavailable \\u2014 call too brief';
-                        logStatusEl.className = 'log-status';
+                        stage('none');
+                        note('Transcription unavailable \\u2014 call too brief', 'log-status');
                         return;
                     }
                     if (attempts >= POLL_MAX_ATTEMPTS) {
@@ -2857,7 +2869,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                         return;
                     }
                     // pending, transient or no recording yet: on its way.
-                    setDockTranscript(recordId, 'transcribing');
+                    stage('transcribing');
                     setTimeout(poll, POLL_INTERVAL_MS);
                 })
                 .catch(function (err) {
@@ -4013,12 +4025,97 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
             return (dockCaller && (dockCaller.name || dockCaller.number)) || 'unknown number';
         }
 
-        function inboundEnded(status, message) {
+        function inboundEnded(status, message, declined) {
             afterCallSettled();
             setStatus('Ready', '');
             setButtons(true, false, false);
             setCallView('idle');
-            setDockLog(status, message);
+            setDockLog(status, message, '', declined);
+        }
+
+        // --- Voicemail coming (finding #91, asset 48, DESIGN.md §4) ---
+        // After a ring that ended unanswered or declined, ask the RESTlet
+        // (checkVoicemail) what Twilio knows about the caller's leg: first
+        // after 5 s, then every 15 s, at most 5 min. Snapshot 'voicemail':
+        // { callSid, state: checking | leaving | saved | none | later,
+        //   recAt (epoch ms the recording started, for the dock's timer),
+        //   seconds (saved length), recordId }. 'saved' means the
+        // voicemail's Phone Call exists (the RESTlet logs it at once).
+        // 'saved' also carries summary { stage: logged | transcribing | done |
+        // none | later, text }: the phone then asks checkTranscript for the
+        // voicemail's record, as after an answered call (asset 49).
+        // Polling only, no webhook. A new ring stops it.
+        var VM_FIRST_MS = 5000;
+        var VM_EVERY_MS = 15000;
+        var VM_MAX_MS = 300000;
+        var dockVoicemail = null;
+        var vmTimer = null;
+
+        function stopVoicemailCheck() {
+            if (vmTimer) clearTimeout(vmTimer);
+            vmTimer = null;
+        }
+
+        function setDockVoicemail(v) {
+            dockVoicemail = v;
+            publishDock();
+        }
+
+        function startVoicemailCheck(callSid) {
+            stopVoicemailCheck();
+            callSid = String(callSid || '');
+            if (!/^CA[0-9a-fA-F]{32}$/.test(callSid)) { setDockVoicemail(null); return; }
+            var started = Date.now();
+            var base = function (state) {
+                return { callSid: callSid, state: state, since: started, recAt: null, seconds: null, recordId: '' };
+            };
+            setDockVoicemail(base('checking'));
+            function mine() { return dockVoicemail && dockVoicemail.callSid === callSid; }
+            function again() { vmTimer = setTimeout(tick, VM_EVERY_MS); }
+            function tick() {
+                vmTimer = null;
+                if (!mine()) return;
+                if (Date.now() - started >= VM_MAX_MS) { setDockVoicemail(base('later')); return; }
+                fetch(TOKEN_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'checkVoicemail', callSid: callSid })
+                })
+                .then(function (res) { return res.json(); })
+                .then(function (d) {
+                    if (!mine()) return;
+                    var st = d && d.state;
+                    if (d && d.error) { setDockVoicemail(base('later')); return; }
+                    if (st === 'saved' || st === 'none') {
+                        var done = base(st);
+                        if (st === 'saved') {
+                            done.seconds = typeof d.seconds === 'number' ? d.seconds : null;
+                            done.recordId = String(d.recordId || '');
+                            // The summary, as after an answered call (asset 49):
+                            // checkTranscript every 15 s, up to 12 times.
+                            if (done.recordId) {
+                                done.summary = { stage: 'logged', text: '' };
+                                pollForTranscript(callSid, done.recordId, function (sst, text) {
+                                    if (!mine() || !dockVoicemail.summary || dockVoicemail.summary.stage === sst) return;
+                                    dockVoicemail.summary = { stage: sst, text: text ? String(text) : dockVoicemail.summary.text };
+                                    publishDock();
+                                });
+                            }
+                        }
+                        setDockVoicemail(done);
+                        return;
+                    }
+                    if (st === 'leaving') {
+                        var v = base('leaving');
+                        var prev = dockVoicemail.recAt;
+                        v.recAt = typeof d.seconds === 'number' ? (prev || Date.now() - d.seconds * 1000) : prev;
+                        if (dockVoicemail.state !== 'leaving' || dockVoicemail.recAt !== v.recAt) setDockVoicemail(v);
+                    }
+                    again();
+                })
+                .catch(function () { if (mine()) again(); });
+            }
+            vmTimer = setTimeout(tick, VM_FIRST_MS);
         }
 
         function onIncoming(call) {
@@ -4028,6 +4125,8 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
             }
             var from = String((call.parameters && call.parameters.From) || '');
             console.log('[CTC] Incoming call');
+            stopVoicemailCheck();
+            dockVoicemail = null;
             pendingInbound = call;
             callDirection = 'inbound';
             dockCaller = { number: formatPhone(from) || from, name: '', entityId: '', entityType: '' };
@@ -4054,11 +4153,13 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
                 // sends markMissedSeen (inboundEnded publishes it).
                 addMissedCall(dockCaller);
                 inboundEnded('missed', 'Missed call from ' + callerLabel());
+                startVoicemailCheck(call.parameters && call.parameters.CallSid);
             });
             call.on('reject', function () {
                 if (pendingInbound !== call) return;
                 pendingInbound = null;
-                inboundEnded('skipped', 'Declined call from ' + callerLabel());
+                inboundEnded('missed', 'Declined call from ' + callerLabel(), true);
+                startVoicemailCheck(call.parameters && call.parameters.CallSid);
             });
             wireCall(call);
 
@@ -4093,7 +4194,10 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
             var call = pendingInbound;
             pendingInbound = null;
             try { call.reject(); } catch (err) { console.error('[CTC] reject failed', err); }
-            inboundEnded('skipped', 'Declined call from ' + callerLabel());
+            // A declined ring is a missed call for the caller: the dock's
+            // missed note (Declined) and the voicemail check (asset 48).
+            inboundEnded('missed', 'Declined call from ' + callerLabel(), true);
+            startVoicemailCheck(call.parameters && call.parameters.CallSid);
         }
 
         // Match the caller to a record (RESTlet lookupCaller). The answer

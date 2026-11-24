@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -130,6 +130,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
 
         if (body.action === 'logCall')              return logCall(body);
         if (body.action === 'checkTranscript')      return checkTranscript(body);
+        if (body.action === 'checkVoicemail')       return checkVoicemail(body);
         if (body.action === 'softphoneSuggested')   return softphoneSuggested(body);
         if (body.action === 'softphoneSearch')      return softphoneSearch(body);
         if (body.action === 'softphoneContacts')    return softphoneContacts(body, steps);
@@ -783,6 +784,43 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
      * @param {string} body.recordId - NetSuite Phone Call internal ID
      * @returns {Object} { status: 'completed'|'pending'|'no_recording'|'terminal'|'transient', alreadyDone?, reason? } or { error }
      */
+    /**
+     * checkVoicemail (finding #91, asset 48): the phone tab asks every 15 s
+     * after an inbound ring that ended unanswered or declined. Body:
+     * { callSid } = the client leg that rang this rep. Ownership: the leg's
+     * `to` must be client:<current user> (verifyCallOwnership inbound).
+     * Voicemail off → { state: 'none' } with no Twilio work. Else
+     * callReconcile.voicemailNow: 'leaving' | 'saved' (+ recordId, seconds;
+     * the voicemail's Phone Call is created now if the run has not made it)
+     * | 'none' | 'retry'.
+     * @param {{callSid?: string}} body
+     * @returns {Object}
+     */
+    const checkVoicemail = (body) => {
+        try {
+            const callSid = String(body.callSid || '');
+            const userId = runtime.getCurrentUser().id;
+            const auth = verifyCallOwnership(callSid, userId, 'inbound');
+            if (!auth.ok) {
+                log.audit({ title: 'CTC checkVoicemail — verification rejected', details: 'reason=' + auth.reason + ' callSid=' + callSid + ' userId=' + userId });
+                return { error: 'forbidden', code: auth.reason };
+            }
+            const config = loadConfig();
+            if (!config.voicemailOn) return { state: 'none' };
+            return callReconcile.voicemailNow({
+                config: config,
+                authHeader: buildSecureAuthHeader(config),
+                // getCall names Twilio's status callStatus; the reconcile
+                // helpers read the raw field (status).
+                leg: Object.assign({}, auth.call, { status: auth.call.callStatus }),
+                ownerId: String(userId)
+            });
+        } catch (e) {
+            log.error({ title: 'CTC checkVoicemail failed', details: (e && e.message) || String(e) });
+            return { state: 'retry' };
+        }
+    };
+
     const checkTranscript = (body) => {
         let claimed = false;
         let saved = false;

@@ -564,7 +564,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
         'Logged': 'logged'
     };
 
-    /** Creates the Phone Call; returns its stats key under stats.created. */
+    /** Creates the Phone Call; returns { key: its stats key under stats.created, id }. */
     const createPhoneCall = (cand, repId, details) => {
         const call = cand.call;
         const inbound = cand.leg.direction === 'inbound';
@@ -597,7 +597,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
             details: `callSid=${call.sid} phoneCall=${recordId} status=${status} rep=${repId} ` +
                      `direction=${cand.leg.direction} voicemail=${details.voicemail === true}`
         });
-        return details.voicemail === true ? 'voicemail' : STAT_KEY[status];
+        return { key: details.voicemail === true ? 'voicemail' : STAT_KEY[status], id: String(recordId) };
     };
 
     const markFailed = (cand, ctx) => {
@@ -642,7 +642,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
             ctx.stats.existing++;
             return;
         }
-        ctx.stats.created[createPhoneCall(cand, ownerId, details)]++;
+        ctx.stats.created[createPhoneCall(cand, ownerId, details).key]++;
     };
 
     /**
@@ -726,6 +726,62 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
             return;
         }
         createUnlessLogged(cand, ownerId, details, ctx);
+    };
+
+    /**
+     * "Voicemail coming" (finding #91, DESIGN.md §4): the voicemail state of
+     * one inbound client leg that rang a rep and was not answered, read
+     * from Twilio now instead of waiting for the reconcile run. When the
+     * recording is finished the voicemail's Phone Call is created here,
+     * exactly as reconcileOne would (same builder, same SIDs), so the run
+     * later finds it logged and skips it.
+     *
+     * The caller has checked that the leg rang this rep (verifyCallOwnership
+     * inbound: `to` = client:<ownerId>).
+     *
+     * @param {{config: Object, authHeader: *, leg: Object, ownerId: string, nowMs?: number}} opts
+     * @returns {{state: string, seconds?: (number|null), recordId?: string}}
+     *   state: 'leaving' (the caller is still on the line: greeting or
+     *   recording), 'saved' (Phone Call exists; recordId, seconds),
+     *   'none' (no voicemail), 'retry' (Twilio not readable, ask again)
+     */
+    const voicemailNow = (opts) => {
+        const cfg = opts.config || {};
+        const leg = opts.leg || {};
+        const nowMs = typeof opts.nowMs === 'number' ? opts.nowMs : Date.now();
+        const parentSid = CALL_SID_PATTERN.test(String(leg.parent_call_sid || '')) ? leg.parent_call_sid : '';
+        if (!parentSid || !CALL_SID_PATTERN.test(String(leg.sid || ''))) return { state: 'none' };
+        if (durationOf(leg) > 0 && leg.status === 'completed') return { state: 'none' }; // answered
+        const parent = utils.fetchCall(cfg.accountSid, parentSid, opts.authHeader);
+        if (utils.isTransientError(parent)) return { state: 'retry' };
+        if (!parent) return { state: 'none' };
+        const recordings = utils.fetchRecordingsForCall(cfg.accountSid, parentSid, opts.authHeader);
+        if (utils.isTransientError(recordings)) return { state: 'retry' };
+        const list = Array.isArray(recordings) ? recordings : [];
+        const live = TERMINAL_CALL_STATUSES.indexOf(parent.status) === -1;
+        const voice = list.find((r) => r && r.call_sid === parentSid && r.source !== 'DialVerb' &&
+            DEAD_RECORDING_STATUSES.indexOf(r.status) === -1) || null;
+        if (live || (voice && voice.status !== 'completed')) {
+            const startMs = voice ? utils.parseTwilioDate(voice.start_time) : null;
+            return { state: 'leaving', seconds: startMs !== null ? Math.max(0, Math.round((nowMs - startMs) / 1000)) : null };
+        }
+        const vm = pickVoicemail(list, parentSid);
+        if (!vm) return { state: 'none' };
+        const seconds = durationOf(vm);
+        const sids = [leg.sid, parentSid];
+        const logged = findLoggedSids(sids);
+        const existing = logged[leg.sid] || logged[parentSid];
+        if (existing) return { state: 'saved', seconds: seconds, recordId: String(existing) };
+        const number = phoneOf(leg.from) || phoneOf(parent.from);
+        const made = createPhoneCall({ call: leg, leg: { direction: 'inbound' } }, String(opts.ownerId), {
+            number: number,
+            duration: seconds,
+            status: utils.CALL_STATUS.LOGGED,
+            voicemail: true,
+            relatedSids: [parentSid]
+        });
+        log.audit({ title: 'CTC voicemail logged from the dock', details: `callSid=${leg.sid} parent=${parentSid} phoneCall=${made.id} rep=${opts.ownerId}` });
+        return { state: 'saved', seconds: seconds, recordId: made.id };
     };
 
     /**
@@ -941,6 +997,7 @@ define(['N/query', 'N/record', 'N/search', 'N/runtime', 'N/format', 'N/log', './
 
     return {
         reconcileCalls,
+        voicemailNow,
         classifyLeg,
         isPstnInboundParent,
         pickVoicemail,

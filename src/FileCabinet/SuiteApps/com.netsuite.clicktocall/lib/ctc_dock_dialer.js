@@ -275,7 +275,14 @@
         // card style between the pill row and the number. Line 1 "Missed
         // call" (coral) · age; line 2 the name as the record link (the
         // number in SF Mono when unknown); a 36 px go-green Call back and ×.
-        '.dl-miss{flex-shrink:0;display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10)}',
+        // Voicemail coming (asset 48): one line under the note, the wrap-up
+        // status line's voice (dot or check, bold state, grey detail).
+        '.dl-miss-st{flex-basis:100%;display:flex;align-items:center;gap:8px;margin-top:2px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);font-size:13px;line-height:18px;color:#C9D3E1;min-width:0}',
+        '.dl-miss-st b{font-weight:600;color:#FFFFFF;white-space:nowrap}',
+        '.dl-miss-st .dl-st-rest{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#94A6BF;font-variant-numeric:tabular-nums}',
+        '.dl-miss-st a{margin-left:auto;flex-shrink:0;font-weight:600;color:#8FC1D3;text-decoration:underline;text-underline-offset:2px}',
+        '.dl-miss-sum{flex-basis:100%;margin-top:6px;font-size:13px;line-height:19px;color:#E4EBF2;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}',
+        '.dl-miss{flex-shrink:0;flex-wrap:wrap;display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px;border-radius:14px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.10)}',
         '.dl-miss-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
         '.dl-miss-l1{font-size:12px;line-height:16px;color:#B2C0D3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.dl-miss-k{font-weight:600;color:' + T.stopDot + '}',
@@ -787,6 +794,8 @@
         +         '</div>'
         +         '<button type="button" class="dl-miss-call"><svg width="14" height="14" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg>Call back</button>'
         +         '<button type="button" class="dl-miss-x" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" ' + STROKE + '>' + ICON_X + '</svg></button>'
+        +         '<div class="dl-miss-st" aria-live="polite" hidden></div>'
+        +         '<div class="dl-miss-sum" hidden></div>'
         +       '</div>'
         +       '<div class="dl-display-wrap">'
         +         '<input type="tel" class="dl-display" aria-label="Number to call" placeholder="Enter a number" autocomplete="off">'
@@ -951,7 +960,7 @@
         rec: q('.dl-rec'), recName: q('.dl-rec-name'), recInsight: q('.dl-rec-insight'),
         slot: q('.dl-slot'), looking: q('.dl-looking'), trig: q('.dl-trig'), mrow: q('.dl-mrow'),
         dialBody: q('.dl-idle .dl-body'), miss: q('.dl-miss'), missAgo: q('.dl-miss-ago'), missName: q('.dl-miss-name'),
-        missCall: q('.dl-miss-call'), missX: q('.dl-miss-x'),
+        missCall: q('.dl-miss-call'), missX: q('.dl-miss-x'), missSt: q('.dl-miss-st'), missSum: q('.dl-miss-sum'), missK: q('.dl-miss-k'),
         tsheet: q('.dl-tsheet'), tflt: q('.dl-flt'), tfilter: q('.dl-tfilter'), tcount: q('.dl-flt-cnt'), tlist: q('.dl-lst'),
         displayWrap: q('.dl-display-wrap'), display: q('.dl-display'), clearBtn: q('.dl-display-wrap .dl-clear'), dialpad: q('.dl-dialpad'),
         match: q('.dl-match'), matchName: q('.dl-match-name'), matchType: q('.dl-match-type'), add: q('.dl-add'),
@@ -3388,7 +3397,7 @@
         // A missed call: the note on Dial (asset 40), once per lastLog.
         if (log.status === 'missed') {
             hideNote();
-            if (key !== noteDismissed && !(miss && miss.key === key)) showMissed(key);
+            if (key !== noteDismissed && !(miss && miss.key === key)) showMissed(key, log.declined === true);
             return;
         }
         if (key === noteDismissed) { hideNote(); return; }
@@ -3418,10 +3427,13 @@
     // Add to NetSuite). The caller comes from snap.missedUnseen.last, kept
     // because opening the panel resets it (markMissedSeen); else the
     // call's caller. The note stays until ×, Call back or a new call.
-    function showMissed(key) {
-        var c = missedCaller || (snap && snap.caller) || {};
+    function showMissed(key, declined) {
+        // A declined ring is not counted in missedUnseen: its caller is the
+        // call's own (snap.caller), never an older missed caller.
+        var c = (declined ? null : missedCaller) || (snap && snap.caller) || {};
         miss = {
             key: key,
+            declined: !!declined,
             name: String(c.name || ''),
             number: String(c.number || ''),
             entityId: String(c.entityId || ''),
@@ -3454,6 +3466,102 @@
         if (miss) ui.missAgo.textContent = ' \u00b7 ' + agoText(miss.at);
     }
 
+    // --- Voicemail coming (finding #91, asset 48, DESIGN.md §4) ---
+    // snap.voicemail from the phone's checkVoicemail polling, painted as
+    // one line under the missed note: Leaving a voicemail… (amber dot, a
+    // timer from recAt), Voicemail saved · 0:11 · Summary in about 2 min ·
+    // Open (check; the Voicemail list reloads), then the summary under it
+    // when the phone's checkTranscript has it (asset 49), No voicemail left (grey),
+    // Voicemail will show within 15 min (grey; the check ran out). Words
+    // change with a 150 ms fade; nothing loops.
+    var vmLineKey = '';
+    var vmLineTimer = null;
+    var vmSavedSid = '';
+    var vmSummarySid = '';
+    function vmClock(sec) { return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+    function vmLine(v) {
+        if (!v || v.state === 'checking') return null;
+        if (v.state === 'leaving') {
+            var sec = v.recAt ? Math.max(0, Math.floor((Date.now() - v.recAt) / 1000)) : null;
+            return { dot: T.amber, bold: 'Leaving a voicemail\u2026', rest: sec === null ? '' : vmClock(sec), live: !!v.recAt };
+        }
+        if (v.state === 'saved') {
+            // The summary stage (asset 49): the phone asks checkTranscript.
+            var sum = v.summary || {};
+            var tail = sum.stage === 'done' ? (sum.text ? '' : ' \u00b7 Summary ready')
+                : sum.stage === 'none' ? ' \u00b7 No summary'
+                : sum.stage === 'later' ? ' \u00b7 Summary within 15 min'
+                : ' \u00b7 Summary in about 2 min';
+            return { check: true, bold: 'Voicemail saved', rest: (typeof v.seconds === 'number' ? ' \u00b7 ' + vmClock(v.seconds) : '') + tail,
+                summary: sum.stage === 'done' ? String(sum.text || '') : '',
+                url: v.recordId ? '/app/crm/calendar/call.nl?id=' + encodeURIComponent(v.recordId) : '' };
+        }
+        if (v.state === 'none') return { dot: T.offline, plain: 'No voicemail left' };
+        return { dot: T.offline, plain: 'Voicemail will show within 15 min' };
+    }
+    function paintMissVm() {
+        var v = snap && snap.voicemail;
+        var line = miss ? vmLine(v) : null;
+        window.clearInterval(vmLineTimer);
+        vmLineTimer = null;
+        if (!line) {
+            ui.missSt.hidden = true;
+            ui.missSt.textContent = '';
+            ui.missSum.hidden = true;
+            ui.missSum.textContent = '';
+            vmLineKey = '';
+            return;
+        }
+        var key = v.callSid + ':' + v.state + ':' + ((v.summary && v.summary.stage) || '');
+        ui.missSt.textContent = '';
+        var mark = document.createElement('span');
+        if (line.check) {
+            mark.style.cssText = 'display:inline-flex;flex-shrink:0';
+            mark.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="' + T.goDot + '" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>';
+        } else {
+            mark.style.cssText = 'width:6px;height:6px;border-radius:50%;flex-shrink:0;background:' + line.dot;
+        }
+        ui.missSt.appendChild(mark);
+        if (line.plain) {
+            var p = document.createElement('span');
+            p.textContent = line.plain;
+            ui.missSt.appendChild(p);
+        } else {
+            var bold = document.createElement('b');
+            bold.textContent = line.bold;
+            var rest = document.createElement('span');
+            rest.className = 'dl-st-rest';
+            rest.textContent = line.rest;
+            ui.missSt.appendChild(bold);
+            ui.missSt.appendChild(rest);
+        }
+        if (line.url) {
+            var open = document.createElement('a');
+            open.href = line.url;
+            open.target = '_top';
+            open.textContent = 'Open';
+            ui.missSt.appendChild(open);
+        }
+        ui.missSt.hidden = false;
+        ui.missSum.textContent = line.summary || '';
+        ui.missSum.hidden = !line.summary;
+        if (key !== vmLineKey) {
+            vmLineKey = key;
+            [ui.missSt, ui.missSum].forEach(function (n) {
+                if (n.hidden || typeof n.animate !== 'function') return;
+                try { n.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' }); } catch (e) { /* no WAAPI */ }
+            });
+        }
+        if (line.live) {
+            vmLineTimer = window.setInterval(function () {
+                var r = ui.missSt.querySelector('.dl-st-rest');
+                var cur = snap && snap.voicemail;
+                if (!r || !cur || cur.state !== 'leaving' || !cur.recAt) return;
+                r.textContent = vmClock(Math.max(0, Math.floor((Date.now() - cur.recAt) / 1000)));
+            }, 1000);
+        }
+    }
+
     function paintMiss() {
         ui.miss.hidden = !miss;
         window.clearInterval(missTimer);
@@ -3472,9 +3580,11 @@
             }
             ui.missCall.hidden = !miss.number;
             ui.missCall.setAttribute('aria-label', 'Call back ' + who);
+            ui.missK.textContent = miss.declined ? 'Declined call' : 'Missed call';
             paintMissAgo();
             missTimer = window.setInterval(paintMissAgo, 30000);
         }
+        paintMissVm();
         syncDial();
     }
 
@@ -4071,6 +4181,20 @@
             pending = null;
             send('dial', req);
         }
+
+        // Voicemail coming: repaint the line; a saved voicemail is in
+        // NetSuite now, so the Voicemail list reloads once for it.
+        var vmNow = snap && snap.voicemail;
+        if (vmNow && vmNow.state === 'saved' && vmNow.callSid !== vmSavedSid) {
+            vmSavedSid = vmNow.callSid;
+            loadVoicemails();
+        }
+        // Its summary is in: once more, so the row shows the brief.
+        if (vmNow && vmNow.state === 'saved' && vmNow.summary && vmNow.summary.stage === 'done' && vmNow.callSid !== vmSummarySid) {
+            vmSummarySid = vmNow.callSid;
+            loadVoicemails();
+        }
+        if (miss) paintMissVm();
 
         var m = snap && snap.missedUnseen;
         if (m && m.count > 0 && m.last) {
