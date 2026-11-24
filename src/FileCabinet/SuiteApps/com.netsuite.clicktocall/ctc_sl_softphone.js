@@ -2027,12 +2027,14 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         // A dock picks a mic or speaker. Runs the same path as the audio
         // overlay selects: set the select, call the shared apply function,
         // and save the choice to the overlay defaults (localStorage) so it
-        // survives a reload. Refused mid-call, as the UI hides the gear
-        // then. Unknown ids are ignored. The snapshot sent back on refusal
-        // tells the dock nothing changed.
+        // survives a reload. Allowed during a live call (finding #88, asset
+        // 46): Voice SDK 2.x moves the active call to the new device. Refused
+        // while a call rings (the rep answers on the device they hear it on)
+        // and for unknown ids; the snapshot sent back on refusal tells the
+        // dock nothing changed.
         function dockSetInput(id) {
             id = String(id || '');
-            if (activeCall || pendingInbound || !device || !device.audio
+            if (pendingInbound || !device || !device.audio
                     || !device.audio.availableInputDevices.has(id)) { publishDock(); return; }
             inputSelect.value = id;
             applyInputDevice(id);
@@ -2041,7 +2043,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
 
         function dockSetOutput(id) {
             id = String(id || '');
-            if (activeCall || pendingInbound || !device || !device.audio
+            if (pendingInbound || !device || !device.audio
                     || !device.audio.availableOutputDevices.has(id)) { publishDock(); return; }
             outputSelect.value = id;
             applyOutputDevice(id);

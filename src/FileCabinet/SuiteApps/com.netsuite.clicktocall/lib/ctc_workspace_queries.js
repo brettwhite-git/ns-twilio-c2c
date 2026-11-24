@@ -731,7 +731,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
                 taskAssigneeName: createdTaskId ? text(r, t('assigned')) : '',
                 call: {
                     id: extractId(value(r, PT_CALL)),
-                    title: String(value(r, c('title'))),
+                    title: displayCallTitle(value(r, c('title'))),
                     date: String(value(r, c('startdate'))),
                     companyId: extractId(value(r, c('company'))),
                     companyName: text(r, c('company')),
@@ -1331,6 +1331,22 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
 
     // ─── Iteration B · Phase 6 — in-call account snapshot ──────────────────
 
+    // A Twilio SID (RE recording, CA call, GT transcript, …: two capitals
+    // and 32 hex digits). Old Phone Calls were titled "Call — RE<sid>"
+    // before titles became plain words (finding #90).
+    const TWILIO_SID = /\b[A-Z]{2}[0-9a-f]{32}\b/;
+
+    /**
+     * A Phone Call title fit to show: '' when it carries a Twilio SID
+     * (callers then fall back to the company or "Call").
+     * @param {*} title
+     * @returns {string}
+     */
+    const displayCallTitle = (title) => {
+        const t = String(title || '').trim();
+        return TWILIO_SID.test(t) ? '' : t;
+    };
+
     const daysSince = (iso) => {
         if (!iso) return null;
         const t = Date.parse(iso);
@@ -1609,9 +1625,19 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
         const items = [];
         /** @type {Array<number>} */
         const touches = [];
+        // Recent activity and last touch are the past: a future-dated
+        // record (a scheduled call, an order dated ahead) is left out, so it
+        // never shows as "Today" (finding #90).
+        // dayMs parses ISO days as UTC midnight and NetSuite-format days as
+        // local midnight: a day counts as future when it starts more than 14 h
+        // (the widest time-zone offset) after today's UTC midnight.
+        const now = new Date();
+        const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+        const FUTURE_AFTER_MS = 14 * 3600000;
         const touch = (value) => {
             const t = dayMs(value);
-            if (t !== null) touches.push(t);
+            if (t === null || t - todayUtc > FUTURE_AFTER_MS) return null;
+            touches.push(t);
             return t;
         };
         const add = (kind, text, value) => {
@@ -1673,7 +1699,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
                 ]
             }).run().getRange({ start: 0, end: 3 }).forEach((r) => {
                 const who = firstNameOf(text(r, 'contact')) || text(r, 'company');
-                const title = String(r.getValue('title') || '').trim();
+                const title = displayCallTitle(r.getValue('title'));
                 const head = who ? 'Call with ' + who : 'Call';
                 add('call', title ? head + ' · ' + title : head, r.getValue('startdate'));
             });
@@ -1931,6 +1957,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
     };
 
     return {
+        displayCallTitle,
         extractText,
         loadHistoryRows,
         loadTaskGroups,

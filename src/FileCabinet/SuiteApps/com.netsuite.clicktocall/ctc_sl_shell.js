@@ -30,12 +30,16 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
 
     const DEFAULT_FRAME_PATH = '/app/center/card.nl?sc=-29';
     const MAX_FRAME_PATH = 2000;
+    // This SuiteApp's own single page apps (Setup Wizard, Sales Central).
+    // Other apps' SPAs stay out.
+    const SPA_FRAME_PREFIX = ctcDock.SPA_PATH_PREFIX;
 
     /**
      * Validate the NetSuite path to open in the frame. Anything that could
-     * leave the account origin or climb out of /app/ falls back to the
-     * default dashboard path.
-     * Rules: string; 1..2000 chars; starts with "/app/"; no "//", no "\",
+     * leave the account origin or climb out of /app/ (or this SuiteApp's
+     * SPAs) falls back to the default dashboard path.
+     * Rules: string; 1..2000 chars; starts with "/app/" or SPA_FRAME_PREFIX;
+     * no "//", no "\",
      * no whitespace or control chars; no scheme (":" before the first "/");
      * no "." or ".." path segments (also percent-encoded) before "?" / "#".
      * @param {*} value
@@ -44,7 +48,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
     const safeFramePath = (value) => {
         if (typeof value !== 'string') return DEFAULT_FRAME_PATH;
         if (value.length === 0 || value.length > MAX_FRAME_PATH) return DEFAULT_FRAME_PATH;
-        if (value.indexOf('/app/') !== 0) return DEFAULT_FRAME_PATH;
+        if (value.indexOf('/app/') !== 0 && value.indexOf(SPA_FRAME_PREFIX) !== 0) return DEFAULT_FRAME_PATH;
         if (value.indexOf('//') !== -1 || value.indexOf('\\') !== -1) return DEFAULT_FRAME_PATH;
         // eslint-disable-next-line no-control-regex
         if (/[\s\x00-\x1f\x7f]/.test(value)) return DEFAULT_FRAME_PATH;
@@ -81,23 +85,48 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
      * @returns {string}
      */
     const buildShellDockTags = (shellBase) => {
+        const opts = dockMountOptions(shellBase);
+        return opts ? ctcDock.buildDockScriptTag(opts) : '';
+    };
+
+    /**
+     * Dock mount options (file URLs, RESTlet, shell). Null when a dock file
+     * or the RESTlet can't be resolved (logged, never thrown).
+     * @param {string} shellBase - this Suitelet's own URL
+     * @returns {Object|null}
+     */
+    const dockMountOptions = (shellBase) => {
         try {
             const restletUrl = url.resolveScript({
                 scriptId: 'customscript_ctc_rl_token',
                 deploymentId: 'customdeploy_ctc_rl_token',
                 returnExternalUrl: false
             });
-            return ctcDock.buildDockScriptTag({
+            return {
                 assetUrl: file.load({ id: ctcDock.DOCK_ASSET_PATH }).url,
                 dialerUrl: file.load({ id: ctcDock.DIALER_ASSET_PATH }).url,
                 restletUrl: restletUrl,
                 shellUrl: shellBase,
                 context: {}
-            });
+            };
         } catch (e) {
             log.error({ title: 'CTC Shell — Failed to load dock scripts', details: e.message || e });
-            return '';
+            return null;
         }
+    };
+
+    /**
+     * ?mount=1: the dock's mount data as JSON, for pages that add the dock
+     * themselves (this SuiteApp's SPAs). Same files and attributes as the
+     * record pages' script tags. {ok:false} when the dock can't load.
+     * @param {Object} response
+     */
+    const writeDockMount = (response) => {
+        const shellBase = resolveSuitelet('customscript_ctc_sl_shell', 'customdeploy_ctc_sl_shell');
+        const opts = dockMountOptions(shellBase);
+        ctcHtml.setNoStoreHeaders(response);
+        try { response.setHeader({ name: 'Content-Type', value: 'application/json; charset=utf-8' }); } catch (e) { /* header unavailable */ }
+        response.write(JSON.stringify(opts ? Object.assign({ ok: true }, ctcDock.buildDockMount(opts)) : { ok: false }));
     };
 
     /**
@@ -108,6 +137,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
      */
     const onRequest = (context) => {
         const params = (context.request && context.request.parameters) || {};
+        if (params.mount === '1') { writeDockMount(context.response); return; }
         const framePath = safeFramePath(params.u);
         // ifrmcntnr=T: NetSuite's flag for a Suitelet shown in an iframe
         // (SAFE pitfall 103).
@@ -141,6 +171,7 @@ define(['N/url', 'N/log', 'N/file', './lib/ctc_html', './lib/ctc_entity', './lib
         const cfg = {
             framePath: o.framePath,
             shellBase: o.shellBase,
+            spaPrefix: SPA_FRAME_PREFIX,
             softphoneUrl: o.softphoneUrl || '',
             lockName: ctcDock.PHONE_LOCK_NAME,
             exitKey: ctcDock.EXIT_KEY,
@@ -494,6 +525,11 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   });
 
   // ---- Frame watcher ----
+  // NetSuite pages and this SuiteApp's SPAs: both load inside the frame.
+  function isFramePath(p) {
+    p = String(p || '');
+    return p.indexOf('/app/') === 0 || p.indexOf(CFG.spaPrefix) === 0;
+  }
   function isLoginPath(p) {
     return p.indexOf('/pages/login') === 0 || p.indexOf('/pages/customerlogin') === 0 ||
       p.indexOf('/app/login') === 0 || p.indexOf('/login.nl') !== -1 || p.indexOf('enterpriselogin') !== -1;
@@ -612,6 +648,16 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
       try { window.__ctcDock.setContext(ctx); } catch (e) { logEvent('dock context error', e && e.message); }
     }
   }
+  // An SPA in the frame changes record without a page load: its dock
+  // (frame mode, setContext) asks for a fresh read. Only the NetSuite
+  // frame's own window counts.
+  window.__ctcShell.syncContext = function (win) {
+    var current = null;
+    try { current = nsFrame && nsFrame.contentWindow; } catch (e) { current = null; }
+    if (!current || win !== current) return;
+    logEvent('context', 'spa');
+    syncContext(current);
+  };
 
   // ---- Keep NetSuite navigation inside the frame ----
   // NetSuite's main menu does not navigate its own page: it replaces the TOP
@@ -635,7 +681,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
       if (e.formData) { logEvent('top post left alone', tail(e.destination && e.destination.url)); return; }
       var dest;
       try { dest = new URL(e.destination.url); } catch (err) { return; }
-      if (dest.origin !== location.origin || dest.pathname.indexOf('/app/') !== 0) return;
+      if (dest.origin !== location.origin || !isFramePath(dest.pathname)) return;
       if (isLoginPath(dest.pathname)) return;
       if (shellScriptId && dest.searchParams.get('script') === shellScriptId) return;
       if (dest.pathname === location.pathname && dest.search === location.search) return; // our own replaceState

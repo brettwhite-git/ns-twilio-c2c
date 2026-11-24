@@ -21,10 +21,14 @@ define(['./ctc_html'], (ctcHtml) => {
     // File Cabinet paths of the browser-side dock scripts, in load order.
     const DOCK_ASSET_PATH = '/SuiteApps/com.netsuite.clicktocall/lib/ctc_dock_client.js';
     const DIALER_ASSET_PATH = '/SuiteApps/com.netsuite.clicktocall/lib/ctc_dock_dialer.js';
+    // This SuiteApp's single page apps: NetSuite serves them at
+    // /spa-app/<appId>/<url> in every account. Phone mode loads these in
+    // its frame (ctc_sl_shell.js).
+    const SPA_PATH_PREFIX = '/spa-app/com.netsuite.clicktocall/';
 
     // Appended to the media URLs so browsers drop cached copies after a deploy.
     // Bump every time ctc_dock_client.js or ctc_dock_dialer.js changes.
-    const DOCK_ASSET_VERSION = '43';
+    const DOCK_ASSET_VERSION = '47';
 
     // ===================== BUS CONTRACT (ctc-bus, v: 1) =====================
     // BroadcastChannel name shared by the anchor (ctc_sl_softphone.js in the
@@ -368,6 +372,22 @@ define(['./ctc_html'], (ctcHtml) => {
     };
 
     /**
+     * Mount data for a page that adds the dock scripts itself (this
+     * SuiteApp's SPAs): versioned file URLs plus the attributes the dock
+     * script element must carry. Load the dialer after the dock.
+     * @param {DockMountOptions} opts - assetUrl and dialerUrl are required here
+     * @returns {{assetUrl: string, dialerUrl: string, attrs: Array<[string, string]>}|null}
+     */
+    const buildDockMount = (opts) => {
+        if (!opts || !opts.assetUrl || !opts.dialerUrl) return null;
+        return {
+            assetUrl: withVersion(opts.assetUrl),
+            dialerUrl: withVersion(opts.dialerUrl),
+            attrs: dockAttributes(opts)
+        };
+    };
+
+    /**
      * Dock loader for HTML portlets. NetSuite parses portlet HTML in a
      * throwaway iframe, copies innerHTML to the dashboard, and strips every
      * <script>; only inline on* attribute strings survive. A broken <img>
@@ -395,6 +415,7 @@ define(['./ctc_html'], (ctcHtml) => {
     return {
         DOCK_ASSET_PATH,
         DIALER_ASSET_PATH,
+        SPA_PATH_PREFIX,
         DOCK_ASSET_VERSION,
         BUS_CHANNEL,
         BUS_VERSION,
@@ -430,6 +451,7 @@ define(['./ctc_html'], (ctcHtml) => {
         EXIT_KEY,
         dockAttributes,
         buildDockScriptTag,
+        buildDockMount,
         buildDockLoaderHtml
     };
 });

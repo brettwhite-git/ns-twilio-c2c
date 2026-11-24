@@ -12,7 +12,8 @@
  *   shell   - top page is the shell (window.__ctcShell is set before this
  *             script). Pill + dialer panel (ctc_dock_dialer.js).
  *   frame   - a NetSuite page inside the shell. Draws nothing. The record's
- *             Call button goes to top.__ctcShell.call(ctx).
+ *             Call button goes to top.__ctcShell.call(ctx). An SPA page
+ *             names a new record with window.__ctcDock.setContext(ctx).
  *   outside - a normal NetSuite tab. Another tab holds the phone (Web Lock
  *             'ctc-phone-anchor'): the same pill + dialer panel as the
  *             shell, as a remote control (bus requests; the audio stays in
@@ -142,6 +143,15 @@
             call: function () {
                 var shell = shellObject();
                 if (shell && typeof shell.call === 'function') shell.call(cfg.context);
+            },
+            // A page that changes record without reloading (an SPA) names
+            // the record it now shows; the shell's dialer follows it as it
+            // does a record page load. Record pages never call it.
+            setContext: function (ctx) {
+                cfg.context = normalizeContext(ctx);
+                window.__ctcRecordContext = cfg.context;
+                var shell = shellObject();
+                if (shell && typeof shell.syncContext === 'function') shell.syncContext(window);
             }
         };
         return;
@@ -182,13 +192,23 @@
     var ENTER_EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
     var ENTER_SHIFT = 6; // px the pill travels in from its edge
     var PANEL_FADE_MS = 200;
-    // Incoming card: the pill morphs into it (A1, 2026-11-01). Enter / exit /
-    // reduced durations; the content fades in from INC_CONTENT_AT of the
-    // enter. INC_RADIUS: the open card's corners.
-    var INC_ENTER_MS = 1280;
-    var INC_EXIT_MS = 880;
+    // Incoming card: the pill morphs into it (A1, 2026-11-01; asset 45,
+    // finding #86: "shared parts + spring"). The window grows on a spring
+    // (INC_SPRING_DAMPING, a tiny settle, no visible tail); the pill's dot
+    // and Answer travel into the card's; the name and Decline fade in out of
+    // a INC_BLUR_PX blur from INC_CONTENT_AT of the enter, over
+    // INC_CONTENT_SPAN, INC_CONTENT_STAGGER apart. Exit: the words go in
+    // INC_WORDS_OUT_MS, the window and the shared parts return on the settle
+    // curve. INC_RADIUS: the open card's corners.
+    var INC_ENTER_MS = 520;
+    var INC_EXIT_MS = 220;
     var INC_REDUCED_MS = 120;
-    var INC_CONTENT_AT = 0.4;
+    var INC_CONTENT_AT = 0.12;
+    var INC_CONTENT_SPAN = 0.55;
+    var INC_CONTENT_STAGGER = 0.06;
+    var INC_BLUR_PX = 4;
+    var INC_WORDS_OUT_MS = 90;
+    var INC_SPRING_DAMPING = 0.8;
     var INC_RADIUS = 16;
     var INC_SHADOW = '0 10px 24px rgba(15,27,48,0.26)';
     // The open window of the morph: the card plus 32 px all round (radius
@@ -412,7 +432,8 @@
            WAAPI, see animateIncoming). Row: sky dot, caller text, Decline,
            Answer. The outer shadow is a layer (.inc-shade) that fades in
            as the morph's window opens past the card. */
-        '.inc{position:fixed;left:0;top:0;isolation:isolate;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:' + INC_RADIUS + 'px;color:#FFFFFF;pointer-events:auto;font-family:"Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06)}',
+        '.inc{position:fixed;left:0;top:0;isolation:isolate;width:320px;max-width:calc(100vw - 32px);display:flex;align-items:center;gap:12px;padding:12px 12px 12px 16px;border-radius:' + INC_RADIUS + 'px;color:#FFFFFF;pointer-events:auto;font-family:"Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;box-shadow:inset 0 1px 0 rgba(255,255,255,0.06);touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}',
+        '.inc.lifted{scale:' + (1 + LIFT) + ';cursor:grabbing}',
         '.inc-shade{position:absolute;inset:-1px;border-radius:inherit;box-shadow:' + INC_SHADOW + ';z-index:-1;pointer-events:none}',
         '.inc-dot{width:8px;height:8px;border-radius:999px;flex-shrink:0;background:' + T.ring + '}',
         '.inc-text{flex:1;min-width:0;display:flex;flex-direction:column}',
@@ -633,10 +654,6 @@
     var incEl = $('.inc');
     var incShade = $('.inc-shade');
     var incSurf = $('.inc-surf');
-    // The card's own content (the shadow layer and the morph stacks are not).
-    var incContent = Array.prototype.filter.call(incEl.children, function (el) {
-        return el !== incShade && el !== incSurf;
-    });
     var vSurf = $('.v-surf');
     var vShades = root.querySelectorAll('.v-shade'); // [old size, new size]
     // Pill parts that move or fade when the pill changes size (fitPill).
@@ -645,6 +662,9 @@
     var incSub = $('.inc-sub');
     var incAnswer = $('.inc-answer');
     var incDecline = $('.inc-decline');
+    var incDot = $('.inc-dot');
+    var incText = $('.inc-text');
+    var vDot = $('.v-dot');
     var srAssertive = $('.sr-assertive');
     var srPolite = $('.sr-polite');
 
@@ -1421,7 +1441,35 @@
             return at(y1, y2, t);
         };
     }
-    var ENTER_CURVE = bezier(0.23, 1, 0.32, 1); // ENTER_EASE
+    var SETTLE_CURVE = bezier(0.32, 0.72, 0, 1); // SETTLE
+
+    // A damped spring (damping ratio z < 1, released from rest) as a
+    // function of time (0..1), time scaled so it has settled (within 0.1%)
+    // at 1. z 0.8 overshoots by about 1.5%: a settle, not a bounce.
+    function springCurve(z) {
+        var wd = Math.sqrt(1 - z * z);
+        var T = Math.log(1000) / z;
+        return function (x) {
+            if (x <= 0) return 0;
+            if (x >= 1) return 1;
+            var t = x * T;
+            return 1 - Math.exp(-z * t) * (Math.cos(wd * t) + (z / wd) * Math.sin(wd * t));
+        };
+    }
+    var SPRING_CURVE = springCurve(INC_SPRING_DAMPING);
+
+    // Keyframes (linear easing) that move an element from (dx, dy, s) to
+    // (dx2, dy2, s2) along `curve`, sampled like the morph window.
+    function curveFrames(a, b, curve) {
+        var out = [];
+        for (var i = 0; i <= MORPH_STEPS * 2; i++) {
+            var t = i / (MORPH_STEPS * 2);
+            var p = curve(t);
+            var l = function (u, v) { return u + (v - u) * p; };
+            out.push({ offset: t, transform: 'translate(' + round3(l(a.dx, b.dx)) + 'px, ' + round3(l(a.dy, b.dy)) + 'px) scale(' + round3(l(a.s, b.s)) + ')' });
+        }
+        return out;
+    }
 
     // Look of `el` (computed) for the fills: background, border, its own
     // (inset) box-shadow.
@@ -2108,18 +2156,19 @@
         vchipEl.style.opacity = under ? '0' : '';
     }
 
-    // Enter (INC_ENTER_MS): a FLIP morph. The card is laid out at its own
-    // place and size; a rounded window onto its surface and shadow (morph
-    // stack in window mode, see morphStack) grows from the pill's rect and
-    // radius to the card plus INC_OUTSET all round (the old clip-path
-    // reveal; the shadow layer fades in as the window passes the card's
-    // edges); its content fades in from INC_CONTENT_AT; the pill fades
-    // out in the first part. Exit (INC_EXIT_MS): the content fades out, the
-    // window shrinks back to the pill's rect, the pill fades in at the end.
-    // Transform and opacity only (WAAPI). Reduced motion: the card's
-    // opacity only, INC_REDUCED_MS. A new enter / exit starts from what is
-    // drawn now (the window's rect read from its corner pieces), so a ring
-    // during an exit turns it around smoothly.
+    // Enter (INC_ENTER_MS): a FLIP morph on a spring. A rounded window onto
+    // the card's surface and shadow (morph stack in window mode, see
+    // morphStack) grows from the pill's rect and radius to the card plus
+    // INC_OUTSET all round (the shadow layer fades in as the window passes
+    // the card's edges). The pill's dot and Answer travel into the card's
+    // (shared parts, so the eye follows them, not an outline); the name and
+    // Decline fade in out of a blur early (the card is never empty); the
+    // pill fades out at once. Exit (INC_EXIT_MS, settle curve): the words
+    // go first, the window and the shared parts return to the pill, the
+    // pill fades in. Transform, opacity and a small blur only (WAAPI).
+    // Reduced motion: the card's opacity only, INC_REDUCED_MS. A new enter
+    // / exit starts from what is drawn now (window rect, parts' transforms),
+    // so a ring during an exit turns it around smoothly.
     function animateIncoming(show) {
         var red = reduced();
         var canAnimate = typeof incEl.animate === 'function';
@@ -2127,7 +2176,14 @@
         var morphing = running && incEl.classList.contains('morph');
         var opacityNow = function (el) { return window.getComputedStyle(el).opacity; };
         var pillFrom = running ? opacityNow(vchipEl) : (show ? '1' : '0');
-        var contentFrom = incContent.map(function (el) { return running ? opacityNow(el) : (show ? '0' : '1'); });
+        var words = [incText, incDecline];
+        var shared = [incDot, incAnswer];
+        var wordsFrom = words.map(function (el) { return running ? opacityNow(el) : (show ? '0' : '1'); });
+        var sharedFrom = shared.map(function (el) {
+            if (!running) return null;
+            var m = parseMatrix(window.getComputedStyle(el).transform);
+            return m ? { dx: m.tx, dy: m.ty, s: m.sx, o: opacityNow(el) } : { dx: 0, dy: 0, s: 1, o: opacityNow(el) };
+        });
         var cardFrom = running && !morphing ? opacityNow(incEl) : null;
         var card = boxOf(incEl, INC_RADIUS);
         var open = { x: -INC_OUTSET, y: -INC_OUTSET, w: card.w + 2 * INC_OUTSET, h: card.h + 2 * INC_OUTSET, r: INC_OUTSET_RADIUS };
@@ -2140,8 +2196,9 @@
             return;
         }
         var dur = red ? INC_REDUCED_MS : show ? INC_ENTER_MS : INC_EXIT_MS;
+        var side = function (el, frames, opts) { incSideAnims.push(el.animate(frames, opts)); };
         var fade = function (el, a, b, delay, ms) {
-            incSideAnims.push(el.animate([{ opacity: a }, { opacity: b }], { duration: ms, delay: delay, easing: ENTER_EASE, fill: 'both' }));
+            side(el, [{ opacity: a }, { opacity: b }], { duration: ms, delay: delay, easing: ENTER_EASE, fill: 'both' });
         };
         setPillUnderCard(false); // the fade owns the pill's opacity until the end
         var a;
@@ -2149,29 +2206,58 @@
             fade(vchipEl, pillFrom, show ? 0 : 1, 0, dur);
             a = incEl.animate([{ opacity: cardFrom !== null ? cardFrom : (show ? 0 : 1) }, { opacity: show ? 1 : 0 }], { duration: dur, easing: ENTER_EASE, fill: 'both' });
         } else {
-            var pillR = pillRectOnCard(incomingGeom());
+            var g = incomingGeom();
+            var pillR = pillRectOnCard(g);
             var from = rectFrom || (show ? pillR : open);
+            var curve = show ? SPRING_CURVE : SETTLE_CURVE;
             layoutStack(incSurf, open, 0, SEAM, surfaceLook(incEl), incEl.clientLeft, incEl.clientTop, true, card);
             incEl.classList.add('morph');
             var to = show ? open : pillR;
-            var pieces = morphStack(incSurf, open, from, to, { duration: dur, fill: 'both' }, ENTER_CURVE);
+            var pieces = morphStack(incSurf, open, from, to, { duration: dur, fill: 'both' }, curve);
             // The card's shadow (its layer, in place) shows as the window
             // opens past the card's edges: opacity = how far past, of
             // INC_OUTSET (a pieced, see-through shadow would show seams).
-            pieces.push(incShade.animate(sampleRects(from, to, ENTER_CURVE).map(function (smp) {
+            pieces.push(incShade.animate(sampleRects(from, to, curve).map(function (smp) {
                 var r = smp.rect;
                 var past = Math.min(-r.x, -r.y, r.x + r.w - card.w, r.y + r.h - card.h) / INC_OUTSET;
                 return { offset: smp.t, opacity: round3(Math.max(0, Math.min(1, past))) };
             }), { duration: dur, easing: 'linear', fill: 'both' }));
             a = pieces.shift();
             incSideAnims = pieces;
-            var inAt = Math.round(dur * INC_CONTENT_AT);
+            // Shared parts: the pill's dot and Answer become the card's. Their
+            // offset from the card's own place, measured at rest.
+            var home = shared.map(function (el, i) {
+                var src = i === 0 ? vDot : vMain;
+                var r1 = src && src.getBoundingClientRect();
+                var r2 = el.getBoundingClientRect();
+                if (!r1 || !r1.width || !r2.width) return null;
+                return { dx: (r1.left + r1.width / 2) - (r2.left + r2.width / 2), dy: (r1.top + r1.height / 2) - (r2.top + r2.height / 2), s: r1.width / r2.width };
+            });
+            var rest = { dx: 0, dy: 0, s: 1 };
             if (show) {
-                fade(vchipEl, pillFrom, 0, 0, Math.round(dur * 0.375));
-                incContent.forEach(function (el, i) { fade(el, contentFrom[i], 1, inAt, dur - inAt); });
+                fade(vchipEl, pillFrom, 0, 0, INC_WORDS_OUT_MS);
+                shared.forEach(function (el, i) {
+                    var h = home[i];
+                    var f = sharedFrom[i] || h;
+                    if (!f) { fade(el, sharedFrom[i] ? sharedFrom[i].o : 0, 1, 0, Math.round(dur * INC_CONTENT_SPAN)); return; }
+                    side(el, curveFrames(f, rest, SPRING_CURVE), { duration: dur, easing: 'linear', fill: 'both' });
+                    if (sharedFrom[i] && sharedFrom[i].o !== '1') fade(el, sharedFrom[i].o, 1, 0, Math.round(dur * 0.3));
+                });
+                words.forEach(function (el, i) {
+                    var o = Number(wordsFrom[i]) || 0;
+                    side(el, [{ opacity: o, filter: 'blur(' + round3(INC_BLUR_PX * (1 - o)) + 'px)' }, { opacity: 1, filter: 'blur(0px)' }],
+                        { duration: Math.round(dur * INC_CONTENT_SPAN), delay: running ? 0 : Math.round(dur * (INC_CONTENT_AT + i * INC_CONTENT_STAGGER)), easing: ENTER_EASE, fill: 'both' });
+                });
             } else {
-                incContent.forEach(function (el, i) { fade(el, contentFrom[i], 0, 0, Math.round(dur * 0.4)); });
-                fade(vchipEl, pillFrom, 1, Math.round(dur * 0.55), Math.round(dur * 0.45));
+                words.forEach(function (el, i) { fade(el, wordsFrom[i], 0, 0, INC_WORDS_OUT_MS); });
+                shared.forEach(function (el, i) {
+                    var h = home[i];
+                    var f = sharedFrom[i] || rest;
+                    var o = sharedFrom[i] ? sharedFrom[i].o : '1';
+                    if (h) side(el, curveFrames(f, h, SETTLE_CURVE), { duration: dur, easing: 'linear', fill: 'both' });
+                    fade(el, o, 0, Math.round(dur * 0.4), Math.round(dur * 0.6));
+                });
+                fade(vchipEl, pillFrom, 1, Math.round(dur * 0.6), INC_WORDS_OUT_MS);
             }
         }
         incAnim = a;
@@ -2298,7 +2384,7 @@
     }
 
 
-    // --- Drag (pill only) ---
+    // --- Drag (the pill, and the incoming card on it) ---
     // The whole pill is the handle, its buttons included. The pointer is captured by
     // the button pressed (else the pill), so a plain press still clicks that
     // button and a fast drag never loses the pointer.
@@ -2326,6 +2412,7 @@
             dockEl.style.transition = '';
             dockEl.style.willChange = 'transform';
             dockEl.classList.add('lifted');
+            if (incShown) incEl.classList.add('lifted');
             // Bounds for this drag: the snap points' extremes (the pill's
             // size and the safe top as the drag starts).
             drag.w = dockEl.offsetWidth;
@@ -2356,6 +2443,7 @@
         suppressClick = true;
         pressAction = null;
         dockEl.classList.remove('lifted');
+        incEl.classList.remove('lifted');
 
         var fl = flick(d.samples, e);
         corner = nearestCorner(pos.x + dockEl.offsetWidth / 2 + fl.x, pos.y + dockEl.offsetHeight / 2 + fl.y);
@@ -2363,6 +2451,16 @@
         place(true);
     }
     bindDrag(vchipEl);
+    // The incoming card drags the dock too (finding #87): the card sits on
+    // the pill (hidden under it) and follows it, so moving the card moves
+    // the pill; Answer / Decline still click on a plain press.
+    bindDrag(incEl);
+    incEl.addEventListener('click', function (e) {
+        if (!suppressClick) return;
+        suppressClick = false;
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }, true);
     // A drag never clicks the pill or its buttons (capture phase, before the
     // button sees it; immediate, so the pill's own click below skips too).
     vchipEl.addEventListener('click', function (e) {

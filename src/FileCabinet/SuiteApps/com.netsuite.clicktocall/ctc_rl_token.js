@@ -1181,7 +1181,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
             const out = {
                 call: {
                     id: callId,
-                    title: String(f.title || ''),
+                    title: workspaceQueries.displayCallTitle(f.title),
                     companyId: companyId,
                     companyName: selectText(f.company),
                     contactName: selectText(f.contact),

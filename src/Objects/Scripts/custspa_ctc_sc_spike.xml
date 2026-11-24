@@ -1,0 +1,14 @@
+<singlepageapp scriptid="custspa_ctc_sc_spike">
+    <name>CTC Sales Central spike</name>
+    <description>Throwaway spike (2026-11-21): does the phone mode dock work inside an SPA? Remove after the write-up (tasks/todo.md).</description>
+    <url>ctc-sc-spike</url>
+    <folder>[/SuiteApps/com.netsuite.clicktocall/sc_spike/]</folder>
+    <clientscriptfile>[/SuiteApps/com.netsuite.clicktocall/sc_spike/SpaClient.js]</clientscriptfile>
+    <serverscriptfile>[/SuiteApps/com.netsuite.clicktocall/sc_spike/SpaServer.js]</serverscriptfile>
+    <loglevel>DEBUG</loglevel>
+    <!-- Standard roles only in SuiteApp XML. MFG Sales (custom) is added
+         in the UI after deploy for Q7. -->
+    <audienceallroles>F</audienceallroles>
+    <audienceroles>ADMINISTRATOR|SALES_PERSON|SALES_MANAGER</audienceroles>
+    <executeas></executeas>
+</singlepageapp>

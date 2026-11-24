@@ -703,8 +703,10 @@
         '.dl-live-wrap .dl-pad.dl-dtmf{width:auto;margin-top:20px;grid-template-columns:var(--dl-cols);grid-template-rows:repeat(4,65px);column-gap:var(--dl-gap);row-gap:8px;justify-content:center;flex-shrink:0}',
         // Controls: 65 px circles on the keypad's 3 columns (--dl-cols),
         // sentence-case 12/600 labels on one baseline. Mute · End · Keypad;
-        // wrap-up: — · Call back · Done.
+        // wrap-up: Call back · Done as a centred pair (asset 47, two of the
+        // same columns, .dl-two).
         '.dl-live-wrap.cs .dl-foot{display:grid;grid-template-columns:var(--dl-cols);column-gap:var(--dl-gap);justify-content:center;justify-items:center;align-items:start;padding:16px 14px 14px}',
+        '.dl-live-wrap.cs .dl-foot.dl-two{grid-template-columns:repeat(2,65px)}',
         '.dl-live-wrap.cs .dl-act{gap:8px;font-family:inherit;font-size:12px;font-weight:600;line-height:16px;letter-spacing:0;color:#C9D3E1}',
         '.dl-live-wrap.cs .dl-act .dl-btn{width:65px;height:65px;border-radius:999px}',
         '.dl-live-wrap.cs .dl-act .dl-btn svg{width:22px;height:22px}',
@@ -861,8 +863,7 @@
         +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn dl-mute" aria-label="Mute" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '>' + ICON_MIC + '</svg></button><span class="dl-mute-label">Mute</span></span>'
         +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn big end dl-end" aria-label="End call"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true" style="transform:rotate(135deg)">' + ICON_PHONE + '</svg></button>End</span>'
         +     '<span class="dl-act dl-call-act"><button type="button" class="dl-btn dl-keys" aria-label="Show keypad" aria-pressed="false"><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE + '><circle cx="6" cy="5" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="18" cy="5" r="1"></circle><circle cx="6" cy="11" r="1"></circle><circle cx="12" cy="11" r="1"></circle><circle cx="18" cy="11" r="1"></circle><circle cx="6" cy="17" r="1"></circle><circle cx="12" cy="17" r="1"></circle><circle cx="18" cy="17" r="1"></circle><circle cx="12" cy="22" r="1"></circle></svg></button>Keypad</span>'
-        // Wrap-up: an empty first column, Call back, Done.
-        +     '<span class="dl-wrap-act" aria-hidden="true" hidden></span>'
+        // Wrap-up: Call back and Done, centred as a pair (.dl-two).
         +     '<span class="dl-act dl-wrap-act" hidden><button type="button" class="dl-btn call dl-wrap-call" aria-label="Call back"><svg width="22" height="22" viewBox="0 0 24 24" fill="#FFFFFF" aria-hidden="true">' + ICON_PHONE + '</svg></button>Call back</span>'
         +     '<span class="dl-act dl-wrap-act" hidden><button type="button" class="dl-btn dl-done" aria-label="Done"><svg width="22" height="22" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_CHECK + '</svg></button>Done</span>'
         +   '</div>'
@@ -2751,6 +2752,7 @@
         ui.ringActs.forEach(function (a) { a.hidden = !ringing; });
         ui.callActs.forEach(function (a) { a.hidden = ringing; });
         ui.wrapActs.forEach(function (a) { a.hidden = true; });
+        ui.wrapCall.parentNode.parentNode.classList.remove('dl-two');
         lastInfo = liveInfo();
         paintCall(lastInfo, slotOf(snap.phase));
         if (ringing) {
@@ -3071,10 +3073,12 @@
             timer.style.top = (t.top - live.top) + 'px';
             timer.style.width = t.width + 'px';
         }
+        var er = ui.end && !ui.end.parentNode.hidden ? ui.end.getBoundingClientRect() : null;
         return {
             foot: foot,
             ghosts: [ghostOf(ui.mute.parentNode, box), ghostOf(ui.keys.parentNode, box)].filter(Boolean),
-            timer: timer
+            timer: timer,
+            endX: er && er.width ? er.left + er.width / 2 : null
         };
     }
     function playEnd(cap) {
@@ -3098,6 +3102,12 @@
         void ui.wrapCall.offsetWidth; // restart the CSS animation
         ui.wrapCall.classList.add('dl-morph');
         fx(ui.wrapCall, [{ transform: 'scale(1)' }, { transform: 'scale(0.94)' }, { transform: 'scale(1)' }], 300);
+        // End turns into Call back where End was, then slides into its place
+        // in the centred pair as Done rises in beside it (asset 47).
+        var cr = ui.wrapCall.getBoundingClientRect();
+        var dx = cap.endX != null && cr.width ? Math.round(cap.endX - (cr.left + cr.width / 2)) : 0;
+        // A delay, not a hold keyframe (the easing runs over the whole effect).
+        if (dx) fx(ui.wrapCall.parentNode, [{ transform: 'translateX(' + dx + 'px)' }, { transform: 'none' }], 280, 'cubic-bezier(0.32,0.72,0,1)', 140);
         fx(done, [{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], 260, EASE_OUT, 140);
         if (cap.timer) {
             ui.liveTime.parentNode.appendChild(cap.timer);
@@ -3195,6 +3205,7 @@
         ui.ringActs.forEach(function (a) { a.hidden = true; });
         ui.callActs.forEach(function (a) { a.hidden = true; });
         ui.wrapActs.forEach(function (a) { a.hidden = false; });
+        ui.wrapCall.parentNode.parentNode.classList.add('dl-two');
         ui.liveWarn.hidden = true;
         var info = wrapUp.info;
         ui.wrapCall.disabled = !dialable(info.raw);
@@ -3537,8 +3548,10 @@
 
     function renderAudio() {
         var a = snap && snap.audio;
-        var active = isActive();
-        var msg = !a ? 'Audio settings open after the phone starts.' : active ? 'Change audio between calls.' : '';
+        // Live calls can switch device (finding #88, asset 46); only a ring
+        // in progress waits for the answer.
+        var ringing = isIncoming();
+        var msg = !a ? 'Audio settings open after the phone starts.' : ringing ? 'Change audio after you answer.' : '';
         ui.audioMsg.textContent = msg;
         ui.audioMsg.hidden = !msg;
         ui.inRow.hidden = !a;
@@ -3547,8 +3560,8 @@
             fillSelect(ui.inSel, a.inputs, a.input);
             if (a.outputSupported) fillSelect(ui.outSel, a.outputs, a.output);
         }
-        ui.inSel.disabled = !a || active;
-        ui.outSel.disabled = !a || active;
+        ui.inSel.disabled = !a || ringing;
+        ui.outSel.disabled = !a || ringing;
         var shell = window.__ctcShell;
         var remote = isRemote();
         ui.exit.hidden = remote || !(shell && typeof shell.exit === 'function');
