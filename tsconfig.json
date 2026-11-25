@@ -80,7 +80,6 @@
     // `gulp bundle` from src/SuiteApps/.../setup_wizard/*.ts. We
     // type-check the TS sources, not the compiled output.
     "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/setup_wizard",
-    "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/sc_spike",
     "src/FileCabinet/SuiteApps/com.netsuite.clicktocall/sales_central"
   ]
 }

@@ -5,10 +5,8 @@
 # AMD anyway). The setup_wizard/ subdir under FileCabinet/ is fully
 # owned by `gulp bundle` after Path B.2.
 src/FileCabinet/SuiteApps/com.netsuite.clicktocall/setup_wizard/
-# Sales Central spike SPA (gulp output; remove with the spike).
 # Sales Central SPA (gulp output).
 src/FileCabinet/SuiteApps/com.netsuite.clicktocall/sales_central/
-src/FileCabinet/SuiteApps/com.netsuite.clicktocall/sc_spike/
 
 # Bundled vendor (existed pre-Path-B).
 src/FileCabinet/SuiteApps/com.netsuite.clicktocall/lib/twilio.min.js
