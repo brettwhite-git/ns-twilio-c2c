@@ -7,7 +7,8 @@
  */
 
 export const STYLES = [
-    '.sc{position:relative;min-height:100%;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+    // Page margins (2026-11-25, previewed live): 16px above the header row, 56px each side (32 + the rows' own 24)
+    '.sc{position:relative;box-sizing:border-box;min-height:100%;padding:16px 32px 0;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
     '.sc *{box-sizing:border-box}',
     // Author display rules beat the browser's [hidden] rule: restate it.
     '.sc [hidden]{display:none !important}',

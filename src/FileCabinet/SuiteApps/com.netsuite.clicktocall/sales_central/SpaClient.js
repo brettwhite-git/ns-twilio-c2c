@@ -45,7 +45,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     };
 
     const STYLES = [
-        '.sc{position:relative;min-height:100%;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        '.sc{position:relative;box-sizing:border-box;min-height:100%;padding:16px 32px 0;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         '.sc *{box-sizing:border-box}',
         '.sc [hidden]{display:none !important}',
         '.sc button{font:inherit;color:inherit}',
