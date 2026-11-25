@@ -111,7 +111,9 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
         const late = {};
         (p.invoices || []).forEach((inv) => {
             const days = daysBetween(inv.dueIso, today);
-            if (!(days > 0) || days > INVOICE_DAYS) return;
+            // Nothing left to pay is not past due, whatever the status says
+            // (demo invoices: status Open, amount remaining 0; finding #103).
+            if (!(inv.remaining > 0) || !(days > 0) || days > INVOICE_DAYS) return;
             const k = String(inv.companyId || '');
             const l = late[k] || (late[k] = { name: inv.companyName || '', count: 0, days: 0, remaining: 0 });
             l.count++;
