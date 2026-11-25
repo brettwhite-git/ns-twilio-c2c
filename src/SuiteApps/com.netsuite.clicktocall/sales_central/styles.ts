@@ -1,0 +1,98 @@
+/**
+ * Sales Central CSS: the ORCA "sharp" contract (board SharpRules) and the
+ * layout pass (SCLayout, SCApp). Six sizes (12 meta, 13 base, 14 row
+ * name, 16 section, 20 title, 24 figures), weights 400 / 500 (600 only on
+ * the title and figures), radii 6 / 10 / 999, navy for selection and
+ * links, go green on Call only. Everything sits under .sc.
+ */
+
+export const STYLES = [
+    '.sc{position:relative;min-height:100%;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+    '.sc *{box-sizing:border-box}',
+    '.sc button{font:inherit;color:inherit}',
+    '.sc a{color:#1F3550;text-decoration:none}.sc a:hover{text-decoration:underline}',
+    '.sc .mut{color:#6F6B66}',
+    '.sc .num{font-variant-numeric:tabular-nums;text-align:right}',
+    '.sc .dot{width:6px;height:6px;border-radius:999px;flex:none;display:inline-block}',
+    // Header 56
+    '.sc-head{height:56px;display:flex;align-items:center;gap:12px;padding:0 24px}',
+    '.sc-head h1{margin:0;font-size:20px;line-height:26px;font-weight:600;letter-spacing:-0.01em}',
+    '.sc-head .mut{font-size:12px}',
+    // Tabs 40: underline only; the count is plain grey text (never a badge)
+    '.sc-tabs{display:flex;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+    '.sc-tab{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
+    '.sc-tab:hover{color:#161513}',
+    '.sc-tab[aria-selected="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #1F3550}',
+    '.sc-tab[disabled]{color:#A8A39C;cursor:default}',
+    '.sc-tab .cnt{font-weight:400;color:#6F6B66;font-variant-numeric:tabular-nums}',
+    '.sc-tab:focus-visible,.sc-row:focus-visible,.sc-pin:focus-visible,.sc-btn:focus-visible,.sc-icon:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+    // Filter row 48
+    '.sc-filters{display:flex;align-items:center;gap:8px;height:48px;padding:0 24px}',
+    '.sc-chip{height:28px;padding:0 10px;border-radius:6px;box-shadow:inset 0 0 0 1px #DEDBD7;font-size:12px;color:#6F6B66;display:inline-flex;align-items:center;gap:4px}',
+    '.sc-chip b{font-weight:500;color:#161513}',
+    // Section labels
+    '.sc-label{padding:4px 24px 8px;font-size:12px;font-weight:500;color:#6F6B66}',
+    '.sc-label .cnt{font-weight:400}',
+    // Do first cards (the exception; the table is the rule)
+    '.sc-pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 24px 24px}',
+    '.sc-pin{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:0;border-radius:10px;background:#FFFFFF;box-shadow:0 0 0 1px #ECEAE7;text-align:left;cursor:pointer;min-width:0;transition:box-shadow 150ms ease,transform 120ms cubic-bezier(0.23,1,0.32,1)}',
+    '.sc-pin:hover{box-shadow:0 0 0 1px #C9C5BF,0 4px 12px rgba(22,21,19,0.05)}',
+    '.sc-pin:active{transform:scale(0.99)}',
+    '.sc-pin .top{display:flex;align-items:center;gap:8px;font-size:12px}',
+    '.sc-pin .name{font-size:14px;font-weight:500}',
+    '.sc-pin .why{color:#4A4744}',
+    '.sc-pin .meta{font-size:12px;color:#6F6B66}',
+    // Table
+    '.sc-thead,.sc-row{display:grid;align-items:center;column-gap:16px;padding:0 24px}',
+    '.sc-thead{height:32px;border-bottom:1px solid #ECEAE7;font-size:12px;color:#6F6B66}',
+    '.sc-row{width:100%;min-height:48px;border:0;border-bottom:1px solid #ECEAE7;background:#FFFFFF;text-align:left;cursor:pointer}',
+    '.sc-row:hover{background:#FAFAF9}',
+    '.sc-row[aria-current="true"]{background:#F5F4F2}',
+    '.sc-needs .sc-thead,.sc-needs .sc-row{grid-template-columns:minmax(0,1fr) 140px 90px 100px 100px}',
+    '.sc-calls .sc-thead,.sc-calls .sc-row{grid-template-columns:110px 200px minmax(0,1fr) 70px 70px}',
+    '.sc-cell2{display:flex;flex-direction:column;min-width:0;padding:6px 0}',
+    '.sc-cell2 .l1{display:flex;gap:8px;align-items:baseline}',
+    '.sc-cell2 .name{font-size:14px;font-weight:500}',
+    '.sc-cell2 .why{color:#4A4744;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.sc-status{display:inline-flex;align-items:center;gap:6px}',
+    '.sc-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+    '.sc-strong{font-weight:500}',
+    // Empty / loading / error
+    '.sc-msg{padding:48px 24px;text-align:center;color:#6F6B66}',
+    '.sc-msg b{display:block;margin-bottom:4px;font-size:14px;font-weight:500;color:#161513}',
+    '.sc-ph{height:48px;border-bottom:1px solid #ECEAE7;padding:0 24px;display:flex;align-items:center}',
+    '.sc-ph span{height:10px;width:40%;border-radius:999px;background:#F5F4F2}',
+    '.sc-note{margin:0 24px 12px;padding:8px 12px;border-radius:6px;background:#F5F4F2;font-size:12px;color:#4A4744}',
+    // Buttons
+    '.sc-btn{height:30px;padding:0 12px;border:0;border-radius:6px;font-weight:500;cursor:pointer;white-space:nowrap;transition:transform 120ms cubic-bezier(0.23,1,0.32,1)}',
+    '.sc-btn:active{transform:scale(0.98)}',
+    '.sc-btn.go{background:#436B1D;color:#FFFFFF}',
+    '.sc-btn.go[disabled]{opacity:0.45;cursor:default;transform:none}',
+    '.sc-btn.gh{background:#FFFFFF;color:#161513;box-shadow:inset 0 0 0 1px #DEDBD7;display:inline-flex;align-items:center;text-decoration:none}',
+    '.sc-btn.gh:hover{box-shadow:inset 0 0 0 1px #A8A39C;text-decoration:none}',
+    '.sc-icon{width:30px;height:30px;padding:0;border:0;border-radius:6px;background:none;color:#4A4744;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}',
+    '.sc-icon:hover{background:#F5F4F2}',
+    '.sc-icon[disabled]{opacity:0.4;cursor:default}',
+    // Drawer 440, under the tabs, 16px above the bottom (Ask Oracle)
+    '.sc-drawer{position:fixed;right:0;bottom:16px;width:440px;max-width:100vw;background:#FFFFFF;box-shadow:-1px 0 0 #ECEAE7,-16px 0 32px rgba(22,21,19,0.08);display:flex;flex-direction:column;z-index:20;animation:sc-in 260ms cubic-bezier(0.32,0.72,0,1) both}',
+    '.sc-drawer.out{animation:sc-out 200ms cubic-bezier(0.32,0.72,0,1) both}',
+    '.sc-dhead{display:flex;align-items:center;gap:4px;height:48px;padding:0 8px 0 20px;border-bottom:1px solid #ECEAE7}',
+    '.sc-dhead .tools{margin-left:auto;display:flex;gap:2px}',
+    '.sc-dbody{flex:1;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:20px}',
+    '.sc-dtitle{display:flex;flex-direction:column;gap:2px}',
+    '.sc-dtitle b{font-size:20px;line-height:26px;font-weight:600}',
+    '.sc-glance{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}',
+    '.sc-glance div{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:6px;background:#F5F4F2}',
+    '.sc-glance b{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}',
+    '.sc-glance span{font-size:12px;color:#6F6B66}',
+    '.sc-sect{display:flex;flex-direction:column;gap:6px}',
+    '.sc-sect>.mut:first-child{font-size:12px;font-weight:500}',
+    '.sc-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:baseline}',
+    '.sc-dfoot{display:flex;align-items:center;gap:8px;padding:12px 20px;border-top:1px solid #ECEAE7}',
+    '.sc-dfoot .mut{margin-left:auto;font-size:12px}',
+    '@keyframes sc-in{from{transform:translateX(100%)}to{transform:none}}',
+    '@keyframes sc-out{from{transform:none}to{transform:translateX(100%)}}',
+    '@keyframes sc-fade{from{opacity:0}to{opacity:1}}',
+    '.sc-fade{animation:sc-fade 160ms ease-out both}',
+    '@media (prefers-reduced-motion: reduce){.sc-drawer,.sc-drawer.out{animation:sc-fade 150ms linear both}.sc-tab,.sc-btn,.sc-pin{transition:none}}'
+].join('\n');

@@ -1,0 +1,14 @@
+<singlepageapp scriptid="custspa_ctc_sales_central">
+    <name>Sales Central</name>
+    <description>Sales Central: what needs the rep now, calls, and the account drawer, with the phone dock.</description>
+    <url>sales-central</url>
+    <folder>[/SuiteApps/com.netsuite.clicktocall/sales_central/]</folder>
+    <clientscriptfile>[/SuiteApps/com.netsuite.clicktocall/sales_central/SpaClient.js]</clientscriptfile>
+    <serverscriptfile>[/SuiteApps/com.netsuite.clicktocall/sales_central/SpaServer.js]</serverscriptfile>
+    <loglevel>DEBUG</loglevel>
+    <!-- Standard roles only in SuiteApp XML. Custom rep roles (MFG Sales)
+         are added to the audience in the UI after install (README). -->
+    <audienceallroles>F</audienceallroles>
+    <audienceroles>ADMINISTRATOR|SALES_PERSON|SALES_MANAGER</audienceroles>
+    <executeas></executeas>
+</singlepageapp>

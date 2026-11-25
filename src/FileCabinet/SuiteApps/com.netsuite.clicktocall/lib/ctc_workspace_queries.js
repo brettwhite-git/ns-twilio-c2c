@@ -152,6 +152,27 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
         return rows.length > 0;
     };
 
+    /**
+     * Company names without the entity number ("Abbott Inc.", not
+     * "7 Abbott Inc."): customer.companyname, else entityid. One SuiteQL
+     * (10 units), none for no ids; at most 500 ids. Throws on a query error.
+     * @param {Array<string>} ids
+     * @returns {Object<string, string>} id → name
+     */
+    const companyNames = (ids) => {
+        const list = (ids || []).map((x) => parseInt(String(x), 10)).filter((n) => n > 0).slice(0, 500);
+        /** @type {Object<string, string>} */
+        const out = {};
+        if (!list.length) return out;
+        query.runSuiteQL({
+            query: 'SELECT id, companyname, entityid FROM customer WHERE id IN (' + list.map(() => '?').join(',') + ')',
+            params: list
+        }).asMappedResults().forEach((r) => {
+            out[String(r.id)] = String(r.companyname || r.entityid || '');
+        });
+        return out;
+    };
+
     const getBookCustomerIds = (params) => {
         try {
             const userId = parseInt(String((params && params.userId) || ''), 10);
@@ -219,7 +240,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
      *   ownerIds?: Array<string>,
      *   dateFilter?: Array,
      *   skipEntityType?: boolean,
-     *   includeUnlinked?: boolean
+     *   includeUnlinked?: boolean,
+     *   pastOnly?: boolean
      * }} [params]
      * `missedOnly` keeps only missed calls and voicemails (status 'Missed'
      * OR custevent_ctc_voicemail T). `voicemailOnly` keeps only voicemails
@@ -316,6 +338,8 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
                 if (filters.dateFrom) searchFilters.push('AND', ['startdate', 'onorafter', filters.dateFrom]);
                 if (filters.dateTo)   searchFilters.push('AND', ['startdate', 'onorbefore', filters.dateTo]);
             }
+            // `pastOnly`: no calls dated after today (Sales Central; finding #102).
+            if (p.pastOnly) searchFilters.push('AND', ['startdate', 'onorbefore', 'today']);
             if (filters.satMin) searchFilters.push('AND', ['custevent_ctc_satisfaction', 'greaterthanorequalto', String(filters.satMin)]);
             if (filters.status) searchFilters.push('AND', ['custevent_ctc_call_status', 'is', filters.status]);
             if (p.missedOnly) {
@@ -1712,7 +1736,9 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
         source('calls', () => {
             search.create({
                 type: search.Type.PHONE_CALL,
-                filters: [['company', 'anyof', entityId]],
+                // Past calls only: future-dated records would fill the 3
+                // newest and then be hidden, leaving no call (finding #101).
+                filters: [['company', 'anyof', entityId], 'AND', ['startdate', 'onorbefore', 'today']],
                 columns: [
                     { name: 'startdate', sort: search.Sort.DESC },
                     { name: 'createddate', sort: search.Sort.DESC },
@@ -1980,6 +2006,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
     return {
         displayCallTitle,
         isCustomerInBook,
+        companyNames,
         extractText,
         loadHistoryRows,
         loadTaskGroups,

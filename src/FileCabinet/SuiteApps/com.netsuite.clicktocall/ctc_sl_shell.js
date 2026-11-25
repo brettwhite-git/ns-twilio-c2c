@@ -552,6 +552,21 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
       return lastGoodPath;
     }
   }
+  // The shell's own address carries the frame's page (u=), so a reload
+  // returns to it.
+  function mirrorFramePath(path) {
+    if (!CFG.shellBase) return;
+    var sep = CFG.shellBase.indexOf('?') === -1 ? '?' : '&';
+    try { history.replaceState(null, '', CFG.shellBase + sep + 'u=' + encodeURIComponent(path) + (DEBUG ? '&debug=1' : '')); } catch (e) { /* ignore */ }
+  }
+  // An SPA in the frame (Sales Central) changes its hash with replaceState,
+  // which fires no event: it calls this after each change (asset 52).
+  window.__ctcShell.syncFramePath = function () {
+    var path = currentFramePath();
+    if (!isFramePath(path) || path === lastGoodPath) return;
+    lastGoodPath = path;
+    mirrorFramePath(path);
+  };
   if (nsFrame) nsFrame.addEventListener('load', function () {
     var loc, path, title, win;
     try {
@@ -570,10 +585,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     }
     lastGoodPath = path;
     sessionBack();
-    if (CFG.shellBase) {
-      var sep = CFG.shellBase.indexOf('?') === -1 ? '?' : '&';
-      try { history.replaceState(null, '', CFG.shellBase + sep + 'u=' + encodeURIComponent(path) + (DEBUG ? '&debug=1' : '')); } catch (e) { /* ignore */ }
-    }
+    mirrorFramePath(path);
     if (title) setRealTitle(title);
     logEvent('frame load', path);
     syncContext(win);

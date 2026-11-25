@@ -76,6 +76,7 @@ satisfaction score, full transcript, and extracted action items.
 - **Phone Call activity records** with full transcript, summary, score, tone keywords, action items
 - **Recording cleanup** — Twilio recordings auto-deleted after transcript extraction
 - **Multi-role support** — Admin + Sales Rep custom roles
+- **Sales Central** (`/spa-app/com.netsuite.clicktocall/sales-central`) — Needs me and Calls with the phone dock. After install, add any custom rep role (e.g. MFG Sales) to the SPA's audience (Customization › Scripting › Single Page Applications › Sales Central); SuiteApp XML can name standard roles only.
 
 ## How It Works
 

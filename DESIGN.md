@@ -12,6 +12,7 @@ Source of truth for how the product looks and behaves. Code follows this file; c
 | L3 | Design system (tokens, components, phone pill, dialer) | https://claude.ai/artifact/Jw98h4kH2Vk1m4NJgu9sy9 |
 | L4 | Screens (wizard, console, rep, manager) | https://claude.ai/artifact/GYfzs3wQ7b7fDHqcjQoSxt |
 | L5 | Demo callers (ElevenLabs agents on a Twilio number) | https://claude.ai/artifact/DuRKbSv33K4oyJVEoS5r1v |
+| SC | Sales Central ORCA (Standard boards: SharpRules, SCLayout, SCApp, Flow, TypeSystem, Focus 8/9/11-13; boards 1-7 and 10 are superseded drafts) | https://claude.ai/artifact/G6mQgR9FeQWZiuCV8jBQ57 |
 
 ## 0. Keeping design, canvas and code in sync
 
@@ -234,6 +235,15 @@ Check every proposal against these before drawing it:
   - Recommended actions (Approve / Dismiss)
 - **Narrow screens (<1280px):** the legacy slide-over (M4) stays until B has a full-page drawer fallback.
 
+## 5b. Sales Central (slice 1 built 2026-11-25, not live-tested)
+
+- **Frame (SCLayout):** an SPA, so NetSuite keeps its header, menu and Ask Oracle bar. Ours: header 56px (title 20/600, date 12px grey), **underline tabs** 40px (13px; selected = ink, 500, a 2px navy line; the count follows the label as plain grey text, never a badge; user, 2026-11-25), filter row 48px (chips read as sentences: Owner Me, Range …).
+- **Tabs:** Needs me and Calls are live; Pipeline, Tasks and Money show greyed ("Coming next") until built.
+- **Needs me (SCApp):** "Do first" = up to 3 cards (radius 10, hairline), then "All" as a table (48px rows, hairline rules; columns Account · why now, Status (6px dot + word, red text only when red), Next, Open, Last touch; numbers tabular, right-aligned). One row per account. **Order (decided 2026-11-25, finding #96):** call back (a missed call or voicemail in 14 days, not returned) → overdue task → task due today → follow-ups to review → invoices; an invoice is a reason only when it became due in the last 90 days ("3 invoices past due · oldest 18d"); older debt counts only in Open.
+- **Calls:** table When, Account, AI summary, Length, Score (score ≤ 3 in red). A call with no account is not clickable.
+- **Drawer:** 440px from the right under the tabs, 16px above the bottom; glance (open, overdue invoices, since last touch) on #F5F4F2 cells radius 6; Recent activity, Follow-ups, People as hairline-free lists; foot: Call (go green, the only green) and Open in NetSuite (ghost, `_top`); ↑ ↓ walk the list, Esc closes; in 260ms on the drawer curve, out 200ms.
+- **Contract (SharpRules):** sizes 12/13/14/16/20; weights 400/500 (600 on title and figures); radii 6/10/999; navy #1F3550 for selection, focus and links; neutrals #161513 / #4A4744 / #6F6B66 / #ECEAE7 / #F5F4F2.
+
 ## 6. Add to NetSuite (unknown numbers) — approved 2026-11-13, built asset 31
 
 - **Entry points:** an incoming unknown caller, wrap-up for an unknown number, and a Recents row with no record.
@@ -271,6 +281,8 @@ Check every proposal against these before drawing it:
 | 2026-11-24 | Asset 49: a saved voicemail's summary comes to the missed note: the phone asks `checkTranscript` for the voicemail's record (15 s × 12), so "Summary in about 2 min" is true; the summary shows under the line when in. Finding #92. |
 | 2026-11-24 | Asset 50: dock leftovers. Keys get smaller (56px) when Dial still does not fit (#79, seen live under the note with its voicemail line); the saved-voicemail tail "Summary in about 2 min" → "Summary soon" (it was cut off); the hidden phone page stops loading data for its unseen UI (#74, no visible change). Also: Sales Rep Central follow-up errors show under the row, never `alert()` (an alert froze the phone: Reconnecting…). |
 | 2026-11-25 | Asset 51: the phone follows you. A click in a phone-mode tab moves an idle phone there; a frozen or silent phone tab loses it to the visible tab in about 2 s; a remote never sticks on "Phone offline". Replaces the 2026-11-13 no-steal rule (user: "I want it to work seamlessly", no handover button). Finding #95. No new visual. |
+| 2026-11-25 | Sales Central slice 1 (shell, Needs me, Calls, account drawer) built to the ORCA Standard boards; underline tabs with plain counts, no nav badges (user). Shell asset 52: `syncFramePath` keeps the SPA's hash in `u=`. |
+| 2026-11-25 | Sales Central Needs me order (#96, user chose "recent + ranked last"): call back, overdue task, due today, to review, invoices; invoices count only when due in the last 90 days. ORCA canvas note `needsOrder`. |
 | 2026-11-18 | Asset 42: call-end Morph (End becomes Call back in place; Mute/Keypad shrink away, Done rises in, the timer gives way to "Call ended"; Dial rises in after the wrap-up), chosen over Fade in the call-end prototype. Session error reads "Reconnecting…" in the panel chip too, said once (no panel alert). An inbound call that never connected is a missed call on the pill as well as the panel (no "Call ended"). Findings #81–#83. |
 | 2026-11-18 | Asset 41: ring rule — one signal per state; Answer pulses in the pill, card and panel; Calling… breathes amber on the panel chip too; every ring ends 6px beyond its element (was ×1.5 / ×1.75 / ×2.75 / ×3.33). Chosen from the ring-motion prototype (Answer pulse over Chip only and Caller ring). |
 | 2026-11-15 | Asset 40: ringing view = call screen with "Ringing…" and the account block (fetched on the caller match), Decline · — · Answer; unknown caller frame; incoming card hint line; missed call lands on Dial with the pill above the note. |

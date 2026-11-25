@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile', './lib/ctc_sc_needs'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile, scNeeds) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -103,6 +103,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         // follow-up actions share one access rule (isAuthorizedForProposedTask).
         if (body.action === 'getWorkspaceHistory')  return getWorkspaceHistory(body);
         if (body.action === 'getCallDetail')        return getCallDetail(body);
+        // Sales Central (slice 1): the session user's own book, no phone needed.
+        if (body.action === 'salesCentralNeeds')    return salesCentralNeeds();
         if (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(FOLLOW_UP_ACTIONS, body.action)) {
             // The manager rule reads the team once per request, never from
             // an earlier request (a supervisor change applies at once).
@@ -1058,6 +1060,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
      * @param {boolean} [body.includeMissed]      - also return `missed`: the same period's
      *                                              missed calls and voicemails (portlet Missed tab)
      * @param {number} [body.missedLimit=5]       - max missed rows (1-25)
+     * @param {boolean} [body.pastOnly]          - no calls dated after today (Sales Central)
+     * @param {boolean} [body.companyNames]      - company names without the entity number (Sales Central)
      * @returns {Object} { rows: [...], total, missed?: { rows, total } } or { error }
      */
     const getWorkspaceHistory = (body) => {
@@ -1067,8 +1071,18 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
             filters: body.filters,
             todayOnly: !!body.todayOnly,
             dateRange: body.dateRange,
+            pastOnly: body.pastOnly === true,
             limit: body.limit
         });
+        // Sales Central: plain company names (no entity number; finding #97).
+        if (body.companyNames === true && result && !result.error) {
+            try {
+                const names = workspaceQueries.companyNames((result.rows || []).map((r) => r.companyId).filter(Boolean));
+                (result.rows || []).forEach((r) => { if (names[r.companyId]) r.companyName = names[r.companyId]; });
+            } catch (e) {
+                log.error({ title: 'CTC company names failed', details: (e && e.message) || String(e) });
+            }
+        }
         if (body.includeMissed && result && !result.error) {
             const missedLimit = Math.min(25, Math.max(1, parseInt(String(body.missedLimit || ''), 10) || 5));
             const missed = workspaceQueries.loadHistoryRows({
@@ -1169,6 +1183,20 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
      * @param {string} [body.owner] - the page's owner param ('team' | 'me' | <employee id>)
      * @returns {Object} { call, tasks } or { error }
      */
+    /**
+     * salesCentralNeeds: Sales Central's Needs me list for the session user
+     * (lib/ctc_sc_needs.js). About 50 units.
+     * @returns {{rows: Array<Object>, partial: Array<string>}|{error: string}}
+     */
+    const salesCentralNeeds = () => {
+        try {
+            return scNeeds.loadNeeds({ userId: runtime.getCurrentUser().id });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralNeeds failed', details: (e && e.message) || String(e) });
+            return { error: 'Could not load Needs me' };
+        }
+    };
+
     const getCallDetail = (body) => {
         try {
             const callId = String(body.callId == null ? '' : body.callId).trim();
