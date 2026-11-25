@@ -47,6 +47,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     const STYLES = [
         '.sc{position:relative;min-height:100%;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         '.sc *{box-sizing:border-box}',
+        '.sc [hidden]{display:none !important}',
         '.sc button{font:inherit;color:inherit}',
         '.sc a{color:#1F3550;text-decoration:none}.sc a:hover{text-decoration:underline}',
         '.sc .mut{color:#6F6B66}',
@@ -55,14 +56,15 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-head{height:56px;display:flex;align-items:center;gap:12px;padding:0 24px}',
         '.sc-head h1{margin:0;font-size:20px;line-height:26px;font-weight:600;letter-spacing:-0.01em}',
         '.sc-head .mut{font-size:12px}',
-        '.sc-tabs{display:flex;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+        '.sc-tabbar{display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+        '.sc-tabs{display:flex;gap:24px}',
         '.sc-tab{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
         '.sc-tab:hover{color:#161513}',
         '.sc-tab[aria-selected="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #1F3550}',
         '.sc-tab[disabled]{color:#A8A39C;cursor:default}',
         '.sc-tab .cnt{font-weight:400;color:#6F6B66;font-variant-numeric:tabular-nums}',
         '.sc-tab:focus-visible,.sc-row:focus-visible,.sc-pin:focus-visible,.sc-btn:focus-visible,.sc-icon:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
-        '.sc-filters{display:flex;align-items:center;gap:8px;height:48px;padding:0 24px}',
+        '.sc-filters{display:flex;align-items:center;gap:8px;margin-left:auto}',
         '.sc-chip{height:28px;padding:0 10px;border-radius:6px;box-shadow:inset 0 0 0 1px #DEDBD7;font-size:12px;color:#6F6B66;display:inline-flex;align-items:center;gap:4px}',
         '.sc-chip b{font-weight:500;color:#161513}',
         '.sc-label{padding:4px 24px 8px;font-size:12px;font-weight:500;color:#6F6B66}',
@@ -89,6 +91,59 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-status{display:inline-flex;align-items:center;gap:6px}',
         '.sc-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.sc-strong{font-weight:500}',
+        '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
+        '.sc-sumline{display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+        '.sc-sum{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent}',
+        '.sc-sum b{font-weight:500;color:#161513;font-variant-numeric:tabular-nums}',
+        '.sc-sum[aria-pressed="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #161513}',
+        '.sc-sum:focus-visible,.sc-more:focus-visible,.sc-toast-act:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+        '.sc-cd{width:8px;height:8px;border-radius:999px;flex:none}',
+        '.sc-band{display:flex;align-items:center;gap:8px;height:32px;padding:0 24px;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:500;color:#4A4744;background:#FAFAF9}',
+        '.sc-more{display:flex;align-items:center;width:100%;height:36px;padding:0 24px;border:0;border-bottom:1px solid #ECEAE7;background:#FFFFFF;font:inherit;font-size:12px;font-weight:500;color:#1F3550;cursor:pointer;text-align:left}',
+        '.sc-more:hover{text-decoration:underline}',
+        '.sc-band .cnt{font-weight:400}',
+        '.sc-hint{margin-left:auto;font-weight:400;color:#6F6B66}',
+        '.sc-trow{border-bottom:1px solid #ECEAE7}',
+        '.sc-trow[data-open="true"]{background:#F5F4F2;border-bottom-color:#DEDBD7}',
+        '.sc-trow{transition:background-color 600ms ease}',
+        '.sc-trow.sc-flash{background:#E9EDF2;transition:none}',
+        '.sc-tline{display:grid;align-items:center;min-height:48px;padding:0 24px}',
+        '.sc-tbtn{padding:0;border:0;background:none;text-align:left;font:inherit;color:inherit;cursor:pointer}',
+        '.sc-tbtn:hover{color:#1F3550}',
+        '.sc-ttitle{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+        '.sc-tline.tap{cursor:pointer}',
+        '.sc-tline.tap:hover{background:#FAFAF9}',
+        '.sc-trow[data-open="true"] .sc-tline.tap:hover{background:none}',
+        '.sc-acct{display:flex;align-items:center;gap:2px;min-width:0}',
+        '.sc-peek{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:none;color:#A8A39C;display:inline-flex;align-items:center;justify-content:center;flex:none;cursor:pointer}',
+        '.sc-peek:hover,.sc-peek[aria-current="true"]{color:#1F3550;background:#E9EDF2}',
+        '.sc-peek:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+        '.sc-from{display:flex;align-items:center;gap:8px;font-size:12px;color:#4A4744;min-width:0}',
+        '.sc-due{font-size:12px}',
+        '.sc-verbs{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}',
+        '.sc-btn.sm{height:28px;padding:0 10px;font-size:12px}',
+        '.sc-topen{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding:4px 24px 18px;animation:sc-rise 180ms cubic-bezier(0.23,1,0.32,1) both}',
+        '.sc-lbl{font-size:12px;font-weight:500;color:#6F6B66}',
+        '.sc-ctx{display:flex;flex-direction:column;gap:6px;padding-right:24px;color:#3B3935;min-width:0}',
+        '.sc-ctxt{white-space:pre-line;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}',
+        '.sc-ctx .sc-links{display:flex;gap:16px;margin-top:4px}',
+        '.sc-lk{border:0;background:none;padding:0;font:inherit;font-weight:500;color:#1F3550;cursor:pointer;text-decoration:none}',
+        '.sc-lk:hover{text-decoration:underline}',
+        '.sc-act{display:flex;flex-direction:column;gap:10px;padding-left:24px;border-left:1px solid #DEDBD7;min-width:0}',
+        '.sc-outs{display:inline-flex;align-self:flex-start;gap:2px;padding:2px;border-radius:7px;background:#E9E6E1}',
+        '.sc-opt{height:28px;padding:0 12px;border:0;border-radius:5px;background:none;color:#4A4744;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}',
+        '.sc-opt[aria-pressed="true"]{background:#FFFFFF;color:#161513;font-weight:500}',
+        '.sc-field{width:100%;box-sizing:border-box;min-height:32px;padding:6px 10px;border:0;border-radius:6px;box-shadow:inset 0 0 0 1px #DEDBD7;font:inherit;color:#161513;background:#FFFFFF}',
+        '.sc-field:focus{outline:2px solid #1F3550;outline-offset:0}',
+        '.sc-next{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px}',
+        '.sc-btn.pri{background:#1F3550;color:#FFFFFF}',
+        '.sc-btn[disabled]{opacity:0.5;cursor:default}',
+        '.sc-acts{display:flex;align-items:center;justify-content:flex-end;gap:8px}',
+        '.sc-acts .sc-err{margin-right:auto}',
+        '.sc-err{font-size:12px;color:#B3311F}',
+        '.sc-toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;height:40px;padding:0 16px;border-radius:10px;background:#161513;color:#FFFFFF;box-shadow:0 8px 24px rgba(22,21,19,0.18);z-index:30;gap:14px;animation:sc-fade 160ms ease-out both}',
+        '.sc-toast-act{padding:0;border:0;background:none;font:inherit;font-weight:500;color:#9DB4CF;cursor:pointer}',
+        '@keyframes sc-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
         '.sc-msg{padding:48px 24px;text-align:center;color:#6F6B66}',
         '.sc-msg b{display:block;margin-bottom:4px;font-size:14px;font-weight:500;color:#161513}',
         '.sc-ph{height:48px;border-bottom:1px solid #ECEAE7;padding:0 24px;display:flex;align-items:center}',
@@ -123,10 +178,10 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '@keyframes sc-out{from{transform:none}to{transform:translateX(100%)}}',
         '@keyframes sc-fade{from{opacity:0}to{opacity:1}}',
         '.sc-fade{animation:sc-fade 160ms ease-out both}',
-        '@media (prefers-reduced-motion: reduce){.sc-drawer,.sc-drawer.out{animation:sc-fade 150ms linear both}.sc-tab,.sc-btn,.sc-pin{transition:none}}'
+        '@media (prefers-reduced-motion: reduce){.sc-drawer,.sc-drawer.out{animation:sc-fade 150ms linear both}.sc-tab,.sc-btn,.sc-pin{transition:none}.sc-topen{animation:none}.sc-trow{transition:none}}'
     ].join('\n');
 
-    const LIVE_TABS = ['needs', 'calls'];
+    const LIVE_TABS = ['needs', 'tasks', 'calls'];
     const parseRoute = (hash) => {
         const parts = String(hash || '').replace(/^#\/?/, '').split('/');
         const tab = LIVE_TABS.indexOf(parts[0]) !== -1 ? parts[0] : 'needs';
@@ -301,6 +356,245 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         return buttons;
     };
 
+    const BANDS = [['overdue', 'Overdue'], ['today', 'Today'], ['week', 'This week'], ['later', 'Later']];
+    const GROUP_COLOR = {
+        suggested: '#5F7590', overdue: '#B3311F', today: '#B8730A', week: '#A8A39C', later: '#DEDBD7'
+    };
+    const SUGGESTION_CAP = 3;
+    const bandLabel = (band) => (BANDS.filter((b) => b[0] === band)[0] || ['', ''])[1];
+    const OUTCOMES = [['done', 'Done'], ['next', 'Next step'], ['reach', 'Couldn’t reach'], ['no', 'Not needed']];
+    const ACTION = {
+        done: 'Complete', next: 'Complete and add next step', reach: 'Try again tomorrow', no: 'Close as not needed'
+    };
+    const nextBusinessDay = (iso) => {
+        const d = new Date(iso + 'T12:00:00Z');
+        do {
+            d.setUTCDate(d.getUTCDate() + 1);
+        } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+        return d.toISOString().slice(0, 10);
+    };
+    const dueText = (r) => (r.due ? shortDate(r.due) : 'No date');
+    const dueColor = (r) => r.kind === 'suggestion' ? '#6F6B66' : r.band === 'overdue' ? '#B3311F' : r.band === 'today' ? '#B8730A' : '#6F6B66';
+    const displayTitle = (title) => title.replace(/^AI:\s*/, '');
+    const circle = (group) => {
+        const c = el('span', 'sc-cd');
+        c.style.background = GROUP_COLOR[group];
+        return c;
+    };
+    const plainNote = (note) => note.split(/\n|<br\s*\/?>/i).map((l) => l.trim()).filter(Boolean).join('\n');
+    const button = (cls, text, onClick) => {
+        const b = el('button', cls, text);
+        b.type = 'button';
+        b.addEventListener('click', onClick);
+        return b;
+    };
+    const link = (text, href) => {
+        const a = el('a', 'sc-lk', text);
+        a.href = href;
+        a.target = '_top';
+        return a;
+    };
+    const fromCell = (r) => {
+        const c = el('span', 'sc-from sc-clip');
+        if (!r.fromCall) {
+            c.classList.add('mut');
+            c.textContent = 'Added in NetSuite';
+            return c;
+        }
+        c.textContent = (r.fromCall.title || 'A call') + (r.fromCall.date ? ' · ' + shortDate(r.fromCall.date) : '');
+        return c;
+    };
+    const contextBlock = (r) => {
+        const w = el('div', 'sc-ctx');
+        const note = plainNote(r.note || '');
+        w.appendChild(el('span', 'sc-lbl', r.fromCall ? 'From the call' : 'Notes'));
+        w.appendChild(el('span', 'sc-ctxt' + (note ? '' : ' mut'), note || 'No notes on this task.'));
+        const links = el('div', 'sc-links');
+        if (r.fromCall)
+            links.appendChild(link('Open call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
+        links.appendChild(link('Open in NetSuite', '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
+        w.appendChild(links);
+        return w;
+    };
+    const actionBlock = (r, v) => {
+        const act = el('div', 'sc-act');
+        let outcome = 'done';
+        const outs = el('div', 'sc-outs');
+        outs.setAttribute('role', 'group');
+        outs.setAttribute('aria-label', 'Outcome');
+        const note = el('input', 'sc-field');
+        note.type = 'text';
+        note.placeholder = 'Add a note (optional)';
+        note.setAttribute('aria-label', 'Note');
+        const next = el('div', 'sc-next');
+        const nextTitle = el('input', 'sc-field');
+        nextTitle.type = 'text';
+        nextTitle.value = 'Follow up with ' + (r.companyName || 'the customer');
+        nextTitle.setAttribute('aria-label', 'Next step');
+        const nextDue = el('input', 'sc-field');
+        nextDue.type = 'date';
+        nextDue.value = nextBusinessDay(v.todayIso);
+        nextDue.setAttribute('aria-label', 'Next step due');
+        next.append(nextTitle, nextDue);
+        const err = el('span', 'sc-err');
+        err.setAttribute('role', 'alert');
+        const go = button('sc-btn pri', ACTION.done, () => {
+            const payload = { outcome: outcome, note: note.value.trim() };
+            if (outcome === 'next')
+                payload.next = { title: nextTitle.value.trim(), due: nextDue.value };
+            go.disabled = true;
+            err.textContent = '';
+            v.onComplete(r, payload).then((problem) => {
+                if (problem) {
+                    err.textContent = problem;
+                    go.disabled = false;
+                }
+            });
+        });
+        const paint = () => {
+            Array.from(outs.children).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute('data-o') === outcome)));
+            next.hidden = outcome !== 'next';
+            go.textContent = ACTION[outcome];
+        };
+        OUTCOMES.forEach(([o, label]) => {
+            const b = button('sc-opt', label, () => { outcome = o; paint(); });
+            b.setAttribute('data-o', o);
+            outs.appendChild(b);
+        });
+        const acts = el('div', 'sc-acts');
+        acts.append(err, button('sc-btn gh', 'Cancel', () => v.onToggle(r.id)), go);
+        act.append(outs, note, next, acts);
+        paint();
+        return act;
+    };
+    const suggestionVerbs = (r, v) => {
+        const cell = el('span', 'sc-verbs');
+        const err = el('span', 'sc-err sc-clip');
+        err.setAttribute('role', 'alert');
+        const act = (approve) => () => {
+            Array.from(cell.querySelectorAll('button')).forEach((b) => { b.disabled = true; });
+            err.textContent = '';
+            v.onSuggestion(r, approve).then((problem) => {
+                if (!problem)
+                    return;
+                err.textContent = problem;
+                err.title = problem;
+                Array.from(cell.querySelectorAll('button')).forEach((b) => { b.disabled = false; });
+            });
+        };
+        cell.append(err, button('sc-btn gh sm', 'Dismiss', act(false)), button('sc-btn pri sm', 'Approve', act(true)));
+        return cell;
+    };
+    const renderRow = (r, v) => {
+        const open = r.kind === 'task' && r.id === v.openId;
+        const row = el('div', 'sc-trow');
+        row.setAttribute('data-id', r.id);
+        row.setAttribute('data-open', String(open));
+        const line = el('div', 'sc-tline');
+        const text = displayTitle(r.title);
+        const title = r.kind === 'task' ? button('sc-tbtn sc-ttitle', text, () => v.onToggle(r.id)) : el('span', 'sc-ttitle', text);
+        if (r.kind === 'task')
+            title.setAttribute('aria-expanded', String(open));
+        const due = el('span', 'num sc-due', dueText(r));
+        due.style.color = dueColor(r);
+        let verb;
+        if (r.kind === 'suggestion')
+            verb = suggestionVerbs(r, v);
+        else if (open)
+            verb = el('span');
+        else
+            verb = el('span', 'sc-verbs');
+        if (r.kind === 'task' && !open)
+            verb.appendChild(button('sc-btn gh sm', 'Complete', () => v.onToggle(r.id)));
+        line.append(title, accountCell(r, v), fromCell(r), due, verb);
+        if (r.kind === 'task') {
+            line.classList.add('tap');
+            line.addEventListener('click', (e) => {
+                if (!e.target.closest('button, a, input, textarea'))
+                    v.onToggle(r.id);
+            });
+        }
+        row.appendChild(line);
+        if (open) {
+            const body = el('div', 'sc-topen');
+            body.append(contextBlock(r), actionBlock(r, v));
+            row.appendChild(body);
+        }
+        return row;
+    };
+    const accountCell = (r, v) => {
+        if (!r.companyId)
+            return el('span', 'sc-clip mut', '—');
+        const cell = el('span', 'sc-acct');
+        const peek = button('sc-peek', '', () => v.onOpenAccount(r));
+        peek.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
+        peek.setAttribute('data-id', r.companyId);
+        peek.setAttribute('aria-label', 'Account details: ' + (r.companyName || 'account'));
+        peek.title = 'Account details';
+        if (v.selectedAccount === r.companyId)
+            peek.setAttribute('aria-current', 'true');
+        cell.append(el('span', 'sc-clip', r.companyName || 'Account'), peek);
+        return cell;
+    };
+    const band = (group, label, count, hint) => {
+        const b = el('div', 'sc-band');
+        b.append(circle(group), el('span', '', label + ' '), el('span', 'cnt', String(count)));
+        if (hint)
+            b.appendChild(el('span', 'sc-hint', hint));
+        return b;
+    };
+    const renderTasks = (host, v) => {
+        clear(host);
+        host.className = 'sc-tasks sc-fade';
+        if (v.partial.length) {
+            host.appendChild(el('div', 'sc-note', 'Some sources did not load (' + v.partial.join(', ') + '). The list may be short.'));
+        }
+        if (!v.rows.length) {
+            const m = el('div', 'sc-msg');
+            m.append(el('b', '', 'No open tasks'), el('span', '', 'Tasks assigned to you and follow-ups suggested from your calls show here.'));
+            host.appendChild(m);
+            return [];
+        }
+        const suggestions = v.rows.filter((r) => r.kind === 'suggestion');
+        const inBand = (key) => v.rows.filter((r) => r.kind === 'task' && r.band === key);
+        const groups = [['all', 'All', v.rows.length], ['suggested', 'Suggested', suggestions.length]];
+        BANDS.forEach(([key, label]) => groups.push([key, label, inBand(key).length]));
+        const shown = groups.some((g) => g[0] === v.group && g[2] > 0) ? v.group : 'all';
+        const line = el('div', 'sc-sumline');
+        line.setAttribute('role', 'group');
+        line.setAttribute('aria-label', 'Show');
+        groups.forEach(([g, label, count]) => {
+            if (g !== 'all' && !count)
+                return;
+            const b = button('sc-sum', '', () => v.onGroup(g));
+            b.setAttribute('data-g', g);
+            b.setAttribute('aria-pressed', String(shown === g));
+            if (g !== 'all')
+                b.appendChild(circle(g));
+            b.append(el('span', '', label + ' '), el('b', '', String(count)));
+            line.appendChild(b);
+        });
+        host.appendChild(line);
+        const head = el('div', 'sc-thead');
+        head.append(el('span', '', 'Task'), el('span', '', 'Account'), el('span', '', 'From'), el('span', 'num', 'Due'), el('span'));
+        host.appendChild(head);
+        if (suggestions.length && (shown === 'all' || shown === 'suggested')) {
+            const capped = shown === 'all' && !v.showAllSuggested && suggestions.length > SUGGESTION_CAP;
+            host.appendChild(band('suggested', 'Suggested from your calls', suggestions.length, 'Approve adds it to your tasks'));
+            (capped ? suggestions.slice(0, SUGGESTION_CAP) : suggestions).forEach((r) => host.appendChild(renderRow(r, v)));
+            if (capped)
+                host.appendChild(button('sc-more', 'Show all ' + suggestions.length, v.onShowAllSuggested));
+        }
+        BANDS.forEach(([key, label]) => {
+            const items = inBand(key);
+            if (!items.length || (shown !== 'all' && shown !== key))
+                return;
+            host.appendChild(band(key, label, items.length));
+            items.forEach((r) => host.appendChild(renderRow(r, v)));
+        });
+        return Array.from(host.querySelectorAll('.sc-peek'));
+    };
+
     const ICON = {
         up: 'M6 15l6-6 6 6', down: 'M6 9l6 6 6-6', close: 'M6 6l12 12M18 6L6 18'
     };
@@ -425,6 +719,13 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     const TABS = [
         ['needs', 'Needs me'], ['pipeline', 'Pipeline'], ['tasks', 'Tasks'], ['calls', 'Calls'], ['money', 'Money']
     ];
+    const PROBLEM = {
+        forbidden: 'This task is not assigned to you.',
+        already_actioned: 'Already done. The list is updated.',
+        invalid_next_title: 'Give the next step a title.',
+        invalid_next_due: 'Pick a due date for the next step.',
+        invalid_note: 'The note is too long.'
+    };
     const startApp = (root, win) => {
         const style = el('style', '', STYLES);
         root.className = 'sc';
@@ -436,11 +737,16 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         tabs.setAttribute('aria-label', 'Sales Central');
         tabs.setAttribute('role', 'tablist');
         const filters = el('div', 'sc-filters');
+        const tabBar = el('div', 'sc-tabbar');
+        tabBar.append(tabs, filters);
         const content = el('div');
         const drawerHost = el('div');
-        root.append(head, tabs, filters, content, drawerHost);
+        root.append(head, tabBar, content, drawerHost);
         let route = parseRoute(win.location.hash);
-        const data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, error: '' };
+        const data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], error: '' };
+        let taskOpenId = '';
+        let taskGroup = 'all';
+        let showAllSuggested = false;
         let post = null;
         let listButtons = [];
         const accountsOf = (tab) => {
@@ -448,6 +754,11 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 const seen = {};
                 return (data.calls || []).filter((c) => c.companyId && !seen[c.companyId] && (seen[c.companyId] = true))
                     .map((c) => ({ companyId: c.companyId, name: c.companyName, entityType: 'customer', phone: c.phone }));
+            }
+            if (tab === 'tasks') {
+                const seen = {};
+                return (data.tasks || []).filter((t) => t.companyId && !seen[t.companyId] && (seen[t.companyId] = true))
+                    .map((t) => ({ companyId: t.companyId, name: t.companyName, entityType: 'customer', phone: '' }));
             }
             return (data.needs || []).map((r) => ({ companyId: r.companyId, name: r.name, entityType: r.entityType, phone: r.phone }));
         };
@@ -482,7 +793,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                     b.title = 'Coming next';
                 }
                 const count = id === 'needs' && data.needs ? String(data.needs.length)
-                    : id === 'calls' && data.calls ? String(data.callsTotal) : '';
+                    : id === 'tasks' && data.tasks ? String(data.tasks.length)
+                        : id === 'calls' && data.calls ? String(data.callsTotal) : '';
                 if (live && count)
                     b.appendChild(el('span', 'cnt', count));
                 b.addEventListener('click', () => { if (live && route.tab !== id)
@@ -497,7 +809,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 c.appendChild(el('b', '', v));
                 return c;
             };
-            filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : 'Last 14 days'));
+            filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : route.tab === 'tasks' ? 'All open' : 'Last 14 days'));
         };
         const loading = () => {
             clear(content);
@@ -519,6 +831,22 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 failed(data.error);
                 return;
             }
+            if (route.tab === 'tasks') {
+                if (!data.tasks) {
+                    loading();
+                    return;
+                }
+                listButtons = renderTasks(content, { rows: data.tasks, openId: taskOpenId, selectedAccount: route.account,
+                    group: taskGroup, showAllSuggested: showAllSuggested,
+                    todayIso: today, partial: data.tasksPartial,
+                    onToggle: (id) => { taskOpenId = taskOpenId === id ? '' : id; renderContent(); },
+                    onGroup: (g) => { taskGroup = g; renderContent(); },
+                    onShowAllSuggested: () => { showAllSuggested = true; renderContent(); },
+                    onOpenAccount: (r) => openAccount(r.companyId),
+                    onComplete: completeTask,
+                    onSuggestion: actOnSuggestion });
+                return;
+            }
             if (route.tab === 'calls') {
                 if (!data.calls) {
                     loading();
@@ -536,6 +864,87 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                     partial: data.needsPartial, onOpen: (r) => openAccount(r.companyId) });
             }
         };
+        const toast = (text, action) => {
+            const old = root.querySelector('.sc-toast');
+            if (old)
+                old.remove();
+            const t = el('div', 'sc-toast', text);
+            t.setAttribute('role', 'status');
+            if (action) {
+                const b = el('button', 'sc-toast-act', action[0]);
+                b.type = 'button';
+                b.addEventListener('click', () => { t.remove(); action[1](); });
+                t.appendChild(b);
+            }
+            root.appendChild(t);
+            win.setTimeout(() => t.remove(), action ? 6000 : 3500);
+        };
+        const reveal = (id) => {
+            taskGroup = 'all';
+            renderContent();
+            const row = content.querySelector('.sc-trow[data-id="' + id + '"]');
+            if (!row)
+                return;
+            if (typeof row.scrollIntoView === 'function')
+                row.scrollIntoView({ block: 'center' });
+            row.classList.add('sc-flash');
+            win.setTimeout(() => row.classList.remove('sc-flash'), 900);
+        };
+        const loadNeeds = () => post({ action: 'salesCentralNeeds' }).then((d) => {
+            if (d.error)
+                throw new Error(d.error);
+            data.needs = d.rows || [];
+            data.needsPartial = d.partial || [];
+        }).catch((e) => {
+            data.needs = [];
+            data.needsPartial = ['all: ' + e.message];
+        });
+        const loadTasks = () => post({ action: 'salesCentralTasks' }).then((d) => {
+            if (d.error)
+                throw new Error(d.error);
+            data.tasks = d.rows || [];
+            data.tasksPartial = d.partial || [];
+        }).catch((e) => {
+            data.tasks = [];
+            data.tasksPartial = ['all: ' + e.message];
+        });
+        const refreshAfterWrite = (message) => {
+            taskOpenId = '';
+            toast(message);
+            Promise.all([loadTasks(), loadNeeds()]).then(() => render(true));
+        };
+        const completeTask = (r, p) => post({ action: 'salesCentralCompleteTask', taskId: r.id, outcome: p.outcome, note: p.note, next: p.next }).then((d) => {
+            if (d.error) {
+                if (d.error === 'already_actioned')
+                    refreshAfterWrite(PROBLEM.already_actioned);
+                return PROBLEM[d.error] || 'Could not save. Try again.';
+            }
+            refreshAfterWrite(p.outcome === 'reach' ? 'Kept open, due tomorrow · ' + r.title
+                : p.outcome === 'next' ? 'Completed · next step added · ' + r.title
+                    : p.outcome === 'no' ? 'Closed as not needed · ' + r.title : 'Completed · ' + r.title);
+            return '';
+        }).catch(() => 'Could not save. Try again.');
+        const actOnSuggestion = (r, approve) => post(approve && r.assignTo
+            ? { action: 'approveProposedTask', taskId: r.id, edits: { assigneeId: r.assignTo } }
+            : { action: approve ? 'approveProposedTask' : 'rejectProposedTask', taskId: r.id }).then((d) => {
+            if (d.error)
+                return d.error === 'forbidden' ? 'Not allowed: this call is not yours or your team\u2019s.' : 'Could not save. Try again.';
+            if (!approve) {
+                refreshAfterWrite('Dismissed · ' + r.title);
+                return '';
+            }
+            taskOpenId = '';
+            const newId = String(d.nativeTaskId || '');
+            Promise.all([loadTasks(), loadNeeds()]).then(() => {
+                render(true);
+                const made = (data.tasks || []).filter((t) => t.kind === 'task' && t.id === newId)[0];
+                if (made)
+                    toast('Approved · now in ' + bandLabel(made.band) + ' · ' + r.title, ['Show', () => reveal(newId)]);
+                else
+                    toast('Approved · ' + r.title);
+            });
+            return '';
+        }).catch(() => 'Could not save. Try again.');
         const step = (dir) => {
             const list = accountsOf(route.tab);
             const i = list.findIndex((a) => a.companyId === route.account);
@@ -623,15 +1032,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 throw new Error('No RESTlet URL from the phone set-up.');
             post = makePost(restlet);
             const p = post;
-            p({ action: 'salesCentralNeeds' }).then((d) => {
-                if (d.error)
-                    throw new Error(d.error);
-                data.needs = d.rows || [];
-                data.needsPartial = d.partial || [];
-            }).catch((e) => {
-                data.needs = [];
-                data.needsPartial = ['all: ' + e.message];
-            }).then(() => render(true));
+            loadNeeds().then(() => render(true));
+            loadTasks().then(() => render(true));
             p({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
                 if (d.error)
                     throw new Error(d.error);

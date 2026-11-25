@@ -8,10 +8,12 @@
 import {el, clear, localToday} from './dom';
 import {STYLES} from './styles';
 import {parseRoute, formatRoute, LIVE_TABS, Route, TabId} from './route';
-import {makePost, Post, NeedsRow, CallRow} from './api';
+import {makePost, Post, NeedsRow, CallRow, TaskRow, CompletePayload} from './api';
 import {mountDock, setDockContext, callWithDock, DockWindow} from './dock';
 import {renderNeeds} from './needs';
 import {renderCalls} from './calls';
+import {renderTasks, bandLabel} from './tasks';
+import type {TaskGroup} from './tasks';
 import {openDrawer, closeDrawer, DrawerAccount} from './drawer';
 
 const TABS: Array<[TabId, string]> = [
@@ -23,8 +25,19 @@ interface Data {
     needsPartial: string[];
     calls: CallRow[] | null;
     callsTotal: number;
+    tasks: TaskRow[] | null;
+    tasksPartial: string[];
     error: string;
 }
+
+// RESTlet error codes a rep can act on, in plain words.
+const PROBLEM: Record<string, string> = {
+    forbidden: 'This task is not assigned to you.',
+    already_actioned: 'Already done. The list is updated.',
+    invalid_next_title: 'Give the next step a title.',
+    invalid_next_due: 'Pick a due date for the next step.',
+    invalid_note: 'The note is too long.'
+};
 
 export const startApp = (root: HTMLElement, win: DockWindow): void => {
     const style = el('style', '', STYLES);
@@ -39,12 +52,17 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     tabs.setAttribute('aria-label', 'Sales Central');
     tabs.setAttribute('role', 'tablist');
     const filters = el('div', 'sc-filters');
+    const tabBar = el('div', 'sc-tabbar');
+    tabBar.append(tabs, filters);
     const content = el('div');
     const drawerHost = el('div');
-    root.append(head, tabs, filters, content, drawerHost);
+    root.append(head, tabBar, content, drawerHost);
 
     let route: Route = parseRoute(win.location.hash);
-    const data: Data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, error: '' };
+    const data: Data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], error: '' };
+    let taskOpenId = '';
+    let taskGroup: TaskGroup = 'all';
+    let showAllSuggested = false;
     let post: Post | null = null;
     let listButtons: HTMLElement[] = [];
 
@@ -54,6 +72,11 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
             const seen: Record<string, boolean> = {};
             return (data.calls || []).filter((c) => c.companyId && !seen[c.companyId] && (seen[c.companyId] = true))
                 .map((c) => ({ companyId: c.companyId, name: c.companyName, entityType: 'customer', phone: c.phone }));
+        }
+        if (tab === 'tasks') {
+            const seen: Record<string, boolean> = {};
+            return (data.tasks || []).filter((t) => t.companyId && !seen[t.companyId] && (seen[t.companyId] = true))
+                .map((t) => ({ companyId: t.companyId, name: t.companyName, entityType: 'customer', phone: '' }));
         }
         return (data.needs || []).map((r) => ({ companyId: r.companyId, name: r.name, entityType: r.entityType, phone: r.phone }));
     };
@@ -92,6 +115,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
                 b.title = 'Coming next';
             }
             const count = id === 'needs' && data.needs ? String(data.needs.length)
+                : id === 'tasks' && data.tasks ? String(data.tasks.length)
                 : id === 'calls' && data.calls ? String(data.callsTotal) : '';
             if (live && count) b.appendChild(el('span', 'cnt', count));
             b.addEventListener('click', () => { if (live && route.tab !== id) go({ tab: id, account: '' }); });
@@ -105,7 +129,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
             c.appendChild(el('b', '', v));
             return c;
         };
-        filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : 'Last 14 days'));
+        filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : route.tab === 'tasks' ? 'All open' : 'Last 14 days'));
     };
 
     // ---- Content ----
@@ -122,6 +146,19 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     const openAccount = (companyId: string): void => go({ tab: route.tab, account: companyId });
     const renderContent = (): void => {
         if (data.error) { failed(data.error); return; }
+        if (route.tab === 'tasks') {
+            if (!data.tasks) { loading(); return; }
+            listButtons = renderTasks(content, { rows: data.tasks, openId: taskOpenId, selectedAccount: route.account,
+                group: taskGroup, showAllSuggested: showAllSuggested,
+                todayIso: today, partial: data.tasksPartial,
+                onToggle: (id) => { taskOpenId = taskOpenId === id ? '' : id; renderContent(); },
+                onGroup: (g) => { taskGroup = g; renderContent(); },
+                onShowAllSuggested: () => { showAllSuggested = true; renderContent(); },
+                onOpenAccount: (r) => openAccount(r.companyId),
+                onComplete: completeTask,
+                onSuggestion: actOnSuggestion });
+            return;
+        }
         if (route.tab === 'calls') {
             if (!data.calls) { loading(); return; }
             listButtons = renderCalls(content, { rows: data.calls, selected: route.account, todayIso: today,
@@ -132,6 +169,81 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
                 partial: data.needsPartial, onOpen: (r) => openAccount(r.companyId) });
         }
     };
+
+    // ---- Tasks: write, then reload the lists that show tasks ----
+    const toast = (text: string, action?: [string, () => void]): void => {
+        const old = root.querySelector('.sc-toast');
+        if (old) old.remove();
+        const t = el('div', 'sc-toast', text);
+        t.setAttribute('role', 'status');
+        if (action) {
+            const b = el('button', 'sc-toast-act', action[0]);
+            b.type = 'button';
+            b.addEventListener('click', () => { t.remove(); action[1](); });
+            t.appendChild(b);
+        }
+        root.appendChild(t);
+        win.setTimeout(() => t.remove(), action ? 6000 : 3500);
+    };
+    /** Show one task: its group, scrolled into view, a single flash. */
+    const reveal = (id: string): void => {
+        taskGroup = 'all';
+        renderContent();
+        const row = content.querySelector('.sc-trow[data-id="' + id + '"]') as HTMLElement | null;
+        if (!row) return;
+        if (typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'center' });
+        row.classList.add('sc-flash');
+        win.setTimeout(() => row.classList.remove('sc-flash'), 900);
+    };
+    const loadNeeds = (): Promise<void> => (post as Post)<{ rows: NeedsRow[]; partial?: string[] }>({ action: 'salesCentralNeeds' }).then((d) => {
+        if (d.error) throw new Error(d.error);
+        data.needs = d.rows || [];
+        data.needsPartial = d.partial || [];
+    }).catch((e: Error) => {
+        data.needs = [];
+        data.needsPartial = ['all: ' + e.message];
+    });
+    const loadTasks = (): Promise<void> => (post as Post)<{ rows: TaskRow[]; partial?: string[] }>({ action: 'salesCentralTasks' }).then((d) => {
+        if (d.error) throw new Error(d.error);
+        data.tasks = d.rows || [];
+        data.tasksPartial = d.partial || [];
+    }).catch((e: Error) => {
+        data.tasks = [];
+        data.tasksPartial = ['all: ' + e.message];
+    });
+    const refreshAfterWrite = (message: string): void => {
+        taskOpenId = '';
+        toast(message);
+        Promise.all([loadTasks(), loadNeeds()]).then(() => render(true));
+    };
+    const completeTask = (r: TaskRow, p: CompletePayload): Promise<string> =>
+        (post as Post)<{ ok?: boolean; due?: string }>({ action: 'salesCentralCompleteTask', taskId: r.id, outcome: p.outcome, note: p.note, next: p.next }).then((d) => {
+            if (d.error) {
+                if (d.error === 'already_actioned') refreshAfterWrite(PROBLEM.already_actioned);
+                return PROBLEM[d.error] || 'Could not save. Try again.';
+            }
+            refreshAfterWrite(p.outcome === 'reach' ? 'Kept open, due tomorrow · ' + r.title
+                : p.outcome === 'next' ? 'Completed · next step added · ' + r.title
+                : p.outcome === 'no' ? 'Closed as not needed · ' + r.title : 'Completed · ' + r.title);
+            return '';
+        }).catch(() => 'Could not save. Try again.');
+    const actOnSuggestion = (r: TaskRow, approve: boolean): Promise<string> =>
+        (post as Post)<{ ok?: boolean; nativeTaskId?: string | number }>(approve && r.assignTo
+            ? { action: 'approveProposedTask', taskId: r.id, edits: { assigneeId: r.assignTo } }
+            : { action: approve ? 'approveProposedTask' : 'rejectProposedTask', taskId: r.id }).then((d) => {
+            if (d.error) return d.error === 'forbidden' ? 'Not allowed: this call is not yours or your team\u2019s.' : 'Could not save. Try again.';
+            if (!approve) { refreshAfterWrite('Dismissed · ' + r.title); return ''; }
+            // Say where the new Task went (#111): its band after the reload.
+            taskOpenId = '';
+            const newId = String(d.nativeTaskId || '');
+            Promise.all([loadTasks(), loadNeeds()]).then(() => {
+                render(true);
+                const made = (data.tasks || []).filter((t) => t.kind === 'task' && t.id === newId)[0];
+                if (made) toast('Approved · now in ' + bandLabel(made.band) + ' · ' + r.title, ['Show', () => reveal(newId)]);
+                else toast('Approved · ' + r.title);
+            });
+            return '';
+        }).catch(() => 'Could not save. Try again.');
 
     // ---- Drawer ----
     const step = (dir: -1 | 1): string => {
@@ -206,14 +318,8 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         if (!restlet) throw new Error('No RESTlet URL from the phone set-up.');
         post = makePost(restlet);
         const p = post;
-        p<{ rows: NeedsRow[]; partial?: string[] }>({ action: 'salesCentralNeeds' }).then((d) => {
-            if (d.error) throw new Error(d.error);
-            data.needs = d.rows || [];
-            data.needsPartial = d.partial || [];
-        }).catch((e: Error) => {
-            data.needs = [];
-            data.needsPartial = ['all: ' + e.message];
-        }).then(() => render(true));
+        loadNeeds().then(() => render(true));
+        loadTasks().then(() => render(true));
         p<{ rows: CallRow[]; total?: number }>({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
             if (d.error) throw new Error(d.error);
             data.calls = d.rows || [];

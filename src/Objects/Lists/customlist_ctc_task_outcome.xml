@@ -1,0 +1,20 @@
+<customlist scriptid="customlist_ctc_task_outcome">
+    <name>CTC Task Outcome</name>
+    <description>How a rep closed or tried a Task in Sales Central: Done, Not needed (closed without doing it), Couldn't reach (kept open, due moved to tomorrow).</description>
+    <isinactive>F</isinactive>
+    <isordered>T</isordered>
+    <customvalues>
+        <customvalue scriptid="val_ctc_to_done">
+            <value>Done</value>
+            <isinactive>F</isinactive>
+        </customvalue>
+        <customvalue scriptid="val_ctc_to_not_needed">
+            <value>Not needed</value>
+            <isinactive>F</isinactive>
+        </customvalue>
+        <customvalue scriptid="val_ctc_to_no_reach">
+            <value>Couldn't reach</value>
+            <isinactive>F</isinactive>
+        </customvalue>
+    </customvalues>
+</customlist>

@@ -1,0 +1,10 @@
+<crmcustomfield scriptid="custevent_ctc_source_call">
+    <label>Source Phone Call</label>
+    <description>The Phone Call this Task came from (set when a rep approves a follow-up suggested from the call).</description>
+    <fieldtype>SELECT</fieldtype>
+    <selectrecordtype>-22</selectrecordtype>
+    <appliestotask>T</appliestotask>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>2</searchlevel>
+</crmcustomfield>

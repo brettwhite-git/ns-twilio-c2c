@@ -9,6 +9,8 @@
 export const STYLES = [
     '.sc{position:relative;min-height:100%;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
     '.sc *{box-sizing:border-box}',
+    // Author display rules beat the browser's [hidden] rule: restate it.
+    '.sc [hidden]{display:none !important}',
     '.sc button{font:inherit;color:inherit}',
     '.sc a{color:#1F3550;text-decoration:none}.sc a:hover{text-decoration:underline}',
     '.sc .mut{color:#6F6B66}',
@@ -19,7 +21,9 @@ export const STYLES = [
     '.sc-head h1{margin:0;font-size:20px;line-height:26px;font-weight:600;letter-spacing:-0.01em}',
     '.sc-head .mut{font-size:12px}',
     // Tabs 40: underline only; the count is plain grey text (never a badge)
-    '.sc-tabs{display:flex;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+    // Tab row: tabs left, Owner / Range chips at the right end (#113)
+    '.sc-tabbar{display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+    '.sc-tabs{display:flex;gap:24px}',
     '.sc-tab{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
     '.sc-tab:hover{color:#161513}',
     '.sc-tab[aria-selected="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #1F3550}',
@@ -27,7 +31,7 @@ export const STYLES = [
     '.sc-tab .cnt{font-weight:400;color:#6F6B66;font-variant-numeric:tabular-nums}',
     '.sc-tab:focus-visible,.sc-row:focus-visible,.sc-pin:focus-visible,.sc-btn:focus-visible,.sc-icon:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
     // Filter row 48
-    '.sc-filters{display:flex;align-items:center;gap:8px;height:48px;padding:0 24px}',
+    '.sc-filters{display:flex;align-items:center;gap:8px;margin-left:auto}',
     '.sc-chip{height:28px;padding:0 10px;border-radius:6px;box-shadow:inset 0 0 0 1px #DEDBD7;font-size:12px;color:#6F6B66;display:inline-flex;align-items:center;gap:4px}',
     '.sc-chip b{font-weight:500;color:#161513}',
     // Section labels
@@ -57,6 +61,64 @@ export const STYLES = [
     '.sc-status{display:inline-flex;align-items:center;gap:6px}',
     '.sc-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '.sc-strong{font-weight:500}',
+    // Tasks (ORCA ScTasks2, variant A): context in columns; an open task splits into context | action
+    '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
+    // Summary line (#116): groups styled like the tabs; a click shows one group
+    '.sc-sumline{display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+    '.sc-sum{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent}',
+    '.sc-sum b{font-weight:500;color:#161513;font-variant-numeric:tabular-nums}',
+    '.sc-sum[aria-pressed="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #161513}',
+    '.sc-sum:focus-visible,.sc-more:focus-visible,.sc-toast-act:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+    // A group's colour is one small circle (#115); headings stay neutral
+    '.sc-cd{width:8px;height:8px;border-radius:999px;flex:none}',
+    '.sc-band{display:flex;align-items:center;gap:8px;height:32px;padding:0 24px;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:500;color:#4A4744;background:#FAFAF9}',
+    '.sc-more{display:flex;align-items:center;width:100%;height:36px;padding:0 24px;border:0;border-bottom:1px solid #ECEAE7;background:#FFFFFF;font:inherit;font-size:12px;font-weight:500;color:#1F3550;cursor:pointer;text-align:left}',
+    '.sc-more:hover{text-decoration:underline}',
+    '.sc-band .cnt{font-weight:400}',
+    '.sc-hint{margin-left:auto;font-weight:400;color:#6F6B66}',
+    '.sc-trow{border-bottom:1px solid #ECEAE7}',
+    // The open task: one shade darker than the bands, a hairline under it (#112)
+    '.sc-trow[data-open="true"]{background:#F5F4F2;border-bottom-color:#DEDBD7}',
+    '.sc-trow{transition:background-color 600ms ease}',
+    '.sc-trow.sc-flash{background:#E9EDF2;transition:none}',
+    '.sc-tline{display:grid;align-items:center;min-height:48px;padding:0 24px}',
+    '.sc-tbtn{padding:0;border:0;background:none;text-align:left;font:inherit;color:inherit;cursor:pointer}',
+    '.sc-tbtn:hover{color:#1F3550}',
+    '.sc-ttitle{font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+    '.sc-tline.tap{cursor:pointer}',
+    '.sc-tline.tap:hover{background:#FAFAF9}',
+    '.sc-trow[data-open="true"] .sc-tline.tap:hover{background:none}',
+    // Peek: the only way to the account drawer from a task (#118)
+    '.sc-acct{display:flex;align-items:center;gap:2px;min-width:0}',
+    '.sc-peek{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:none;color:#A8A39C;display:inline-flex;align-items:center;justify-content:center;flex:none;cursor:pointer}',
+    '.sc-peek:hover,.sc-peek[aria-current="true"]{color:#1F3550;background:#E9EDF2}',
+    '.sc-peek:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+    '.sc-from{display:flex;align-items:center;gap:8px;font-size:12px;color:#4A4744;min-width:0}',
+    '.sc-due{font-size:12px}',
+    '.sc-verbs{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}',
+    '.sc-btn.sm{height:28px;padding:0 10px;font-size:12px}',
+    '.sc-topen{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding:4px 24px 18px;animation:sc-rise 180ms cubic-bezier(0.23,1,0.32,1) both}',
+    '.sc-lbl{font-size:12px;font-weight:500;color:#6F6B66}',
+    '.sc-ctx{display:flex;flex-direction:column;gap:6px;padding-right:24px;color:#3B3935;min-width:0}',
+    '.sc-ctxt{white-space:pre-line;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}',
+    '.sc-ctx .sc-links{display:flex;gap:16px;margin-top:4px}',
+    '.sc-lk{border:0;background:none;padding:0;font:inherit;font-weight:500;color:#1F3550;cursor:pointer;text-decoration:none}',
+    '.sc-lk:hover{text-decoration:underline}',
+    '.sc-act{display:flex;flex-direction:column;gap:10px;padding-left:24px;border-left:1px solid #DEDBD7;min-width:0}',
+    '.sc-outs{display:inline-flex;align-self:flex-start;gap:2px;padding:2px;border-radius:7px;background:#E9E6E1}',
+    '.sc-opt{height:28px;padding:0 12px;border:0;border-radius:5px;background:none;color:#4A4744;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}',
+    '.sc-opt[aria-pressed="true"]{background:#FFFFFF;color:#161513;font-weight:500}',
+    '.sc-field{width:100%;box-sizing:border-box;min-height:32px;padding:6px 10px;border:0;border-radius:6px;box-shadow:inset 0 0 0 1px #DEDBD7;font:inherit;color:#161513;background:#FFFFFF}',
+    '.sc-field:focus{outline:2px solid #1F3550;outline-offset:0}',
+    '.sc-next{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px}',
+    '.sc-btn.pri{background:#1F3550;color:#FFFFFF}',
+    '.sc-btn[disabled]{opacity:0.5;cursor:default}',
+    '.sc-acts{display:flex;align-items:center;justify-content:flex-end;gap:8px}',
+    '.sc-acts .sc-err{margin-right:auto}',
+    '.sc-err{font-size:12px;color:#B3311F}',
+    '.sc-toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;height:40px;padding:0 16px;border-radius:10px;background:#161513;color:#FFFFFF;box-shadow:0 8px 24px rgba(22,21,19,0.18);z-index:30;gap:14px;animation:sc-fade 160ms ease-out both}',
+    '.sc-toast-act{padding:0;border:0;background:none;font:inherit;font-weight:500;color:#9DB4CF;cursor:pointer}',
+    '@keyframes sc-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
     // Empty / loading / error
     '.sc-msg{padding:48px 24px;text-align:center;color:#6F6B66}',
     '.sc-msg b{display:block;margin-bottom:4px;font-size:14px;font-weight:500;color:#161513}',
@@ -94,5 +156,5 @@ export const STYLES = [
     '@keyframes sc-out{from{transform:none}to{transform:translateX(100%)}}',
     '@keyframes sc-fade{from{opacity:0}to{opacity:1}}',
     '.sc-fade{animation:sc-fade 160ms ease-out both}',
-    '@media (prefers-reduced-motion: reduce){.sc-drawer,.sc-drawer.out{animation:sc-fade 150ms linear both}.sc-tab,.sc-btn,.sc-pin{transition:none}}'
+    '@media (prefers-reduced-motion: reduce){.sc-drawer,.sc-drawer.out{animation:sc-fade 150ms linear both}.sc-tab,.sc-btn,.sc-pin{transition:none}.sc-topen{animation:none}.sc-trow{transition:none}}'
 ].join('\n');

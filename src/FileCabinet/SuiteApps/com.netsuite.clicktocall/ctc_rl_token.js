@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile', './lib/ctc_sc_needs'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile, scNeeds) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile', './lib/ctc_sc_needs', './lib/ctc_sc_tasks'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile, scNeeds, scTasks) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -105,6 +105,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         if (body.action === 'getCallDetail')        return getCallDetail(body);
         // Sales Central (slice 1): the session user's own book, no phone needed.
         if (body.action === 'salesCentralNeeds')    return salesCentralNeeds();
+        if (body.action === 'salesCentralTasks')    return salesCentralTasks();
+        if (body.action === 'salesCentralCompleteTask') return salesCentralCompleteTask(body);
         if (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(FOLLOW_UP_ACTIONS, body.action)) {
             // The manager rule reads the team once per request, never from
             // an earlier request (a supervisor change applies at once).
@@ -1197,6 +1199,32 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         }
     };
 
+    /**
+     * salesCentralTasks: the session user's open Tasks and call suggestions
+     * (lib/ctc_sc_tasks.js). About 60 units.
+     */
+    const salesCentralTasks = () => {
+        try {
+            return scTasks.loadTasks({ userId: runtime.getCurrentUser().id });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralTasks failed', details: (e && e.message) || String(e) });
+            return { error: 'Could not load tasks' };
+        }
+    };
+
+    /**
+     * salesCentralCompleteTask: complete (or retry) one Task with an outcome;
+     * the Task must be assigned to the user (Administrator: any).
+     */
+    const salesCentralCompleteTask = (body) => {
+        try {
+            return scTasks.completeTask({ userId: runtime.getCurrentUser().id, isAdmin: isAdministrator(), body: body });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralCompleteTask failed', details: (e && e.message) || String(e) });
+            return { error: 'Complete failed' };
+        }
+    };
+
     const getCallDetail = (body) => {
         try {
             const callId = String(body.callId == null ? '' : body.callId).trim();
@@ -1818,7 +1846,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
     };
 
     /**
-     * Who an approver may give the Task to: the source call's owner, the
+     * Who an approver may give the Task to: the approver, the source call's owner, the
      * customer's sales rep (the default), or someone in the approver's team
      * (lib/ctc_rc_scope.js: the people they supervise; for an Administrator
      * every active phone user).
@@ -1827,7 +1855,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
      * @returns {boolean}
      */
     const isAllowedAssignee = (assigneeId, ctx) => {
-        if (assigneeId === ctx.callOwnerId || assigneeId === ctx.salesRepId) return true;
+        if (assigneeId === ctx.callOwnerId || assigneeId === ctx.salesRepId || assigneeId === String(ctx.userId)) return true;
         return teamIdsOf(ctx.userId, isAdministrator()).indexOf(assigneeId) !== -1;
     };
 
@@ -1926,6 +1954,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
             if (sourceContact) task.setValue({ fieldId: 'contact', value: sourceContact });
             if (finalAssignee) task.setValue({ fieldId: 'assigned', value: finalAssignee });
             if (finalDueValue) task.setValue({ fieldId: 'duedate', value: finalDueValue });
+            // The call it came from (Sales Central "Why it exists", 2026-11-25).
+            if (sourceCallId) task.setValue({ fieldId: 'custevent_ctc_source_call', value: sourceCallId });
             if (editsPriority) task.setValue({ fieldId: 'priority', value: editsPriority });
             const nativeTaskId = task.save({ ignoreMandatoryFields: true });
 

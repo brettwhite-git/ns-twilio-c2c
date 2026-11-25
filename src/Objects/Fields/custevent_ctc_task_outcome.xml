@@ -1,0 +1,10 @@
+<crmcustomfield scriptid="custevent_ctc_task_outcome">
+    <label>Outcome</label>
+    <description>How the rep last closed or tried this Task in Sales Central (Done, Not needed, Couldn't reach). Reportable; the rep's note goes to Message.</description>
+    <fieldtype>SELECT</fieldtype>
+    <selectrecordtype>[scriptid=customlist_ctc_task_outcome]</selectrecordtype>
+    <appliestotask>T</appliestotask>
+    <displaytype>NORMAL</displaytype>
+    <ismandatory>F</ismandatory>
+    <searchlevel>2</searchlevel>
+</crmcustomfield>

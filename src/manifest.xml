@@ -8,6 +8,7 @@
         <features>
             <feature required="true">SERVERSIDESCRIPTING</feature>
             <feature required="true">CUSTOMRECORDS</feature>
+            <feature required="true">CRM</feature>
         </features>
     </dependencies>
 </manifest>

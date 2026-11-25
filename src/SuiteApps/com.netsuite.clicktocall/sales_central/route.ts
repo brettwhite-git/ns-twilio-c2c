@@ -5,7 +5,7 @@
  */
 
 export type TabId = 'needs' | 'pipeline' | 'tasks' | 'calls' | 'money';
-export const LIVE_TABS: TabId[] = ['needs', 'calls'];
+export const LIVE_TABS: TabId[] = ['needs', 'tasks', 'calls'];
 
 export interface Route { tab: TabId; account: string; }
 

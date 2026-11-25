@@ -35,3 +35,14 @@ export const makePost = (restletUrl: string): Post => (body) =>
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
     });
+
+export interface TaskRow {
+    kind: 'task' | 'suggestion'; id: string; title: string; companyId: string; companyName: string;
+    contactId: string; due: string; band: 'overdue' | 'today' | 'week' | 'later'; status: string; priority: string;
+    note: string; fromCall: { id: string; title: string; date: string } | null;
+    /** Suggestions: who Approve gives the Task to (the call's rep, else the approver). */
+    assignTo?: string;
+}
+
+export type Outcome = 'done' | 'next' | 'reach' | 'no';
+export interface CompletePayload { outcome: Outcome; note: string; next?: { title: string; due: string } }
