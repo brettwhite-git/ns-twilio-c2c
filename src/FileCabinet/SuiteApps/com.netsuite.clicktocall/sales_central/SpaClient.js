@@ -128,7 +128,10 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-topen{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding:4px 24px 18px;animation:sc-rise 180ms cubic-bezier(0.23,1,0.32,1) both}',
         '.sc-lbl{font-size:12px;font-weight:500;color:#6F6B66}',
         '.sc-ctx{display:flex;flex-direction:column;gap:6px;padding-right:24px;color:#3B3935;min-width:0}',
-        '.sc-ctxt{white-space:pre-line;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}',
+        '.sc-ctxt{white-space:pre-line;max-height:152px;overflow:auto}',
+        '.sc-cancel{margin-right:auto;height:30px;padding:0;border:0;background:none;font:inherit;font-weight:500;color:#6F6B66;cursor:pointer}',
+        '.sc-cancel:hover{color:#161513}',
+        '.sc-cancel:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
         '.sc-ctx .sc-links{display:flex;gap:16px;margin-top:4px}',
         '.sc-lk{border:0;background:none;padding:0;font:inherit;font-weight:500;color:#1F3550;cursor:pointer;text-decoration:none}',
         '.sc-lk:hover{text-decoration:underline}',
@@ -411,13 +414,13 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     const contextBlock = (r) => {
         const w = el('div', 'sc-ctx');
         const note = plainNote(r.note || '');
-        w.appendChild(el('span', 'sc-lbl', r.fromCall ? 'From the call' : 'Notes'));
+        w.appendChild(el('span', 'sc-lbl', 'Notes'));
         w.appendChild(el('span', 'sc-ctxt' + (note ? '' : ' mut'), note || 'No notes on this task.'));
-        const links = el('div', 'sc-links');
-        if (r.fromCall)
+        if (r.fromCall) {
+            const links = el('div', 'sc-links');
             links.appendChild(link('Open call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
-        links.appendChild(link('Open in NetSuite', '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
-        w.appendChild(links);
+            w.appendChild(links);
+        }
         return w;
     };
     const actionBlock = (r, v) => {
@@ -428,7 +431,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         outs.setAttribute('aria-label', 'Outcome');
         const note = el('input', 'sc-field');
         note.type = 'text';
-        note.placeholder = 'Add a note (optional)';
+        note.placeholder = 'Add a note';
         note.setAttribute('aria-label', 'Note');
         const next = el('div', 'sc-next');
         const nextTitle = el('input', 'sc-field');
@@ -455,6 +458,21 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 }
             });
         });
+        const save = button('sc-btn gh', 'Save note', () => {
+            const text = note.value.trim();
+            if (!text) {
+                note.focus();
+                return;
+            }
+            save.disabled = true;
+            err.textContent = '';
+            v.onAddNote(r, text).then((problem) => {
+                if (problem) {
+                    err.textContent = problem;
+                    save.disabled = false;
+                }
+            });
+        });
         const paint = () => {
             Array.from(outs.children).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute('data-o') === outcome)));
             next.hidden = outcome !== 'next';
@@ -466,8 +484,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             outs.appendChild(b);
         });
         const acts = el('div', 'sc-acts');
-        acts.append(err, button('sc-btn gh', 'Cancel', () => v.onToggle(r.id)), go);
-        act.append(outs, note, next, acts);
+        acts.append(button('sc-cancel', 'Cancel', () => v.onToggle(r.id)), save, go);
+        act.append(outs, note, next, acts, err);
         paint();
         return act;
     };
@@ -504,8 +522,10 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         let verb;
         if (r.kind === 'suggestion')
             verb = suggestionVerbs(r, v);
-        else if (open)
-            verb = el('span');
+        else if (open) {
+            verb = el('span', 'sc-verbs');
+            verb.appendChild(link('Open in NetSuite', '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
+        }
         else
             verb = el('span', 'sc-verbs');
         if (r.kind === 'task' && !open)
@@ -850,6 +870,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                     onShowAllSuggested: () => { showAllSuggested = true; renderContent(); },
                     onOpenAccount: (r) => openAccount(r.companyId),
                     onComplete: completeTask,
+                    onAddNote: addTaskNote,
                     onSuggestion: actOnSuggestion });
                 return;
             }
@@ -928,6 +949,14 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             refreshAfterWrite(p.outcome === 'reach' ? 'Kept open, due tomorrow · ' + r.title
                 : p.outcome === 'next' ? 'Completed · next step added · ' + r.title
                     : p.outcome === 'no' ? 'Closed as not needed · ' + r.title : 'Completed · ' + r.title);
+            return '';
+        }).catch(() => 'Could not save. Try again.');
+        const addTaskNote = (r, note) => post({ action: 'salesCentralAddTaskNote', taskId: r.id, note: note }).then((d) => {
+            if (d.error)
+                return PROBLEM[d.error] || 'Could not save. Try again.';
+            r.note = r.note ? r.note + '\n\n' + (d.line || note) : (d.line || note);
+            renderContent();
+            toast('Note added · ' + r.title.replace(/^AI:\s*/, ''));
             return '';
         }).catch(() => 'Could not save. Try again.');
         const actOnSuggestion = (r, approve) => post(approve && r.assignTo

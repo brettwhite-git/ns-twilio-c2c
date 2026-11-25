@@ -104,7 +104,11 @@ export const STYLES = [
     '.sc-topen{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding:4px 24px 18px;animation:sc-rise 180ms cubic-bezier(0.23,1,0.32,1) both}',
     '.sc-lbl{font-size:12px;font-weight:500;color:#6F6B66}',
     '.sc-ctx{display:flex;flex-direction:column;gap:6px;padding-right:24px;color:#3B3935;min-width:0}',
-    '.sc-ctxt{white-space:pre-line;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden}',
+    // Notes grow at the bottom, so the newest line must stay visible: scroll, not clamp
+    '.sc-ctxt{white-space:pre-line;max-height:152px;overflow:auto}',
+    '.sc-cancel{margin-right:auto;height:30px;padding:0;border:0;background:none;font:inherit;font-weight:500;color:#6F6B66;cursor:pointer}',
+    '.sc-cancel:hover{color:#161513}',
+    '.sc-cancel:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
     '.sc-ctx .sc-links{display:flex;gap:16px;margin-top:4px}',
     '.sc-lk{border:0;background:none;padding:0;font:inherit;font-weight:500;color:#1F3550;cursor:pointer;text-decoration:none}',
     '.sc-lk:hover{text-decoration:underline}',

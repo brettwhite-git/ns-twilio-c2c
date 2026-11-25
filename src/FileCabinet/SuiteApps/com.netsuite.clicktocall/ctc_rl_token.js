@@ -107,6 +107,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         if (body.action === 'salesCentralNeeds')    return salesCentralNeeds();
         if (body.action === 'salesCentralTasks')    return salesCentralTasks();
         if (body.action === 'salesCentralCompleteTask') return salesCentralCompleteTask(body);
+        if (body.action === 'salesCentralAddTaskNote') return salesCentralAddTaskNote(body);
         if (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(FOLLOW_UP_ACTIONS, body.action)) {
             // The manager rule reads the team once per request, never from
             // an earlier request (a supervisor change applies at once).
@@ -1222,6 +1223,19 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         } catch (e) {
             log.error({ title: 'CTC salesCentralCompleteTask failed', details: (e && e.message) || String(e) });
             return { error: 'Complete failed' };
+        }
+    };
+
+    /**
+     * salesCentralAddTaskNote: add a dated note to one Task's Message
+     * (add-only, #119); same access rule as salesCentralCompleteTask.
+     */
+    const salesCentralAddTaskNote = (body) => {
+        try {
+            return scTasks.addNote({ userId: runtime.getCurrentUser().id, isAdmin: isAdministrator(), body: body });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralAddTaskNote failed', details: (e && e.message) || String(e) });
+            return { error: 'Add note failed' };
         }
     };
 

@@ -39,6 +39,8 @@ export interface TasksView {
     onShowAllSuggested: () => void;
     onOpenAccount: (row: TaskRow) => void;
     onComplete: (row: TaskRow, p: CompletePayload) => Promise<string>;
+    /** Add-only note on the Task's Message (#119); resolves to a problem, or ''. */
+    onAddNote: (row: TaskRow, note: string) => Promise<string>;
     onSuggestion: (row: TaskRow, approve: boolean) => Promise<string>;
 }
 
@@ -92,15 +94,17 @@ const fromCell = (r: TaskRow): HTMLElement => {
     return c;
 };
 
+/** Notes = the Task's native Message field, read only here; the one note box is in the action column (#119). */
 const contextBlock = (r: TaskRow): HTMLElement => {
     const w = el('div', 'sc-ctx');
     const note = plainNote(r.note || '');
-    w.appendChild(el('span', 'sc-lbl', r.fromCall ? 'From the call' : 'Notes'));
+    w.appendChild(el('span', 'sc-lbl', 'Notes'));
     w.appendChild(el('span', 'sc-ctxt' + (note ? '' : ' mut'), note || 'No notes on this task.'));
-    const links = el('div', 'sc-links');
-    if (r.fromCall) links.appendChild(link('Open call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
-    links.appendChild(link('Open in NetSuite', '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
-    w.appendChild(links);
+    if (r.fromCall) {
+        const links = el('div', 'sc-links');
+        links.appendChild(link('Open call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
+        w.appendChild(links);
+    }
     return w;
 };
 
@@ -112,7 +116,7 @@ const actionBlock = (r: TaskRow, v: TasksView): HTMLElement => {
     outs.setAttribute('aria-label', 'Outcome');
     const note = el('input', 'sc-field');
     note.type = 'text';
-    note.placeholder = 'Add a note (optional)';
+    note.placeholder = 'Add a note';
     note.setAttribute('aria-label', 'Note');
     const next = el('div', 'sc-next');
     const nextTitle = el('input', 'sc-field');
@@ -135,6 +139,16 @@ const actionBlock = (r: TaskRow, v: TasksView): HTMLElement => {
             if (problem) { err.textContent = problem; go.disabled = false; }
         });
     });
+    // Save note: add it and keep the task open. The outcome button: close with the note on its line.
+    const save = button('sc-btn gh', 'Save note', () => {
+        const text = note.value.trim();
+        if (!text) { note.focus(); return; }
+        save.disabled = true;
+        err.textContent = '';
+        v.onAddNote(r, text).then((problem) => {
+            if (problem) { err.textContent = problem; save.disabled = false; }
+        });
+    });
     const paint = (): void => {
         Array.from(outs.children).forEach((b) => b.setAttribute('aria-pressed', String(b.getAttribute('data-o') === outcome)));
         next.hidden = outcome !== 'next';
@@ -146,8 +160,8 @@ const actionBlock = (r: TaskRow, v: TasksView): HTMLElement => {
         outs.appendChild(b);
     });
     const acts = el('div', 'sc-acts');
-    acts.append(err, button('sc-btn gh', 'Cancel', () => v.onToggle(r.id)), go);
-    act.append(outs, note, next, acts);
+    acts.append(button('sc-cancel', 'Cancel', () => v.onToggle(r.id)), save, go);
+    act.append(outs, note, next, acts, err);
     paint();
     return act;
 };
@@ -183,7 +197,11 @@ const renderRow = (r: TaskRow, v: TasksView): HTMLElement => {
     due.style.color = dueColor(r);
     let verb: HTMLElement;
     if (r.kind === 'suggestion') verb = suggestionVerbs(r, v);
-    else if (open) verb = el('span');
+    else if (open) {
+        // The open row's empty verb cell holds the way out to the record.
+        verb = el('span', 'sc-verbs');
+        verb.appendChild(link('Open in NetSuite', '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
+    }
     else verb = el('span', 'sc-verbs');
     if (r.kind === 'task' && !open) verb.appendChild(button('sc-btn gh sm', 'Complete', () => v.onToggle(r.id)));
     line.append(title, accountCell(r, v), fromCell(r), due, verb);

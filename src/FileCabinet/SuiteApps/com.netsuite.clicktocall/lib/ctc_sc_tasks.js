@@ -14,6 +14,9 @@
  *   next  - Completed (Done) and a new Task for the next step.
  * The rep's note is added to Message with the date and the outcome. A Task
  * made from a call also marks its proposed task completed.
+ *
+ * Notes are add-only (#119): addNote appends "<date> · Note: <text>" to
+ * Message and never rewrites what is there.
  */
 // eslint-disable-next-line suitescript/no-log-module
 define(['N/search', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_followups', './ctc_rc_scope'],
@@ -162,6 +165,12 @@ define(['N/search', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_fo
         return { ok: true, outcome: outcome, note: note, next: next };
     };
 
+    /** Add one line to the Task's Message, after a blank line; never rewrites it. */
+    const appendLine = (task, line) => {
+        const before = String(task.getValue({ fieldId: 'message' }) || '');
+        task.setValue({ fieldId: 'message', value: before ? before + '\n\n' + line : line });
+    };
+
     const valueOf = (v) => (Array.isArray(v) ? (v.length ? String(v[0].value || '') : '') : String(v || ''));
 
     /**
@@ -179,9 +188,7 @@ define(['N/search', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_fo
 
         const todayIso = rcScope.todayIso();
         const label = OUTCOME_TEXT[req.outcome];
-        const line = todayIso + ' · ' + label + (req.note ? ': ' + req.note : '');
-        const before = String(task.getValue({ fieldId: 'message' }) || '');
-        task.setValue({ fieldId: 'message', value: before ? before + '\n\n' + line : line });
+        appendLine(task, todayIso + ' · ' + label + (req.note ? ': ' + req.note : ''));
         task.setText({ fieldId: 'custevent_ctc_task_outcome', text: label });
         const out = { ok: true, outcome: req.outcome };
         if (req.outcome === 'reach') {
@@ -209,6 +216,25 @@ define(['N/search', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_fo
         return out;
     };
 
+    /**
+     * Add a note to one Task (add-only). Same access rule as completeTask:
+     * assigned to the user, or an Administrator. Works on a completed Task too.
+     * @param {{userId: (string|number), isAdmin: boolean, body: {taskId: string, note: string}}} p
+     * @returns {{ok: true, line: string}|{error: string}}
+     */
+    const addNote = (p) => {
+        const b = p.body || {};
+        if (!/^[0-9]{1,12}$/.test(String(b.taskId || ''))) return { error: 'taskId required' };
+        const note = String(b.note == null ? '' : b.note).trim();
+        if (!note || note.length > MAX_NOTE) return { error: 'invalid_note' };
+        const task = record.load({ type: record.Type.TASK, id: b.taskId, isDynamic: false });
+        if (!p.isAdmin && valueOf(task.getValue({ fieldId: 'assigned' })) !== String(p.userId)) return { error: 'forbidden' };
+        const line = rcScope.todayIso() + ' · Note: ' + note;
+        appendLine(task, line);
+        task.save({ ignoreMandatoryFields: true });
+        return { ok: true, line: line };
+    };
+
     /** The proposed task that made this Task, if any: completed too. Never throws. */
     const markFollowUpDone = (taskId) => {
         try {
@@ -228,5 +254,5 @@ define(['N/search', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_fo
         }
     };
 
-    return { bandOf, buildTasks, loadTasks, readComplete, completeTask };
+    return { bandOf, buildTasks, loadTasks, readComplete, completeTask, addNote };
 });

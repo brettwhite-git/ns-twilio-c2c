@@ -156,6 +156,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
                 onShowAllSuggested: () => { showAllSuggested = true; renderContent(); },
                 onOpenAccount: (r) => openAccount(r.companyId),
                 onComplete: completeTask,
+                onAddNote: addTaskNote,
                 onSuggestion: actOnSuggestion });
             return;
         }
@@ -225,6 +226,15 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
             refreshAfterWrite(p.outcome === 'reach' ? 'Kept open, due tomorrow · ' + r.title
                 : p.outcome === 'next' ? 'Completed · next step added · ' + r.title
                 : p.outcome === 'no' ? 'Closed as not needed · ' + r.title : 'Completed · ' + r.title);
+            return '';
+        }).catch(() => 'Could not save. Try again.');
+    // A note keeps the task open: append the saved line in place, no reload.
+    const addTaskNote = (r: TaskRow, note: string): Promise<string> =>
+        (post as Post)<{ ok?: boolean; line?: string }>({ action: 'salesCentralAddTaskNote', taskId: r.id, note: note }).then((d) => {
+            if (d.error) return PROBLEM[d.error] || 'Could not save. Try again.';
+            r.note = r.note ? r.note + '\n\n' + (d.line || note) : (d.line || note);
+            renderContent();
+            toast('Note added · ' + r.title.replace(/^AI:\s*/, ''));
             return '';
         }).catch(() => 'Could not save. Try again.');
     const actOnSuggestion = (r: TaskRow, approve: boolean): Promise<string> =>
