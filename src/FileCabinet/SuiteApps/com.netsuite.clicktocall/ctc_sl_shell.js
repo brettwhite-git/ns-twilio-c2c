@@ -561,6 +561,9 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   }
   // An SPA in the frame (Sales Central) changes its hash with replaceState,
   // which fires no event: it calls this after each change (asset 52).
+  // The frame's page, for the dock (an SPA page keeps the pill on the
+  // bottom row, finding #99).
+  window.__ctcShell.framePath = function () { return lastGoodPath; };
   window.__ctcShell.syncFramePath = function () {
     var path = currentFramePath();
     if (!isFramePath(path) || path === lastGoodPath) return;
@@ -588,6 +591,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     mirrorFramePath(path);
     if (title) setRealTitle(title);
     logEvent('frame load', path);
+    notifyDock();
     syncContext(win);
     watchFrameWindow(win);
     followFrame(win);

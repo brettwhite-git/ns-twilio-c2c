@@ -174,6 +174,12 @@
     var CORNER_KEY = 'ctc-dock-pos';
     var CORNERS = ['tl', 'tc', 'tr', 'ml', 'mr', 'bl', 'bc', 'br'];
     var DEFAULT_CORNER = 'bc';
+    // This SuiteApp's SPA pages (lib/ctc_dock.js SPA_PATH_PREFIX): their
+    // content runs edge to edge, so on arriving there the pill goes to the
+    // bottom row (finding #99): a side or top point shows as the bottom
+    // point on its side. A drag or arrow key there puts it anywhere again
+    // (user, 2026-11-25: the bottom is only the default on arrival).
+    var SPA_PATH_PREFIX = '/spa-app/com.netsuite.clicktocall/';
     var PANEL_W = 380;
     // One panel height for every view: the Search view at full size. Views
     // that need less leave room at the bottom; views that need more scroll.
@@ -563,6 +569,10 @@
     var snap = null; // null until the anchor answers (or the hello times out)
     var expanded = false;
     var panel = null; // { el, handle, render(snap), open(opts), focus(what), setContext(ctx) } from ctc_dock_dialer.js
+    var bottomOnly = false;
+    // The rep moved the pill on this SPA page: their point wins until the
+    // next page change.
+    var movedOnPage = false;
     var corner = readCorner();
     var pos = { x: 0, y: 0 };
     var drag = null;
@@ -683,8 +693,40 @@
         return u && CORNERS.indexOf(u.corner) !== -1 ? u.corner : DEFAULT_CORNER;
     }
 
-    // The pill (or the panel, which shares its point) moved.
+    // The page this pill sits over: in the shell, the NetSuite frame's page.
+    function pagePath() {
+        try {
+            if (mode === 'shell') {
+                var s = window.__ctcShell;
+                return s && typeof s.framePath === 'function' ? String(s.framePath() || '') : '';
+            }
+            return String(window.location.pathname || '');
+        } catch (e) { return ''; }
+    }
+
+    function fitCorner(c) {
+        return bottomOnly && !movedOnPage && c.charAt(0) !== 'b' ? 'b' + c.charAt(1) : c;
+    }
+
+    // Arriving on an SPA page the pill moves to the bottom row; leaving
+    // it, back to the saved point.
+    function checkPage() {
+        var next = pagePath().indexOf(SPA_PATH_PREFIX) === 0;
+        if (next === bottomOnly) return;
+        bottomOnly = next;
+        movedOnPage = false;
+        var c = fitCorner(readCorner());
+        if (c === corner) return;
+        corner = c;
+        if (mountedAt) {
+            place(true);
+            if (expanded) placePanel();
+        }
+    }
+
+    // The pill (or the panel, which shares its point) moved by the rep.
     function saveCorner(c) {
+        if (bottomOnly) movedOnPage = true;
         try { window.localStorage.setItem(CORNER_KEY, c); } catch (e) { /* private mode */ }
         saveUi();
     }
@@ -735,7 +777,7 @@
         if (!u) return;
         applyingUi = true;
         try {
-            var c = readCorner();
+            var c = fitCorner(readCorner());
             if (c !== corner) {
                 corner = c;
                 place(false);
@@ -2772,7 +2814,7 @@
     // --- Sync and resize ---
     window.addEventListener('storage', function (e) {
         if (e.key !== CORNER_KEY || CORNERS.indexOf(e.newValue) === -1) return;
-        corner = e.newValue;
+        corner = fitCorner(e.newValue);
         place(true);
         if (expanded) placePanel();
     });
@@ -2881,7 +2923,7 @@
         /**
          * Shell: the lock state changed (phoneState()); draw again.
          */
-        refresh: function () { render(); },
+        refresh: function () { checkPage(); render(); },
 
         /**
          * true when the dialer panel is loaded (the shell's busy banner is
@@ -2893,6 +2935,7 @@
 
     function mount() {
         document.body.appendChild(host);
+        checkPage();
         mountedAt = Date.now();
         // Outside: once the lock check says who holds the phone, the shared
         // UI state applies (the panel can open only then).
