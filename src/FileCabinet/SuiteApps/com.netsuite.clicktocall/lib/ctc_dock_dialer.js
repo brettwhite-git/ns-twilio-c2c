@@ -229,6 +229,8 @@
         // then ends in an ellipsis; it never goes under the buttons.
         '.dl-head-row{flex:1 1 100%;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,auto) minmax(max-content,1fr);align-items:center}',
         '.dl-head-row .dl-icon{margin-left:8px}',
+        // Sales Central (asset 54): the header grid's empty left column.
+        '.dl-head-row .dl-sc{grid-column:1;justify-self:start;margin-left:0}',
         '.dl-head-r{grid-column:3;display:flex;align-items:center;justify-content:flex-end}',
         '.dl-head .dl-status{grid-column:2;justify-self:center;max-width:100%;min-width:0;box-sizing:border-box;overflow:hidden;white-space:nowrap}',
         '.dl-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:999px;font-size:12px;color:var(--dl-dot,#94A6BF);background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08)}',
@@ -742,6 +744,7 @@
         + '<div class="dl-head" title="Drag to move the phone">'
         +   '<span class="dl-grip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>'
         +   '<div class="dl-head-row">'
+        +     '<button type="button" class="dl-icon dl-sc" aria-label="Open Sales Central" title="Open Sales Central" hidden><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE2 + '><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"></rect><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"></rect><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"></rect><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"></rect></svg></button>'
         +     '<span class="dl-status"><span class="dot"></span><span class="dl-status-label"></span></span>'
         +     '<div class="dl-head-r">'
         +     '<button type="button" class="dl-icon dl-vm" aria-label="Voicemail" title="Voicemail" aria-pressed="false" hidden><svg width="18" height="18" viewBox="0 0 24 24" ' + STROKE2 + '>' + ICON_VM + '</svg><span class="dl-vm-badge" aria-hidden="true" hidden></span></button>'
@@ -973,7 +976,7 @@
         filter: q('.dl-filter'), filterDot: q('.dl-fdot'), filterMenu: q('.dl-filter-menu'),
         results: q('.dl-results'), searchMsg: q('.dl-search-msg'),
         recents: q('.dl-recent-list'), recentMsg: q('.dl-recent-msg'), recentQuery: q('.dl-rq'),
-        vm: q('.dl-vm'), vmBadge: q('.dl-vm-badge'), vmPane: q('.dl-vm-wrap'), vmBack: q('.dl-vm-back'),
+        sc: q('.dl-sc'), vm: q('.dl-vm'), vmBadge: q('.dl-vm-badge'), vmPane: q('.dl-vm-wrap'), vmBack: q('.dl-vm-back'),
         vmList: q('.dl-vm-list'), vmMsg: q('.dl-vm-msg'),
         liveAv: q('.dl-live-av'), liveName: q('.dl-live-name'), liveSub: q('.dl-live-sub'), liveTime: q('.dl-live-time'),
         liveNone: q('.dl-live-none'),
@@ -4158,7 +4161,19 @@
     ui.asSave.addEventListener('click', saveAdd);
 
     // --- Render from the anchor's snapshot ---
+    // Sales Central icon (asset 54, finding #104): opens it; with a
+    // company loaded, on that account's drawer. Hidden on Sales Central.
+    function paintSc() {
+        ui.sc.hidden = !host.salesCentral || host.salesCentral.here();
+    }
+    ui.sc.addEventListener('click', function () {
+        if (!host.salesCentral) return;
+        var id = target && target.entityType !== 'contact' ? target.entityId : '';
+        host.salesCentral.open(id);
+    });
+
     function render(next) {
+        paintSc();
         snap = next || snap;
         if (isActive() || isIncoming()) closeTargets(false);
         renderSignedOut();

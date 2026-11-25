@@ -180,6 +180,8 @@
     // point on its side. A drag or arrow key there puts it anywhere again
     // (user, 2026-11-25: the bottom is only the default on arrival).
     var SPA_PATH_PREFIX = '/spa-app/com.netsuite.clicktocall/';
+    // Sales Central's SPA URL (custspa_ctc_sales_central <url>).
+    var SALES_CENTRAL_PATH = SPA_PATH_PREFIX + 'sales-central';
     var PANEL_W = 380;
     // One panel height for every view: the Search view at full size. Views
     // that need less leave room at the bottom; views that need more scroll.
@@ -722,6 +724,27 @@
             place(true);
             if (expanded) placePanel();
         }
+    }
+
+    function onSalesCentral() { return pagePath().indexOf(SALES_CENTRAL_PATH) === 0; }
+
+    // The panel's Sales Central icon (asset 54, finding #104): the shell
+    // opens it in the NetSuite frame (a call goes on); elsewhere this tab
+    // moves into phone mode on it. With an account loaded, its drawer opens.
+    function openSalesCentral(entityId) {
+        var id = /^[0-9]{1,12}$/.test(String(entityId || '')) ? String(entityId) : '';
+        var path = SALES_CENTRAL_PATH + '#needs' + (id ? '/a/' + id : '');
+        if (mode === 'shell') {
+            var s = window.__ctcShell;
+            if (s && typeof s.openPath === 'function' && s.openPath(path)) return;
+        }
+        if (cfg.shellUrl) {
+            try { window.sessionStorage.removeItem(EXIT_KEY); } catch (e) { /* storage blocked */ }
+            var sep = cfg.shellUrl.indexOf('?') === -1 ? '?' : '&';
+            window.top.location.href = cfg.shellUrl + sep + 'u=' + encodeURIComponent(path);
+            return;
+        }
+        window.top.location.href = path;
     }
 
     // The pill (or the panel, which shares its point) moved by the rep.
@@ -2896,6 +2919,8 @@
                 root.appendChild(st);
             },
             send: function (action, extra) { return request(action, extra); },
+            // Sales Central icon: hidden on Sales Central itself.
+            salesCentral: { here: function () { return onSalesCentral(); }, open: function (id) { openSalesCentral(id); } },
             // The user picked a view in the panel: share it (UI_KEY).
             saveUi: saveUi,
             collapse: function () { setExpanded(false, true); saveUi(); focusPill(); },

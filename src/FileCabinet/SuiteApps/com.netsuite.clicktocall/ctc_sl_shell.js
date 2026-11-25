@@ -564,6 +564,14 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   // The frame's page, for the dock (an SPA page keeps the pill on the
   // bottom row, finding #99).
   window.__ctcShell.framePath = function () { return lastGoodPath; };
+  // The dock's Sales Central icon (asset 54): open one of this NetSuite's
+  // pages in the frame (allowed frame paths only). The call goes on.
+  window.__ctcShell.openPath = function (path) {
+    if (!nsFrame || !isFramePath(String(path || ''))) return false;
+    logEvent('open', path);
+    nsFrame.src = path;
+    return true;
+  };
   window.__ctcShell.syncFramePath = function () {
     var path = currentFramePath();
     if (!isFramePath(path) || path === lastGoodPath) return;
