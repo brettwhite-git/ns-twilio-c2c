@@ -73,9 +73,11 @@ const button = (cls: string, text: string, onClick: () => void): HTMLButtonEleme
 };
 
 const link = (text: string, href: string): HTMLAnchorElement => {
-    const a = el('a', 'sc-lk', text);
+    const a = el('a', 'sc-lk sc-out', text);
     a.href = href;
     a.target = '_top';
+    // Arrow out: the link leaves Sales Central (#120).
+    a.insertAdjacentHTML('beforeend', '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg>');
     return a;
 };
 
@@ -251,7 +253,9 @@ export const renderTasks = (host: HTMLElement, v: TasksView): HTMLElement[] => {
         b.append(el('span', '', label + ' '), el('b', '', String(count)));
         line.appendChild(b);
     });
-    host.appendChild(line);
+    const bar = el('div', 'sc-sumbar');
+    bar.appendChild(line);
+    host.appendChild(bar);
     const head = el('div', 'sc-thead');
     head.append(el('span', '', 'Task'), el('span', '', 'Account'), el('span', '', 'From'), el('span', 'num', 'Due'), el('span'));
     host.appendChild(head);

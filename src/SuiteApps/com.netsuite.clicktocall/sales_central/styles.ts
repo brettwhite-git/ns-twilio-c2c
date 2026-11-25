@@ -24,7 +24,7 @@ export const STYLES = [
     // Tab row: tabs left, Owner / Range chips at the right end (#113)
     '.sc-tabbar{display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
     '.sc-tabs{display:flex;gap:24px}',
-    '.sc-tab{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
+    '.sc-tab{height:48px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;font-size:14px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
     '.sc-tab:hover{color:#161513}',
     '.sc-tab[aria-selected="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #1F3550}',
     '.sc-tab[disabled]{color:#A8A39C;cursor:default}',
@@ -64,10 +64,14 @@ export const STYLES = [
     // Tasks (ORCA ScTasks2, variant A): context in columns; an open task splits into context | action
     '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
     // Summary line (#116): groups styled like the tabs; a click shows one group
-    '.sc-sumline{display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
-    '.sc-sum{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent}',
+    // (#121: a segmented control, not a second row of tabs; same shape as the outcome control)
+    '.sc-sumbar{padding:12px 24px}',
+    '.sc-sumline{display:inline-flex;gap:2px;padding:3px;border-radius:8px;background:#F1EFEA}',
+    '.sc-sum{height:28px;padding:0 12px;border:0;border-radius:6px;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer}',
+    '.sc-sum:hover{color:#161513}',
     '.sc-sum b{font-weight:500;color:#161513;font-variant-numeric:tabular-nums}',
-    '.sc-sum[aria-pressed="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #161513}',
+    '.sc-sum[aria-pressed="true"]{background:#FFFFFF;color:#161513;font-weight:500;box-shadow:0 1px 2px rgba(22,21,19,0.08)}',
+    '.sc-out{display:inline-flex;align-items:center;gap:5px}',
     '.sc-sum:focus-visible,.sc-more:focus-visible,.sc-toast-act:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
     // A group's colour is one small circle (#115); headings stay neutral
     '.sc-cd{width:8px;height:8px;border-radius:999px;flex:none}',

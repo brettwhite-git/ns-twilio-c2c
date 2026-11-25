@@ -58,7 +58,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-head .mut{font-size:12px}',
         '.sc-tabbar{display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
         '.sc-tabs{display:flex;gap:24px}',
-        '.sc-tab{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
+        '.sc-tab{height:48px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;font-size:14px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
         '.sc-tab:hover{color:#161513}',
         '.sc-tab[aria-selected="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #1F3550}',
         '.sc-tab[disabled]{color:#A8A39C;cursor:default}',
@@ -92,10 +92,13 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.sc-strong{font-weight:500}',
         '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
-        '.sc-sumline{display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
-        '.sc-sum{height:40px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent}',
+        '.sc-sumbar{padding:12px 24px}',
+        '.sc-sumline{display:inline-flex;gap:2px;padding:3px;border-radius:8px;background:#F1EFEA}',
+        '.sc-sum{height:28px;padding:0 12px;border:0;border-radius:6px;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer}',
+        '.sc-sum:hover{color:#161513}',
         '.sc-sum b{font-weight:500;color:#161513;font-variant-numeric:tabular-nums}',
-        '.sc-sum[aria-pressed="true"]{color:#161513;font-weight:500;box-shadow:inset 0 -2px 0 #161513}',
+        '.sc-sum[aria-pressed="true"]{background:#FFFFFF;color:#161513;font-weight:500;box-shadow:0 1px 2px rgba(22,21,19,0.08)}',
+        '.sc-out{display:inline-flex;align-items:center;gap:5px}',
         '.sc-sum:focus-visible,.sc-more:focus-visible,.sc-toast-act:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
         '.sc-cd{width:8px;height:8px;border-radius:999px;flex:none}',
         '.sc-band{display:flex;align-items:center;gap:8px;height:32px;padding:0 24px;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:500;color:#4A4744;background:#FAFAF9}',
@@ -389,9 +392,10 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         return b;
     };
     const link = (text, href) => {
-        const a = el('a', 'sc-lk', text);
+        const a = el('a', 'sc-lk sc-out', text);
         a.href = href;
         a.target = '_top';
+        a.insertAdjacentHTML('beforeend', '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg>');
         return a;
     };
     const fromCell = (r) => {
@@ -574,7 +578,9 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             b.append(el('span', '', label + ' '), el('b', '', String(count)));
             line.appendChild(b);
         });
-        host.appendChild(line);
+        const bar = el('div', 'sc-sumbar');
+        bar.appendChild(line);
+        host.appendChild(bar);
         const head = el('div', 'sc-thead');
         head.append(el('span', '', 'Task'), el('span', '', 'Account'), el('span', '', 'From'), el('span', 'num', 'Due'), el('span'));
         host.appendChild(head);
