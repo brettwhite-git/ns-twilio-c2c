@@ -53,9 +53,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc .mut{color:#6F6B66}',
         '.sc .num{font-variant-numeric:tabular-nums;text-align:right}',
         '.sc .dot{width:6px;height:6px;border-radius:999px;flex:none;display:inline-block}',
-        '.sc-head{height:56px;display:flex;align-items:center;gap:12px;padding:0 24px}',
-        '.sc-head h1{margin:0;font-size:20px;line-height:26px;font-weight:600;letter-spacing:-0.01em}',
-        '.sc-head .mut{font-size:12px}',
+        '.sc-title{margin:0;font-size:17px;line-height:22px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap}',
+        '.sc-tsep{width:1px;height:22px;background:#DEDBD7;flex:none}',
         '.sc-tabbar{display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
         '.sc-tabs{display:flex;gap:24px}',
         '.sc-tab{height:48px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;font-size:14px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
@@ -98,7 +97,9 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-sum:hover{color:#161513}',
         '.sc-sum b{font-weight:500;color:#161513;font-variant-numeric:tabular-nums}',
         '.sc-sum[aria-pressed="true"]{background:#FFFFFF;color:#161513;font-weight:500;box-shadow:0 1px 2px rgba(22,21,19,0.08)}',
-        '.sc-out{display:inline-flex;align-items:center;gap:5px}',
+        '.sc-rec{color:#1F3550;font-weight:500;text-decoration:underline;text-decoration-color:#9DB4CF;text-underline-offset:3px}',
+        '.sc-rec:hover{text-decoration-color:#1F3550}',
+        '.sc-ctx .sc-links{gap:4px}',
         '.sc-sum:focus-visible,.sc-more:focus-visible,.sc-toast-act:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
         '.sc-cd{width:8px;height:8px;border-radius:999px;flex:none}',
         '.sc-band{display:flex;align-items:center;gap:8px;height:32px;padding:0 24px;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:500;color:#4A4744;background:#FAFAF9}',
@@ -150,6 +151,36 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;height:40px;padding:0 16px;border-radius:10px;background:#161513;color:#FFFFFF;box-shadow:0 8px 24px rgba(22,21,19,0.18);z-index:30;gap:14px;animation:sc-fade 160ms ease-out both}',
         '.sc-toast-act{padding:0;border:0;background:none;font:inherit;font-weight:500;color:#9DB4CF;cursor:pointer}',
         '@keyframes sc-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
+        '.sc-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:16px 24px;border-bottom:1px solid #ECEAE7}',
+        '.sc-vsep{width:1px;height:20px;background:#DEDBD7;margin:0 4px}',
+        '.sc-k{display:flex;flex-direction:column;gap:2px;padding:0 24px;border-left:1px solid #ECEAE7;min-width:0}',
+        '.sc-k:first-child{padding-left:0;border-left:0}',
+        '.sc-kl{font-size:12px;color:#6F6B66}',
+        '.sc-kv{font-size:22px;line-height:28px;font-weight:600;font-variant-numeric:tabular-nums}',
+        '.sc-ks{font-size:12px;color:#6F6B66}',
+        '.sc-cols{display:grid;gap:12px;padding:16px 24px 24px;overflow-x:auto;align-items:start}',
+        '.sc-col{border-radius:10px;background:#FAFAF9;box-shadow:inset 0 0 0 1px #ECEAE7;padding:8px;display:flex;flex-direction:column;gap:8px;min-height:320px;transition:background-color 120ms ease}',
+        '.sc-col.drop{background:#F1F4F8;box-shadow:inset 0 0 0 1.5px #5F7590}',
+        '.sc-colh{display:flex;align-items:baseline;gap:6px;padding:4px 6px 2px}',
+        '.sc-colh b{font-weight:500}',
+        '.sc-colh .cnt{font-size:12px;color:#6F6B66}',
+        '.sc-colh .amt{margin-left:auto;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}',
+        '.sc-card{background:#FFFFFF;border-radius:8px;box-shadow:0 0 0 1px #E1DDD8;padding:10px 12px;display:flex;flex-direction:column;gap:3px;cursor:grab;min-width:0}',
+        '.sc-card:hover{box-shadow:0 0 0 1px #DEDBD7,0 4px 12px rgba(22,21,19,0.08)}',
+        '.sc-card.dragging{opacity:0.35}',
+        '.sc-ca{display:flex;align-items:center;gap:4px;font-weight:500;min-width:0}',
+        '.sc-cd2{font-size:12px;color:#4A4744}',
+        '.sc-cm{display:flex;gap:8px;font-size:12px;color:#6F6B66}',
+        '.sc-pen{margin-left:auto;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:none;color:#A8A39C;display:inline-flex;align-items:center;justify-content:center;flex:none;cursor:pointer}',
+        '.sc-pen:hover{color:#1F3550;background:#E9EDF2}',
+        '.sc-pen:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+        '.sc-plist .sc-thead,.sc-plist .sc-row{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 110px 90px 90px;column-gap:24px}',
+        '.sc-dsub{font-size:12px;color:#6F6B66}',
+        '.sc-fl{display:flex;flex-direction:column;gap:4px}',
+        '.sc-fl>span:first-child{font-size:12px;font-weight:500;color:#6F6B66}',
+        '.sc-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}',
+        '.sc-ro{height:32px;display:flex;align-items:center;font-variant-numeric:tabular-nums}',
+        '.sc-dfoot .sc-err{margin-right:auto}',
         '.sc-msg{padding:48px 24px;text-align:center;color:#6F6B66}',
         '.sc-msg b{display:block;margin-bottom:4px;font-size:14px;font-weight:500;color:#161513}',
         '.sc-ph{height:48px;border-bottom:1px solid #ECEAE7;padding:0 24px;display:flex;align-items:center}',
@@ -187,7 +218,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '@media (prefers-reduced-motion: reduce){.sc-drawer,.sc-drawer.out{animation:sc-fade 150ms linear both}.sc-tab,.sc-btn,.sc-pin{transition:none}.sc-topen{animation:none}.sc-trow{transition:none}}'
     ].join('\n');
 
-    const LIVE_TABS = ['needs', 'tasks', 'calls'];
+    const LIVE_TABS = ['needs', 'pipeline', 'tasks', 'calls'];
     const parseRoute = (hash) => {
         const parts = String(hash || '').replace(/^#\/?/, '').split('/');
         const tab = LIVE_TABS.indexOf(parts[0]) !== -1 ? parts[0] : 'needs';
@@ -388,17 +419,17 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         return c;
     };
     const plainNote = (note) => note.split(/\n|<br\s*\/?>/i).map((l) => l.trim()).filter(Boolean).join('\n');
-    const button = (cls, text, onClick) => {
+    const button$1 = (cls, text, onClick) => {
         const b = el('button', cls, text);
         b.type = 'button';
         b.addEventListener('click', onClick);
         return b;
     };
-    const link = (text, href) => {
-        const a = el('a', 'sc-lk sc-out', text);
+    const recordLink = (text, href) => {
+        const a = el('a', 'sc-rec', text);
         a.href = href;
         a.target = '_top';
-        a.insertAdjacentHTML('beforeend', '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg>');
+        a.title = 'Open in NetSuite';
         return a;
     };
     const fromCell = (r) => {
@@ -418,7 +449,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         w.appendChild(el('span', 'sc-ctxt' + (note ? '' : ' mut'), note || 'No notes on this task.'));
         if (r.fromCall) {
             const links = el('div', 'sc-links');
-            links.appendChild(link('Open call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
+            links.append(el('span', 'mut', 'From '), recordLink(r.fromCall.title || 'the call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
             w.appendChild(links);
         }
         return w;
@@ -445,7 +476,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         next.append(nextTitle, nextDue);
         const err = el('span', 'sc-err');
         err.setAttribute('role', 'alert');
-        const go = button('sc-btn pri', ACTION.done, () => {
+        const go = button$1('sc-btn pri', ACTION.done, () => {
             const payload = { outcome: outcome, note: note.value.trim() };
             if (outcome === 'next')
                 payload.next = { title: nextTitle.value.trim(), due: nextDue.value };
@@ -458,7 +489,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 }
             });
         });
-        const save = button('sc-btn gh', 'Save note', () => {
+        const save = button$1('sc-btn gh', 'Save note', () => {
             const text = note.value.trim();
             if (!text) {
                 note.focus();
@@ -479,12 +510,12 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             go.textContent = ACTION[outcome];
         };
         OUTCOMES.forEach(([o, label]) => {
-            const b = button('sc-opt', label, () => { outcome = o; paint(); });
+            const b = button$1('sc-opt', label, () => { outcome = o; paint(); });
             b.setAttribute('data-o', o);
             outs.appendChild(b);
         });
         const acts = el('div', 'sc-acts');
-        acts.append(button('sc-cancel', 'Cancel', () => v.onToggle(r.id)), save, go);
+        acts.append(button$1('sc-cancel', 'Cancel', () => v.onToggle(r.id)), save, go);
         act.append(outs, note, next, acts, err);
         paint();
         return act;
@@ -504,7 +535,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 Array.from(cell.querySelectorAll('button')).forEach((b) => { b.disabled = false; });
             });
         };
-        cell.append(err, button('sc-btn gh sm', 'Dismiss', act(false)), button('sc-btn pri sm', 'Approve', act(true)));
+        cell.append(err, button$1('sc-btn gh sm', 'Dismiss', act(false)), button$1('sc-btn pri sm', 'Approve', act(true)));
         return cell;
     };
     const renderRow = (r, v) => {
@@ -514,7 +545,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         row.setAttribute('data-open', String(open));
         const line = el('div', 'sc-tline');
         const text = displayTitle(r.title);
-        const title = r.kind === 'task' ? button('sc-tbtn sc-ttitle', text, () => v.onToggle(r.id)) : el('span', 'sc-ttitle', text);
+        const title = r.kind === 'task' ? button$1('sc-tbtn sc-ttitle', text, () => v.onToggle(r.id)) : el('span', 'sc-ttitle', text);
         if (r.kind === 'task')
             title.setAttribute('aria-expanded', String(open));
         const due = el('span', 'num sc-due', dueText(r));
@@ -524,12 +555,12 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             verb = suggestionVerbs(r, v);
         else if (open) {
             verb = el('span', 'sc-verbs');
-            verb.appendChild(link('Open in NetSuite', '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
+            verb.appendChild(recordLink('Task ' + r.id, '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
         }
         else
             verb = el('span', 'sc-verbs');
         if (r.kind === 'task' && !open)
-            verb.appendChild(button('sc-btn gh sm', 'Complete', () => v.onToggle(r.id)));
+            verb.appendChild(button$1('sc-btn gh sm', 'Complete', () => v.onToggle(r.id)));
         line.append(title, accountCell(r, v), fromCell(r), due, verb);
         if (r.kind === 'task') {
             line.classList.add('tap');
@@ -550,7 +581,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         if (!r.companyId)
             return el('span', 'sc-clip mut', '—');
         const cell = el('span', 'sc-acct');
-        const peek = button('sc-peek', '', () => v.onOpenAccount(r));
+        const peek = button$1('sc-peek', '', () => v.onOpenAccount(r));
         peek.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
         peek.setAttribute('data-id', r.companyId);
         peek.setAttribute('aria-label', 'Account details: ' + (r.companyName || 'account'));
@@ -590,7 +621,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         groups.forEach(([g, label, count]) => {
             if (g !== 'all' && !count)
                 return;
-            const b = button('sc-sum', '', () => v.onGroup(g));
+            const b = button$1('sc-sum', '', () => v.onGroup(g));
             b.setAttribute('data-g', g);
             b.setAttribute('aria-pressed', String(shown === g));
             if (g !== 'all')
@@ -609,7 +640,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             host.appendChild(band('suggested', 'Suggested from your calls', suggestions.length, 'Approve adds it to your tasks'));
             (capped ? suggestions.slice(0, SUGGESTION_CAP) : suggestions).forEach((r) => host.appendChild(renderRow(r, v)));
             if (capped)
-                host.appendChild(button('sc-more', 'Show all ' + suggestions.length, v.onShowAllSuggested));
+                host.appendChild(button$1('sc-more', 'Show all ' + suggestions.length, v.onShowAllSuggested));
         }
         BANDS.forEach(([key, label]) => {
             const items = inBand(key);
@@ -619,6 +650,214 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             items.forEach((r) => host.appendChild(renderRow(r, v)));
         });
         return Array.from(host.querySelectorAll('.sc-peek'));
+    };
+
+    const PEN = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="M14 6l4 4"></path></svg>';
+    const button = (cls, text, onClick) => {
+        const b = el('button', cls, text);
+        b.type = 'button';
+        b.addEventListener('click', onClick);
+        return b;
+    };
+    const late = (d, todayIso) => !!d.close && d.close < todayIso;
+    const sum = (deals) => deals.reduce((n, d) => n + d.amount, 0);
+    const kpi = (label, value, sub, red) => {
+        const k = el('div', 'sc-k');
+        const v = el('span', 'sc-kv', value);
+        if (red)
+            v.style.color = '#B3311F';
+        k.append(el('span', 'sc-kl', label), v, el('span', 'sc-ks', sub));
+        return k;
+    };
+    const viewToggle = (view, onView) => {
+        const seg = el('div', 'sc-sumline');
+        seg.setAttribute('role', 'group');
+        seg.setAttribute('aria-label', 'View');
+        ['board', 'list'].forEach((v) => {
+            const b = button('sc-sum', v === 'board' ? 'Board' : 'List', () => onView(v));
+            b.setAttribute('aria-pressed', String(view === v));
+            seg.appendChild(b);
+        });
+        return seg;
+    };
+    const kpiRow = (p) => {
+        const row = el('div', 'sc-kpis');
+        const k = p.kpis;
+        row.append(kpi('Open', money(k.open) === '—' ? '$0' : money(k.open), k.openCount + (k.openCount === 1 ? ' deal' : ' deals')), kpi('Weighted', money(k.weighted) === '—' ? '$0' : money(k.weighted), 'amount × probability'), kpi('Won this quarter', money(k.won) === '—' ? '$0' : money(k.won), k.wonCount + (k.wonCount === 1 ? ' sales order' : ' sales orders')), kpi('Past close date', String(k.lateCount), money(k.late), k.lateCount > 0));
+        return row;
+    };
+    const card = (d, h) => {
+        const c = el('div', 'sc-card');
+        c.setAttribute('data-id', d.id);
+        c.draggable = true;
+        c.addEventListener('dragstart', (e) => {
+            if (e.dataTransfer) {
+                e.dataTransfer.setData('text/plain', d.id);
+                e.dataTransfer.effectAllowed = 'move';
+            }
+            c.classList.add('dragging');
+        });
+        c.addEventListener('dragend', () => c.classList.remove('dragging'));
+        const top = el('span', 'sc-ca');
+        const pen = button('sc-pen', '', () => h.onEdit(d));
+        pen.innerHTML = PEN;
+        pen.setAttribute('aria-label', 'Edit ' + (d.title || 'deal'));
+        pen.title = 'Edit deal';
+        top.append(el('span', 'sc-clip', d.companyName || 'No customer'), pen);
+        const meta = el('span', 'sc-cm');
+        const close = el('span', '', d.close ? 'Close ' + shortDate(d.close) : 'No close date');
+        if (late(d, h.todayIso))
+            close.style.color = '#B3311F';
+        meta.append(close, el('span', '', d.probability + '%'));
+        c.append(top, el('span', 'sc-cd2 sc-clip', (d.title || 'Untitled') + ' · ' + money(d.amount)), meta);
+        return c;
+    };
+    const board = (p, h) => {
+        const cols = el('div', 'sc-cols');
+        cols.style.gridTemplateColumns = 'repeat(' + Math.max(1, p.statuses.length) + ', minmax(190px, 1fr))';
+        p.statuses.forEach((s) => {
+            const items = p.deals.filter((d) => d.statusId === s.id);
+            const col = el('div', 'sc-col');
+            col.setAttribute('data-status', s.id);
+            const head = el('div', 'sc-colh');
+            head.append(el('b', '', s.name), el('span', 'cnt', String(items.length)), el('span', 'amt', items.length ? money(sum(items)) : ''));
+            col.appendChild(head);
+            items.forEach((d) => col.appendChild(card(d, h)));
+            col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drop'); });
+            col.addEventListener('dragleave', () => col.classList.remove('drop'));
+            col.addEventListener('drop', (e) => {
+                e.preventDefault();
+                col.classList.remove('drop');
+                const id = e.dataTransfer ? e.dataTransfer.getData('text/plain') : '';
+                const d = p.deals.filter((x) => x.id === id)[0];
+                if (d && d.statusId !== s.id)
+                    h.onMove(d, s.id);
+            });
+            cols.appendChild(col);
+        });
+        return cols;
+    };
+    const list = (p, h) => {
+        const wrap = el('div', 'sc-plist');
+        const head = el('div', 'sc-thead');
+        head.append(el('span', '', 'Deal'), el('span', '', 'Account'), el('span', 'num', 'Amount'), el('span', 'num', 'Close'), el('span', 'num', 'Probability'));
+        wrap.appendChild(head);
+        p.statuses.forEach((s) => {
+            const items = p.deals.filter((d) => d.statusId === s.id);
+            if (!items.length)
+                return;
+            const b = el('div', 'sc-band', s.name + ' ');
+            b.appendChild(el('span', 'cnt', items.length + ' · ' + money(sum(items))));
+            wrap.appendChild(b);
+            items.forEach((d) => {
+                const r = button('sc-row', '', () => h.onEdit(d));
+                r.setAttribute('data-id', d.id);
+                const close = el('span', 'num', d.close ? shortDate(d.close) : '—');
+                if (late(d, h.todayIso))
+                    close.style.color = '#B3311F';
+                r.append(el('span', 'sc-strong sc-clip', d.title || 'Untitled'), el('span', 'sc-clip', d.companyName), el('span', 'num', money(d.amount)), close, el('span', 'num mut', d.probability + '%'));
+                wrap.appendChild(r);
+            });
+        });
+        return wrap;
+    };
+    const renderPipeline = (host, p, h) => {
+        clear(host);
+        host.className = 'sc-pipe sc-fade';
+        if (p.partial.length)
+            host.appendChild(el('div', 'sc-note', 'Some sources did not load (' + p.partial.join(', ') + '). The numbers may be short.'));
+        host.appendChild(kpiRow(p));
+        if (!p.deals.length) {
+            const m = el('div', 'sc-msg');
+            m.append(el('b', '', 'No open deals'), el('span', '', 'Open opportunities for customers in your book show here.'));
+            host.appendChild(m);
+            return;
+        }
+        host.appendChild(h.view === 'list' ? list(p, h) : board(p, h));
+    };
+    const field = (label, input) => {
+        const f = el('label', 'sc-fl');
+        f.append(el('span', '', label), input);
+        return f;
+    };
+    const openDealDrawer = (host, d, h) => {
+        const old = host.querySelector('.sc-deal');
+        if (old)
+            old.remove();
+        const dw = el('aside', 'sc-drawer sc-deal');
+        dw.setAttribute('aria-label', 'Deal ' + (d.title || ''));
+        dw.style.top = h.top() + 'px';
+        const bar = el('div', 'sc-dhead');
+        const tools = el('span', 'tools');
+        const x = button('sc-icon', '✕', h.onClose);
+        x.setAttribute('aria-label', 'Close');
+        tools.appendChild(x);
+        bar.append(el('span', 'sc-lbl', 'Deal'), tools);
+        const title = el('div', 'sc-dtitle');
+        const sub = el('div', 'sc-dsub');
+        const rec = el('a', 'sc-rec', 'Opportunity ' + (d.number || d.id));
+        rec.href = '/app/accounting/transactions/opprtnty.nl?id=' + encodeURIComponent(d.id);
+        rec.target = '_top';
+        rec.title = 'Open in NetSuite';
+        const acct = button('sc-lk', d.companyName || 'Customer', () => h.onAccount(d));
+        acct.title = 'Account details';
+        sub.append(acct, el('span', 'mut', ' · '), rec);
+        title.append(el('b', '', d.title || 'Untitled'), sub);
+        const tIn = el('input', 'sc-field');
+        tIn.type = 'text';
+        tIn.value = d.title;
+        const sIn = el('select', 'sc-field');
+        h.statuses.forEach((s) => {
+            const o = el('option', '', s.name);
+            o.value = s.id;
+            o.selected = s.id === d.statusId;
+            sIn.appendChild(o);
+        });
+        const cIn = el('input', 'sc-field');
+        cIn.type = 'date';
+        cIn.value = d.close;
+        const pIn = el('input', 'sc-field');
+        pIn.type = 'number';
+        pIn.min = '0';
+        pIn.max = '99';
+        pIn.value = String(d.probability);
+        const grid = el('div', 'sc-fgrid');
+        grid.append(field('Status', sIn), field('Expected close', cIn), field('Probability %', pIn), field('Amount', el('span', 'sc-ro', money(d.amount))));
+        const err = el('span', 'sc-err');
+        err.setAttribute('role', 'alert');
+        const save = button('sc-btn pri', 'Save', () => {
+            const edit = {};
+            if (tIn.value.trim() !== d.title)
+                edit.title = tIn.value.trim();
+            if (sIn.value !== d.statusId)
+                edit.statusId = sIn.value;
+            if (cIn.value && cIn.value !== d.close)
+                edit.close = cIn.value;
+            if (pIn.value !== '' && Number(pIn.value) !== d.probability)
+                edit.probability = Number(pIn.value);
+            if (!Object.keys(edit).length) {
+                h.onClose();
+                return;
+            }
+            save.disabled = true;
+            err.textContent = '';
+            h.onSave(d, edit).then((problem) => { if (problem) {
+                err.textContent = problem;
+                save.disabled = false;
+            } });
+        });
+        const foot = el('div', 'sc-dfoot');
+        foot.append(err, button('sc-cancel', 'Cancel', h.onClose), save);
+        const body = el('div', 'sc-dbody');
+        body.append(title, field('Title', tIn), grid);
+        dw.append(bar, body, foot);
+        host.appendChild(dw);
+        return dw;
+    };
+    const closeDealDrawer = (host) => {
+        const d = host.querySelector('.sc-deal');
+        if (d)
+            d.remove();
     };
 
     const ICON = {
@@ -750,29 +989,35 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         already_actioned: 'Already done. The list is updated.',
         invalid_next_title: 'Give the next step a title.',
         invalid_next_due: 'Pick a due date for the next step.',
-        invalid_note: 'The note is too long.'
+        invalid_note: 'The note is too long.',
+        invalid_title: 'Give the deal a title.',
+        invalid_status: 'That status cannot be set here.',
+        invalid_close: 'Pick an expected close date.',
+        invalid_probability: 'Probability is 0 to 99.',
+        closed: 'This deal is closed. The list is updated.'
     };
     const startApp = (root, win) => {
         const style = el('style', '', STYLES);
         root.className = 'sc';
         root.appendChild(style);
         const today = localToday();
-        const head = el('header', 'sc-head');
-        head.append(el('h1', '', 'Sales Central'), el('span', 'mut', new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })));
+        const title = el('h1', 'sc-title', 'Sales Central');
         const tabs = el('nav', 'sc-tabs');
         tabs.setAttribute('aria-label', 'Sales Central');
         tabs.setAttribute('role', 'tablist');
         const filters = el('div', 'sc-filters');
         const tabBar = el('div', 'sc-tabbar');
-        tabBar.append(tabs, filters);
+        tabBar.append(title, el('span', 'sc-tsep'), tabs, filters);
         const content = el('div');
         const drawerHost = el('div');
-        root.append(head, tabBar, content, drawerHost);
+        root.append(tabBar, content, drawerHost);
         let route = parseRoute(win.location.hash);
-        const data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], error: '' };
+        const data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
         let taskOpenId = '';
         let taskGroup = 'all';
         let showAllSuggested = false;
+        let pipelineView = 'board';
+        let dealOpenId = '';
         let post = null;
         let listButtons = [];
         const accountsOf = (tab) => {
@@ -780,6 +1025,11 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 const seen = {};
                 return (data.calls || []).filter((c) => c.companyId && !seen[c.companyId] && (seen[c.companyId] = true))
                     .map((c) => ({ companyId: c.companyId, name: c.companyName, entityType: 'customer', phone: c.phone }));
+            }
+            if (tab === 'pipeline') {
+                const seen = {};
+                return (data.pipeline ? data.pipeline.deals : []).filter((d) => d.companyId && !seen[d.companyId] && (seen[d.companyId] = true))
+                    .map((d) => ({ companyId: d.companyId, name: d.companyName, entityType: 'customer', phone: '' }));
             }
             if (tab === 'tasks') {
                 const seen = {};
@@ -820,7 +1070,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 }
                 const count = id === 'needs' && data.needs ? String(data.needs.length)
                     : id === 'tasks' && data.tasks ? String(data.tasks.length)
-                        : id === 'calls' && data.calls ? String(data.callsTotal) : '';
+                        : id === 'pipeline' && data.pipeline ? String(data.pipeline.deals.length)
+                            : id === 'calls' && data.calls ? String(data.callsTotal) : '';
                 if (live && count)
                     b.appendChild(el('span', 'cnt', count));
                 b.addEventListener('click', () => { if (live && route.tab !== id)
@@ -830,12 +1081,14 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         };
         const renderFilters = () => {
             clear(filters);
+            if (route.tab === 'pipeline')
+                filters.append(viewToggle(pipelineView, (v) => { pipelineView = v; render(true); }), el('span', 'sc-vsep'));
             const chip = (k, v) => {
                 const c = el('span', 'sc-chip', k + ' ');
                 c.appendChild(el('b', '', v));
                 return c;
             };
-            filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : route.tab === 'tasks' ? 'All open' : 'Last 14 days'));
+            filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : route.tab === 'tasks' ? 'All open' : route.tab === 'pipeline' ? 'Open deals' : 'Last 14 days'));
         };
         const loading = () => {
             clear(content);
@@ -855,6 +1108,17 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         const renderContent = () => {
             if (data.error) {
                 failed(data.error);
+                return;
+            }
+            if (route.tab === 'pipeline') {
+                if (!data.pipeline) {
+                    loading();
+                    return;
+                }
+                listButtons = [];
+                renderPipeline(content, data.pipeline, { view: pipelineView, todayIso: today,
+                    onMove: moveDeal,
+                    onEdit: (d) => openDeal(d.id) });
                 return;
             }
             if (route.tab === 'tasks') {
@@ -951,6 +1215,66 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                     : p.outcome === 'no' ? 'Closed as not needed · ' + r.title : 'Completed · ' + r.title);
             return '';
         }).catch(() => 'Could not save. Try again.');
+        const loadPipeline = () => post({ action: 'salesCentralPipeline' }).then((d) => {
+            if (d.error)
+                throw new Error(d.error);
+            data.pipeline = { statuses: d.statuses || [], deals: d.deals || [], kpis: d.kpis, partial: d.partial || [] };
+        }).catch((e) => {
+            data.pipeline = { statuses: [], deals: [], partial: ['all: ' + e.message],
+                kpis: { open: 0, openCount: 0, weighted: 0, won: 0, wonCount: 0, late: 0, lateCount: 0 } };
+        });
+        const statusName = (id) => ((data.pipeline ? data.pipeline.statuses : []).filter((s) => s.id === id)[0] || { name: '' }).name;
+        const saveDeal = (d, edit) => post({ action: 'salesCentralUpdateDeal', id: d.id, ...edit }).then((r) => {
+            if (r.error) {
+                if (r.error === 'closed')
+                    loadPipeline().then(() => render(true));
+                return r.error === 'forbidden' ? 'This customer is not in your book.' : PROBLEM[r.error] || 'Could not save. Try again.';
+            }
+            return '';
+        }).catch(() => 'Could not save. Try again.');
+        const moveDeal = (d, statusId) => {
+            const from = d.statusId;
+            d.statusId = statusId;
+            renderContent();
+            saveDeal(d, { statusId: statusId }).then((problem) => {
+                if (problem) {
+                    d.statusId = from;
+                    renderContent();
+                    toast(problem + ' · ' + (d.title || d.companyName));
+                    return;
+                }
+                toast('Moved to ' + statusName(statusId) + ' · ' + d.companyName + ' · ' + d.title, ['Undo', () => {
+                        d.statusId = from;
+                        renderContent();
+                        saveDeal(d, { statusId: from }).then(() => loadPipeline().then(() => render(true)));
+                    }]);
+                loadPipeline().then(() => render(true));
+            });
+        };
+        const openDeal = (id) => {
+            dealOpenId = id;
+            const d = (data.pipeline ? data.pipeline.deals : []).filter((x) => x.id === id)[0];
+            if (!d) {
+                closeDealDrawer(drawerHost);
+                dealOpenId = '';
+                return;
+            }
+            openDealDrawer(drawerHost, d, {
+                statuses: data.pipeline ? data.pipeline.statuses : [],
+                top: drawerTop,
+                onClose: () => { dealOpenId = ''; closeDealDrawer(drawerHost); },
+                onAccount: (deal) => { dealOpenId = ''; closeDealDrawer(drawerHost); go({ tab: route.tab, account: deal.companyId }); },
+                onSave: (deal, edit) => saveDeal(deal, edit).then((problem) => {
+                    if (problem)
+                        return problem;
+                    dealOpenId = '';
+                    closeDealDrawer(drawerHost);
+                    toast('Saved · ' + (edit.title || deal.title));
+                    loadPipeline().then(() => render(true));
+                    return '';
+                })
+            });
+        };
         const addTaskNote = (r, note) => post({ action: 'salesCentralAddTaskNote', taskId: r.id, note: note }).then((d) => {
             if (d.error)
                 return PROBLEM[d.error] || 'Could not save. Try again.';
@@ -1028,6 +1352,12 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             renderDrawer();
         };
         win.document.addEventListener('keydown', (e) => {
+            if (dealOpenId && e.key === 'Escape') {
+                dealOpenId = '';
+                closeDealDrawer(drawerHost);
+                e.preventDefault();
+                return;
+            }
             if (!route.account || e.metaKey || e.ctrlKey || e.altKey)
                 return;
             const t = e.target;
@@ -1069,6 +1399,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             const p = post;
             loadNeeds().then(() => render(true));
             loadTasks().then(() => render(true));
+            loadPipeline().then(() => render(true));
             p({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
                 if (d.error)
                     throw new Error(d.error);

@@ -23,6 +23,18 @@ export interface AccountContext {
 
 export interface ContactRow { contactId: string; name: string; title?: string; phones?: Array<{ number: string; type: string }>; }
 
+export interface DealStatus { id: string; name: string; probability: number; }
+export interface Deal {
+    id: string; number: string; title: string; companyId: string; companyName: string;
+    statusId: string; amount: number; probability: number; close: string;
+}
+export interface PipelineData {
+    statuses: DealStatus[]; deals: Deal[]; partial: string[];
+    kpis: { open: number; openCount: number; weighted: number; won: number; wonCount: number; late: number; lateCount: number };
+}
+/** Only the fields that changed (salesCentralUpdateDeal). */
+export interface DealEdit { title?: string; statusId?: string; close?: string; probability?: number; }
+
 export type Post = <T>(body: Record<string, unknown>) => Promise<T & { error?: string }>;
 
 export const makePost = (restletUrl: string): Post => (body) =>

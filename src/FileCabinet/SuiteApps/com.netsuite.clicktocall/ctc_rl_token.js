@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile', './lib/ctc_sc_needs', './lib/ctc_sc_tasks'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile, scNeeds, scTasks) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile', './lib/ctc_sc_needs', './lib/ctc_sc_tasks', './lib/ctc_sc_pipeline'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile, scNeeds, scTasks, scPipeline) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -108,6 +108,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         if (body.action === 'salesCentralTasks')    return salesCentralTasks();
         if (body.action === 'salesCentralCompleteTask') return salesCentralCompleteTask(body);
         if (body.action === 'salesCentralAddTaskNote') return salesCentralAddTaskNote(body);
+        if (body.action === 'salesCentralPipeline') return salesCentralPipeline();
+        if (body.action === 'salesCentralUpdateDeal') return salesCentralUpdateDeal(body);
         if (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(FOLLOW_UP_ACTIONS, body.action)) {
             // The manager rule reads the team once per request, never from
             // an earlier request (a supervisor change applies at once).
@@ -1236,6 +1238,26 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         } catch (e) {
             log.error({ title: 'CTC salesCentralAddTaskNote failed', details: (e && e.message) || String(e) });
             return { error: 'Add note failed' };
+        }
+    };
+
+    /** salesCentralPipeline: open deals in the user's book by status, plus KPIs (lib/ctc_sc_pipeline.js). */
+    const salesCentralPipeline = () => {
+        try {
+            return scPipeline.loadPipeline({ userId: runtime.getCurrentUser().id });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralPipeline failed', details: (e && e.message) || String(e) });
+            return { error: 'Could not load the pipeline' };
+        }
+    };
+
+    /** salesCentralUpdateDeal: edit one open deal in the user's book (Administrator: any). */
+    const salesCentralUpdateDeal = (body) => {
+        try {
+            return scPipeline.updateDeal({ userId: runtime.getCurrentUser().id, isAdmin: isAdministrator(), body: body });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralUpdateDeal failed', details: (e && e.message) || String(e) });
+            return { error: 'Save failed' };
         }
     };
 

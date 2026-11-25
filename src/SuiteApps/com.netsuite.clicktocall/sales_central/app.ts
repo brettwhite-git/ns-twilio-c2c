@@ -1,6 +1,6 @@
 /**
- * Sales Central (slice 1): the frame (header, underline tabs, filter row),
- * Needs me and Calls, the account drawer, the dock. The place (tab, open
+ * Sales Central: the frame (header, underline tabs, Owner / Range chips),
+ * Needs me, Pipeline, Tasks and Calls, the account and deal drawers, the dock. The place (tab, open
  * account) lives in the URL hash (route.ts). Keys: Esc closes the drawer,
  * ↑ / ↓ walk the list while it is open.
  */
@@ -8,11 +8,13 @@
 import {el, clear, localToday} from './dom';
 import {STYLES} from './styles';
 import {parseRoute, formatRoute, LIVE_TABS, Route, TabId} from './route';
-import {makePost, Post, NeedsRow, CallRow, TaskRow, CompletePayload} from './api';
+import {makePost, Post, NeedsRow, CallRow, TaskRow, CompletePayload, Deal, DealEdit, PipelineData} from './api';
 import {mountDock, setDockContext, callWithDock, DockWindow} from './dock';
 import {renderNeeds} from './needs';
 import {renderCalls} from './calls';
 import {renderTasks, bandLabel} from './tasks';
+import {renderPipeline, openDealDrawer, closeDealDrawer, viewToggle} from './pipeline';
+import type {PipelineView} from './pipeline';
 import type {TaskGroup} from './tasks';
 import {openDrawer, closeDrawer, DrawerAccount} from './drawer';
 
@@ -27,6 +29,7 @@ interface Data {
     callsTotal: number;
     tasks: TaskRow[] | null;
     tasksPartial: string[];
+    pipeline: PipelineData | null;
     error: string;
 }
 
@@ -36,7 +39,12 @@ const PROBLEM: Record<string, string> = {
     already_actioned: 'Already done. The list is updated.',
     invalid_next_title: 'Give the next step a title.',
     invalid_next_due: 'Pick a due date for the next step.',
-    invalid_note: 'The note is too long.'
+    invalid_note: 'The note is too long.',
+    invalid_title: 'Give the deal a title.',
+    invalid_status: 'That status cannot be set here.',
+    invalid_close: 'Pick an expected close date.',
+    invalid_probability: 'Probability is 0 to 99.',
+    closed: 'This deal is closed. The list is updated.'
 };
 
 export const startApp = (root: HTMLElement, win: DockWindow): void => {
@@ -45,24 +53,25 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     root.appendChild(style);
 
     const today = localToday();
-    const head = el('header', 'sc-head');
-    head.append(el('h1', '', 'Sales Central'),
-        el('span', 'mut', new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })));
+    // One header row (ORCA ScPipeHead 1A): the title, a divider, the tabs, then the tab's controls.
+    const title = el('h1', 'sc-title', 'Sales Central');
     const tabs = el('nav', 'sc-tabs');
     tabs.setAttribute('aria-label', 'Sales Central');
     tabs.setAttribute('role', 'tablist');
     const filters = el('div', 'sc-filters');
     const tabBar = el('div', 'sc-tabbar');
-    tabBar.append(tabs, filters);
+    tabBar.append(title, el('span', 'sc-tsep'), tabs, filters);
     const content = el('div');
     const drawerHost = el('div');
-    root.append(head, tabBar, content, drawerHost);
+    root.append(tabBar, content, drawerHost);
 
     let route: Route = parseRoute(win.location.hash);
-    const data: Data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], error: '' };
+    const data: Data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
     let taskOpenId = '';
     let taskGroup: TaskGroup = 'all';
     let showAllSuggested = false;
+    let pipelineView: PipelineView = 'board';
+    let dealOpenId = '';
     let post: Post | null = null;
     let listButtons: HTMLElement[] = [];
 
@@ -72,6 +81,11 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
             const seen: Record<string, boolean> = {};
             return (data.calls || []).filter((c) => c.companyId && !seen[c.companyId] && (seen[c.companyId] = true))
                 .map((c) => ({ companyId: c.companyId, name: c.companyName, entityType: 'customer', phone: c.phone }));
+        }
+        if (tab === 'pipeline') {
+            const seen: Record<string, boolean> = {};
+            return (data.pipeline ? data.pipeline.deals : []).filter((d) => d.companyId && !seen[d.companyId] && (seen[d.companyId] = true))
+                .map((d) => ({ companyId: d.companyId, name: d.companyName, entityType: 'customer', phone: '' }));
         }
         if (tab === 'tasks') {
             const seen: Record<string, boolean> = {};
@@ -116,6 +130,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
             }
             const count = id === 'needs' && data.needs ? String(data.needs.length)
                 : id === 'tasks' && data.tasks ? String(data.tasks.length)
+                : id === 'pipeline' && data.pipeline ? String(data.pipeline.deals.length)
                 : id === 'calls' && data.calls ? String(data.callsTotal) : '';
             if (live && count) b.appendChild(el('span', 'cnt', count));
             b.addEventListener('click', () => { if (live && route.tab !== id) go({ tab: id, account: '' }); });
@@ -124,12 +139,14 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     };
     const renderFilters = (): void => {
         clear(filters);
+        // Pipeline: Board | List sits left of the chips, with a divider between (#124)
+        if (route.tab === 'pipeline') filters.append(viewToggle(pipelineView, (v) => { pipelineView = v; render(true); }), el('span', 'sc-vsep'));
         const chip = (k: string, v: string): HTMLElement => {
             const c = el('span', 'sc-chip', k + ' ');
             c.appendChild(el('b', '', v));
             return c;
         };
-        filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : route.tab === 'tasks' ? 'All open' : 'Last 14 days'));
+        filters.append(chip('Owner', 'Me'), chip('Range', route.tab === 'calls' ? 'This week' : route.tab === 'tasks' ? 'All open' : route.tab === 'pipeline' ? 'Open deals' : 'Last 14 days'));
     };
 
     // ---- Content ----
@@ -146,6 +163,14 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     const openAccount = (companyId: string): void => go({ tab: route.tab, account: companyId });
     const renderContent = (): void => {
         if (data.error) { failed(data.error); return; }
+        if (route.tab === 'pipeline') {
+            if (!data.pipeline) { loading(); return; }
+            listButtons = [];
+            renderPipeline(content, data.pipeline, { view: pipelineView, todayIso: today,
+                onMove: moveDeal,
+                onEdit: (d) => openDeal(d.id) });
+            return;
+        }
         if (route.tab === 'tasks') {
             if (!data.tasks) { loading(); return; }
             listButtons = renderTasks(content, { rows: data.tasks, openId: taskOpenId, selectedAccount: route.account,
@@ -228,6 +253,62 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
                 : p.outcome === 'no' ? 'Closed as not needed · ' + r.title : 'Completed · ' + r.title);
             return '';
         }).catch(() => 'Could not save. Try again.');
+    // ---- Pipeline: load, move (drag) with Undo, edit in the deal drawer ----
+    const loadPipeline = (): Promise<void> => (post as Post)<PipelineData>({ action: 'salesCentralPipeline' }).then((d) => {
+        if (d.error) throw new Error(d.error);
+        data.pipeline = { statuses: d.statuses || [], deals: d.deals || [], kpis: d.kpis, partial: d.partial || [] };
+    }).catch((e: Error) => {
+        data.pipeline = { statuses: [], deals: [], partial: ['all: ' + e.message],
+            kpis: { open: 0, openCount: 0, weighted: 0, won: 0, wonCount: 0, late: 0, lateCount: 0 } };
+    });
+    const statusName = (id: string): string => ((data.pipeline ? data.pipeline.statuses : []).filter((s) => s.id === id)[0] || { name: '' }).name;
+    const saveDeal = (d: Deal, edit: DealEdit): Promise<string> =>
+        (post as Post)<{ ok?: boolean }>({ action: 'salesCentralUpdateDeal', id: d.id, ...edit }).then((r) => {
+            if (r.error) {
+                if (r.error === 'closed') loadPipeline().then(() => render(true));
+                return r.error === 'forbidden' ? 'This customer is not in your book.' : PROBLEM[r.error] || 'Could not save. Try again.';
+            }
+            return '';
+        }).catch(() => 'Could not save. Try again.');
+    const moveDeal = (d: Deal, statusId: string): void => {
+        const from = d.statusId;
+        d.statusId = statusId; // the card moves at once; the save follows
+        renderContent();
+        saveDeal(d, { statusId: statusId }).then((problem) => {
+            if (problem) {
+                d.statusId = from;
+                renderContent();
+                toast(problem + ' · ' + (d.title || d.companyName));
+                return;
+            }
+            toast('Moved to ' + statusName(statusId) + ' · ' + d.companyName + ' · ' + d.title, ['Undo', () => {
+                d.statusId = from;
+                renderContent();
+                saveDeal(d, { statusId: from }).then(() => loadPipeline().then(() => render(true)));
+            }]);
+            loadPipeline().then(() => render(true));
+        });
+    };
+    const openDeal = (id: string): void => {
+        dealOpenId = id;
+        const d = (data.pipeline ? data.pipeline.deals : []).filter((x) => x.id === id)[0];
+        if (!d) { closeDealDrawer(drawerHost); dealOpenId = ''; return; }
+        openDealDrawer(drawerHost, d, {
+            statuses: data.pipeline ? data.pipeline.statuses : [],
+            top: drawerTop,
+            onClose: () => { dealOpenId = ''; closeDealDrawer(drawerHost); },
+            onAccount: (deal) => { dealOpenId = ''; closeDealDrawer(drawerHost); go({ tab: route.tab, account: deal.companyId }); },
+            onSave: (deal, edit) => saveDeal(deal, edit).then((problem) => {
+                if (problem) return problem;
+                dealOpenId = '';
+                closeDealDrawer(drawerHost);
+                toast('Saved · ' + (edit.title || deal.title));
+                loadPipeline().then(() => render(true));
+                return '';
+            })
+        });
+    };
+
     // A note keeps the task open: append the saved line in place, no reload.
     const addTaskNote = (r: TaskRow, note: string): Promise<string> =>
         (post as Post)<{ ok?: boolean; line?: string }>({ action: 'salesCentralAddTaskNote', taskId: r.id, note: note }).then((d) => {
@@ -298,6 +379,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
 
     // ---- Keys ----
     win.document.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (dealOpenId && e.key === 'Escape') { dealOpenId = ''; closeDealDrawer(drawerHost); e.preventDefault(); return; }
         if (!route.account || e.metaKey || e.ctrlKey || e.altKey) return;
         const t = e.target as HTMLElement;
         if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
@@ -330,6 +412,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         const p = post;
         loadNeeds().then(() => render(true));
         loadTasks().then(() => render(true));
+        loadPipeline().then(() => render(true));
         p<{ rows: CallRow[]; total?: number }>({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
             if (d.error) throw new Error(d.error);
             data.calls = d.rows || [];

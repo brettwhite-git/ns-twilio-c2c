@@ -74,12 +74,12 @@ const button = (cls: string, text: string, onClick: () => void): HTMLButtonEleme
     return b;
 };
 
-const link = (text: string, href: string): HTMLAnchorElement => {
-    const a = el('a', 'sc-lk sc-out', text);
+/** A record's own name or number is the link to it in NetSuite; no icon (ORCA ScPipeline, option C). */
+const recordLink = (text: string, href: string): HTMLAnchorElement => {
+    const a = el('a', 'sc-rec', text);
     a.href = href;
     a.target = '_top';
-    // Arrow out: the link leaves Sales Central (#120).
-    a.insertAdjacentHTML('beforeend', '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"></path><path d="M8 7h9v9"></path></svg>');
+    a.title = 'Open in NetSuite';
     return a;
 };
 
@@ -102,7 +102,7 @@ const contextBlock = (r: TaskRow): HTMLElement => {
     w.appendChild(el('span', 'sc-ctxt' + (note ? '' : ' mut'), note || 'No notes on this task.'));
     if (r.fromCall) {
         const links = el('div', 'sc-links');
-        links.appendChild(link('Open call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
+        links.append(el('span', 'mut', 'From '), recordLink(r.fromCall.title || 'the call', '/app/crm/calendar/call.nl?id=' + encodeURIComponent(r.fromCall.id)));
         w.appendChild(links);
     }
     return w;
@@ -200,7 +200,7 @@ const renderRow = (r: TaskRow, v: TasksView): HTMLElement => {
     else if (open) {
         // The open row's empty verb cell holds the way out to the record.
         verb = el('span', 'sc-verbs');
-        verb.appendChild(link('Open in NetSuite', '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
+        verb.appendChild(recordLink('Task ' + r.id, '/app/crm/calendar/task.nl?id=' + encodeURIComponent(r.id)));
     }
     else verb = el('span', 'sc-verbs');
     if (r.kind === 'task' && !open) verb.appendChild(button('sc-btn gh sm', 'Complete', () => v.onToggle(r.id)));
