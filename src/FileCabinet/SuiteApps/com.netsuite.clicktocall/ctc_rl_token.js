@@ -1702,6 +1702,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
      * approve, complete):
      *   - an Administrator;
      *   - the sales rep of the source call's customer (customer.salesrep);
+     *   - the call's owner (Phone Call `assigned`);
+     *   - a member of the customer's sales team (the user's book, the scope
+     *     the follow-up lists use; 2026-11-24, it was refused before);
      *   - a manager, for a call owned (Phone Call `assigned`) by an active
      *     employee they supervise (Reporting Central's team).
      * Never anyone else: a manager outside their team is refused.
@@ -1716,7 +1719,33 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         const srepId = getCustomerSalesRepForCall(sourceCallId);
         if (srepId !== '' && srepId === String(userId)) return true;
         const ownerId = getCallOwnerForCall(sourceCallId);
-        return ownerId !== '' && ownerId !== String(userId) && teamIdsOf(userId, false).indexOf(ownerId) !== -1;
+        // The rep who took the call (Phone Call assigned).
+        if (ownerId !== '' && ownerId === String(userId)) return true;
+        if (ownerId !== '' && teamIdsOf(userId, false).indexOf(ownerId) !== -1) return true;
+        // The customer is in the user's book (primary rep or sales team):
+        // the same scope that lists the follow-up (portlet, Call Central).
+        return isCallInBook(sourceCallId, userId);
+    };
+
+    /**
+     * Whether the source call's company is in the user's book: the
+     * customer's sales rep or a member of its sales team (customerSalesTeam),
+     * the rule getBookCustomerIds uses for the follow-up lists.
+     * Cost: 1 lookup + 1 SuiteQL (10 units, workspaceQueries.isCustomerInBook).
+     * @param {string|number} sourceCallId
+     * @param {string|number} userId
+     * @returns {boolean}
+     */
+    const isCallInBook = (sourceCallId, userId) => {
+        if (!sourceCallId) return false;
+        try {
+            const f = search.lookupFields({ type: search.Type.PHONE_CALL, id: sourceCallId, columns: ['company'] });
+            const companyId = selectValue(f && f.company);
+            return companyId !== '' && workspaceQueries.isCustomerInBook(companyId, userId);
+        } catch (e) {
+            log.error({ title: 'CTC book check failed', details: (e && e.message) || String(e) });
+            return false;
+        }
     };
 
     const PRIORITIES = ['HIGH', 'MEDIUM', 'LOW'];

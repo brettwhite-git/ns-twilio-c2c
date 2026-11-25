@@ -232,6 +232,9 @@
     var PILL_SHADOW = shadowCss(PILL_SHADE);
     var PILL_SHADOW_LIGHT = shadowCss(PILL_SHADE_LIGHT);
     var HELLO_TIMEOUT_MS = 600;
+    // The phone in another tab (a remote control): that tab may be in the
+    // background, where the browser slows it. Wait longer before "offline".
+    var REMOTE_HELLO_TIMEOUT_MS = 2000;
     // Bus contract (lib/ctc_dock.js): BUS_MIN_VERSION, COALESCE_MS,
     // REQUEST_QUEUE_MS, UI_STATE_KEY, UI_STATE_VERSION.
     var BUS_MIN_VERSION = 1;
@@ -2720,16 +2723,20 @@
     // killed tab), so silence is the reliable signal. Except in a shell that
     // just loaded: its phone frame is still starting (it speaks first when
     // ready), so the pill shows 'starting' instead of flashing 'offline'.
+    // A shell waiting for the phone (another tab runs it) reads silence as
+    // 'starting': the shell takes the phone when that tab does not answer
+    // (asset 51, the phone follows you), so "Phone offline" would be wrong.
     function hello() {
         bus.postMessage({ v: 1, type: 'hello' });
         window.clearTimeout(helloTimer);
+        var away = shellWaiting() || (mode === 'outside' && lockHeld !== false);
         helloTimer = window.setTimeout(function () {
             var booting = mode === 'shell' && !gotSnapshot && Date.now() - mountedAt < SHELL_BOOT_MS;
-            var phase = booting ? 'starting' : 'offline';
+            var phase = booting || shellWaiting() ? 'starting' : 'offline';
             // Silence: no anchor. Requests wait (and drop) until one speaks.
             ready = false;
             if (!snap || snap.phase !== phase) { snap = { phase: phase }; clearWrap(); render(); }
-        }, HELLO_TIMEOUT_MS);
+        }, away ? REMOTE_HELLO_TIMEOUT_MS : HELLO_TIMEOUT_MS);
     }
 
     // --- Outside mode: who holds the phone? ---
@@ -2896,8 +2903,11 @@
         window.setInterval(function () {
             if (document.hidden) return;
             if (mode === 'outside') checkLock();
+            // Keep asking while the phone is in another tab, offline or not
+            // (finding #95: a shell remote that once read offline never
+            // asked again and stayed "Phone offline").
             if (snap && snap.phase !== 'offline') hello();
-            else if (mode === 'outside' && phoneElsewhere()) hello();
+            else if ((mode === 'outside' && phoneElsewhere()) || shellWaiting()) hello();
         }, PING_INTERVAL_MS);
         // Back in this tab: the phone as the user left it (shared UI state).
         document.addEventListener('visibilitychange', function () {

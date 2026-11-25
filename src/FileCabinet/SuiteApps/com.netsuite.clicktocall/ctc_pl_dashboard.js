@@ -329,6 +329,19 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
         v + ".classList.add('ctc-pl-task-leaving');" +
         "(function(x){setTimeout(function(){if(x.parentNode){x.parentNode.removeChild(x)}},360)})(" + v + ");";
 
+    // A failed follow-up action says why under the row's text, never with
+    // alert(): a modal alert freezes every frame in the tab, the hidden
+    // phone included (its Twilio connection dropped to Reconnecting…,
+    // 2026-11-24). `rowExpr` is a JS expression for the row; `codeExpr`
+    // the RESTlet error code.
+    const taskErrJs = (rowExpr, codeExpr, verb) => "(function(x,c){if(!x)return;" +
+        "var m=x.querySelector('.ctc-pl-task-main');if(!m)return;" +
+        "var e=m.querySelector('.ctc-pl-task-err');" +
+        "if(!e){e=document.createElement('span');e.className='ctc-pl-task-err';e.setAttribute('role','alert');m.appendChild(e)}" +
+        "e.textContent=c==='forbidden'?'Not allowed: this call is not yours or your team\u2019s.'" +
+        ":c==='already_actioned'?'Already handled. Refresh to update.'" +
+        ":'" + verb + " failed. Try again.'})(" + rowExpr + "," + codeExpr + ");";
+
     const buildTaskActionOnclick = (action, taskId, restletUrl) => {
         if (!restletUrl) return '';
         const isApprove = action === 'approveProposedTask';
@@ -349,11 +362,11 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
                     "if(row){" + taskExitJs('row') + "}" +
                     FU_SYNC_JS +
                 "}else{" +
-                    "alert('" + errLabel + " failed: '+((d&&d.error)||'unknown'));" +
+                    taskErrJs("b.closest('.ctc-pl-task-row')", "(d&&d.error)", errLabel) +
                     "b.disabled=false;if(sib){sib.disabled=false}" +
                 "}" +
-            "}).catch(function(e){" +
-                "alert('" + errLabel + " error: '+e.message);" +
+            "}).catch(function(){" +
+                taskErrJs("b.closest('.ctc-pl-task-row')", "''", errLabel) +
                 "b.disabled=false;if(sib){sib.disabled=false}" +
             "});";
     };
@@ -374,17 +387,18 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
             ".then(function(d){" +
                 "if(d&&d.results){" +
                     "d.results.forEach(function(r){" +
-                        "if(!r.ok)return;" +
                         "var row=document.querySelector('.ctc-pl-task-row[data-row-id=\"'+r.taskId+'\"]');" +
+                        "if(!r.ok){" + taskErrJs('row', 'r.error', 'Approve') + "return}" +
                         "if(row){" + taskExitJs('row') + "}" +
                     "});" +
                     FU_SYNC_JS +
-                    "if(d.failed){alert('Approve all: '+d.approved+' succeeded, '+d.failed+' failed. Failed rows remain visible.')}" +
                 "}else{" +
-                    "alert('Bulk approve failed: '+((d&&d.error)||'unknown'));" +
+                    "for(var j=0;j<rows.length;j++){" + taskErrJs('rows[j]', '(d&&d.error)', 'Approve') + "}" +
                 "}" +
                 "b.disabled=false;" +
-            "}).catch(function(e){alert('Bulk approve error: '+e.message);b.disabled=false});";
+            "}).catch(function(){" +
+                "for(var j=0;j<rows.length;j++){" + taskErrJs('rows[j]', "''", 'Approve') + "}" +
+                "b.disabled=false});";
     };
 
     // Period dropdown: carry the range to the Reporting Central links,
@@ -1018,6 +1032,7 @@ define(['N/url', 'N/log', 'N/runtime', 'N/file', './lib/ctc_html', './lib/ctc_wo
 .ctc-pl-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ctc-pl-task-text { font-size: 13.5px; font-weight: 500; }
 .ctc-pl-task-meta { font-size: 12px; color: #5C5955; }
+.ctc-pl-task-err { font-size: 12px; color: #B3311F; }
 .ctc-pl-root a.ctc-pl-task-company { color: #5C5955; }
 .ctc-pl-root a.ctc-pl-task-company:hover { color: #345D7E; text-decoration: underline; }
 .ctc-pl-task-actions { display: flex; align-items: center; gap: 6px; flex: none; }

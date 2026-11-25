@@ -570,6 +570,10 @@
         // The card takes room: the keypad rows close to 4 px (board 06b-5),
         // and the match slot goes (its lookups need the NetSuite session).
         '.dl-signedout .dl-pad.dl-dialpad{row-gap:4px;min-height:calc(4 * 65px + 3 * 4px)}',
+        // Fit step 3 (asset 50, finding #79): smaller keys, never hidden ones.
+        '.dl-pad.dl-dialpad.dl-fit-tight{grid-template-rows:repeat(4,56px);row-gap:4px;justify-items:center;align-content:center;min-height:calc(4 * 56px + 3 * 4px)}',
+        '.dl-dialpad.dl-fit-tight .dl-key{width:56px;height:56px}',
+        '.dl-dialpad.dl-fit-tight .dl-key b{font-size:22px}',
         '.dl-signedout .dl-slot{display:none}',
         '.dl-display[disabled],.dl-dialpad .dl-key[disabled]{cursor:default}',
         '.dl-dialpad .dl-key[disabled]:active{transform:none;background:rgba(255,255,255,0.10)}',
@@ -3491,7 +3495,7 @@
             var tail = sum.stage === 'done' ? (sum.text ? '' : ' \u00b7 Summary ready')
                 : sum.stage === 'none' ? ' \u00b7 No summary'
                 : sum.stage === 'later' ? ' \u00b7 Summary within 15 min'
-                : ' \u00b7 Summary in about 2 min';
+                : ' \u00b7 Summary soon';
             return { check: true, bold: 'Voicemail saved', rest: (typeof v.seconds === 'number' ? ' \u00b7 ' + vmClock(v.seconds) : '') + tail,
                 summary: sum.stage === 'done' ? String(sum.text || '') : '',
                 url: v.recordId ? '/app/crm/calendar/call.nl?id=' + encodeURIComponent(v.recordId) : '' };
@@ -3509,6 +3513,7 @@
             ui.missSt.textContent = '';
             ui.missSum.hidden = true;
             ui.missSum.textContent = '';
+            if (vmLineKey) fitDial();
             vmLineKey = '';
             return;
         }
@@ -3552,6 +3557,8 @@
                 try { n.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' }); } catch (e) { /* no WAAPI */ }
             });
         }
+        // The line (and the summary under it) grow the note: refit Dial.
+        fitDial();
         if (line.live) {
             vmLineTimer = window.setInterval(function () {
                 var r = ui.missSt.querySelector('.dl-st-rest');
@@ -3609,19 +3616,26 @@
         if (hadFocus) focusPanel();
     });
 
-    // The fit rule (keys are sacred): while the missed note shows and the
-    // Dial view does not fit above the footer, the record's insight line
-    // goes first, then the 34 px row when it is empty; never the keys.
+    // The fit rule (keys are sacred): when the Dial view does not fit
+    // above the footer, (1) with the missed note showing, the record's
+    // insight line goes, (2) then the 34 px row when it is empty, (3) then
+    // the keys get smaller (56 px, 4 px apart; asset 50, finding #79: a
+    // short window, or the note with its voicemail line under a loaded
+    // record, clipped the * 0 # row). Never hidden keys.
     function fitDial() {
         ui.recInsight.classList.remove('dl-fit-out');
         ui.mrow.classList.remove('dl-fit-out');
-        if (!miss || tab !== 'dial' || ui.idle.hidden) return;
+        ui.dialpad.classList.remove('dl-fit-tight');
+        if (tab !== 'dial' || ui.idle.hidden) return;
         var body = ui.dialBody;
         var over = function () { return body.scrollHeight > body.clientHeight; };
         if (!over()) return;
-        if (!ui.rec.hidden && !ui.recInsight.hidden) ui.recInsight.classList.add('dl-fit-out');
-        var empty = ui.trig.hidden && (ui.slot.hidden || (ui.looking.hidden && ui.match.hidden && ui.add.hidden));
-        if (over() && empty) ui.mrow.classList.add('dl-fit-out');
+        if (miss) {
+            if (!ui.rec.hidden && !ui.recInsight.hidden) ui.recInsight.classList.add('dl-fit-out');
+            var empty = ui.trig.hidden && (ui.slot.hidden || (ui.looking.hidden && ui.match.hidden && ui.add.hidden));
+            if (over() && empty) ui.mrow.classList.add('dl-fit-out');
+        }
+        if (over()) ui.dialpad.classList.add('dl-fit-tight');
     }
     if (typeof window.ResizeObserver === 'function') {
         try { new window.ResizeObserver(function () { fitDial(); }).observe(ui.dialBody); } catch (e) { /* no observer: fit on render */ }

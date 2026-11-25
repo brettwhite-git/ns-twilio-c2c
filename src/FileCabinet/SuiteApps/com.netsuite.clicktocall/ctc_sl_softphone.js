@@ -1788,6 +1788,12 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
             try { return window.parent !== window && !!window.parent.__ctcShell; } catch (err) { return false; }
         }
         var IN_SHELL = inPhoneShell();
+        // This page's own Search / Recents / picker / account UI is never
+        // shown: the shell keeps the phone frame hidden and the dock draws
+        // everything. So its data loads are skipped (finding #74, asset 50:
+        // softphoneRecents, softphoneSuggested, softphoneBookCounts,
+        // softphoneContacts, softphoneAccountSnapshot ran for nobody).
+        var UI_HIDDEN = IN_SHELL;
         function makeAnchorId() {
             var out = '';
             try {
@@ -4390,6 +4396,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         }
 
         function loadBookCounts() {
+            if (UI_HIDDEN) return;
             fetch(TOKEN_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -4423,6 +4430,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         }
 
         function loadSuggested() {
+            if (UI_HIDDEN) return;
             searchLoading.classList.remove('hidden');
             searchSectLabel.textContent = 'Suggested · your book';
             searchSectMeta.textContent  = 'by recency';
@@ -4696,6 +4704,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         }
 
         function hydratePickerForEntity(entityId) {
+            if (UI_HIDDEN) return;
             if (!entityId) {
                 renderPicker([]);
                 return;
@@ -5220,6 +5229,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         }
 
         function loadRecents() {
+            if (UI_HIDDEN) return;
             recentsLoading.classList.remove('hidden');
             fetch(TOKEN_URL, {
                 method: 'POST',
@@ -5348,6 +5358,7 @@ define(['N/url', 'N/log', 'N/file', 'N/search', './lib/ctc_html', './lib/ctc_ent
         }
 
         function loadAccountSnapshot(entityId) {
+            if (UI_HIDDEN) return;
             if (!snapshotCard || !entityId) return;
             var label = ENTITY_NAME || ('Entity ' + entityId);
             if (snapshotEntityLabel) snapshotEntityLabel.textContent = label;

@@ -578,6 +578,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     logEvent('frame load', path);
     syncContext(win);
     watchFrameWindow(win);
+    followFrame(win);
     try {
       win.addEventListener('error', function (ev) {
         logEvent('frame error', (ev && ev.message ? ev.message : 'error') + ' @ ' + tail(ev && ev.filename));
@@ -768,6 +769,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   }
   function onSnapshot(snap) {
     if (probing && workingAnchor(snap)) probeSeen = true;
+    if (follow && !ownSnapshot(snap) && workingAnchor(snap)) followHeard(snap);
     if (ownSnapshot(snap)) setPhase(snap.phase);
     ringFromSnapshot(snap);
     sessionFromSnapshot(snap);
@@ -826,6 +828,11 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
       if (!m || m.v !== 1) return;
       if (m.type === 'snapshot' && m.snap) {
         onSnapshot(m.snap);
+      } else if (m.type === 'hello') {
+        // A holder shell answers for its phone (alive even while it starts).
+        if (lockState === 'held') bus.postMessage({ v: 1, type: HOLDER_TYPE, phase: phase });
+      } else if (m.type === HOLDER_TYPE) {
+        followHeard(null);
       } else if (m.type === 'request' && m.action === CFG.requestUnlock && m.origin === CFG.requestOrigin) {
         // Only a gesture in this tab counts (transient activation now).
         if (hasTransientActivation()) unlockAudio('bus request');
@@ -1042,8 +1049,9 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   // over when the holder closes, crashes or is discarded) | 'yielding'
   // (another page stole the lock during our live call: the phone keeps the
   // call and stops when it ends) | 'disabled' (the phone is not enabled for
-  // this user; lock released). This shell never steals the lock: the phone
-  // is never moved by hand.
+  // this user; lock released). The phone follows the tab you use (asset 51,
+  // see "The phone follows you"): a waiting shell steals the lock on a click
+  // when the phone tab is idle, or when the phone tab stops answering.
   var lockState = 'none';
   var releaseLock = null;
   var waitAbort = null;
@@ -1071,7 +1079,7 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
   function gotLock(mode) {
     setLock('held');
     setBusy(false);
-    startPhone(mode === 'first' ? 'lock held' : 'lock freed');
+    startPhone(mode === 'first' ? 'lock held' : mode === 'steal' ? 'moved here' : 'lock freed');
     // Keep the lock until this page goes away, its phone loses to another
     // phone (duplicate anchor), or the phone is not enabled for this user.
     return new Promise(function (resolve) { releaseLock = resolve; });
@@ -1081,6 +1089,8 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     setBusy(true);
     logEvent('phone busy', reason);
     requestLock('wait');
+    // Is the phone tab alive? (A frozen tab keeps the lock and never rings.)
+    followCheck(false);
   }
   // mode: 'first' (ifAvailable) | 'wait' (queued).
   function requestLock(mode) {
@@ -1129,6 +1139,98 @@ ${o.phoneTab ? '' : '<iframe id="ctc-ns-frame" title="NetSuite" src="' + escapeH
     becomeWaiting('lock lost');
     setPhase('offline');
   }
+  // ---- The phone follows you (asset 51, finding #95) ----
+  // A waiting shell (another tab runs the phone) takes the phone:
+  //   - on a click or key in this tab (the shell, its dock or its NetSuite
+  //     frame), when the phone tab is idle: no call or ring, no voicemail
+  //     check, no summary on its way (otherBusy);
+  //   - when this tab is visible and nothing answers the bus within
+  //     FOLLOW_WAIT_MS (the phone tab is frozen, stalled or gone), click or
+  //     not: checked when this tab starts waiting, comes into view, and
+  //     every FOLLOW_CHECK_MS while visible.
+  // A holder shell answers 'hello' itself ('holder'), so a phone that is
+  // still starting in the tab that just took it counts as alive (no steal
+  // back). Taking = a Web Locks steal: the old tab's lockLost stops its
+  // phone, or keeps a live call until it ends. Reverses the 2026-11-13
+  // "nothing steals the lock" decision (user, 2026-11-25: seamless).
+  var FOLLOW_WAIT_MS = 2000;
+  var FOLLOW_CHECK_MS = 15000;
+  var FOLLOW_GAP_MS = 3000;
+  var VM_BUSY_MS = 300000;
+  var SUMMARY_BUSY_MS = 240000;
+  var HOLDER_TYPE = 'ctc-phone-holder';
+  var follow = null;
+  var lastClickCheckAt = 0;
+  function recent(since, ms) { return typeof since === 'number' && Date.now() - since < ms; }
+  function otherBusy(snap) {
+    if (!snap) return false;
+    if (ACTIVE[snap.phase]) return true;
+    var v = snap.voicemail;
+    if (v && (v.state === 'checking' || v.state === 'leaving') && recent(v.since, VM_BUSY_MS)) return true;
+    if (v && v.summary && (v.summary.stage === 'logged' || v.summary.stage === 'transcribing') && recent(v.since, VM_BUSY_MS)) return true;
+    var t = snap.lastLog && snap.lastLog.transcript;
+    return !!(t && (t.stage === 'logged' || t.stage === 'transcribing') && recent(t.since, SUMMARY_BUSY_MS));
+  }
+  function canFollow() {
+    return lockState === 'waiting' && !lockBroken && !!bus && !!navigator.locks &&
+      typeof navigator.locks.request === 'function' && !document.hidden;
+  }
+  function followCheck(byUser) {
+    if (!canFollow()) return;
+    if (follow) { if (byUser) follow.byUser = true; return; }
+    // Clicks while the phone tab is busy: ask at most every FOLLOW_GAP_MS.
+    if (byUser) {
+      if (Date.now() - lastClickCheckAt < FOLLOW_GAP_MS) return;
+      lastClickCheckAt = Date.now();
+    }
+    follow = { byUser: !!byUser, alive: false, snap: null, timer: null };
+    bus.postMessage({ v: 1, type: 'hello' });
+    follow.timer = setTimeout(function () { followDecide('timeout'); }, FOLLOW_WAIT_MS);
+  }
+  // Each answer while a check runs: an anchor snapshot (full state) decides
+  // at once; a holder shell's answer only says "alive".
+  function followHeard(snap) {
+    if (!follow) return;
+    follow.alive = true;
+    if (snap) { follow.snap = snap; followDecide('answer'); }
+  }
+  function followDecide(why) {
+    var f = follow;
+    if (!f) return;
+    follow = null;
+    clearTimeout(f.timer);
+    if (!canFollow()) return;
+    if (!f.alive) { takePhone('the phone tab did not answer'); return; }
+    if (f.byUser && !otherBusy(f.snap)) takePhone('followed a click in this tab (' + why + ')');
+  }
+  function takePhone(reason) {
+    logEvent('phone moved here', reason);
+    if (waitAbort) { try { waitAbort.abort(); } catch (e) { /* done */ } waitAbort = null; }
+    var granted = false;
+    navigator.locks.request(CFG.lockName, { steal: true }, function () {
+      granted = true;
+      return gotLock('steal');
+    }).catch(function (e) {
+      if (granted) { lockLost(e && e.name); return; }
+      logEvent('lock error', e && e.message);
+      requestLock('wait');
+    });
+  }
+  function onFollowGesture() { followCheck(true); }
+  // A NetSuite page in the frame: its clicks and keys count too.
+  function followFrame(win) {
+    try {
+      var d = win && win.document;
+      if (!d || typeof d.addEventListener !== 'function') return;
+      d.addEventListener('pointerdown', onFollowGesture, true);
+      d.addEventListener('keydown', onFollowGesture, true);
+    } catch (e) { /* frame not readable */ }
+  }
+  document.addEventListener('pointerdown', onFollowGesture, true);
+  document.addEventListener('keydown', onFollowGesture, true);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) followCheck(false); });
+  setInterval(function () { followCheck(false); }, FOLLOW_CHECK_MS);
+
   // ---- No usable lock: ask the bus first ----
   // The lock request failed: start the phone only when no other phone
   // answers a 'hello' within PROBE_MS. Else wait with the busy banner (the

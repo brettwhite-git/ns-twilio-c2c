@@ -131,6 +131,27 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
      * @param {{userId?: string|number}} [params]
      * @returns {Array<string>} customer internal IDs (may be empty)
      */
+    /**
+     * Whether one customer is in the user's book: its sales rep, or a
+     * member of its sales team (customerSalesTeam). The getBookCustomerIds
+     * rule for one id (follow-up access, 2026-11-24). Throws on a SuiteQL
+     * error (the caller decides). Cost: 10 units.
+     * @param {string|number} customerId
+     * @param {string|number} userId
+     * @returns {boolean}
+     */
+    const isCustomerInBook = (customerId, userId) => {
+        const cid = parseInt(String(customerId || ''), 10);
+        const uid = parseInt(String(userId || ''), 10);
+        if (!cid || !uid) return false;
+        const rows = query.runSuiteQL({
+            query: 'SELECT c.id FROM customer c LEFT JOIN customerSalesTeam cst ON cst.customer = c.id ' +
+                   'WHERE c.id = ? AND (c.salesrep = ? OR cst.employee = ?)',
+            params: [cid, uid, uid]
+        }).asMappedResults();
+        return rows.length > 0;
+    };
+
     const getBookCustomerIds = (params) => {
         try {
             const userId = parseInt(String((params && params.userId) || ''), 10);
@@ -1958,6 +1979,7 @@ define(['N/search', 'N/query', 'N/log', './ctc_time', './ctc_html'], (search, qu
 
     return {
         displayCallTitle,
+        isCustomerInBook,
         extractText,
         loadHistoryRows,
         loadTaskGroups,
