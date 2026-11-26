@@ -43,9 +43,6 @@ export const renderNeeds = (host: HTMLElement, v: NeedsView): HTMLElement[] => {
         return buttons;
     }
     const pins = v.rows.slice(0, 3);
-    const lab = el('div', 'sc-label', 'Do first ');
-    lab.appendChild(el('span', 'cnt', String(pins.length)));
-    host.appendChild(lab);
     const grid = el('div', 'sc-pins');
     pins.forEach((r) => {
         const b = el('button', 'sc-pin');

@@ -8,7 +8,7 @@
 
 export const STYLES = [
     // Page margins (2026-11-25, previewed live): 16px above the header row, 56px each side (32 + the rows' own 24)
-    '.sc{position:relative;box-sizing:border-box;min-height:100%;padding:16px 32px 0;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+    '.sc{position:relative;box-sizing:border-box;min-height:100%;padding:18px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
     '.sc *{box-sizing:border-box}',
     // Author display rules beat the browser's [hidden] rule: restate it.
     '.sc [hidden]{display:none !important}',
@@ -22,7 +22,28 @@ export const STYLES = [
     '.sc-tsep{width:1px;height:22px;background:#DEDBD7;flex:none}',
     // Tabs 40: underline only; the count is plain grey text (never a badge)
     // Tab row: tabs left, Owner / Range chips at the right end (#113)
-    '.sc-tabbar{display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+    // Frame (ORCA ScFrame B; Batchline §2c): ground, white cards with 8px corners
+    // (.sc-frame, not .sc-card: .sc-card is the Pipeline deal card)
+    '.sc-frame{background:#FFFFFF;border:1px solid #E5E2DD;border-radius:8px;box-shadow:0 1px 2px rgba(26,24,22,0.04);overflow:hidden}',
+    '.sc-wcard{margin-top:16px}',
+    '.sc-tabbar{display:flex;align-items:center;gap:20px;padding:0 20px 0 12px}',
+    '.sc-fold{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:none;color:#5E5952;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;margin-right:-12px}',
+    '.sc-fold:hover{background:#F1EEE9}',
+    '.sc-fold:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+    '.sc-fold svg{transition:transform 180ms cubic-bezier(0.23,1,0.32,1);transform:rotate(90deg)}',
+    '.sc-hcard.folded .sc-fold svg{transform:none}',
+    '.sc-hcard.folded .sc-lens{display:none}',
+    // Lens band (Batchline §3g): sunk, grouped figures under small uppercase titles
+    '.sc-lens{display:flex;background:#FAF9F7;border-top:1px solid #E5E2DD}',
+    '.sc-lens:empty{display:none}',
+    '.sc-lgrp{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px 24px 32px;border-left:1px solid #E5E2DD}',
+    '.sc-lgrp:first-child{border-left:0}',
+    '.sc-lgh{align-self:flex-start;padding-bottom:4px;border-bottom:1px solid #D4D0C9;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5E5952}',
+    '.sc-lkv{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}',
+    '.sc-lkv>div+div{border-left:1px solid #E8E5E0}',
+    '.sc-lkv>div{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0;text-align:center}',
+    '.sc-lkv span{font-size:12px;color:#5E5952}',
+    '.sc-lkv b{font-size:18px;line-height:24px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}',
     '.sc-tabs{display:flex;gap:24px}',
     '.sc-tab{height:48px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;font-size:14px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
     '.sc-tab:hover{color:#161513}',
@@ -38,7 +59,7 @@ export const STYLES = [
     '.sc-label{padding:4px 24px 8px;font-size:12px;font-weight:500;color:#6F6B66}',
     '.sc-label .cnt{font-weight:400}',
     // Do first cards (the exception; the table is the rule)
-    '.sc-pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 24px 24px}',
+    '.sc-pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:20px 24px 24px}',
     '.sc-pin{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:0;border-radius:10px;background:#FFFFFF;box-shadow:0 0 0 1px #ECEAE7;text-align:left;cursor:pointer;min-width:0;transition:box-shadow 150ms ease,transform 120ms cubic-bezier(0.23,1,0.32,1)}',
     '.sc-pin:hover{box-shadow:0 0 0 1px #C9C5BF,0 4px 12px rgba(22,21,19,0.05)}',
     '.sc-pin:active{transform:scale(0.99)}',
@@ -65,7 +86,7 @@ export const STYLES = [
     '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
     // Summary line (#116): groups styled like the tabs; a click shows one group
     // (#121: a segmented control, not a second row of tabs; same shape as the outcome control)
-    '.sc-sumbar{padding:12px 24px}',
+    '.sc-sumbar{padding:10px 20px;background:#FCFBFA;border-bottom:1px solid #EFEDE9}',
     '.sc-sumline{display:inline-flex;gap:2px;padding:3px;border-radius:8px;background:#F1EFEA}',
     '.sc-sum{height:28px;padding:0 12px;border:0;border-radius:6px;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer}',
     '.sc-sum:hover{color:#161513}',
@@ -132,13 +153,7 @@ export const STYLES = [
     '@keyframes sc-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
     // Empty / loading / error
     // Pipeline (ORCA ScPipeline): KPIs on top, Board | List behind a divider, status columns, the deal drawer
-    '.sc-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:16px 24px;border-bottom:1px solid #ECEAE7}',
     '.sc-vsep{width:1px;height:20px;background:#DEDBD7;margin:0 4px}',
-    '.sc-k{display:flex;flex-direction:column;gap:2px;padding:0 24px;border-left:1px solid #ECEAE7;min-width:0}',
-    '.sc-k:first-child{padding-left:0;border-left:0}',
-    '.sc-kl{font-size:12px;color:#6F6B66}',
-    '.sc-kv{font-size:22px;line-height:28px;font-weight:600;font-variant-numeric:tabular-nums}',
-    '.sc-ks{font-size:12px;color:#6F6B66}',
     '.sc-cols{display:grid;gap:12px;padding:16px 24px 24px;overflow-x:auto;align-items:start}',
     '.sc-col{border-radius:10px;background:#FAFAF9;box-shadow:inset 0 0 0 1px #ECEAE7;padding:8px;display:flex;flex-direction:column;gap:8px;min-height:320px;transition:background-color 120ms ease}',
     '.sc-col.drop{background:#F1F4F8;box-shadow:inset 0 0 0 1.5px #5F7590}',

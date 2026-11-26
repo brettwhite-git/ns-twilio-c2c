@@ -1,6 +1,6 @@
 /**
- * Sales Central · Pipeline (ORCA board ScPipeline): KPIs on top (open,
- * weighted, won this quarter, past close date) across the full width;
+ * Sales Central · Pipeline (ORCA board ScPipeline): the KPIs (open,
+ * weighted, won this quarter, past close date) live in the header's Lens band;
  * Board | List sits in the tab row, left of the Owner / Range chips (viewToggle); the Board has one column per open NetSuite status, cards drag between
  * them; the pencil (or a List row) opens the deal drawer to edit and save.
  * Won is read only: it comes from a sales order, never from Sales Central.
@@ -30,14 +30,6 @@ const button = (cls: string, text: string, onClick: () => void): HTMLButtonEleme
 const late = (d: Deal, todayIso: string): boolean => !!d.close && d.close < todayIso;
 const sum = (deals: Deal[]): number => deals.reduce((n, d) => n + d.amount, 0);
 
-const kpi = (label: string, value: string, sub: string, red?: boolean): HTMLElement => {
-    const k = el('div', 'sc-k');
-    const v = el('span', 'sc-kv', value);
-    if (red) v.style.color = '#B3311F';
-    k.append(el('span', 'sc-kl', label), v, el('span', 'sc-ks', sub));
-    return k;
-};
-
 /** Board | List, for the tab row (left of the Owner / Range chips). */
 export const viewToggle = (view: PipelineView, onView: (v: PipelineView) => void): HTMLElement => {
     const seg = el('div', 'sc-sumline');
@@ -49,18 +41,6 @@ export const viewToggle = (view: PipelineView, onView: (v: PipelineView) => void
         seg.appendChild(b);
     });
     return seg;
-};
-
-const kpiRow = (p: PipelineData): HTMLElement => {
-    const row = el('div', 'sc-kpis');
-    const k = p.kpis;
-    row.append(
-        kpi('Open', money(k.open) === '—' ? '$0' : money(k.open), k.openCount + (k.openCount === 1 ? ' deal' : ' deals')),
-        kpi('Weighted', money(k.weighted) === '—' ? '$0' : money(k.weighted), 'amount × probability'),
-        kpi('Won this quarter', money(k.won) === '—' ? '$0' : money(k.won), k.wonCount + (k.wonCount === 1 ? ' sales order' : ' sales orders')),
-        kpi('Past close date', String(k.lateCount), money(k.late), k.lateCount > 0)
-    );
-    return row;
 };
 
 const card = (d: Deal, h: PipelineHandlers): HTMLElement => {
@@ -139,7 +119,6 @@ export const renderPipeline = (host: HTMLElement, p: PipelineData, h: PipelineHa
     clear(host);
     host.className = 'sc-pipe sc-fade';
     if (p.partial.length) host.appendChild(el('div', 'sc-note', 'Some sources did not load (' + p.partial.join(', ') + '). The numbers may be short.'));
-    host.appendChild(kpiRow(p));
     if (!p.deals.length) {
         const m = el('div', 'sc-msg');
         m.append(el('b', '', 'No open deals'), el('span', '', 'Open opportunities for customers in your book show here.'));

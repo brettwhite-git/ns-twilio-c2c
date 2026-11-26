@@ -45,7 +45,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     };
 
     const STYLES = [
-        '.sc{position:relative;box-sizing:border-box;min-height:100%;padding:16px 32px 0;background:#FFFFFF;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        '.sc{position:relative;box-sizing:border-box;min-height:100%;padding:18px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         '.sc *{box-sizing:border-box}',
         '.sc [hidden]{display:none !important}',
         '.sc button{font:inherit;color:inherit}',
@@ -55,7 +55,25 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc .dot{width:6px;height:6px;border-radius:999px;flex:none;display:inline-block}',
         '.sc-title{margin:0;font-size:17px;line-height:22px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap}',
         '.sc-tsep{width:1px;height:22px;background:#DEDBD7;flex:none}',
-        '.sc-tabbar{display:flex;align-items:center;gap:24px;padding:0 24px;border-bottom:1px solid #ECEAE7}',
+        '.sc-frame{background:#FFFFFF;border:1px solid #E5E2DD;border-radius:8px;box-shadow:0 1px 2px rgba(26,24,22,0.04);overflow:hidden}',
+        '.sc-wcard{margin-top:16px}',
+        '.sc-tabbar{display:flex;align-items:center;gap:20px;padding:0 20px 0 12px}',
+        '.sc-fold{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:none;color:#5E5952;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;margin-right:-12px}',
+        '.sc-fold:hover{background:#F1EEE9}',
+        '.sc-fold:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+        '.sc-fold svg{transition:transform 180ms cubic-bezier(0.23,1,0.32,1);transform:rotate(90deg)}',
+        '.sc-hcard.folded .sc-fold svg{transform:none}',
+        '.sc-hcard.folded .sc-lens{display:none}',
+        '.sc-lens{display:flex;background:#FAF9F7;border-top:1px solid #E5E2DD}',
+        '.sc-lens:empty{display:none}',
+        '.sc-lgrp{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:16px;padding:24px 24px 32px;border-left:1px solid #E5E2DD}',
+        '.sc-lgrp:first-child{border-left:0}',
+        '.sc-lgh{align-self:flex-start;padding-bottom:4px;border-bottom:1px solid #D4D0C9;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5E5952}',
+        '.sc-lkv{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}',
+        '.sc-lkv>div+div{border-left:1px solid #E8E5E0}',
+        '.sc-lkv>div{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0;text-align:center}',
+        '.sc-lkv span{font-size:12px;color:#5E5952}',
+        '.sc-lkv b{font-size:18px;line-height:24px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}',
         '.sc-tabs{display:flex;gap:24px}',
         '.sc-tab{height:48px;padding:0;border:0;background:none;display:inline-flex;align-items:center;gap:6px;font-size:14px;color:#4A4744;cursor:pointer;box-shadow:inset 0 -2px 0 transparent;transition:box-shadow 150ms ease,color 150ms ease}',
         '.sc-tab:hover{color:#161513}',
@@ -68,7 +86,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-chip b{font-weight:500;color:#161513}',
         '.sc-label{padding:4px 24px 8px;font-size:12px;font-weight:500;color:#6F6B66}',
         '.sc-label .cnt{font-weight:400}',
-        '.sc-pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:0 24px 24px}',
+        '.sc-pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:20px 24px 24px}',
         '.sc-pin{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:0;border-radius:10px;background:#FFFFFF;box-shadow:0 0 0 1px #ECEAE7;text-align:left;cursor:pointer;min-width:0;transition:box-shadow 150ms ease,transform 120ms cubic-bezier(0.23,1,0.32,1)}',
         '.sc-pin:hover{box-shadow:0 0 0 1px #C9C5BF,0 4px 12px rgba(22,21,19,0.05)}',
         '.sc-pin:active{transform:scale(0.99)}',
@@ -91,7 +109,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.sc-strong{font-weight:500}',
         '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
-        '.sc-sumbar{padding:12px 24px}',
+        '.sc-sumbar{padding:10px 20px;background:#FCFBFA;border-bottom:1px solid #EFEDE9}',
         '.sc-sumline{display:inline-flex;gap:2px;padding:3px;border-radius:8px;background:#F1EFEA}',
         '.sc-sum{height:28px;padding:0 12px;border:0;border-radius:6px;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer}',
         '.sc-sum:hover{color:#161513}',
@@ -151,13 +169,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);display:flex;align-items:center;height:40px;padding:0 16px;border-radius:10px;background:#161513;color:#FFFFFF;box-shadow:0 8px 24px rgba(22,21,19,0.18);z-index:30;gap:14px;animation:sc-fade 160ms ease-out both}',
         '.sc-toast-act{padding:0;border:0;background:none;font:inherit;font-weight:500;color:#9DB4CF;cursor:pointer}',
         '@keyframes sc-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
-        '.sc-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:16px 24px;border-bottom:1px solid #ECEAE7}',
         '.sc-vsep{width:1px;height:20px;background:#DEDBD7;margin:0 4px}',
-        '.sc-k{display:flex;flex-direction:column;gap:2px;padding:0 24px;border-left:1px solid #ECEAE7;min-width:0}',
-        '.sc-k:first-child{padding-left:0;border-left:0}',
-        '.sc-kl{font-size:12px;color:#6F6B66}',
-        '.sc-kv{font-size:22px;line-height:28px;font-weight:600;font-variant-numeric:tabular-nums}',
-        '.sc-ks{font-size:12px;color:#6F6B66}',
         '.sc-cols{display:grid;gap:12px;padding:16px 24px 24px;overflow-x:auto;align-items:start}',
         '.sc-col{border-radius:10px;background:#FAFAF9;box-shadow:inset 0 0 0 1px #ECEAE7;padding:8px;display:flex;flex-direction:column;gap:8px;min-height:320px;transition:background-color 120ms ease}',
         '.sc-col.drop{background:#F1F4F8;box-shadow:inset 0 0 0 1.5px #5F7590}',
@@ -297,9 +309,6 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             return buttons;
         }
         const pins = v.rows.slice(0, 3);
-        const lab = el('div', 'sc-label', 'Do first ');
-        lab.appendChild(el('span', 'cnt', String(pins.length)));
-        host.appendChild(lab);
         const grid = el('div', 'sc-pins');
         pins.forEach((r) => {
             const b = el('button', 'sc-pin');
@@ -660,15 +669,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         return b;
     };
     const late = (d, todayIso) => !!d.close && d.close < todayIso;
-    const sum = (deals) => deals.reduce((n, d) => n + d.amount, 0);
-    const kpi = (label, value, sub, red) => {
-        const k = el('div', 'sc-k');
-        const v = el('span', 'sc-kv', value);
-        if (red)
-            v.style.color = '#B3311F';
-        k.append(el('span', 'sc-kl', label), v, el('span', 'sc-ks', sub));
-        return k;
-    };
+    const sum$1 = (deals) => deals.reduce((n, d) => n + d.amount, 0);
     const viewToggle = (view, onView) => {
         const seg = el('div', 'sc-sumline');
         seg.setAttribute('role', 'group');
@@ -679,12 +680,6 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             seg.appendChild(b);
         });
         return seg;
-    };
-    const kpiRow = (p) => {
-        const row = el('div', 'sc-kpis');
-        const k = p.kpis;
-        row.append(kpi('Open', money(k.open) === '—' ? '$0' : money(k.open), k.openCount + (k.openCount === 1 ? ' deal' : ' deals')), kpi('Weighted', money(k.weighted) === '—' ? '$0' : money(k.weighted), 'amount × probability'), kpi('Won this quarter', money(k.won) === '—' ? '$0' : money(k.won), k.wonCount + (k.wonCount === 1 ? ' sales order' : ' sales orders')), kpi('Past close date', String(k.lateCount), money(k.late), k.lateCount > 0));
-        return row;
     };
     const card = (d, h) => {
         const c = el('div', 'sc-card');
@@ -720,7 +715,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             const col = el('div', 'sc-col');
             col.setAttribute('data-status', s.id);
             const head = el('div', 'sc-colh');
-            head.append(el('b', '', s.name), el('span', 'cnt', String(items.length)), el('span', 'amt', items.length ? money(sum(items)) : ''));
+            head.append(el('b', '', s.name), el('span', 'cnt', String(items.length)), el('span', 'amt', items.length ? money(sum$1(items)) : ''));
             col.appendChild(head);
             items.forEach((d) => col.appendChild(card(d, h)));
             col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drop'); });
@@ -747,7 +742,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             if (!items.length)
                 return;
             const b = el('div', 'sc-band', s.name + ' ');
-            b.appendChild(el('span', 'cnt', items.length + ' · ' + money(sum(items))));
+            b.appendChild(el('span', 'cnt', items.length + ' · ' + money(sum$1(items))));
             wrap.appendChild(b);
             items.forEach((d) => {
                 const r = button('sc-row', '', () => h.onEdit(d));
@@ -766,7 +761,6 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         host.className = 'sc-pipe sc-fade';
         if (p.partial.length)
             host.appendChild(el('div', 'sc-note', 'Some sources did not load (' + p.partial.join(', ') + '). The numbers may be short.'));
-        host.appendChild(kpiRow(p));
         if (!p.deals.length) {
             const m = el('div', 'sc-msg');
             m.append(el('b', '', 'No open deals'), el('span', '', 'Open opportunities for customers in your book show here.'));
@@ -858,6 +852,88 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         const d = host.querySelector('.sc-deal');
         if (d)
             d.remove();
+    };
+
+    const n = (x) => x.toLocaleString('en-US');
+    const amount = (x) => (x ? money(x) : '$0');
+    const pct = (part, whole) => (whole ? Math.round((part / whole) * 100) + '%' : '—');
+    const avgMoney = (sum, count) => (count ? money(sum / count) : '—');
+    const sum = (rows, f) => rows.reduce((s, r) => s + (f(r) || 0), 0);
+    const clockOf = (secs) => Math.floor(secs / 60) + ':' + String(Math.round(secs % 60)).padStart(2, '0');
+    const tasksLens = (rows) => {
+        const tasks = rows.filter((r) => r.kind === 'task');
+        const count = (band) => tasks.filter((r) => r.band === band).length;
+        const overdue = tasks.filter((r) => r.band === 'overdue').map((r) => r.due).filter(Boolean).sort();
+        const sugg = rows.filter((r) => r.kind === 'suggestion');
+        const dates = sugg.map((r) => (r.fromCall ? r.fromCall.date : '')).filter(Boolean).sort();
+        const accounts = new Set(sugg.map((r) => r.companyId).filter(Boolean)).size;
+        return [
+            { title: 'Today', items: [{ label: 'Overdue', value: n(count('overdue')), red: count('overdue') > 0 }, { label: 'Due today', value: n(count('today')) },
+                    { label: 'Oldest overdue', value: overdue.length ? shortDate(overdue[0]) : '—' }] },
+            { title: 'Suggestions', items: [{ label: 'To review', value: n(sugg.length) }, { label: 'Oldest', value: dates.length ? shortDate(dates[0]) : '—' },
+                    { label: 'Accounts', value: n(accounts) }] },
+            { title: 'Later', items: [{ label: 'This week', value: n(count('week')) }, { label: 'Later', value: n(count('later')) }, { label: 'All open', value: n(tasks.length) }] }
+        ];
+    };
+    const pipelineLens = (p) => {
+        const k = p.kpis;
+        const avgProb = p.deals.length ? Math.round(sum(p.deals, (d) => d.probability) / p.deals.length) + '%' : '—';
+        return [
+            { title: 'Open', items: [{ label: 'Amount', value: amount(k.open) }, { label: 'Deals', value: n(k.openCount) }, { label: 'Average deal', value: avgMoney(k.open, k.openCount) }] },
+            { title: 'Weighted', items: [{ label: 'Amount × probability', value: amount(k.weighted) }, { label: 'Share of open', value: pct(k.weighted, k.open) },
+                    { label: 'Average probability', value: avgProb }] },
+            { title: 'Won this quarter', items: [{ label: 'Amount', value: amount(k.won) }, { label: 'Sales orders', value: n(k.wonCount) }, { label: 'Average order', value: avgMoney(k.won, k.wonCount) }] },
+            { title: 'Past close date', items: [{ label: 'Deals', value: n(k.lateCount), red: k.lateCount > 0 }, { label: 'Amount', value: amount(k.late) },
+                    { label: 'Share of open', value: pct(k.lateCount, k.openCount) }] }
+        ];
+    };
+    const needsLens = (rows) => {
+        const red = rows.filter((r) => r.tone === 'red');
+        const amber = rows.filter((r) => r.tone === 'amber');
+        const open = (rs) => amount(sum(rs, (r) => r.open));
+        return [
+            { title: 'Act now', items: [{ label: 'Accounts', value: n(red.length), red: red.length > 0 },
+                    { label: 'Call backs', value: n(red.filter((r) => r.kind === 'callback').length) }, { label: 'Open', value: open(red) }] },
+            { title: 'Soon', items: [{ label: 'Accounts', value: n(amber.length) }, { label: 'To review', value: n(amber.filter((r) => r.kind === 'review').length) },
+                    { label: 'Open', value: open(amber) }] },
+            { title: 'Accounts', items: [{ label: 'Total', value: n(rows.length) }, { label: 'Open', value: open(rows) },
+                    { label: 'No touch logged', value: n(rows.filter((r) => !r.lastTouch).length) }] }
+        ];
+    };
+    const callsLens = (rows, total) => {
+        const timed = rows.filter((r) => r.duration > 0);
+        const secs = sum(timed, (r) => r.duration);
+        const scored = rows.filter((r) => typeof r.satisfaction === 'number' && r.satisfaction > 0);
+        const scores = scored.map((r) => r.satisfaction);
+        const avg = scores.length ? scores.reduce((s, x) => s + x, 0) / scores.length : 0;
+        const voicemails = rows.filter((r) => r.voicemail).length;
+        const missed = rows.filter((r) => r.callStatus === 'No answer' || r.callStatus === 'Missed').length;
+        return [
+            { title: 'This week', items: [{ label: 'Calls', value: n(total) }, { label: 'Minutes', value: n(Math.round(secs / 60)) },
+                    { label: 'Average length', value: timed.length ? clockOf(secs / timed.length) : '—' }] },
+            { title: 'Missed', items: [{ label: 'Voicemails', value: n(voicemails) }, { label: 'No answer', value: n(missed) },
+                    { label: 'Share of calls', value: pct(voicemails + missed, rows.length) }] },
+            { title: 'Mood', items: [{ label: 'Average', value: scores.length ? avg.toFixed(1) + ' / 10' : '—', red: scores.length > 0 && avg <= 5 },
+                    { label: 'Scored calls', value: n(scores.length) }, { label: 'Lowest', value: scores.length ? Math.min(...scores) + ' / 10' : '—' }] }
+        ];
+    };
+    const renderLens = (host, groups) => {
+        clear(host);
+        groups.forEach((g) => {
+            const grp = el('div', 'sc-lgrp');
+            grp.appendChild(el('span', 'sc-lgh', g.title));
+            const kv = el('div', 'sc-lkv');
+            g.items.forEach((it) => {
+                const cell = el('div');
+                const v = el('b', '', it.value);
+                if (it.red)
+                    v.style.color = '#B3311F';
+                cell.append(el('span', '', it.label), v);
+                kv.appendChild(cell);
+            });
+            grp.appendChild(kv);
+            host.appendChild(grp);
+        });
     };
 
     const ICON = {
@@ -1001,16 +1077,45 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         root.className = 'sc';
         root.appendChild(style);
         const today = localToday();
+        const FOLD_KEY = 'ctc-sc-lens-folded';
+        let lensFolded = false;
+        try {
+            lensFolded = win.localStorage.getItem(FOLD_KEY) === '1';
+        }
+        catch (e) { }
+        const fold = el('button', 'sc-fold');
+        fold.type = 'button';
+        fold.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg>';
         const title = el('h1', 'sc-title', 'Sales Central');
         const tabs = el('nav', 'sc-tabs');
         tabs.setAttribute('aria-label', 'Sales Central');
         tabs.setAttribute('role', 'tablist');
         const filters = el('div', 'sc-filters');
         const tabBar = el('div', 'sc-tabbar');
-        tabBar.append(title, el('span', 'sc-tsep'), tabs, filters);
+        tabBar.append(fold, title, el('span', 'sc-tsep'), tabs, filters);
+        const lens = el('div', 'sc-lens');
+        const hcard = el('div', 'sc-frame sc-hcard');
+        hcard.append(tabBar, lens);
         const content = el('div');
+        const wcard = el('div', 'sc-frame sc-wcard');
+        wcard.appendChild(content);
         const drawerHost = el('div');
-        root.append(tabBar, content, drawerHost);
+        root.append(hcard, wcard, drawerHost);
+        const paintFold = () => {
+            fold.setAttribute('aria-expanded', String(!lensFolded));
+            fold.setAttribute('aria-label', lensFolded ? 'Show summary' : 'Hide summary');
+            fold.title = lensFolded ? 'Show summary' : 'Hide summary';
+            hcard.classList.toggle('folded', lensFolded);
+        };
+        fold.addEventListener('click', () => {
+            lensFolded = !lensFolded;
+            try {
+                win.localStorage.setItem(FOLD_KEY, lensFolded ? '1' : '0');
+            }
+            catch (e) { }
+            paintFold();
+        });
+        paintFold();
         let route = parseRoute(win.location.hash);
         const data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
         let taskOpenId = '';
@@ -1310,7 +1415,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             const next = list[i + dir];
             return next ? next.companyId : '';
         };
-        const drawerTop = () => Math.max(0, Math.round(tabs.getBoundingClientRect().bottom));
+        const drawerTop = () => Math.max(0, Math.round(hcard.getBoundingClientRect().bottom));
         let shownAccount = '';
         const renderDrawer = () => {
             const a = route.account && post ? current() : null;
@@ -1336,10 +1441,20 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 }
             });
         };
+        const lensGroups = () => {
+            if (route.tab === 'tasks')
+                return data.tasks ? tasksLens(data.tasks) : [];
+            if (route.tab === 'pipeline')
+                return data.pipeline ? pipelineLens(data.pipeline) : [];
+            if (route.tab === 'calls')
+                return data.calls ? callsLens(data.calls, data.callsTotal) : [];
+            return data.needs ? needsLens(data.needs) : [];
+        };
         const render = (full) => {
             renderTabs();
             if (full) {
                 renderFilters();
+                renderLens(lens, lensGroups());
                 renderContent();
             }
             else

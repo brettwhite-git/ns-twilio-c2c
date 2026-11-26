@@ -14,6 +14,8 @@ import {renderNeeds} from './needs';
 import {renderCalls} from './calls';
 import {renderTasks, bandLabel} from './tasks';
 import {renderPipeline, openDealDrawer, closeDealDrawer, viewToggle} from './pipeline';
+import {renderLens, tasksLens, pipelineLens, needsLens, callsLens} from './lens';
+import type {LensGroup} from './lens';
 import type {PipelineView} from './pipeline';
 import type {TaskGroup} from './tasks';
 import {openDrawer, closeDrawer, DrawerAccount} from './drawer';
@@ -53,17 +55,41 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     root.appendChild(style);
 
     const today = localToday();
-    // One header row (ORCA ScPipeHead 1A): the title, a divider, the tabs, then the tab's controls.
+    // Frame (ORCA ScFrame B, after Batchline): the ground holds two cards. The header card is one
+    // row (fold caret, title, tabs, the tab's controls) over the Lens band; the work card holds the tab.
+    const FOLD_KEY = 'ctc-sc-lens-folded';
+    let lensFolded = false;
+    try { lensFolded = win.localStorage.getItem(FOLD_KEY) === '1'; } catch (e) { /* storage blocked: start open */ }
+    const fold = el('button', 'sc-fold');
+    fold.type = 'button';
+    fold.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg>';
     const title = el('h1', 'sc-title', 'Sales Central');
     const tabs = el('nav', 'sc-tabs');
     tabs.setAttribute('aria-label', 'Sales Central');
     tabs.setAttribute('role', 'tablist');
     const filters = el('div', 'sc-filters');
     const tabBar = el('div', 'sc-tabbar');
-    tabBar.append(title, el('span', 'sc-tsep'), tabs, filters);
+    tabBar.append(fold, title, el('span', 'sc-tsep'), tabs, filters);
+    const lens = el('div', 'sc-lens');
+    const hcard = el('div', 'sc-frame sc-hcard');
+    hcard.append(tabBar, lens);
     const content = el('div');
+    const wcard = el('div', 'sc-frame sc-wcard');
+    wcard.appendChild(content);
     const drawerHost = el('div');
-    root.append(tabBar, content, drawerHost);
+    root.append(hcard, wcard, drawerHost);
+    const paintFold = (): void => {
+        fold.setAttribute('aria-expanded', String(!lensFolded));
+        fold.setAttribute('aria-label', lensFolded ? 'Show summary' : 'Hide summary');
+        fold.title = lensFolded ? 'Show summary' : 'Hide summary';
+        hcard.classList.toggle('folded', lensFolded);
+    };
+    fold.addEventListener('click', () => {
+        lensFolded = !lensFolded;
+        try { win.localStorage.setItem(FOLD_KEY, lensFolded ? '1' : '0'); } catch (e) { /* not kept */ }
+        paintFold();
+    });
+    paintFold();
 
     let route: Route = parseRoute(win.location.hash);
     const data: Data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
@@ -343,7 +369,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         const next = list[i + dir];
         return next ? next.companyId : '';
     };
-    const drawerTop = (): number => Math.max(0, Math.round(tabs.getBoundingClientRect().bottom));
+    const drawerTop = (): number => Math.max(0, Math.round(hcard.getBoundingClientRect().bottom));
     let shownAccount = '';
     const renderDrawer = (): void => {
         const a = route.account && post ? current() : null;
@@ -367,9 +393,16 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         });
     };
 
+    // ---- Lens: this tab's figures, from data it already loaded ----
+    const lensGroups = (): LensGroup[] => {
+        if (route.tab === 'tasks') return data.tasks ? tasksLens(data.tasks) : [];
+        if (route.tab === 'pipeline') return data.pipeline ? pipelineLens(data.pipeline) : [];
+        if (route.tab === 'calls') return data.calls ? callsLens(data.calls, data.callsTotal) : [];
+        return data.needs ? needsLens(data.needs) : [];
+    };
     const render = (full: boolean): void => {
         renderTabs();
-        if (full) { renderFilters(); renderContent(); }
+        if (full) { renderFilters(); renderLens(lens, lensGroups()); renderContent(); }
         else listButtons.forEach((b) => {
             if (b.getAttribute('data-id') === route.account) b.setAttribute('aria-current', 'true');
             else b.removeAttribute('aria-current');
