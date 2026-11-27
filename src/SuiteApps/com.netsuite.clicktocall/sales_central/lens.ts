@@ -37,11 +37,8 @@ export const tasksLens = (rows: TaskRow[]): LensGroup[] => {
 
 export const pipelineLens = (p: PipelineData): LensGroup[] => {
     const k = p.kpis;
-    const avgProb = p.deals.length ? Math.round(sum(p.deals, (d) => d.probability) / p.deals.length) + '%' : '—';
     return [
-        { title: 'Open', items: [{ label: 'Amount', value: amount(k.open) }, { label: 'Deals', value: n(k.openCount) }, { label: 'Average deal', value: avgMoney(k.open, k.openCount) }] },
-        { title: 'Weighted', items: [{ label: 'Amount × probability', value: amount(k.weighted) }, { label: 'Share of open', value: pct(k.weighted, k.open) },
-            { label: 'Average probability', value: avgProb }] },
+        { title: 'Open', items: [{ label: 'Amount', value: amount(k.open) }, { label: 'Weighted', value: amount(k.weighted) }, { label: 'Deals', value: n(k.openCount) }] },
         { title: 'Won this quarter', items: [{ label: 'Amount', value: amount(k.won) }, { label: 'Sales orders', value: n(k.wonCount) }, { label: 'Average order', value: avgMoney(k.won, k.wonCount) }] },
         { title: 'Past close date', items: [{ label: 'Deals', value: n(k.lateCount), red: k.lateCount > 0 }, { label: 'Amount', value: amount(k.late) },
             { label: 'Share of open', value: pct(k.lateCount, k.openCount) }] }
