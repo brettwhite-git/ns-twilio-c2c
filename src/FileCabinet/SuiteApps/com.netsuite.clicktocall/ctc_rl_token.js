@@ -8,7 +8,7 @@
  * Called by the Suitelet softphone UI via same-origin request.
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile', './lib/ctc_sc_needs', './lib/ctc_sc_tasks', './lib/ctc_sc_pipeline'], (search, runtime, log, record, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile, scNeeds, scTasks, scPipeline) => {
+define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/url', './lib/ctc_twilio_jwt', './lib/ctc_transcript_utils', './lib/ctc_config', './lib/ctc_twilio_admin', './lib/ctc_workspace_queries', './lib/ctc_entity', './lib/ctc_call_ownership', './lib/ctc_llm_analysis', './lib/ctc_time', './lib/ctc_call_claim', './lib/ctc_rc_scope', './lib/ctc_outbound_function', './lib/ctc_inbound_routing', './lib/ctc_add_to_netsuite', './lib/ctc_call_reconcile', './lib/ctc_sc_needs', './lib/ctc_sc_tasks', './lib/ctc_sc_pipeline', './lib/ctc_call_access', './lib/ctc_sc_snooze'], (search, runtime, log, record, url, twilioJwt, utils, ctcConfig, twilioAdmin, workspaceQueries, ctcEntity, callOwnership, llmAnalysis, ctcTime, callClaim, rcScope, outboundFn, inboundRouting, addToNetSuite, callReconcile, scNeeds, scTasks, scPipeline, callAccess, scSnooze) => {
 
     const loadConfig = ctcConfig.loadConfig;
     // Phase 2 U10: Auth Token removed. All Twilio Basic Auth uses the API Key
@@ -105,6 +105,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         if (body.action === 'getCallDetail')        return getCallDetail(body);
         // Sales Central (slice 1): the session user's own book, no phone needed.
         if (body.action === 'salesCentralNeeds')    return salesCentralNeeds();
+        if (body.action === 'salesCentralSnooze')   return salesCentralSnooze(body);
+        if (body.action === 'salesCentralUnsnooze') return salesCentralUnsnooze(body);
         if (body.action === 'salesCentralTasks')    return salesCentralTasks();
         if (body.action === 'salesCentralCompleteTask') return salesCentralCompleteTask(body);
         if (body.action === 'salesCentralAddTaskNote') return salesCentralAddTaskNote(body);
@@ -1021,17 +1023,29 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
             // return value, so a Twilio 5xx during browser-triggered
             // transcript fetch silently lost the cleanup retry.
             // Recording would linger in Twilio storage forever.
-            const deleteResult = utils.deleteRecording(config.accountSid, recording.sid, authHeader);
-            if (utils.isTransientError(deleteResult)) {
-                try {
-                    record.submitFields({
-                        type: record.Type.PHONE_CALL,
-                        id: savedRecordId,
-                        values: { custevent_ctc_recording_cleanup_pending: true },
-                        options: { enableSourcing: false, ignoreMandatoryFields: true }
-                    });
-                } catch (flagErr) {
-                    log.error({ title: 'CTC checkTranscript — cleanup_pending flag-set failed', details: (flagErr && flagErr.message) || String(flagErr) });
+            //
+            // Recording retention: keep days > 0 (or unreadable: null)
+            // keeps the recording for playback; the poller's age pass
+            // deletes it later. 0 deletes it now, as before.
+            if (ctcConfig.readRecordingKeepDays(config.id) === 0) {
+                const deleteResult = utils.deleteRecording(config.accountSid, recording.sid, authHeader);
+                let flagValues = null;
+                if (utils.isTransientError(deleteResult)) {
+                    flagValues = { custevent_ctc_recording_cleanup_pending: true };
+                } else if (deleteResult === true || deleteResult === null) {
+                    flagValues = { custevent_ctc_recording_deleted: true };
+                }
+                if (flagValues) {
+                    try {
+                        record.submitFields({
+                            type: record.Type.PHONE_CALL,
+                            id: savedRecordId,
+                            values: flagValues,
+                            options: { enableSourcing: false, ignoreMandatoryFields: true }
+                        });
+                    } catch (flagErr) {
+                        log.error({ title: 'CTC checkTranscript — recording flag-set failed', details: (flagErr && flagErr.message) || String(flagErr) });
+                    }
                 }
             }
 
@@ -1116,7 +1130,8 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         'custevent_ctc_call_sid', 'custevent_ctc_call_started', 'custevent_ctc_duration',
         'custevent_ctc_call_status', 'custevent_ctc_inbound', 'custevent_ctc_voicemail',
         'custevent_ctc_satisfaction', 'custevent_ctc_tone_keywords', 'custevent_ctc_ai_summary',
-        'custevent_ctc_transcript', 'custevent_ctc_recording_url'
+        'custevent_ctc_transcript', 'custevent_ctc_recording_url',
+        'custevent_ctc_recording_sid', 'custevent_ctc_recording_deleted'
     ];
     // Select fields come back as [{ value, text }] (the lookupFields shape).
     const CALL_DETAIL_SELECTS = ['company', 'contact', 'assigned'];
@@ -1203,6 +1218,26 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         }
     };
 
+    /** salesCentralSnooze: hide one account in the user's book from Needs me until tomorrow (lib/ctc_sc_snooze.js). */
+    const salesCentralSnooze = (body) => {
+        try {
+            return scSnooze.snooze({ userId: runtime.getCurrentUser().id, body: body });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralSnooze failed', details: (e && e.message) || String(e) });
+            return { error: 'Snooze failed' };
+        }
+    };
+
+    /** salesCentralUnsnooze: show one account again (deletes the user's snooze for it). */
+    const salesCentralUnsnooze = (body) => {
+        try {
+            return scSnooze.unsnooze({ userId: runtime.getCurrentUser().id, body: body });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralUnsnooze failed', details: (e && e.message) || String(e) });
+            return { error: 'Unsnooze failed' };
+        }
+    };
+
     /**
      * salesCentralTasks: the session user's open Tasks and call suggestions
      * (lib/ctc_sc_tasks.js). About 60 units.
@@ -1272,6 +1307,28 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         }
     };
 
+    /**
+     * The recording audio Suitelet's URL for one call (same origin), or ''
+     * when it cannot be resolved. The Suitelet repeats the access check.
+     * @param {string} callId
+     * @param {string} owner - the page's owner param, so a manager's team view plays too
+     */
+    const recordingAudioUrl = (callId, owner) => {
+        try {
+            const params = { call: callId };
+            if (owner) params.owner = owner;
+            return url.resolveScript({
+                scriptId: 'customscript_ctc_sl_recording',
+                deploymentId: 'customdeploy_ctc_sl_recording',
+                returnExternalUrl: false,
+                params: params
+            });
+        } catch (e) {
+            log.error({ title: 'CTC getCallDetail — audio URL not resolved', details: (e && e.message) || String(e) });
+            return '';
+        }
+    };
+
     const getCallDetail = (body) => {
         try {
             const callId = String(body.callId == null ? '' : body.callId).trim();
@@ -1291,16 +1348,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
             const companyId = selectValue(f.company);
             const ownerId = selectValue(f.assigned);
 
-            rcScope.clearTeamCache();
-            const scope = rcScope.resolveOwnerScope({
-                userId: userId, role: user.role, owner: typeof body.owner === 'string' ? body.owner : ''
-            });
-            if (scope.ownerIds) {
-                if (!ownerId || scope.ownerIds.indexOf(ownerId) === -1) return { error: 'not_found' };
-            } else {
-                if (!companyId) return { error: 'not_found' };
-                const book = workspaceQueries.getBookCustomerIds({ userId: userId });
-                if (book.indexOf(companyId) === -1) return { error: 'not_found' };
+            const owner = typeof body.owner === 'string' ? body.owner : '';
+            if (!callAccess.isCallInScope({ companyId: companyId, ownerId: ownerId, userId: userId, role: user.role, owner: owner })) {
+                return { error: 'not_found' };
             }
 
             const voicemail = isChecked(f.custevent_ctc_voicemail);
@@ -1341,6 +1391,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
                     transcriptLines: lines.slice(0, CALL_DETAIL_LINES).map(transcriptLine),
                     transcriptLineCount: lines.length,
                     recordingUrl: String(f.custevent_ctc_recording_url || ''),
+                    // The audio comes from the Transcript's media (it outlives the deleted Recording)
+                    audioUrl: f.custevent_ctc_recording_sid && status === 'Transcribed'
+                        ? recordingAudioUrl(callId, owner) : '',
                     recordUrl: '/app/crm/calendar/call.nl?id=' + callId
                 },
                 tasks: pending

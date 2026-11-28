@@ -133,7 +133,7 @@ export interface BacklogRow {
 /** Primer under the backlog card title. */
 export const BACKLOG_PRIMER =
     'Calls from the last 7 days that still have work to do. Each call waits for Twilio\'s transcript. ' +
-    'Then NetSuite summarises it, and Click-to-Call deletes the recording in Twilio. ' +
+    'Then NetSuite summarises it. Click-to-Call deletes the recording in Twilio after the keep period set under Recordings. ' +
     'Most calls go from Logged to Transcribed within an hour.';
 
 /** The backlog table rows (canvas copy), from the transcriptBacklog value. */

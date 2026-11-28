@@ -726,6 +726,8 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
             activeModal: null,
             phoneTabSaving: false,
             phoneTabError: null,
+            recordingKeepSaving: false,
+            recordingKeepError: null,
             pendingDeactivateConfirm: false,
             deactivating: false,
             deactivateError: null,
@@ -955,6 +957,26 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         }
         finally {
             store.dispatch(Action.consolePatch({ phoneTabSaving: false }));
+        }
+    }
+    async function setRecordingKeep(keepDays) {
+        if (store.getState().console.recordingKeepSaving)
+            return;
+        store.dispatch(Action.consolePatch({ recordingKeepSaving: true, recordingKeepError: null }));
+        try {
+            const result = await wizardCall('wizardSetRecordingKeep', { keepDays });
+            if (!result || result.ok === false) {
+                store.dispatch(Action.consolePatch({ recordingKeepError: errorOf(result, 'The recording setting was not saved') }));
+                return;
+            }
+            const snap = store.getState().console.snapshot;
+            store.dispatch(Action.consolePatch({ snapshot: { ...(snap || {}), recordingKeepDays: keepDays } }));
+        }
+        catch (e) {
+            store.dispatch(Action.consolePatch({ recordingKeepError: thrownText$1(e, 'The recording setting was not saved') }));
+        }
+        finally {
+            store.dispatch(Action.consolePatch({ recordingKeepSaving: false }));
         }
     }
     const setActiveFlag = (active) => {
@@ -2764,7 +2786,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
         'Recording cleanup due': 'warn'
     };
     const BACKLOG_PRIMER = 'Calls from the last 7 days that still have work to do. Each call waits for Twilio\'s transcript. ' +
-        'Then NetSuite summarises it, and Click-to-Call deletes the recording in Twilio. ' +
+        'Then NetSuite summarises it. Click-to-Call deletes the recording in Twilio after the keep period set under Recordings. ' +
         'Most calls go from Logged to Transcribed within an hour.';
     function backlogRows(v) {
         const row = (status, count, next, link) => ({ status, tone: BACKLOG_STATUS_TONE[status], count: Math.max(0, Number(count) || 0), next, link });
@@ -4671,6 +4693,10 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
     };
     const kv = (name, value, action = null) => grid('150px minmax(0, 1fr) auto', [label(name), value, action || text('')], Gap.SPACING4X);
     const signalOf = (state, key) => state.health.signals[key];
+    const RECORDING_KEEP_DAYS = [0, 7, 30, 90, 180, 365];
+    const RECORDING_KEEP_HELP = 'Keep call recordings for this many days so reps can play them; 0 deletes each recording after its transcript is saved. ' +
+        'The background job deletes older recordings from Twilio. Twilio charges for recording storage.';
+    const keepLabel = (n) => (n === 0 ? 'Delete after the transcript' : n + (n === 1 ? ' day' : ' days'));
     class TranscriptsPage extends core.PureComponent {
         componentDidMount() {
             const h = store.getState().health;
@@ -4713,14 +4739,30 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                     sig && sig.severity !== 'ok' && sig.detail ? text(sig.detail, { small: true }) : null
                 ], Gap.SPACING1X)),
                 divider(),
-                kv('Recordings', vstack([
-                    text('Deleted from Twilio after the transcript is saved in NetSuite.'),
-                    help('Outbound calls are always recorded. Inbound recording is set under Inbound calls.')
-                ], Gap.SPACING1X))
+                kv('Recordings', this.renderRecordingKeep(state))
             ];
             if (c.voiceError)
                 rows.push(errorLine(friendlyError(c.voiceError)));
             return card(rows, { label: 'Transcription', fill: true, gap: Gap.SPACING2X });
+        }
+        renderRecordingKeep(state) {
+            const c = state.console;
+            const raw = c.snapshot?.recordingKeepDays;
+            const days = typeof raw === 'number' ? raw : null;
+            const options = days === null || RECORDING_KEEP_DAYS.indexOf(days) >= 0
+                ? RECORDING_KEEP_DAYS
+                : RECORDING_KEEP_DAYS.concat([days]).sort((x, y) => x - y);
+            return vstack([
+                days === null ? text('Not read: the keep period could not be read, so no recording is deleted.', { weak: true }) : null,
+                jsxRuntime.jsx(component__namespace.Dropdown, { dataSource: new core__namespace.ArrayDataSource(options.map((n) => ({ value: n, label: keepLabel(n) }))), valueMember: "value", displayMember: "label", selectedValue: days === null ? undefined : days, enabled: !c.recordingKeepSaving, onSelectionChanged: (args) => {
+                        const n = Number(args && args.value);
+                        if (Number.isInteger(n) && n >= 0 && n !== days)
+                            setRecordingKeep(n);
+                    }, rootStyle: { width: '240px' } }),
+                help(RECORDING_KEEP_HELP),
+                help('Outbound calls are always recorded. Inbound recording is set under Inbound calls.'),
+                c.recordingKeepError ? errorLine(friendlyError(c.recordingKeepError)) : null
+            ], Gap.SPACING1X);
         }
         renderAi(state) {
             const sig = signalOf(state, 'aiQuota');
@@ -4798,7 +4840,7 @@ define(['exports', '@uif-js/core/jsx-runtime', '@uif-js/core', '@uif-js/componen
                 body.push(this.signalState(state, sig));
             }
             else {
-                body.push(this.jobRow('Transcript check', v.transcripts, 'Every 15 minutes. Also retries failed saves and deletes finished recordings.'));
+                body.push(this.jobRow('Transcript check', v.transcripts, 'Every 15 minutes. Also retries failed saves and deletes recordings past the keep period.'));
                 body.push(divider());
                 body.push(this.jobRow('Missed-call sync', v.reconcile, 'Every 15 minutes. Logs calls that rang no rep (missed, too short, no answer, voicemail) so Call Central is complete.'));
                 if (sig && sig.severity !== 'ok' && sig.detail)

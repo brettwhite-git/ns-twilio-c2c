@@ -1,0 +1,56 @@
+<customrecordtype scriptid="customrecord_ctc_sc_snooze">
+    <recordname>CTC Sales Central Snooze</recordname>
+    <description>Sales Central Needs me snoozes: one row per rep and customer. Written only by the token RESTlet's salesCentralSnooze / salesCentralUnsnooze actions (lib/ctc_sc_snooze.js); read by salesCentralNeeds. Needs me hides the customer while today is before Until and the row's needs text still equals Signature. Expired rows stay and are reused on the next snooze. Hidden from admin UI via allowuiaccess=F.</description>
+    <allowuiaccess>F</allowuiaccess>
+    <includeinsearchmenu>F</includeinsearchmenu>
+    <includename>F</includename>
+    <accesstype>NONENEEDED</accesstype>
+    <allowattachments>F</allowattachments>
+    <allowinlinedeleting>F</allowinlinedeleting>
+    <allowquickadd>F</allowquickadd>
+    <allowquicksearch>F</allowquicksearch>
+    <enablemailmerge>F</enablemailmerge>
+    <enablenumbering>F</enablenumbering>
+    <enablesystemnotes>F</enablesystemnotes>
+    <isinactive>F</isinactive>
+    <numberingprefix></numberingprefix>
+    <permissions>
+        <permission>
+            <permittedrole>ADMINISTRATOR</permittedrole>
+            <permittedlevel>FULL</permittedlevel>
+            <restriction>EDIT</restriction>
+        </permission>
+    </permissions>
+    <customrecordcustomfields>
+        <customrecordcustomfield scriptid="custrecord_ctc_snz_employee">
+            <label>Employee</label>
+            <description>Rep who snoozed the customer. Set from the session (runtime.getCurrentUser), never from the request body.</description>
+            <fieldtype>SELECT</fieldtype>
+            <selectrecordtype>-4</selectrecordtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_snz_customer">
+            <label>Customer</label>
+            <description>Customer hidden from the rep's Needs me list (the row's companyId). Must be in the rep's book when snoozed.</description>
+            <fieldtype>SELECT</fieldtype>
+            <selectrecordtype>-2</selectrecordtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_snz_until">
+            <label>Until</label>
+            <description>First day the customer shows again (the day after the snooze, in the rep's time zone).</description>
+            <fieldtype>DATE</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_snz_sig">
+            <label>Signature</label>
+            <description>The Needs me row's needs text when snoozed (300 characters max), e.g. "1 call back · 2 overdue tasks". A different needs text shows the customer again before Until.</description>
+            <fieldtype>TEXT</fieldtype>
+            <ismandatory>T</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
+    </customrecordcustomfields>
+</customrecordtype>

@@ -1,0 +1,10 @@
+<crmcustomfield scriptid="custevent_ctc_recording_deleted">
+    <label>Recording Deleted</label>
+    <fieldtype>CHECKBOX</fieldtype>
+    <appliestophonecall>T</appliestophonecall>
+    <displaytype>HIDDEN</displaytype>
+    <ismandatory>F</ismandatory>
+    <defaultchecked>F</defaultchecked>
+    <searchlevel>2</searchlevel>
+    <description>Set to T when the call's Twilio recording is deleted (or Twilio confirms it is gone). The recording audio endpoint refuses calls with this flag, and the scheduled poller's age-based delete pass skips them. HIDDEN: an operational flag, not rep-facing.</description>
+</crmcustomfield>

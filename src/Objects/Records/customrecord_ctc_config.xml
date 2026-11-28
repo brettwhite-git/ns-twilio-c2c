@@ -194,6 +194,13 @@
             <defaultchecked>F</defaultchecked>
             <displaytype>NORMAL</displaytype>
         </customrecordcustomfield>
+        <customrecordcustomfield scriptid="custrecord_ctc_recording_keep_days">
+            <label>Keep Call Recordings (Days)</label>
+            <description>Days a call recording stays in Twilio so reps can play it from NetSuite. The scheduled poller deletes it when the call is older. 0 deletes it right after the transcript is saved. Blank means 30.</description>
+            <fieldtype>INTEGER</fieldtype>
+            <ismandatory>F</ismandatory>
+            <displaytype>NORMAL</displaytype>
+        </customrecordcustomfield>
         <customrecordcustomfield scriptid="custrecord_ctc_out_allowed_cc">
             <label>Outbound Allowed Country Codes</label>
             <description>Country codes reps may call through the outbound Twilio Function (toll-fraud guard), for example +1, +44. A longer prefix such as +1416 also works; * allows every country. Blank means the country of the default caller ID. Publish the outbound Function again after a change. Also turn on Twilio Voice Geo Permissions for the same countries.</description>

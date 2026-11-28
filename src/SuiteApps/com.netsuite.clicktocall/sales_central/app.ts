@@ -8,10 +8,11 @@
 import {el, clear, localToday} from './dom';
 import {STYLES} from './styles';
 import {parseRoute, formatRoute, LIVE_TABS, Route, TabId} from './route';
-import {makePost, Post, NeedsRow, CallRow, TaskRow, CompletePayload, Deal, DealEdit, DealDetail, PipelineData} from './api';
+import {makePost, Post, NeedsRow, SnoozedRow, CallRow, TaskRow, CompletePayload, Deal, DealEdit, DealDetail, PipelineData} from './api';
 import {mountDock, setDockContext, callWithDock, DockWindow} from './dock';
 import {renderNeeds} from './needs';
 import {renderCalls} from './calls';
+import {openCallDrawer, closeCallDrawer} from './calldrawer';
 import {renderTasks, bandLabel} from './tasks';
 import {renderPipeline, openDealDrawer, closeDealDrawer, viewToggle} from './pipeline';
 import {renderLens, tasksLens, pipelineLens, needsLens, callsLens} from './lens';
@@ -27,6 +28,7 @@ const TABS: Array<[TabId, string]> = [
 interface Data {
     needs: NeedsRow[] | null;
     needsPartial: string[];
+    needsSnoozed: SnoozedRow[];
     calls: CallRow[] | null;
     callsTotal: number;
     tasks: TaskRow[] | null;
@@ -92,12 +94,14 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     paintFold();
 
     let route: Route = parseRoute(win.location.hash);
-    const data: Data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
+    const data: Data = { needs: null, needsPartial: [], needsSnoozed: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
     let taskOpenId = '';
     let taskGroup: TaskGroup = 'all';
     let showAllSuggested = false;
     let pipelineView: PipelineView = 'board';
     let dealOpenId = '';
+    let callOpenId = '';
+    let showSnoozed = false;
     let post: Post | null = null;
     let listButtons: HTMLElement[] = [];
 
@@ -213,12 +217,17 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         }
         if (route.tab === 'calls') {
             if (!data.calls) { loading(); return; }
-            listButtons = renderCalls(content, { rows: data.calls, selected: route.account, todayIso: today,
-                onOpen: (r) => openAccount(r.companyId) });
+            listButtons = renderCalls(content, { rows: data.calls, selected: callOpenId, todayIso: today,
+                onOpen: (r) => openCall(r),
+                onCall: (r) => { callWithDock(win, { entityId: r.companyId, entityName: r.companyName || r.phone, entityType: 'customer', phone: r.phone }); } });
         } else {
             if (!data.needs) { loading(); return; }
             listButtons = renderNeeds(content, { rows: data.needs, selected: route.account, todayIso: today,
-                partial: data.needsPartial, onOpen: (r) => openAccount(r.companyId) });
+                onCall: (r) => { callWithDock(win, { entityId: r.companyId, entityName: r.name, entityType: r.entityType, phone: r.phone }); },
+                partial: data.needsPartial, onOpen: (r) => openAccount(r.companyId),
+                snoozed: data.needsSnoozed, showSnoozed: showSnoozed,
+                onSnooze: snooze, onUnsnooze: unsnooze,
+                onToggleSnoozed: () => { showSnoozed = !showSnoozed; renderContent(); } });
         }
     };
 
@@ -247,10 +256,11 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         row.classList.add('sc-flash');
         win.setTimeout(() => row.classList.remove('sc-flash'), 900);
     };
-    const loadNeeds = (): Promise<void> => (post as Post)<{ rows: NeedsRow[]; partial?: string[] }>({ action: 'salesCentralNeeds' }).then((d) => {
+    const loadNeeds = (): Promise<void> => (post as Post)<{ rows: NeedsRow[]; partial?: string[]; snoozed?: SnoozedRow[] }>({ action: 'salesCentralNeeds' }).then((d) => {
         if (d.error) throw new Error(d.error);
         data.needs = d.rows || [];
         data.needsPartial = d.partial || [];
+        data.needsSnoozed = d.snoozed || [];
     }).catch((e: Error) => {
         data.needs = [];
         data.needsPartial = ['all: ' + e.message];
@@ -337,6 +347,97 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         });
     };
 
+    // ---- Needs me: snooze, and the cards closing the gap (FLIP: measure, change, play) ----
+    const EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+    const still = (): boolean => !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const measure = (): Record<string, DOMRect> => {
+        const at: Record<string, DOMRect> = {};
+        // Table rows first, then cards: a card that was a table row rises from where the row was
+        content.querySelectorAll('.sc-rline[data-id]').forEach((n) => { at['r' + n.getAttribute('data-id')] = n.getBoundingClientRect(); });
+        content.querySelectorAll('.sc-pin[data-id]').forEach((n) => { at['c' + n.getAttribute('data-id')] = n.getBoundingClientRect(); });
+        return at;
+    };
+    const settle = (before: Record<string, DOMRect>): void => {
+        if (still()) return;
+        content.querySelectorAll('.sc-pin[data-id]').forEach((n) => {
+            const id = n.getAttribute('data-id');
+            const was = before['c' + id] || before['r' + id];
+            if (!was || typeof (n as HTMLElement).animate !== 'function') return;
+            const now = n.getBoundingClientRect();
+            const dx = was.left - now.left;
+            const dy = was.top - now.top;
+            if (!dx && !dy) return;
+            const risen = !before['c' + id];
+            (n as HTMLElement).animate([
+                { transform: 'translate(' + dx + 'px,' + dy + 'px)', opacity: risen ? 0.4 : 1 },
+                { transform: 'none', opacity: 1 }
+            ], { duration: 250, easing: EASE });
+        });
+    };
+    const redrawNeeds = (before: Record<string, DOMRect>): void => { renderContent(); settle(before); };
+    const leave = (card: HTMLElement): Promise<void> => new Promise((done) => {
+        if (still() || typeof card.animate !== 'function') { done(); return; }
+        const a = card.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(0.96)' }],
+            { duration: 200, easing: EASE, fill: 'forwards' });
+        a.onfinish = () => done();
+    });
+    const unsnooze = (companyId: string): void => {
+        (post as Post)<{ ok?: boolean }>({ action: 'salesCentralUnsnooze', companyId: companyId }).then((d) => {
+            if (d.error) { toast('Could not unsnooze. Try again.'); return; }
+            const before = measure();
+            return loadNeeds().then(() => { if (route.tab === 'needs') redrawNeeds(before); else render(true); });
+        }).catch(() => toast('Could not unsnooze. Try again.'));
+    };
+    const snooze = (r: NeedsRow, card: HTMLElement): void => {
+        const saved = (post as Post)<{ ok?: boolean; until?: string }>({ action: 'salesCentralSnooze', companyId: r.companyId, sig: r.needs });
+        Promise.all([saved, leave(card)]).then(([d]) => {
+            if (d.error) {
+                toast(d.error === 'forbidden' ? 'This customer is not in your book.' : 'Could not snooze. Try again.');
+                renderContent();
+                return;
+            }
+            const before = measure();
+            data.needs = (data.needs || []).filter((x) => x.companyId !== r.companyId);
+            data.needsSnoozed = data.needsSnoozed.filter((s) => s.companyId !== r.companyId)
+                .concat([{ companyId: r.companyId, name: r.name, until: d.until || '' }]);
+            redrawNeeds(before);
+            renderLens(lens, lensGroups());
+            toast('Snoozed until tomorrow · ' + r.name, ['Undo', () => unsnooze(r.companyId)]);
+        }).catch(() => { toast('Could not snooze. Try again.'); renderContent(); });
+    };
+
+    // ---- Call drawer (ORCA ScCallDrawer) ----
+    const markCall = (): void => {
+        content.querySelectorAll('.sc-calls .sc-row').forEach((b) => {
+            if (callOpenId && b.getAttribute('data-call') === callOpenId) b.setAttribute('aria-current', 'true');
+            else b.removeAttribute('aria-current');
+        });
+    };
+    const closeCall = (): void => { callOpenId = ''; closeCallDrawer(drawerHost); markCall(); };
+    const openCall = (r: CallRow): void => {
+        if (route.account) go({ tab: route.tab, account: '' });
+        callOpenId = r.id;
+        markCall();
+        if (r.companyId) setDockContext(win, { entityId: r.companyId, entityName: r.companyName, entityType: 'customer', phone: r.phone });
+        openCallDrawer(drawerHost, r, {
+            post: post as Post,
+            top: drawerTop,
+            onClose: closeCall,
+            onAccount: (row) => { closeCall(); openAccount(row.companyId); },
+            onCallBack: (row) => {
+                callWithDock(win, { entityId: row.companyId, entityName: row.companyName || row.phone, entityType: 'customer', phone: row.phone });
+            },
+            onFollowUp: (taskId, approve, title) =>
+                (post as Post)<{ ok?: boolean }>({ action: approve ? 'approveProposedTask' : 'rejectProposedTask', taskId: taskId }).then((d) => {
+                    if (d.error) return PROBLEM[d.error] || 'Could not save. Try again.';
+                    toast((approve ? 'Approved · ' : 'Dismissed · ') + title);
+                    // Needs me counts follow-ups to review: refresh it with Tasks
+                    Promise.all([loadTasks(), loadNeeds()]).then(() => render(true));
+                    return '';
+                }).catch(() => 'Could not save. Try again.')
+        });
+    };
+
     // A note keeps the task open: append the saved line in place, no reload.
     const addTaskNote = (r: TaskRow, note: string): Promise<string> =>
         (post as Post)<{ ok?: boolean; line?: string }>({ action: 'salesCentralAddTaskNote', taskId: r.id, note: note }).then((d) => {
@@ -416,6 +517,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
     // ---- Keys ----
     win.document.addEventListener('keydown', (e: KeyboardEvent) => {
         if (dealOpenId && e.key === 'Escape') { dealOpenId = ''; closeDealDrawer(drawerHost); e.preventDefault(); return; }
+        if (callOpenId && e.key === 'Escape') { closeCall(); e.preventDefault(); return; }
         if (!route.account || e.metaKey || e.ctrlKey || e.altKey) return;
         const t = e.target as HTMLElement;
         if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
@@ -434,8 +536,7 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         }
     });
     win.addEventListener('resize', () => {
-        const d = drawerHost.querySelector('.sc-drawer') as HTMLElement | null;
-        if (d) d.style.top = drawerTop() + 'px';
+        drawerHost.querySelectorAll('.sc-drawer').forEach((d) => { (d as HTMLElement).style.top = drawerTop() + 'px'; });
     });
 
     // ---- Load ----
@@ -449,13 +550,32 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         loadNeeds().then(() => render(true));
         loadTasks().then(() => render(true));
         loadPipeline().then(() => render(true));
-        p<{ rows: CallRow[]; total?: number }>({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
+        const loadCalls = (): Promise<void> => p<{ rows: CallRow[]; total?: number }>({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
             if (d.error) throw new Error(d.error);
             data.calls = d.rows || [];
             data.callsTotal = typeof d.total === 'number' ? d.total : data.calls.length;
         }).catch(() => {
             data.calls = [];
-        }).then(() => render(true));
+        });
+        loadCalls().then(() => render(true));
+        // A call the dock just logged (or missed) changes Needs me and Calls: reload both once it is saved.
+        // The phone's bus snapshot carries lastLog; the first one seen is history, not news.
+        try {
+            const bus = new (win as unknown as { BroadcastChannel: typeof BroadcastChannel }).BroadcastChannel('ctc-bus');
+            let seen: string | null = null;
+            let timer = 0;
+            bus.onmessage = (ev: MessageEvent) => {
+                const m = ev.data as { type?: string; snap?: { lastLog?: { status?: string; recordUrl?: string; message?: string; transcript?: { recordId?: string } } } };
+                const log = m && m.type === 'snapshot' && m.snap ? m.snap.lastLog : null;
+                if (!log || (log.status !== 'saved' && log.status !== 'missed')) return;
+                const key = log.status + '|' + (log.recordUrl || (log.transcript && log.transcript.recordId) || '') + '|' + (log.message || '');
+                if (seen === null) { seen = key; return; }
+                if (key === seen) return;
+                seen = key;
+                win.clearTimeout(timer);
+                timer = win.setTimeout(() => { Promise.all([loadNeeds(), loadCalls()]).then(() => render(true)); }, 1500);
+            };
+        } catch (e) { /* no BroadcastChannel: lists refresh on reload */ }
     }).catch((e: Error) => {
         data.error = e.message;
         render(true);

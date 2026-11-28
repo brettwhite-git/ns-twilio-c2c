@@ -407,6 +407,55 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
         }
     };
 
+    /** Mark the call's recording as gone from Twilio (deleted or a confirmed 404). */
+    const markRecordingDeleted = (recordId, extraValues) => {
+        try {
+            record.submitFields({
+                type: record.Type.PHONE_CALL,
+                id: recordId,
+                values: Object.assign({ custevent_ctc_recording_deleted: true }, extraValues || {}),
+                options: { enableSourcing: false, ignoreMandatoryFields: true }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Mark Recording Deleted Failed', details: `${recordId}: ${(e && e.message) || e}` });
+        }
+    };
+
+    /**
+     * Transcribed calls whose recording is still in Twilio and whose call
+     * date is more than keepDays days ago. Oldest first, at most 50 rows.
+     * Rows with cleanup pending are left to Phase A. keepDays is a
+     * validated integer (lib/ctc_config.parseRecordingKeepDays), so the
+     * formula holds no user text. SYSDATE, not CURRENT_DATE (CHANGELOG
+     * 2026-11-03: never mix CURRENT_DATE with stored dates).
+     * @param {number} keepDays
+     */
+    const findAgedRecordingCalls = (keepDays) => {
+        const results = search.create({
+            type: search.Type.PHONE_CALL,
+            filters: [
+                ['custevent_ctc_processed', 'is', 'T'],
+                'AND',
+                ['custevent_ctc_recording_sid', 'isnotempty', ''],
+                'AND',
+                ['custevent_ctc_recording_deleted', 'is', 'F'],
+                'AND',
+                ['custevent_ctc_recording_cleanup_pending', 'is', 'F'],
+                'AND',
+                [`formulanumeric: CASE WHEN {startdate} < SYSDATE - ${keepDays} THEN 1 ELSE 0 END`, 'equalto', '1']
+            ],
+            columns: [
+                search.createColumn({ name: 'internalid', sort: search.Sort.ASC }),
+                'custevent_ctc_recording_sid'
+            ]
+        }).run().getRange({ start: 0, end: 50 });
+
+        return results.map((r) => ({
+            recordId: r.id,
+            recordingSid: r.getValue('custevent_ctc_recording_sid')
+        }));
+    };
+
     const updatePhoneCallRecord = (recordId, recording, config, transcriptText, analysis, callDate) => {
         const phoneCall = record.load({ type: record.Type.PHONE_CALL, id: recordId, isDynamic: true });
         callClaim.clearClaimOnRecord(phoneCall);
@@ -549,9 +598,16 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
         // flag so the next cycle's retry pass picks it up.
         // Any other return (true / null / false) means we have
         // an authoritative answer from Twilio — nothing to retry.
+        //
+        // Recording retention: with keepDays > 0 (or unreadable: null)
+        // the recording stays so reps can play it; the age pass (Phase
+        // A2) deletes it later. keepDays 0 deletes it now, as before.
+        if (ctx.keepDays !== 0) return OUTCOME.PROCESSED;
         const deleteResult = utils.deleteRecording(ctx.config.accountSid, recording.sid, ctx.authHeader);
         if (utils.isTransientError(deleteResult)) {
             markCleanupPending(call.recordId, true);
+        } else if (deleteResult === true || deleteResult === null) {
+            markRecordingDeleted(call.recordId);
         }
         return OUTCOME.PROCESSED;
     };
@@ -571,6 +627,8 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
         let errors = 0;
         let cleanupResolved = 0;
         let cleanupTransient = 0;
+        let agedDeleted = 0;
+        let agedTransient = 0;
         let orphanResolved = 0;
         let orphanFailed = 0;
         let orphanRejected = 0;
@@ -586,6 +644,8 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
             const config = loadConfig();
             const authHeader = buildSecureAuthHeader(config);
             const hasLlmQuota = llmAnalysis.hasQuota();
+            // Days to keep recordings; null = unreadable → delete nothing.
+            const keepDays = ctcConfig.readRecordingKeepDays(config.id);
 
             if (!hasLlmQuota) {
                 log.audit({ title: 'CTC LLM Quota Low', details: 'AI analysis will be skipped this cycle' });
@@ -623,7 +683,11 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
                         cleanupTransient++;
                         continue;
                     }
-                    markCleanupPending(pending.recordId, false);
+                    if (retryResult === true || retryResult === null) {
+                        markRecordingDeleted(pending.recordId, { custevent_ctc_recording_cleanup_pending: false });
+                    } else {
+                        markCleanupPending(pending.recordId, false);
+                    }
                     cleanupResolved++;
                     log.audit({
                         title: 'CTC Recording Cleanup Resolved',
@@ -631,6 +695,38 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
                     });
                 } catch (e) {
                     log.error({ title: 'CTC Cleanup Retry Error', details: `${pending.recordingSid}: ${(e && e.message) || e}` });
+                }
+            }
+
+            // ─────────────────────────────────────────────────────
+            // Phase A2 — recordings past the keep period
+            // (custrecord_ctc_recording_keep_days). Own try/catch: a
+            // failed search never blocks Phases B-C. Skipped when the
+            // keep period is unreadable (null). Per row: 1 DELETE (10)
+            // + 1 submitFields; ≤ 50 rows; yields like Phase A.
+            // ─────────────────────────────────────────────────────
+            if (keepDays !== null) {
+                try {
+                    for (const aged of findAgedRecordingCalls(keepDays)) {
+                        if (shouldYield()) {
+                            enqueueResume();
+                            break;
+                        }
+                        const result = utils.deleteRecording(config.accountSid, aged.recordingSid, authHeader);
+                        if (utils.isTransientError(result)) {
+                            markCleanupPending(aged.recordId, true);
+                            agedTransient++;
+                        } else if (result === true || result === null) {
+                            markRecordingDeleted(aged.recordId);
+                            agedDeleted++;
+                        } else {
+                            // 4xx: retrying will not help; stop selecting the row.
+                            markRecordingDeleted(aged.recordId);
+                            log.error({ title: 'CTC Aged Recording Delete Refused', details: `${aged.recordId} recording=${aged.recordingSid}` });
+                        }
+                    }
+                } catch (e) {
+                    log.error({ title: 'CTC Aged Recording Pass Error', details: (e && e.message) || String(e) });
                 }
             }
 
@@ -679,7 +775,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
             // factory function (so utils mock-time injection works
             // in tests).
             const terminalStatuses = TERMINAL_STATUSES();
-            const ctx = { config, authHeader, hasLlmQuota };
+            const ctx = { config, authHeader, hasLlmQuota, keepDays };
 
             for (const call of unprocessedCalls) {
                 // Sprint 2 U2 (HIGH-6) — yield before the next call to
@@ -769,6 +865,7 @@ define(['N/record', 'N/search', 'N/log', 'N/runtime', 'N/task', './lib/ctc_trans
                      `transient=${transient}, alreadyDone=${alreadyDone}, errors=${errors + (crashed ? 1 : 0)}, ` +
                      `transientExpired=${transientExpired}, gaveUp=${gaveUp}${crashed ? ', crashed=true' : ''}) ` +
                      `cleanup(resolved=${cleanupResolved}, transient=${cleanupTransient}) ` +
+                     `aged(deleted=${agedDeleted}, transient=${agedTransient}) ` +
                      `orphan(resolved=${orphanResolved}, failed=${orphanFailed}, rejected=${orphanRejected}) ` +
                      `stale(released=${staleReleased}, gaveUp=${staleGaveUp})`
         });

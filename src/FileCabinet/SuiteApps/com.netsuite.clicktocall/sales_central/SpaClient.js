@@ -45,7 +45,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     };
 
     const STYLES = [
-        '.sc{position:relative;box-sizing:border-box;min-height:100%;padding:18px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        '.sc{position:relative;box-sizing:border-box;min-height:100vh;padding:18px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         '.sc *{box-sizing:border-box}',
         '.sc [hidden]{display:none !important}',
         '.sc button{font:inherit;color:inherit}',
@@ -87,20 +87,55 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-label{padding:4px 24px 8px;font-size:12px;font-weight:500;color:#6F6B66}',
         '.sc-label .cnt{font-weight:400}',
         '.sc-pins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:20px 24px 24px}',
-        '.sc-pin{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:0;border-radius:10px;background:#FFFFFF;box-shadow:0 0 0 1px #ECEAE7;text-align:left;cursor:pointer;min-width:0;transition:box-shadow 150ms ease,transform 120ms cubic-bezier(0.23,1,0.32,1)}',
-        '.sc-pin:hover{box-shadow:0 0 0 1px #C9C5BF,0 4px 12px rgba(22,21,19,0.05)}',
-        '.sc-pin:active{transform:scale(0.99)}',
-        '.sc-pin .top{display:flex;align-items:center;gap:8px;font-size:12px}',
-        '.sc-pin .name{font-size:14px;font-weight:500}',
-        '.sc-pin .why{color:#4A4744}',
-        '.sc-pin .meta{font-size:12px;color:#6F6B66}',
+        '.sc-pin{display:flex;flex-direction:column;border-radius:10px;background:#FFFFFF;box-shadow:0 0 0 1px #E5E2DD;min-width:0;overflow:hidden}',
+        '.sc-pin .top{display:flex;align-items:center;gap:8px;padding:14px 16px 0;font-size:12px}',
+        '.sc-pin .top .mut{margin-left:auto}',
+        '.sc-pin .name{display:block;margin:6px 16px 0;padding:0;border:0;background:none;font:inherit;font-size:15px;font-weight:600;color:#161513;text-align:left;cursor:pointer}',
+        '.sc-pin .name:hover{text-decoration:underline;text-decoration-color:#9DB4CF}',
+        '.sc-pin .why{padding:2px 16px 0;color:#4A4744}',
+        '.sc-pstats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-top:12px;border-top:1px solid #F1EFEA}',
+        '.sc-pstats>div{display:flex;flex-direction:column;min-width:0;padding:10px 16px}',
+        '.sc-pstats>div+div{border-left:1px solid #F1EFEA}',
+        '.sc-pstats span{font-size:12px;color:#6F6B66}',
+        '.sc-pstats b{font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}',
+        '.sc-pstats b.sm{font-size:13px;font-weight:500}',
+        '.sc-pacts{display:flex;align-items:center;gap:8px;margin-top:auto;padding:10px 16px;background:#FAF9F7;border-top:1px solid #F1EFEA}',
+        '.sc-snz{margin-left:auto;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 8px;border:0;border-radius:6px;background:none;font:inherit;font-size:12px;font-weight:500;color:#6F6B66;cursor:pointer}',
+        '.sc-snz:hover{color:#161513;background:#F1EFEA}',
+        '.sc-snz:focus-visible,.sc-snzt:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+        '.sc-snzt{margin-left:12px;padding:0;border:0;background:none;font:inherit;font-size:12px;font-weight:500;color:#1F3550;cursor:pointer}',
+        '.sc-snzt:hover{text-decoration:underline}',
+        '.sc-snzlist{border-bottom:1px solid #ECEAE7;background:#FCFBFA}',
+        '.sc-snzrow{display:grid;grid-template-columns:minmax(0,1fr) 120px auto;gap:16px;align-items:center;height:40px;padding:0 24px;border-top:1px solid #F1EFEA}',
+        '.sc-snzrow .sc-cancel{margin-right:0;height:28px;padding:0 8px}',
+        '.sc-pill.amb{color:#8A5A12;background:#FBF3E4;box-shadow:inset 0 0 0 1px #EBD7B1}',
+        '.sc-rline{display:grid;grid-template-columns:minmax(0,1fr) 56px;align-items:center;border-bottom:1px solid #ECEAE7}',
+        '.sc-rline .sc-row{border-bottom:0}',
+        '.sc-rline:hover{background:#FAFAF9}',
+        '.sc-rline:has(.sc-row[aria-current="true"]){background:#F5F4F2}',
+        '.sc-callb{width:30px;height:30px;border:0;border-radius:999px;background:#EAF4EC;color:#2F7D32;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:background-color 150ms ease,color 150ms ease}',
+        '.sc-callb:hover{background:#2F7D32;color:#FFFFFF}',
+        '.sc-callb:disabled{background:#F1EFEA;color:#C9C5BF;cursor:default}',
+        '.sc-callb:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+        '.sc-two{display:flex;flex-direction:column;min-width:0;line-height:18px}',
+        '.sc-two small{font-size:12px;color:#6F6B66}',
+        '.sc-two.strong .m{font-weight:500}',
+        '.sc-two.num{align-items:flex-end}',
         '.sc-thead,.sc-row{display:grid;align-items:center;column-gap:16px;padding:0 24px}',
-        '.sc-thead{height:32px;border-bottom:1px solid #ECEAE7;font-size:12px;color:#6F6B66}',
+        '.sc-thead{height:40px;border-bottom:1px solid #ECEAE7;font-size:13px;font-weight:500;color:#5E5952}',
         '.sc-row{width:100%;min-height:48px;border:0;border-bottom:1px solid #ECEAE7;background:#FFFFFF;text-align:left;cursor:pointer}',
         '.sc-row:hover{background:#FAFAF9}',
         '.sc-row[aria-current="true"]{background:#F5F4F2}',
-        '.sc-needs .sc-thead,.sc-needs .sc-row{grid-template-columns:minmax(0,1fr) 140px 90px 100px 100px}',
-        '.sc-calls .sc-thead,.sc-calls .sc-row{grid-template-columns:110px 200px minmax(0,1fr) 70px 70px}',
+        '.sc-needs .sc-row{grid-template-columns:minmax(0,1.6fr) 140px minmax(0,1fr) 110px 100px 80px;min-height:56px}',
+        '.sc-needs .sc-thead{grid-template-columns:minmax(0,1.6fr) 140px minmax(0,1fr) 110px 100px 80px 56px}',
+        '.sc-calls .sc-row{grid-template-columns:64px minmax(0,220px) 130px minmax(0,1fr) 64px 80px;min-height:60px;padding-top:8px;padding-bottom:8px;padding-right:16px}',
+        '.sc-calls .sc-thead{grid-template-columns:64px minmax(0,220px) 130px minmax(0,1fr) 64px 80px 56px;padding-right:0}',
+        '.sc-ksum{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:18px;color:#2E2C29}',
+        '.sc-kday{display:flex;align-items:center;height:32px;padding:0 24px;background:#FAFAF9;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5E5952}',
+        '.sc-kday i{margin-left:auto;font-style:normal;font-weight:400;letter-spacing:0;text-transform:none;color:#6F6B66}',
+        '.sc-pill.good{color:#2F6B34;background:#EAF4EC;box-shadow:inset 0 0 0 1px #C9E3CD}',
+        '.sc-needs .sc-row{padding-right:16px}',
+        '.sc-needs .sc-thead{padding-right:0}',
         '.sc-cell2{display:flex;flex-direction:column;min-width:0;padding:6px 0}',
         '.sc-cell2 .l1{display:flex;gap:8px;align-items:baseline}',
         '.sc-cell2 .name{font-size:14px;font-weight:500}',
@@ -119,7 +154,15 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-rec:hover{text-decoration-color:#1F3550}',
         '.sc-ctx .sc-links{gap:4px}',
         '.sc-sum:focus-visible,.sc-more:focus-visible,.sc-toast-act:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
-        '.sc-cd{width:8px;height:8px;border-radius:999px;flex:none}',
+        '.sc-gi{display:inline-flex;flex:none}',
+        '.sc-sum .sc-gi{margin-left:-2px}',
+        '.sc-tint{font-weight:500}',
+        '.sc-tint .cnt{opacity:0.8}',
+        '.sc-tint.g-suggested{background:#EEF2F6;border-bottom-color:#DCE3EB;color:#4E637C}',
+        '.sc-tint.g-overdue{background:#FBEFEC;border-bottom-color:#F1D3CC;color:#9A2A1B}',
+        '.sc-tint.g-today{background:#FBF3E4;border-bottom-color:#EFDDBD;color:#7E5310}',
+        '.sc-tint.g-week{background:#F4F3F0;border-bottom-color:#E7E4DF;color:#5E5952}',
+        '.sc-tint.g-later{background:#F8F7F5;border-bottom-color:#EEECE8;color:#6F6B66}',
         '.sc-band{display:flex;align-items:center;gap:8px;height:32px;padding:0 24px;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:500;color:#4A4744;background:#FAFAF9}',
         '.sc-more{display:flex;align-items:center;width:100%;height:36px;padding:0 24px;border:0;border-bottom:1px solid #ECEAE7;background:#FFFFFF;font:inherit;font-size:12px;font-weight:500;color:#1F3550;cursor:pointer;text-align:left}',
         '.sc-more:hover{text-decoration:underline}',
@@ -219,6 +262,27 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}',
         '.sc-ro{height:32px;display:flex;align-items:center;font-variant-numeric:tabular-nums}',
         '.sc-dmore{display:flex;flex-direction:column;gap:12px}',
+        '.sc-cfacts{display:flex;flex-wrap:wrap;gap:6px}',
+        '.sc-cfu{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #F1EFEA}',
+        '.sc-cfu small{display:block;font-size:12px;color:#6F6B66}',
+        '.sc-cfu .acts{display:flex;gap:8px;align-items:center}',
+        '.sc-cfu .sc-err{grid-column:1 / -1}',
+        '.sc-cfu .sc-cancel{margin-right:0;height:30px;padding:0 8px}',
+        '.sc-player{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;box-shadow:inset 0 0 0 1px #E5E2DD}',
+        '.sc-player audio{display:none}',
+        '.sc-player .sc-err{flex-basis:100%}',
+        '.sc-pplay{width:32px;height:32px;flex:none;border:0;border-radius:999px;background:#1F3550;color:#FFFFFF;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 120ms cubic-bezier(0.23,1,0.32,1)}',
+        '.sc-pplay:active{transform:scale(0.96)}',
+        '.sc-pplay:disabled{background:#C9C5BF;cursor:default}',
+        '.sc-pplay:focus-visible,.sc-pspeed:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
+        '.sc-pseek{flex:1;min-width:0;height:4px;margin:0;-webkit-appearance:none;appearance:none;border-radius:2px;background:linear-gradient(to right,#1F3550 var(--p,0%),#E5E2DD var(--p,0%));cursor:pointer}',
+        '.sc-pseek::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:999px;background:#1F3550;border:2px solid #FFFFFF;box-shadow:0 0 0 1px #1F3550}',
+        '.sc-pseek::-moz-range-thumb{width:10px;height:10px;border-radius:999px;background:#1F3550;border:2px solid #FFFFFF}',
+        '.sc-ptime{font-size:12px;color:#6F6B66;font-variant-numeric:tabular-nums;white-space:nowrap}',
+        '.sc-pspeed{height:26px;min-width:40px;padding:0 8px;border:0;border-radius:6px;background:#F1EFEA;font:inherit;font-size:12px;font-weight:500;color:#3E3B37;cursor:pointer}',
+        '.sc-ctr{display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:18px}',
+        '.sc-ctr p{margin:0}',
+        '.sc-ctr b{font-weight:600;color:#5E5952;margin-right:6px}',
         '.sc-dsec{display:flex;align-items:baseline;gap:8px;padding-top:16px;border-top:1px solid #ECEAE7;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5E5952}',
         '.sc-dsec i{margin-left:auto;font-style:normal;font-weight:400;letter-spacing:0;text-transform:none;color:#6F6B66}',
         '.sc-dkv{display:grid;grid-template-columns:120px 1fr;row-gap:8px;column-gap:12px;margin:0}',
@@ -327,18 +391,49 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         return true;
     };
 
-    const TONE = { red: '#B3311F', amber: '#B8730A', grey: '#A8A39C' };
-    const status = (r) => {
-        const s = el('span', 'sc-status');
-        const d = el('span', 'dot');
-        d.style.background = TONE[r.tone] || TONE.grey;
-        const t = el('span', '', r.status);
-        if (r.tone === 'red')
-            t.style.color = TONE.red;
-        s.append(d, t);
+    const SNOOZE = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 1.5M9 2h6"></path></svg>';
+    const PHONE$1 = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path></svg>';
+    const button$3 = (cls, text, onClick) => {
+        const b = el('button', cls, text);
+        b.type = 'button';
+        b.addEventListener('click', onClick);
+        return b;
+    };
+    const status = (r) => el('span', 'sc-pill ' + (r.tone === 'red' ? 'late' : r.tone === 'amber' ? 'amb' : ''), r.status);
+    const whyText = (r) => r.why + (r.more ? ' · +' + r.more + ' more' : '');
+    const firstName$1 = (s) => (s || '').split(' ')[0];
+    const touchText$1 = (r, todayIso) => (r.lastTouch ? ago(r.lastTouch, todayIso) : '—');
+    const stat = (label, value, cls) => {
+        const d = el('div');
+        d.append(el('span', '', label), el('b', cls || '', value));
+        return d;
+    };
+    const card$1 = (r, v) => {
+        const c = el('div', 'sc-pin');
+        c.setAttribute('data-id', r.companyId);
+        const top = el('div', 'top');
+        top.append(status(r), el('span', 'mut', r.lastTouch ? 'Last touch ' + ago(r.lastTouch, v.todayIso) : 'No touch logged'));
+        const name = button$3('name sc-clip', r.name, () => v.onOpen(r));
+        name.title = 'Account details';
+        const stats = el('div', 'sc-pstats');
+        stats.append(stat('Open', r.open ? money(r.open) : '$0'), stat('Contact', r.contact || '—', 'sm sc-clip'), stat('Needs', r.needs || r.status, 'sm'));
+        const acts = el('div', 'sc-pacts');
+        if (r.phone)
+            acts.appendChild(button$3('sc-btn go', 'Call ' + (firstName$1(r.contact) || r.name), () => v.onCall(r)));
+        acts.appendChild(button$3('sc-btn gh', 'Account details', () => v.onOpen(r)));
+        const snz = button$3('sc-snz', '', () => v.onSnooze(r, c));
+        snz.innerHTML = SNOOZE;
+        snz.appendChild(document.createTextNode('Snooze'));
+        snz.title = 'Hide until tomorrow. It comes back sooner if something new happens.';
+        acts.appendChild(snz);
+        c.append(top, name, el('div', 'why sc-clip', whyText(r)), stats, acts);
+        return c;
+    };
+    const two = (main, sub, cls) => {
+        const s = el('span', 'sc-two ' + (cls || ''));
+        s.append(el('span', 'm sc-clip', main), el('small', 'sc-clip', sub));
         return s;
     };
-    const whyText = (r) => r.why + (r.more ? ' · +' + r.more + ' more' : '');
     const renderNeeds = (host, v) => {
         clear(host);
         host.className = 'sc-needs sc-fade';
@@ -348,54 +443,66 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         }
         if (!v.rows.length) {
             const m = el('div', 'sc-msg');
-            m.append(el('b', '', 'Nothing needs you right now'), el('span', '', 'Missed calls, overdue tasks, follow-ups and late invoices show here.'));
+            m.append(el('b', '', 'Nothing needs you right now'), el('span', '', v.snoozed.length
+                ? v.snoozed.length + (v.snoozed.length === 1 ? ' account is' : ' accounts are') + ' snoozed until tomorrow.'
+                : 'Missed calls, overdue tasks, follow-ups and late invoices show here.'));
             host.appendChild(m);
+            if (v.snoozed.length)
+                m.appendChild(button$3('sc-snzt', 'Show snoozed', v.onToggleSnoozed));
             return buttons;
         }
-        const pins = v.rows.slice(0, 3);
         const grid = el('div', 'sc-pins');
-        pins.forEach((r) => {
-            const b = el('button', 'sc-pin');
-            b.type = 'button';
-            const top = el('span', 'top');
-            top.appendChild(status(r));
-            const touch = el('span', 'mut', r.lastTouch ? 'Last touch ' + ago(r.lastTouch, v.todayIso) : '');
-            touch.style.marginLeft = 'auto';
-            top.appendChild(touch);
-            b.append(top, el('span', 'name', r.name), el('span', 'why', whyText(r)), el('span', 'meta', (r.open ? money(r.open) + ' open' : 'Nothing open') + (r.next ? ' · next ' + shortDate(r.next) : '')));
-            b.addEventListener('click', () => v.onOpen(r));
-            grid.appendChild(b);
-        });
+        v.rows.slice(0, 3).forEach((r) => grid.appendChild(card$1(r, v)));
         host.appendChild(grid);
-        const all = el('div', 'sc-label', 'All ');
-        all.appendChild(el('span', 'cnt', String(v.rows.length)));
-        host.appendChild(all);
+        const band = el('div', 'sc-band');
+        band.append(el('span', '', 'Everything that needs you '), el('span', 'cnt', String(v.rows.length)));
+        if (v.snoozed.length) {
+            const t = button$3('sc-snzt', v.snoozed.length + ' snoozed', v.onToggleSnoozed);
+            t.setAttribute('aria-expanded', String(v.showSnoozed));
+            band.appendChild(t);
+        }
+        band.appendChild(el('span', 'sc-hint', 'Most urgent first'));
+        host.appendChild(band);
+        if (v.showSnoozed && v.snoozed.length) {
+            const list = el('div', 'sc-snzlist');
+            v.snoozed.forEach((s) => {
+                const row = el('div', 'sc-snzrow');
+                row.append(el('span', 'sc-clip', s.name), el('span', 'mut', 'until ' + shortDate(s.until)), button$3('sc-cancel', 'Unsnooze', () => v.onUnsnooze(s.companyId)));
+                list.appendChild(row);
+            });
+            host.appendChild(list);
+        }
         const head = el('div', 'sc-thead');
-        head.append(el('span', '', 'Account · why now'), el('span', '', 'Status'), el('span', 'num', 'Next'), el('span', 'num', 'Open'), el('span', 'num', 'Last touch'));
+        head.append(el('span', '', 'Account · why now'), el('span', '', 'Status'), el('span', '', 'Contact'), el('span', 'num', 'Open'), el('span', 'num', 'Last touch'), el('span', 'num', 'Next'), el('span'));
         host.appendChild(head);
         v.rows.forEach((r) => {
+            const line = el('div', 'sc-rline');
+            line.setAttribute('data-id', r.companyId);
             const b = el('button', 'sc-row');
             b.type = 'button';
             b.setAttribute('data-id', r.companyId);
             if (r.companyId === v.selected)
                 b.setAttribute('aria-current', 'true');
-            const c = el('span', 'sc-cell2');
-            const l1 = el('span', 'l1');
-            l1.appendChild(el('span', 'name', r.name));
-            c.append(l1, el('span', 'why', whyText(r)));
-            const next = el('span', 'num', r.next ? shortDate(r.next) : '—');
-            next.style.color = '#4A4744';
-            b.append(c, status(r), next, el('span', 'num', money(r.open)), el('span', 'num mut', ago(r.lastTouch, v.todayIso)));
+            b.append(two(r.name, whyText(r), 'strong'), el('span', '', ''), two(r.contact || '—', r.phone || ''), two(r.open ? money(r.open) : '$0', 'open', 'num'), two(touchText$1(r, v.todayIso), 'last touch', 'num'), two(r.next ? shortDate(r.next) : '—', 'next', 'num'));
+            b.children[1].appendChild(status(r));
             b.addEventListener('click', () => v.onOpen(r));
-            host.appendChild(b);
+            const call = button$3('sc-callb', '', () => v.onCall(r));
+            call.innerHTML = PHONE$1;
+            call.setAttribute('aria-label', 'Call ' + (r.contact || r.name));
+            call.disabled = !r.phone;
+            line.append(b, call);
+            host.appendChild(line);
             buttons.push(b);
         });
         return buttons;
     };
 
-    const when = (r, todayIso) => {
-        const day = ago(nsDateToIso(r.date), todayIso).replace(/d ago$/, 'd');
-        return (day === '—' ? '' : day + ' ') + (r.timeOfDay || '');
+    const PHONE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path></svg>';
+    const DIR_ICON = {
+        in: '<path d="M17 7 7 17M7 9v8h8"></path>',
+        out: '<path d="M7 17 17 7M9 7h8v8"></path>',
+        missed: '<path d="M17 7 7 17M7 9v8h8"></path><path d="M14 4l6 6M20 4l-6 6"></path>',
+        vm: '<circle cx="6.5" cy="12" r="3.5"></circle><circle cx="17.5" cy="12" r="3.5"></circle><path d="M6.5 15.5h11"></path>'
     };
     const summary = (r) => {
         if (r.brief)
@@ -406,49 +513,299 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             return 'Missed call';
         if (r.callStatus === 'No answer')
             return 'No answer';
+        if (r.callStatus === 'No transcript')
+            return 'No transcript for this call';
         return 'No summary yet';
+    };
+    const kindPill = (r) => {
+        const [label, icon, tone] = r.voicemail ? ['Voicemail', 'vm', 'amb']
+            : r.callStatus === 'Missed' ? ['Missed', 'missed', 'late']
+                : r.callStatus === 'No answer' ? ['No answer', 'out', 'amb']
+                    : r.direction === 'inbound' ? ['Inbound', 'in', ''] : ['Outbound', 'out', ''];
+        const p = el('span', 'sc-pill ' + tone);
+        p.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + DIR_ICON[icon] + '</svg>';
+        p.appendChild(document.createTextNode(label));
+        return p;
+    };
+    const scorePill = (n) => n ? el('span', 'sc-pill ' + (n <= 3 ? 'late' : n >= 7 ? 'good' : ''), n + ' / 10') : el('span', 'mut', '—');
+    const dayLabel = (iso, todayIso) => {
+        if (!iso)
+            return 'Undated';
+        const d = Math.round((Date.parse(todayIso) - Date.parse(iso)) / 86400000);
+        return (d === 0 ? 'Today · ' : d === 1 ? 'Yesterday · ' : '') + shortDate(iso);
     };
     const renderCalls = (host, v) => {
         clear(host);
         host.className = 'sc-calls sc-fade';
-        const buttons = [];
         if (!v.rows.length) {
             const m = el('div', 'sc-msg');
             m.append(el('b', '', 'No calls this week'), el('span', '', 'Calls with your accounts show here.'));
             host.appendChild(m);
-            return buttons;
+            return [];
         }
         const head = el('div', 'sc-thead');
-        head.append(el('span', '', 'When'), el('span', '', 'Account'), el('span', '', 'AI summary'), el('span', 'num', 'Length'), el('span', 'num', 'Score'));
+        head.append(el('span', '', 'Time'), el('span', '', 'Account · contact'), el('span', '', 'Call'), el('span', '', 'AI summary'), el('span', 'num', 'Length'), el('span', '', 'Score'), el('span'));
         host.appendChild(head);
+        let day = '';
         v.rows.forEach((r) => {
+            const iso = nsDateToIso(r.date);
+            if (iso !== day) {
+                day = iso;
+                const n = v.rows.filter((x) => nsDateToIso(x.date) === iso).length;
+                const g = el('div', 'sc-kday');
+                g.append(el('span', '', dayLabel(iso, v.todayIso)), el('i', '', n + (n === 1 ? ' call' : ' calls')));
+                host.appendChild(g);
+            }
+            const line = el('div', 'sc-rline');
             const b = el('button', 'sc-row');
             b.type = 'button';
-            b.setAttribute('data-id', r.companyId);
-            if (!r.companyId) {
-                b.disabled = true;
-                b.style.cursor = 'default';
-            }
-            if (r.companyId && r.companyId === v.selected)
+            b.setAttribute('data-call', r.id);
+            if (r.id === v.selected)
                 b.setAttribute('aria-current', 'true');
-            const score = el('span', 'num', r.satisfaction ? String(r.satisfaction) : '—');
-            if (r.satisfaction && r.satisfaction <= 3)
-                score.style.color = '#B3311F';
-            const sum = el('span', 'sc-clip', summary(r));
-            sum.style.color = '#4A4744';
-            b.append(el('span', 'mut', when(r, v.todayIso)), el('span', 'sc-strong sc-clip', r.companyName || r.phone || 'Unknown caller'), sum, el('span', 'num', r.duration ? clock(r.duration) : '—'), score);
-            b.addEventListener('click', () => { if (r.companyId)
-                v.onOpen(r); });
-            host.appendChild(b);
-            if (r.companyId)
-                buttons.push(b);
+            const who = el('span', 'sc-two strong');
+            who.append(el('span', 'm sc-clip', r.companyName || r.phone || 'Unknown caller'), el('small', 'sc-clip', r.contactName || r.phone || ''));
+            const kind = el('span');
+            kind.appendChild(kindPill(r));
+            const score = el('span');
+            score.appendChild(scorePill(r.voicemail ? null : r.satisfaction));
+            b.append(el('span', 'num', r.timeOfDay || ''), who, kind, el('span', 'sc-ksum', summary(r)), el('span', 'num', r.duration ? clock(r.duration) : '—'), score);
+            b.addEventListener('click', () => v.onOpen(r));
+            const call = el('button', 'sc-callb');
+            call.type = 'button';
+            call.innerHTML = PHONE;
+            call.setAttribute('aria-label', 'Call back ' + (r.contactName || r.companyName || r.phone));
+            call.disabled = !r.phone;
+            call.addEventListener('click', () => v.onCall(r));
+            line.append(b, call);
+            host.appendChild(line);
         });
-        return buttons;
+        return [];
+    };
+
+    const button$2 = (cls, text, onClick) => {
+        const b = el('button', cls, text);
+        b.type = 'button';
+        b.addEventListener('click', onClick);
+        return b;
+    };
+    const section$2 = (title, aside) => {
+        const h = el('div', 'sc-dsec');
+        h.append(el('span', '', title), el('i', '', aside));
+        return h;
+    };
+    const firstName = (name) => (name || '').split(' ')[0];
+    const recordUrl$1 = (id) => '/app/crm/calendar/call.nl?id=' + encodeURIComponent(id);
+    const unanswered = (c) => c.status === 'Missed' || c.status === 'No answer';
+    const pillsOf = (row, c) => {
+        const facts = el('div', 'sc-cfacts');
+        const pill = (text, cls) => { facts.appendChild(el('span', 'sc-pill' + (cls ? ' ' + cls : ''), text)); };
+        pill(c.direction === 'inbound' ? 'Inbound' : 'Outbound');
+        const day = nsDateToIso(row.date);
+        pill((day ? shortDate(day) + ' ' : '') + (row.timeOfDay || ''));
+        if (c.voicemail)
+            pill('Voicemail');
+        else if (unanswered(c))
+            pill(c.status, 'late');
+        if (c.duration)
+            pill(clock(c.duration));
+        if (c.satisfaction)
+            pill('Score ' + c.satisfaction + ' / 10', c.satisfaction <= 3 ? 'late' : '');
+        if (c.ownerName)
+            pill(firstName(c.ownerName));
+        return facts;
+    };
+    const followUps = (host, d, h) => {
+        if (!d.tasks.length && !d.tasksError)
+            return;
+        host.appendChild(section$2('Follow-ups', d.tasksError ? 'Could not load' : d.tasks.length + ' to review'));
+        d.tasks.forEach((t) => {
+            const row = el('div', 'sc-cfu');
+            const text = el('span', '', t.text);
+            if (t.proposedDue)
+                text.appendChild(el('small', '', 'Proposed due ' + shortDate(nsDateToIso(t.proposedDue) || t.proposedDue)));
+            const err = el('span', 'sc-err');
+            const act = (approve) => {
+                row.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+                err.textContent = '';
+                h.onFollowUp(t.id, approve, t.text).then((problem) => {
+                    if (problem) {
+                        err.textContent = problem;
+                        row.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+                    }
+                    else
+                        row.remove();
+                });
+            };
+            const acts = el('span', 'acts');
+            acts.append(button$2('sc-cancel', 'Dismiss', () => act(false)), button$2('sc-btn pri', 'Approve', () => act(true)));
+            row.append(text, acts, err);
+            host.appendChild(row);
+        });
+    };
+    const PLAY = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"></path></svg>';
+    const PAUSE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"></path></svg>';
+    const SPEEDS = [1, 1.5, 2];
+    const player = (src, knownSeconds) => {
+        const wrap = el('div', 'sc-player');
+        const audio = el('audio');
+        audio.preload = 'metadata';
+        audio.src = src;
+        const play = el('button', 'sc-pplay');
+        play.type = 'button';
+        play.innerHTML = PLAY;
+        play.setAttribute('aria-label', 'Play recording');
+        const seek = el('input', 'sc-pseek');
+        seek.type = 'range';
+        seek.min = '0';
+        seek.step = '0.1';
+        seek.value = '0';
+        seek.setAttribute('aria-label', 'Position');
+        const time = el('span', 'sc-ptime');
+        const speed = el('button', 'sc-pspeed', '1×');
+        speed.type = 'button';
+        speed.setAttribute('aria-label', 'Playback speed');
+        const err = el('span', 'sc-err');
+        const total = () => (isFinite(audio.duration) && audio.duration > 0 ? audio.duration : knownSeconds);
+        const paint = () => {
+            seek.max = String(total() || 0);
+            if (document.activeElement !== seek)
+                seek.value = String(audio.currentTime);
+            seek.style.setProperty('--p', (total() ? (audio.currentTime / total()) * 100 : 0) + '%');
+            time.textContent = clock(audio.currentTime) + ' / ' + clock(total());
+            play.innerHTML = audio.paused ? PLAY : PAUSE;
+            play.setAttribute('aria-label', audio.paused ? 'Play recording' : 'Pause recording');
+        };
+        play.addEventListener('click', () => {
+            err.textContent = '';
+            if (audio.paused)
+                audio.play().catch(() => { err.textContent = 'The recording could not play.'; });
+            else
+                audio.pause();
+        });
+        seek.addEventListener('input', () => { audio.currentTime = Number(seek.value); paint(); });
+        speed.addEventListener('click', () => {
+            const next = SPEEDS[(SPEEDS.indexOf(audio.playbackRate) + 1) % SPEEDS.length];
+            audio.playbackRate = next;
+            speed.textContent = next + '×';
+        });
+        ['timeupdate', 'loadedmetadata', 'play', 'pause', 'ended'].forEach((ev) => audio.addEventListener(ev, paint));
+        audio.addEventListener('error', () => { err.textContent = 'The recording is not available.'; play.disabled = true; });
+        paint();
+        wrap.append(play, seek, time, speed, audio, err);
+        return wrap;
+    };
+    const renderCallDetail = (host, row, d, h) => {
+        clear(host);
+        const c = d.call;
+        host.appendChild(pillsOf(row, c));
+        if (c.summary && !c.voicemail) {
+            host.appendChild(section$2('AI summary', c.toneKeywords.split(',').map((s) => s.trim()).filter(Boolean).join(' · ')));
+            host.appendChild(el('div', 'sc-dmemo', c.summary));
+        }
+        else if (!c.voicemail && !unanswered(c)) {
+            const final = c.status === 'No transcript' || c.status === 'Failed';
+            host.appendChild(section$2('AI summary', c.status));
+            host.appendChild(el('div', 'mut', final ? 'No summary for this call: there was no transcript to summarise.'
+                : 'The summary is on its way. It is written after the transcript is ready.'));
+        }
+        if (c.audioUrl) {
+            host.appendChild(section$2('Recording', ''));
+            host.appendChild(player(c.audioUrl, c.duration));
+        }
+        followUps(host, d, h);
+        if (c.transcriptLines.length) {
+            const shown = c.transcriptLines.length;
+            host.appendChild(section$2('Transcript', shown < c.transcriptLineCount ? 'First ' + shown + ' of ' + c.transcriptLineCount + ' lines' : shown + ' lines'));
+            const tr = el('div', 'sc-ctr');
+            const who = (s) => (s === 'rep' ? firstName(c.ownerName) || 'Rep' : s === 'customer' ? firstName(c.contactName) || 'Customer' : '');
+            c.transcriptLines.forEach((l) => {
+                const p = el('p');
+                if (who(l.speaker))
+                    p.appendChild(el('b', '', who(l.speaker)));
+                p.appendChild(document.createTextNode(l.text));
+                tr.appendChild(p);
+            });
+            host.appendChild(tr);
+            const all = el('a', 'sc-rec', 'Full transcript in NetSuite');
+            all.href = recordUrl$1(c.id);
+            all.target = '_top';
+            host.appendChild(all);
+        }
+    };
+    const loading = (host) => {
+        clear(host);
+        ['AI summary', 'Transcript'].forEach((t) => {
+            host.appendChild(section$2(t, ''));
+            const bars = el('div', 'sc-dload');
+            [80, 64, 72].forEach((w) => { const b = el('span'); b.style.width = w + '%'; bars.appendChild(b); });
+            host.appendChild(bars);
+        });
+    };
+    const openCallDrawer = (host, row, h) => {
+        closeCallDrawer(host);
+        const dw = el('aside', 'sc-drawer sc-calld');
+        dw.setAttribute('aria-label', 'Call · ' + (row.companyName || row.phone || 'Unknown caller'));
+        dw.style.top = h.top() + 'px';
+        const bar = el('div', 'sc-dhead');
+        const tools = el('span', 'tools');
+        const x = button$2('sc-icon', '✕', h.onClose);
+        x.setAttribute('aria-label', 'Close');
+        tools.appendChild(x);
+        bar.append(el('span', 'sc-lbl', 'Call'), tools);
+        const title = el('div', 'sc-dtitle');
+        const sub = el('div', 'sc-dsub');
+        if (row.companyId) {
+            const acct = button$2('sc-lk', 'Account', () => h.onAccount(row));
+            acct.title = 'Account details';
+            sub.append(acct, el('span', 'mut', ' · '));
+        }
+        if (row.contactName)
+            sub.append(el('span', 'mut', row.contactName + ' · '));
+        const rec = el('a', 'sc-rec', 'Phone call');
+        rec.href = recordUrl$1(row.id);
+        rec.target = '_top';
+        rec.title = 'Open in NetSuite';
+        sub.appendChild(rec);
+        title.append(el('b', '', row.companyName || row.phone || 'Unknown caller'), sub);
+        const more = el('div', 'sc-dmore');
+        loading(more);
+        const body = el('div', 'sc-dbody');
+        body.append(title, more);
+        const foot = el('div', 'sc-dfoot');
+        if (row.phone)
+            foot.appendChild(button$2('sc-btn go', 'Call back', () => h.onCallBack(row)));
+        const open = el('a', 'sc-btn gh', 'Open in NetSuite');
+        open.href = recordUrl$1(row.id);
+        open.target = '_top';
+        foot.append(open, el('span', 'mut', 'Esc to close'));
+        dw.append(bar, body, foot);
+        host.appendChild(dw);
+        h.post({ action: 'getCallDetail', callId: row.id })
+            .then((d) => {
+            if (!dw.isConnected)
+                return;
+            if (d.error || !d.call) {
+                clear(more);
+                more.appendChild(el('div', 'mut', 'Could not load this call'));
+                return;
+            }
+            renderCallDetail(more, row, d, h);
+        })
+            .catch(() => { if (dw.isConnected) {
+            clear(more);
+            more.appendChild(el('div', 'mut', 'Could not load this call'));
+        } });
+        return dw;
+    };
+    const closeCallDrawer = (host) => {
+        const d = host.querySelector('.sc-calld');
+        if (d)
+            d.remove();
     };
 
     const BANDS = [['overdue', 'Overdue'], ['today', 'Today'], ['week', 'This week'], ['later', 'Later']];
     const GROUP_COLOR = {
-        suggested: '#5F7590', overdue: '#B3311F', today: '#B8730A', week: '#A8A39C', later: '#DEDBD7'
+        suggested: '#5F7590', overdue: '#B3311F', today: '#B8730A', week: '#8A857F', later: '#A8A39C'
     };
     const SUGGESTION_CAP = 3;
     const bandLabel = (band) => (BANDS.filter((b) => b[0] === band)[0] || ['', ''])[1];
@@ -466,9 +823,19 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     const dueText = (r) => (r.due ? shortDate(r.due) : 'No date');
     const dueColor = (r) => r.kind === 'suggestion' ? '#6F6B66' : r.band === 'overdue' ? '#B3311F' : r.band === 'today' ? '#B8730A' : '#6F6B66';
     const displayTitle = (title) => title.replace(/^AI:\s*/, '');
-    const circle = (group) => {
-        const c = el('span', 'sc-cd');
-        c.style.background = GROUP_COLOR[group];
+    const GROUP_ICON = {
+        all: '<path d="M8 6h12M8 12h12M8 18h12"></path><path d="M4 6h.01M4 12h.01M4 18h.01"></path>',
+        suggested: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path><path d="M16 3v5M13.5 5.5h5"></path>',
+        overdue: '<circle cx="12" cy="13" r="8"></circle><path d="M12 9v4M12 16.5h.01M5 3 2 6M19 3l3 3"></path>',
+        today: '<rect x="4" y="5" width="16" height="16" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4"></path><circle cx="12" cy="15.5" r="1.5"></circle>',
+        week: '<rect x="4" y="5" width="16" height="16" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4M8 14h3"></path>',
+        later: '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v4l3 2"></path>'
+    };
+    const groupIcon = (group) => {
+        const c = el('span', 'sc-gi');
+        if (group !== 'all')
+            c.style.color = GROUP_COLOR[group];
+        c.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + GROUP_ICON[group] + '</svg>';
         return c;
     };
     const plainNote = (note) => note.split(/\n|<br\s*\/?>/i).map((l) => l.trim()).filter(Boolean).join('\n');
@@ -645,8 +1012,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         return cell;
     };
     const band = (group, label, count, hint) => {
-        const b = el('div', 'sc-band');
-        b.append(circle(group), el('span', '', label + ' '), el('span', 'cnt', String(count)));
+        const b = el('div', 'sc-band sc-tint g-' + group);
+        b.append(groupIcon(group), el('span', '', label + ' '), el('span', 'cnt', String(count)));
         if (hint)
             b.appendChild(el('span', 'sc-hint', hint));
         return b;
@@ -677,8 +1044,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             const b = button$1('sc-sum', '', () => v.onGroup(g));
             b.setAttribute('data-g', g);
             b.setAttribute('aria-pressed', String(shown === g));
-            if (g !== 'all')
-                b.appendChild(circle(g));
+            b.appendChild(groupIcon(g));
             b.append(el('span', '', label + ' '), el('b', '', String(count)));
             line.appendChild(b);
         });
@@ -1335,12 +1701,14 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         });
         paintFold();
         let route = parseRoute(win.location.hash);
-        const data = { needs: null, needsPartial: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
+        const data = { needs: null, needsPartial: [], needsSnoozed: [], calls: null, callsTotal: 0, tasks: null, tasksPartial: [], pipeline: null, error: '' };
         let taskOpenId = '';
         let taskGroup = 'all';
         let showAllSuggested = false;
         let pipelineView = 'board';
         let dealOpenId = '';
+        let callOpenId = '';
+        let showSnoozed = false;
         let post = null;
         let listButtons = [];
         const accountsOf = (tab) => {
@@ -1466,8 +1834,9 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                     loading();
                     return;
                 }
-                listButtons = renderCalls(content, { rows: data.calls, selected: route.account, todayIso: today,
-                    onOpen: (r) => openAccount(r.companyId) });
+                listButtons = renderCalls(content, { rows: data.calls, selected: callOpenId, todayIso: today,
+                    onOpen: (r) => openCall(r),
+                    onCall: (r) => { callWithDock(win, { entityId: r.companyId, entityName: r.companyName || r.phone, entityType: 'customer', phone: r.phone }); } });
             }
             else {
                 if (!data.needs) {
@@ -1475,7 +1844,11 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                     return;
                 }
                 listButtons = renderNeeds(content, { rows: data.needs, selected: route.account, todayIso: today,
-                    partial: data.needsPartial, onOpen: (r) => openAccount(r.companyId) });
+                    onCall: (r) => { callWithDock(win, { entityId: r.companyId, entityName: r.name, entityType: r.entityType, phone: r.phone }); },
+                    partial: data.needsPartial, onOpen: (r) => openAccount(r.companyId),
+                    snoozed: data.needsSnoozed, showSnoozed: showSnoozed,
+                    onSnooze: snooze, onUnsnooze: unsnooze,
+                    onToggleSnoozed: () => { showSnoozed = !showSnoozed; renderContent(); } });
             }
         };
         const toast = (text, action) => {
@@ -1509,6 +1882,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 throw new Error(d.error);
             data.needs = d.rows || [];
             data.needsPartial = d.partial || [];
+            data.needsSnoozed = d.snoozed || [];
         }).catch((e) => {
             data.needs = [];
             data.needsPartial = ['all: ' + e.message];
@@ -1598,6 +1972,106 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                     loadPipeline().then(() => render(true));
                     return '';
                 })
+            });
+        };
+        const EASE = 'cubic-bezier(0.23, 1, 0.32, 1)';
+        const still = () => !!(win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        const measure = () => {
+            const at = {};
+            content.querySelectorAll('.sc-rline[data-id]').forEach((n) => { at['r' + n.getAttribute('data-id')] = n.getBoundingClientRect(); });
+            content.querySelectorAll('.sc-pin[data-id]').forEach((n) => { at['c' + n.getAttribute('data-id')] = n.getBoundingClientRect(); });
+            return at;
+        };
+        const settle = (before) => {
+            if (still())
+                return;
+            content.querySelectorAll('.sc-pin[data-id]').forEach((n) => {
+                const id = n.getAttribute('data-id');
+                const was = before['c' + id] || before['r' + id];
+                if (!was || typeof n.animate !== 'function')
+                    return;
+                const now = n.getBoundingClientRect();
+                const dx = was.left - now.left;
+                const dy = was.top - now.top;
+                if (!dx && !dy)
+                    return;
+                const risen = !before['c' + id];
+                n.animate([
+                    { transform: 'translate(' + dx + 'px,' + dy + 'px)', opacity: risen ? 0.4 : 1 },
+                    { transform: 'none', opacity: 1 }
+                ], { duration: 250, easing: EASE });
+            });
+        };
+        const redrawNeeds = (before) => { renderContent(); settle(before); };
+        const leave = (card) => new Promise((done) => {
+            if (still() || typeof card.animate !== 'function') {
+                done();
+                return;
+            }
+            const a = card.animate([{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(0.96)' }], { duration: 200, easing: EASE, fill: 'forwards' });
+            a.onfinish = () => done();
+        });
+        const unsnooze = (companyId) => {
+            post({ action: 'salesCentralUnsnooze', companyId: companyId }).then((d) => {
+                if (d.error) {
+                    toast('Could not unsnooze. Try again.');
+                    return;
+                }
+                const before = measure();
+                return loadNeeds().then(() => { if (route.tab === 'needs')
+                    redrawNeeds(before);
+                else
+                    render(true); });
+            }).catch(() => toast('Could not unsnooze. Try again.'));
+        };
+        const snooze = (r, card) => {
+            const saved = post({ action: 'salesCentralSnooze', companyId: r.companyId, sig: r.needs });
+            Promise.all([saved, leave(card)]).then(([d]) => {
+                if (d.error) {
+                    toast(d.error === 'forbidden' ? 'This customer is not in your book.' : 'Could not snooze. Try again.');
+                    renderContent();
+                    return;
+                }
+                const before = measure();
+                data.needs = (data.needs || []).filter((x) => x.companyId !== r.companyId);
+                data.needsSnoozed = data.needsSnoozed.filter((s) => s.companyId !== r.companyId)
+                    .concat([{ companyId: r.companyId, name: r.name, until: d.until || '' }]);
+                redrawNeeds(before);
+                renderLens(lens, lensGroups());
+                toast('Snoozed until tomorrow · ' + r.name, ['Undo', () => unsnooze(r.companyId)]);
+            }).catch(() => { toast('Could not snooze. Try again.'); renderContent(); });
+        };
+        const markCall = () => {
+            content.querySelectorAll('.sc-calls .sc-row').forEach((b) => {
+                if (callOpenId && b.getAttribute('data-call') === callOpenId)
+                    b.setAttribute('aria-current', 'true');
+                else
+                    b.removeAttribute('aria-current');
+            });
+        };
+        const closeCall = () => { callOpenId = ''; closeCallDrawer(drawerHost); markCall(); };
+        const openCall = (r) => {
+            if (route.account)
+                go({ tab: route.tab, account: '' });
+            callOpenId = r.id;
+            markCall();
+            if (r.companyId)
+                setDockContext(win, { entityId: r.companyId, entityName: r.companyName, entityType: 'customer', phone: r.phone });
+            openCallDrawer(drawerHost, r, {
+                post: post,
+                top: drawerTop,
+                onClose: closeCall,
+                onAccount: (row) => { closeCall(); openAccount(row.companyId); },
+                onCallBack: (row) => {
+                    callWithDock(win, { entityId: row.companyId, entityName: row.companyName || row.phone, entityType: 'customer', phone: row.phone });
+                },
+                onFollowUp: (taskId, approve, title) => post({ action: approve ? 'approveProposedTask' : 'rejectProposedTask', taskId: taskId }).then((d) => {
+                    if (d.error)
+                        return PROBLEM[d.error] || 'Could not save. Try again.';
+                    toast((approve ? 'Approved · ' : 'Dismissed · ') + title);
+                    Promise.all([loadTasks(), loadNeeds()]).then(() => render(true));
+                    return '';
+                }).catch(() => 'Could not save. Try again.')
             });
         };
         const addTaskNote = (r, note) => post({ action: 'salesCentralAddTaskNote', taskId: r.id, note: note }).then((d) => {
@@ -1693,6 +2167,11 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 e.preventDefault();
                 return;
             }
+            if (callOpenId && e.key === 'Escape') {
+                closeCall();
+                e.preventDefault();
+                return;
+            }
             if (!route.account || e.metaKey || e.ctrlKey || e.altKey)
                 return;
             const t = e.target;
@@ -1720,9 +2199,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             }
         });
         win.addEventListener('resize', () => {
-            const d = drawerHost.querySelector('.sc-drawer');
-            if (d)
-                d.style.top = drawerTop() + 'px';
+            drawerHost.querySelectorAll('.sc-drawer').forEach((d) => { d.style.top = drawerTop() + 'px'; });
         });
         writeHash();
         render(true);
@@ -1735,14 +2212,37 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             loadNeeds().then(() => render(true));
             loadTasks().then(() => render(true));
             loadPipeline().then(() => render(true));
-            p({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
+            const loadCalls = () => p({ action: 'getWorkspaceHistory', dateRange: 'thisweek', limit: 50, pastOnly: true, companyNames: true }).then((d) => {
                 if (d.error)
                     throw new Error(d.error);
                 data.calls = d.rows || [];
                 data.callsTotal = typeof d.total === 'number' ? d.total : data.calls.length;
             }).catch(() => {
                 data.calls = [];
-            }).then(() => render(true));
+            });
+            loadCalls().then(() => render(true));
+            try {
+                const bus = new win.BroadcastChannel('ctc-bus');
+                let seen = null;
+                let timer = 0;
+                bus.onmessage = (ev) => {
+                    const m = ev.data;
+                    const log = m && m.type === 'snapshot' && m.snap ? m.snap.lastLog : null;
+                    if (!log || (log.status !== 'saved' && log.status !== 'missed'))
+                        return;
+                    const key = log.status + '|' + (log.recordUrl || (log.transcript && log.transcript.recordId) || '') + '|' + (log.message || '');
+                    if (seen === null) {
+                        seen = key;
+                        return;
+                    }
+                    if (key === seen)
+                        return;
+                    seen = key;
+                    win.clearTimeout(timer);
+                    timer = win.setTimeout(() => { Promise.all([loadNeeds(), loadCalls()]).then(() => render(true)); }, 1500);
+                };
+            }
+            catch (e) { }
         }).catch((e) => {
             data.error = e.message;
             render(true);

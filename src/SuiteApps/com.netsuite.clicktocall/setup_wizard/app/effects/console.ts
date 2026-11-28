@@ -122,6 +122,29 @@ export async function setPhoneTab(on: boolean): Promise<void> {
     }
 }
 
+/**
+ * Days to keep call recordings in Twilio (wizardSetRecordingKeep, config
+ * custrecord_ctc_recording_keep_days; 0 = delete after the transcript).
+ * On success the cached snapshot's recordingKeepDays follows.
+ */
+export async function setRecordingKeep(keepDays: number): Promise<void> {
+    if ((store.getState() as AppState).console.recordingKeepSaving) return;
+    store.dispatch(Action.consolePatch({ recordingKeepSaving: true, recordingKeepError: null }));
+    try {
+        const result = await wizardCall('wizardSetRecordingKeep', { keepDays });
+        if (!result || (result as { ok?: boolean }).ok === false) {
+            store.dispatch(Action.consolePatch({ recordingKeepError: errorOf(result, 'The recording setting was not saved') }));
+            return;
+        }
+        const snap = (store.getState() as AppState).console.snapshot as Record<string, unknown> | null;
+        store.dispatch(Action.consolePatch({ snapshot: { ...(snap || {}), recordingKeepDays: keepDays } }));
+    } catch (e) {
+        store.dispatch(Action.consolePatch({ recordingKeepError: thrownText(e, 'The recording setting was not saved') }));
+    } finally {
+        store.dispatch(Action.consolePatch({ recordingKeepSaving: false }));
+    }
+}
+
 /** Mark the cached snapshot active / paused at once (the banner and rail follow). */
 const setActiveFlag = (active: boolean): void => {
     const snap = (store.getState() as AppState).console.snapshot as Record<string, unknown> | null;

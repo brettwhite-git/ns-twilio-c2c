@@ -389,7 +389,9 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
                     phoneNumber:       cfg.phoneNumber || '',
                     intelServiceSid:   cfg.intelServiceSid || '',
                     active:            cfg.active === true,
-                    phoneTab:          config.readPhoneTabMode(cfg.id)
+                    phoneTab:          config.readPhoneTabMode(cfg.id),
+                    // null = unreadable (the console then shows "Not read").
+                    recordingKeepDays: config.readRecordingKeepDays(cfg.id)
                 }
             };
         } catch (e) {
@@ -1277,6 +1279,41 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
     };
 
     /* ------------------------------------------------------------------ */
+    /* Action: wizardSetRecordingKeep (days to keep call recordings)      */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * wizardSetRecordingKeep { keepDays: integer 0-3650 } → { ok, keepDays }.
+     * Sets custrecord_ctc_recording_keep_days: how long call recordings stay
+     * in Twilio so reps can play them; the poller deletes older ones. 0
+     * deletes each recording right after its transcript is saved.
+     */
+    const wizardSetRecordingKeep = (payload) => {
+        const keepDays = payload && payload.keepDays;
+        if (!Number.isInteger(keepDays) || keepDays < 0 || keepDays > config.MAX_RECORDING_KEEP_DAYS) {
+            return { ok: false, error: 'invalid_keep_days',
+                message: 'keepDays must be a whole number from 0 to ' + config.MAX_RECORDING_KEEP_DAYS + '.' };
+        }
+        const id = getConfigRecordId();
+        if (!id) return { ok: false, error: 'config_not_found' };
+        try {
+            record.submitFields({
+                type: 'customrecord_ctc_config',
+                id: id,
+                values: { custrecord_ctc_recording_keep_days: keepDays }
+            });
+        } catch (e) {
+            log.error({ title: 'CTC Wizard — recording keep days not saved', details: e && e.message ? e.message : String(e) });
+            return { ok: false, error: 'keep_days_failed', errorMessage: e && e.message ? e.message : String(e) };
+        }
+        log.audit({
+            title: 'CTC Wizard — recording keep days ' + keepDays,
+            details: 'user=' + runtime.getCurrentUser().id
+        });
+        return { ok: true, keepDays: keepDays };
+    };
+
+    /* ------------------------------------------------------------------ */
     /* Action: wizardActivate (Step 5 — flip active flag)                 */
     /* ------------------------------------------------------------------ */
 
@@ -2026,6 +2063,7 @@ define(['N/runtime', 'N/record', 'N/search', 'N/log', 'N/crypto', 'N/query',
         wizardRunPreflight:      wizardRunPreflight,
         wizardActivate:          wizardActivate,
         wizardSetPhoneTab:       wizardSetPhoneTab,
+        wizardSetRecordingKeep:  wizardSetRecordingKeep,
         wizardLoadInbound:       wizardLoadInbound,
         wizardSaveInbound:       wizardSaveInbound,
         wizardPublishRouting:    wizardPublishRouting,

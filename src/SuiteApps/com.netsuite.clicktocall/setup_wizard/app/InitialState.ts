@@ -135,6 +135,10 @@ export interface ConsoleState {
     phoneTabSaving: boolean;
     phoneTabError: string | null;
 
+    // Recording keep period (Transcripts page; wizardSetRecordingKeep)
+    recordingKeepSaving: boolean;
+    recordingKeepError: string | null;
+
     // Health + Deactivate / Reactivate flow
     pendingDeactivateConfirm: boolean;
     deactivating: boolean;
@@ -552,6 +556,8 @@ const initialState: AppState = {
         activeModal: null,
         phoneTabSaving: false,
         phoneTabError: null,
+        recordingKeepSaving: false,
+        recordingKeepError: null,
         pendingDeactivateConfirm: false,
         deactivating: false,
         deactivateError: null,

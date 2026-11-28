@@ -368,8 +368,52 @@ define(['N/search', 'N/record', 'N/log'], (search, record, log) => {
         }
     };
 
+    const DEFAULT_RECORDING_KEEP_DAYS = 30;
+    const MAX_RECORDING_KEEP_DAYS = 3650;
+
+    /**
+     * custrecord_ctc_recording_keep_days → whole days. Blank, not a number,
+     * or out of range (below 0, above MAX) gives the default 30. 0 = delete
+     * the recording right after the transcript is saved.
+     * @param {*} raw
+     * @returns {number}
+     */
+    const parseRecordingKeepDays = (raw) => {
+        if (raw === '' || raw === null || raw === undefined) return DEFAULT_RECORDING_KEEP_DAYS;
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 0 || n > MAX_RECORDING_KEEP_DAYS) return DEFAULT_RECORDING_KEEP_DAYS;
+        return n;
+    };
+
+    /**
+     * Days to keep call recordings in Twilio. Read on its own (lookupFields,
+     * not a loadConfig column: a new loadConfig search column took the
+     * phone down once, CHANGELOG 2026-11-03). Never throws.
+     * Returns null when the field cannot be read: callers then delete
+     * nothing (keeping a recording can be undone later, a delete cannot).
+     * @param {string|number} id - config record internal id
+     * @returns {number|null}
+     */
+    const readRecordingKeepDays = (id) => {
+        try {
+            const v = search.lookupFields({
+                type: 'customrecord_ctc_config',
+                id: id,
+                columns: ['custrecord_ctc_recording_keep_days']
+            });
+            return parseRecordingKeepDays(v && v.custrecord_ctc_recording_keep_days);
+        } catch (e) {
+            log.error({ title: 'CTC config — recording keep days unreadable; no recording deletes', details: (e && e.message) || String(e) });
+            return null;
+        }
+    };
+
     return {
         loadOutboundConfig,
+        readRecordingKeepDays,
+        parseRecordingKeepDays,
+        DEFAULT_RECORDING_KEEP_DAYS,
+        MAX_RECORDING_KEEP_DAYS,
         loadConfig,
         readPhoneTabMode,
         readRoutingState,

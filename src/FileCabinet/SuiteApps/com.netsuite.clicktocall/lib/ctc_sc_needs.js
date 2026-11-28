@@ -19,10 +19,16 @@
  * call date. Cost: book SuiteQL 10 + calls 10 + follow-ups 20 +
  * invoices 10 + names 10 = about 60 units. Calls dated after today are
  * left out (pastOnly; this account has some, finding #102).
+ *
+ * Snooze (2026-11-28, lib/ctc_sc_snooze.js): a row is hidden while the
+ * user's snooze for the account is active (today < until) and the row's
+ * `needs` text equals the text stored at snooze time; a new or changed
+ * reason shows it again. Hidden rows are listed in `snoozed`. One more
+ * SuiteQL (10 units).
  */
 // eslint-disable-next-line suitescript/no-log-module
-define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './ctc_rc_followups', './ctc_rc_scope'],
-    (search, log, wq, rcOverview, rcFollowups, rcScope) => {
+define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './ctc_rc_followups', './ctc_rc_scope', './ctc_sc_snooze'],
+    (search, log, wq, rcOverview, rcFollowups, rcScope, scSnooze) => {
 
     const CALLBACK_DAYS = 14;
     const INVOICE_DAYS = 90;
@@ -54,7 +60,7 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
             const key = String(id || '');
             if (!key) return null;
             if (!acc[key]) {
-                acc[key] = { companyId: key, name: name || '', phone: '', reasons: [], open: 0, next: '', lastTouch: '' };
+                acc[key] = { companyId: key, name: name || '', phone: '', contact: '', reasons: [], open: 0, next: '', lastTouch: '', invoiceCount: 0 };
             }
             if (!acc[key].name && name) acc[key].name = name;
             return acc[key];
@@ -64,6 +70,8 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
             const a = of(r.companyId, r.companyName);
             if (!a) return;
             const iso = rcFollowups.nsToIso(r.date);
+            // The contact on the newest call is the person to call (Needs me card and table)
+            if (iso && iso >= a.lastTouch && r.contactName) a.contact = String(r.contactName);
             if (iso && iso > a.lastTouch) a.lastTouch = iso;
             if (!a.phone && r.phone) a.phone = String(r.phone);
         });
@@ -124,11 +132,27 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
             const a = acc[k] || of(k, l.name);
             if (!a) return;
             if (!a.open) (p.invoices || []).forEach((inv) => { if (String(inv.companyId) === k) a.open += inv.remaining || 0; });
+            a.invoiceCount = l.count;
             a.reasons.push({ kind: 'invoice', tone: 'red', rank: 4, days: l.days, status: 'Overdue ' + l.days + 'd',
                 why: plural(l.count, 'invoice') + ' past due · oldest ' + l.days + 'd' });
         });
 
         const reviewCount = (a) => a.reasons.filter((x) => x.kind === 'review').length;
+        /** Everything waiting on the account, in urgency order ("1 call back · 2 overdue tasks · 2 invoices"). */
+        const needsOf = (a) => {
+            const n = (pred) => a.reasons.filter(pred).length;
+            const parts = [];
+            const cb = n((x) => x.kind === 'callback');
+            const over = n((x) => x.kind === 'task' && x.tone === 'red');
+            const today = n((x) => x.kind === 'task' && x.tone === 'amber');
+            const review = n((x) => x.kind === 'review');
+            if (cb) parts.push(plural(cb, 'call back'));
+            if (over) parts.push(plural(over, 'overdue task'));
+            if (today) parts.push(plural(today, 'task') + ' due today');
+            if (review) parts.push(plural(review, 'follow-up') + ' to review');
+            if (a.invoiceCount) parts.push(plural(a.invoiceCount, 'invoice') + ' past due');
+            return parts.join(' · ');
+        };
         return Object.keys(acc).map((k) => acc[k]).filter((a) => a.reasons.length).map((a) => {
             const top = a.reasons.slice().sort((x, y) => x.rank - y.rank || y.days - x.days)[0];
             const n = reviewCount(a);
@@ -139,6 +163,8 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
                 name: a.name || 'Account ' + a.companyId,
                 entityType: 'customer',
                 phone: a.phone,
+                contact: a.contact,
+                needs: needsOf(a),
                 why: why,
                 more: more > 0 ? more : 0,
                 kind: top.kind,
@@ -152,6 +178,29 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
             };
         }).sort((x, y) => x.rank - y.rank || y.days - x.days || x.name.localeCompare(y.name))
           .map((r) => { delete r.rank; delete r.days; return r; });
+    };
+
+    /**
+     * Pure: split the rows into shown and snoozed. A row is snoozed while
+     * its account's snooze is active (todayIso < until) and its needs text
+     * equals the snooze's sig.
+     * @param {Array<Object>} rows - buildNeeds rows
+     * @param {Array<{companyId: string, until: string, sig: string}>} snoozes
+     * @param {string} todayIso
+     * @returns {{rows: Array<Object>, snoozed: Array<{companyId: string, name: string, until: string}>}}
+     */
+    const splitSnoozed = (rows, snoozes, todayIso) => {
+        /** @type {Object<string, {until: string, sig: string}>} */
+        const active = {};
+        (snoozes || []).forEach((s) => { if (s.until > todayIso) active[String(s.companyId)] = s; });
+        const shown = [];
+        const snoozed = [];
+        rows.forEach((r) => {
+            const s = active[r.companyId];
+            if (s && s.sig === r.needs) snoozed.push({ companyId: r.companyId, name: r.name, until: s.until });
+            else shown.push(r);
+        });
+        return { rows: shown, snoozed: snoozed };
     };
 
     /**
@@ -182,13 +231,13 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
      * The Needs me list for one user. A failed source is left out and named
      * in `partial`; nothing throws.
      * @param {{userId: (string|number)}} p
-     * @returns {{rows: Array<Object>, partial: Array<string>, error?: string}}
+     * @returns {{rows: Array<Object>, snoozed: Array<Object>, partial: Array<string>, error?: string}}
      */
     const loadNeeds = (p) => {
         const userId = p && p.userId;
         const partial = [];
         const book = wq.getBookCustomerIds({ userId: userId });
-        if (!book.length) return { rows: [], partial: partial };
+        if (!book.length) return { rows: [], snoozed: [], partial: partial };
         const calls = wq.loadHistoryRows({
             userId: userId, bookCustomerIds: book, limit: 1000, skipEntityType: true, pastOnly: true,
             dateFilter: ['startdate', 'onorafter', 'daysago30']
@@ -203,8 +252,9 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
             log.error({ title: 'CTC SC needs invoices failed', details: (e && e.message) || String(e) });
             partial.push('invoices');
         }
+        const todayIso = rcScope.todayIso();
         const rows = buildNeeds({
-            todayIso: rcScope.todayIso(),
+            todayIso: todayIso,
             calls: calls.error ? [] : calls.rows,
             followUps: followUps.error ? [] : followUps.rows,
             invoices: invoices
@@ -216,8 +266,15 @@ define(['N/search', 'N/log', './ctc_workspace_queries', './ctc_rc_overview', './
         } catch (e) {
             log.error({ title: 'CTC SC needs names failed', details: (e && e.message) || String(e) });
         }
-        return { rows: rows, partial: partial };
+        let snoozes = [];
+        try {
+            snoozes = scSnooze.loadActive({ userId: userId, todayIso: todayIso });
+        } catch (e) {
+            log.error({ title: 'CTC SC needs snoozes failed', details: (e && e.message) || String(e) });
+            partial.push('snooze');
+        }
+        return Object.assign(splitSnoozed(rows, snoozes, todayIso), { partial: partial });
     };
 
-    return { buildNeeds, loadNeeds, CALLBACK_DAYS, INVOICE_DAYS };
+    return { buildNeeds, splitSnoozed, loadNeeds, CALLBACK_DAYS, INVOICE_DAYS };
 });

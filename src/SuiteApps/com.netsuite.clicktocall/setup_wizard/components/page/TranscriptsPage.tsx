@@ -4,7 +4,9 @@
  *   Transcription · Twilio       Intelligence service (Change: the shared
  *                                voiceField editor, moved here from Voice),
  *                                auto-transcribe (signal intelligence),
- *                                recordings.
+ *                                recordings: days kept in Twilio for
+ *                                playback (wizardSetRecordingKeep, saved
+ *                                on change; 0 = delete after the transcript).
  *   AI analysis · NetSuite N/llm "<n> AI analyses left" + UIF MeterBar
  *                                (aiMeter: scaled to left + this month's
  *                                Click-to-Call analyses; NetSuite reports
@@ -22,6 +24,7 @@ import * as core from '@uif-js/core';
 import * as component from '@uif-js/component';
 import {store} from '../../app/Store';
 import {loadHealth} from '../../app/effects/health';
+import {setRecordingKeep} from '../../app/effects/console';
 import type {AppState, HealthSignal} from '../../app/InitialState';
 import type {PageTickProps} from '../../App';
 import {friendlyError} from '../shared/friendlyError';
@@ -47,6 +50,13 @@ const kv = (name: string, value: Child, action: Child = null): core.VDom.Node =>
         Gap.SPACING4X);
 
 const signalOf = (state: AppState, key: string): HealthSignal | undefined => state.health.signals[key];
+
+/** Keep-period choices in days; 0 deletes each recording after its transcript. */
+export const RECORDING_KEEP_DAYS = [0, 7, 30, 90, 180, 365];
+export const RECORDING_KEEP_HELP =
+    'Keep call recordings for this many days so reps can play them; 0 deletes each recording after its transcript is saved. ' +
+    'The background job deletes older recordings from Twilio. Twilio charges for recording storage.';
+const keepLabel = (n: number): string => (n === 0 ? 'Delete after the transcript' : n + (n === 1 ? ' day' : ' days'));
 
 export default class TranscriptsPage extends PureComponent<PageTickProps, unknown> {
     componentDidMount(): void {
@@ -90,13 +100,37 @@ export default class TranscriptsPage extends PureComponent<PageTickProps, unknow
                 sig && sig.severity !== 'ok' && sig.detail ? text(sig.detail, { small: true }) : null
             ], Gap.SPACING1X)),
             divider(),
-            kv('Recordings', vstack([
-                text('Deleted from Twilio after the transcript is saved in NetSuite.'),
-                help('Outbound calls are always recorded. Inbound recording is set under Inbound calls.')
-            ], Gap.SPACING1X))
+            kv('Recordings', this.renderRecordingKeep(state))
         ];
         if (c.voiceError) rows.push(errorLine(friendlyError(c.voiceError)));
         return card(rows, { label: 'Transcription', fill: true, gap: Gap.SPACING2X });
+    }
+
+    private renderRecordingKeep(state: AppState): core.VDom.Node {
+        const c = state.console;
+        const raw = (c.snapshot as { recordingKeepDays?: number | null } | null)?.recordingKeepDays;
+        const days = typeof raw === 'number' ? raw : null;
+        const options = days === null || RECORDING_KEEP_DAYS.indexOf(days) >= 0
+            ? RECORDING_KEEP_DAYS
+            : RECORDING_KEEP_DAYS.concat([days]).sort((x, y) => x - y);
+        return vstack([
+            days === null ? text('Not read: the keep period could not be read, so no recording is deleted.', { weak: true }) : null,
+            <component.Dropdown
+                dataSource={new core.ArrayDataSource(options.map((n) => ({ value: n, label: keepLabel(n) }))) as never}
+                valueMember="value"
+                displayMember="label"
+                selectedValue={days === null ? undefined : days}
+                enabled={!c.recordingKeepSaving}
+                onSelectionChanged={(args: { value?: unknown }): void => {
+                    const n = Number(args && args.value);
+                    if (Number.isInteger(n) && n >= 0 && n !== days) setRecordingKeep(n);
+                }}
+                rootStyle={{width: '240px'} as never}
+            />,
+            help(RECORDING_KEEP_HELP),
+            help('Outbound calls are always recorded. Inbound recording is set under Inbound calls.'),
+            c.recordingKeepError ? errorLine(friendlyError(c.recordingKeepError)) : null
+        ], Gap.SPACING1X);
     }
 
     private renderAi(state: AppState): core.VDom.Node {
@@ -176,7 +210,7 @@ export default class TranscriptsPage extends PureComponent<PageTickProps, unknow
             body.push(this.signalState(state, sig));
         } else {
             body.push(this.jobRow('Transcript check', v.transcripts,
-                'Every 15 minutes. Also retries failed saves and deletes finished recordings.'));
+                'Every 15 minutes. Also retries failed saves and deletes recordings past the keep period.'));
             body.push(divider());
             body.push(this.jobRow('Missed-call sync', v.reconcile,
                 'Every 15 minutes. Logs calls that rang no rep (missed, too short, no answer, voicemail) so Call Central is complete.'));

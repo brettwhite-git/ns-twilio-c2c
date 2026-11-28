@@ -16,7 +16,7 @@ import type {TaskRow, Outcome, CompletePayload} from './api';
 export type TaskGroup = 'all' | 'suggested' | TaskRow['band'];
 const BANDS: Array<[TaskRow['band'], string]> = [['overdue', 'Overdue'], ['today', 'Today'], ['week', 'This week'], ['later', 'Later']];
 const GROUP_COLOR: Record<Exclude<TaskGroup, 'all'>, string> = {
-    suggested: '#5F7590', overdue: '#B3311F', today: '#B8730A', week: '#A8A39C', later: '#DEDBD7'
+    suggested: '#5F7590', overdue: '#B3311F', today: '#B8730A', week: '#8A857F', later: '#A8A39C'
 };
 const SUGGESTION_CAP = 3;
 export const bandLabel = (band: TaskRow['band']): string => (BANDS.filter((b) => b[0] === band)[0] || ['', ''])[1];
@@ -58,9 +58,19 @@ const dueColor = (r: TaskRow): string =>
 /** Tasks made from a suggestion are stored as "AI: <text>"; the list shows the text. */
 export const displayTitle = (title: string): string => title.replace(/^AI:\s*/, '');
 
-const circle = (group: Exclude<TaskGroup, 'all'>): HTMLElement => {
-    const c = el('span', 'sc-cd');
-    c.style.background = GROUP_COLOR[group];
+// One icon per group in our own style (DESIGN rule 7), in the group's colour.
+const GROUP_ICON: Record<TaskGroup, string> = {
+    all: '<path d="M8 6h12M8 12h12M8 18h12"></path><path d="M4 6h.01M4 12h.01M4 18h.01"></path>',
+    suggested: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path><path d="M16 3v5M13.5 5.5h5"></path>',
+    overdue: '<circle cx="12" cy="13" r="8"></circle><path d="M12 9v4M12 16.5h.01M5 3 2 6M19 3l3 3"></path>',
+    today: '<rect x="4" y="5" width="16" height="16" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4"></path><circle cx="12" cy="15.5" r="1.5"></circle>',
+    week: '<rect x="4" y="5" width="16" height="16" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4M8 14h3"></path>',
+    later: '<circle cx="12" cy="12" r="8"></circle><path d="M12 8v4l3 2"></path>'
+};
+const groupIcon = (group: TaskGroup): HTMLElement => {
+    const c = el('span', 'sc-gi');
+    if (group !== 'all') c.style.color = GROUP_COLOR[group];
+    c.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + GROUP_ICON[group] + '</svg>';
     return c;
 };
 
@@ -235,8 +245,8 @@ const accountCell = (r: TaskRow, v: TasksView): HTMLElement => {
 };
 
 const band = (group: Exclude<TaskGroup, 'all'>, label: string, count: number, hint?: string): HTMLElement => {
-    const b = el('div', 'sc-band');
-    b.append(circle(group), el('span', '', label + ' '), el('span', 'cnt', String(count)));
+    const b = el('div', 'sc-band sc-tint g-' + group);
+    b.append(groupIcon(group), el('span', '', label + ' '), el('span', 'cnt', String(count)));
     if (hint) b.appendChild(el('span', 'sc-hint', hint));
     return b;
 };
@@ -267,7 +277,7 @@ export const renderTasks = (host: HTMLElement, v: TasksView): HTMLElement[] => {
         const b = button('sc-sum', '', () => v.onGroup(g));
         b.setAttribute('data-g', g);
         b.setAttribute('aria-pressed', String(shown === g));
-        if (g !== 'all') b.appendChild(circle(g));
+        b.appendChild(groupIcon(g));
         b.append(el('span', '', label + ' '), el('b', '', String(count)));
         line.appendChild(b);
     });

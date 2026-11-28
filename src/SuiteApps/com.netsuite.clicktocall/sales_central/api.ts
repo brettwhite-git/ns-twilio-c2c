@@ -4,12 +4,33 @@ export interface NeedsRow {
     companyId: string; name: string; entityType: string; phone: string;
     why: string; more: number; kind: string; status: string; tone: 'red' | 'amber' | 'grey';
     next: string; open: number; lastTouch: string;
+    /** The contact on the newest call, and everything waiting ("1 call back · 2 invoices past due"). */
+    contact: string; needs: string;
 }
+
+/** A Needs me account hidden until tomorrow (salesCentralNeeds.snoozed). */
+export interface SnoozedRow { companyId: string; name: string; until: string; }
 
 export interface CallRow {
     id: string; date: string; timeOfDay: string; companyId: string; companyName: string;
     contactName: string; phone: string; brief: string; satisfaction: number | null;
     duration: number; direction: string; voicemail: boolean; callStatus: string;
+}
+
+/** One Phone Call for the call drawer (getCallDetail). */
+export interface CallDetail {
+    call: {
+        id: string; title: string; companyId: string; companyName: string; contactName: string;
+        ownerName: string; phone: string; date: string; direction: 'inbound' | 'outbound'; duration: number;
+        status: string; voicemail: boolean; satisfaction: number | null; toneKeywords: string; summary: string;
+        transcriptLines: Array<{ speaker: '' | 'rep' | 'customer'; text: string }>; transcriptLineCount: number;
+        recordingUrl: string;
+        /** The access-checked audio Suitelet for this call; '' when the recording is gone or was never made. */
+        audioUrl?: string;
+    };
+    /** Pending follow-ups proposed from this call. */
+    tasks: Array<{ id: string; text: string; proposedDue: string }>;
+    tasksError?: boolean;
 }
 
 export interface AccountContext {
