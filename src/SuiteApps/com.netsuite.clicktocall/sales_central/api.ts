@@ -27,10 +27,21 @@ export interface DealStatus { id: string; name: string; probability: number; }
 export interface Deal {
     id: string; number: string; title: string; companyId: string; companyName: string;
     statusId: string; amount: number; probability: number; close: string;
+    /** Sales rep (display name) and the date the deal was created, for the card. */
+    rep: string; created: string;
 }
 export interface PipelineData {
     statuses: DealStatus[]; deals: Deal[]; partial: string[];
     kpis: { open: number; openCount: number; weighted: number; won: number; wonCount: number; late: number; lateCount: number };
+}
+/** One deal's detail for the drawer (salesCentralDeal); read only. */
+export interface DealDetail {
+    details: { salesRep: string; leadSource: string; partner: string; forecastType: string;
+        rangeLow: number; rangeHigh: number; memo: string; created: string };
+    items: Array<{ item: string; quantity: number; amount: number }>;
+    activity: Array<{ kind: 'call' | 'task' | 'event'; title: string; date: string }>;
+    todayIso: string;
+    partial: string[];
 }
 /** Only the fields that changed (salesCentralUpdateDeal). */
 export interface DealEdit { title?: string; statusId?: string; close?: string; probability?: number; }

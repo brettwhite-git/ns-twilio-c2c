@@ -8,7 +8,7 @@
 import {el, clear, localToday} from './dom';
 import {STYLES} from './styles';
 import {parseRoute, formatRoute, LIVE_TABS, Route, TabId} from './route';
-import {makePost, Post, NeedsRow, CallRow, TaskRow, CompletePayload, Deal, DealEdit, PipelineData} from './api';
+import {makePost, Post, NeedsRow, CallRow, TaskRow, CompletePayload, Deal, DealEdit, DealDetail, PipelineData} from './api';
 import {mountDock, setDockContext, callWithDock, DockWindow} from './dock';
 import {renderNeeds} from './needs';
 import {renderCalls} from './calls';
@@ -324,6 +324,8 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
             top: drawerTop,
             onClose: () => { dealOpenId = ''; closeDealDrawer(drawerHost); },
             onAccount: (deal) => { dealOpenId = ''; closeDealDrawer(drawerHost); go({ tab: route.tab, account: deal.companyId }); },
+            detail: (post as Post)<DealDetail>({ action: 'salesCentralDeal', id: d.id })
+                .then((x) => (x.error ? null : x)).catch(() => null),
             onSave: (deal, edit) => saveDeal(deal, edit).then((problem) => {
                 if (problem) return problem;
                 dealOpenId = '';
@@ -369,7 +371,8 @@ export const startApp = (root: HTMLElement, win: DockWindow): void => {
         const next = list[i + dir];
         return next ? next.companyId : '';
     };
-    const drawerTop = (): number => Math.max(0, Math.round(hcard.getBoundingClientRect().bottom));
+    // Drawers start under the tab row, over the Lens band (user scrawl, 2026-11-27).
+    const drawerTop = (): number => Math.max(0, Math.round(tabBar.getBoundingClientRect().bottom));
     let shownAccount = '';
     const renderDrawer = (): void => {
         const a = route.account && post ? current() : null;

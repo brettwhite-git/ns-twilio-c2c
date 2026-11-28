@@ -110,6 +110,7 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         if (body.action === 'salesCentralAddTaskNote') return salesCentralAddTaskNote(body);
         if (body.action === 'salesCentralPipeline') return salesCentralPipeline();
         if (body.action === 'salesCentralUpdateDeal') return salesCentralUpdateDeal(body);
+        if (body.action === 'salesCentralDeal')     return salesCentralDeal(body);
         if (typeof body.action === 'string' && Object.prototype.hasOwnProperty.call(FOLLOW_UP_ACTIONS, body.action)) {
             // The manager rule reads the team once per request, never from
             // an earlier request (a supervisor change applies at once).
@@ -1258,6 +1259,16 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', './lib/ctc_twilio_jwt', '.
         } catch (e) {
             log.error({ title: 'CTC salesCentralUpdateDeal failed', details: (e && e.message) || String(e) });
             return { error: 'Save failed' };
+        }
+    };
+
+    /** salesCentralDeal: one deal's detail for the drawer (read only; same access as salesCentralUpdateDeal). */
+    const salesCentralDeal = (body) => {
+        try {
+            return scPipeline.loadDeal({ userId: runtime.getCurrentUser().id, isAdmin: isAdministrator(), id: body.id });
+        } catch (e) {
+            log.error({ title: 'CTC salesCentralDeal failed', details: (e && e.message) || String(e) });
+            return { error: 'Could not load details' };
         }
     };
 

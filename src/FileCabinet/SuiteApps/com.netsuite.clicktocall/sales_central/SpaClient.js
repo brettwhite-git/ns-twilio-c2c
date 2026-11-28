@@ -159,6 +159,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-opt{height:28px;padding:0 12px;border:0;border-radius:5px;background:none;color:#4A4744;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}',
         '.sc-opt[aria-pressed="true"]{background:#FFFFFF;color:#161513;font-weight:500}',
         '.sc-field{width:100%;box-sizing:border-box;min-height:32px;padding:6px 10px;border:0;border-radius:6px;box-shadow:inset 0 0 0 1px #DEDBD7;font:inherit;color:#161513;background:#FFFFFF}',
+        "select.sc-field{-webkit-appearance:none;appearance:none;padding-right:32px;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236F6B66' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 10px center}",
         '.sc-field:focus{outline:2px solid #1F3550;outline-offset:0}',
         '.sc-next{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:8px}',
         '.sc-btn.pri{background:#1F3550;color:#FFFFFF}',
@@ -170,11 +171,26 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-toast-act{padding:0;border:0;background:none;font:inherit;font-weight:500;color:#9DB4CF;cursor:pointer}',
         '@keyframes sc-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}',
         '.sc-vsep{width:1px;height:20px;background:#DEDBD7;margin:0 4px}',
-        '.sc-cols{display:grid;gap:12px;padding:16px 24px 24px;overflow-x:auto;align-items:start}',
+        '.sc-cols{display:grid;gap:12px;padding:16px 24px 24px;align-items:stretch}',
+        '@media (max-width:1100px){.sc-cols{overflow-x:auto}}',
+        '.sc-wcard:has(.sc-cols){overflow:visible}',
         '.sc-col{border-radius:10px;background:#FAFAF9;box-shadow:inset 0 0 0 1px #ECEAE7;padding:8px;display:flex;flex-direction:column;gap:8px;min-height:320px;transition:background-color 120ms ease}',
         '.sc-col.drop{background:#F1F4F8;box-shadow:inset 0 0 0 1.5px #5F7590}',
-        '.sc-colh{display:flex;align-items:baseline;gap:6px;padding:4px 6px 2px}',
+        '.sc-colh{position:sticky;top:0;z-index:2;display:flex;align-items:baseline;gap:6px;margin:-8px -8px 0;padding:12px 14px 8px;border-radius:10px 10px 0 0;background:#FAFAF9}',
         '.sc-colh b{font-weight:500}',
+        '.sc-ccards{display:flex;flex-direction:column;gap:8px}',
+        '.sc-cmw{position:relative;align-self:center;margin:-4px -6px -4px 2px}',
+        '.sc-cmb{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:none;color:#8A857F;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}',
+        '.sc-cmb:hover,.sc-cmb[aria-expanded="true"]{color:#161513;background:#EFEDE9}',
+        '.sc-cmb:focus-visible{outline:2px solid #1F3550;outline-offset:1px}',
+        '.sc-cmenu{position:absolute;top:calc(100% + 6px);right:0;z-index:10;min-width:180px;padding:6px;background:#FFFFFF;border-radius:10px;box-shadow:0 0 0 1px #E5E2DD,0 8px 24px rgba(22,21,19,0.12);display:flex;flex-direction:column;transform-origin:top right;animation:sc-pop 160ms cubic-bezier(0.23,1,0.32,1) both}',
+        '@keyframes sc-pop{from{opacity:0;transform:scale(0.96)}}',
+        '@media (prefers-reduced-motion:reduce){.sc-cmenu{animation:none}}',
+        '.sc-cmh{padding:4px 8px 6px;font-size:12px;color:#6F6B66}',
+        '.sc-cmi{display:flex;align-items:center;height:32px;padding:0 8px;border:0;border-radius:6px;background:none;font:inherit;color:#161513;text-align:left;cursor:pointer}',
+        '.sc-cmi:hover,.sc-cmi:focus-visible{background:#F5F4F2;outline:none}',
+        '.sc-cmi[aria-checked="true"]{font-weight:500}',
+        '.sc-cmi[aria-checked="true"]::after{content:"";margin-left:auto;width:8px;height:5px;border-left:1.6px solid #1F3550;border-bottom:1.6px solid #1F3550;transform:rotate(-45deg) translateY(-2px)}',
         '.sc-colh .cnt{font-size:12px;color:#6F6B66}',
         '.sc-colh .amt{margin-left:auto;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}',
         '.sc-card{background:#FFFFFF;border-radius:8px;box-shadow:0 0 0 1px #E1DDD8;padding:10px 12px;display:flex;flex-direction:column;gap:3px;cursor:grab;min-width:0}',
@@ -183,6 +199,16 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-ca{display:flex;align-items:center;gap:4px;font-weight:500;min-width:0}',
         '.sc-cd2{font-size:12px;color:#4A4744}',
         '.sc-cm{display:flex;gap:8px;font-size:12px;color:#6F6B66}',
+        '.sc-pcard{padding:0;gap:0}',
+        '.sc-ctop{display:flex;align-items:flex-start;gap:8px;padding:10px 10px 10px 12px}',
+        '.sc-wheel{flex:none;display:inline-flex;margin-top:2px}',
+        '.sc-ctext{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}',
+        '.sc-pcard .sc-ca{font-weight:500}',
+        '.sc-pills{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 10px;border-top:1px solid #ECEAE7}',
+        '.sc-pill{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 8px;border-radius:999px;box-shadow:inset 0 0 0 1px #E5E2DD;font-size:12px;color:#3E3B37;white-space:nowrap}',
+        '.sc-pill svg{color:#8A857F}',
+        '.sc-pill.late{color:#B3311F;background:#FDF4F2;box-shadow:inset 0 0 0 1px #F0C8C2}',
+        '.sc-pill.late svg{color:#B3311F}',
         '.sc-pen{margin-left:auto;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:none;color:#A8A39C;display:inline-flex;align-items:center;justify-content:center;flex:none;cursor:pointer}',
         '.sc-pen:hover{color:#1F3550;background:#E9EDF2}',
         '.sc-pen:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
@@ -192,7 +218,25 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-fl>span:first-child{font-size:12px;font-weight:500;color:#6F6B66}',
         '.sc-fgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}',
         '.sc-ro{height:32px;display:flex;align-items:center;font-variant-numeric:tabular-nums}',
+        '.sc-dmore{display:flex;flex-direction:column;gap:12px}',
+        '.sc-dsec{display:flex;align-items:baseline;gap:8px;padding-top:16px;border-top:1px solid #ECEAE7;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5E5952}',
+        '.sc-dsec i{margin-left:auto;font-style:normal;font-weight:400;letter-spacing:0;text-transform:none;color:#6F6B66}',
+        '.sc-dkv{display:grid;grid-template-columns:120px 1fr;row-gap:8px;column-gap:12px;margin:0}',
+        '.sc-dkv dt{color:#6F6B66}',
+        '.sc-dkv dd{margin:0}',
+        '.sc-dmemo{background:#FAF9F7;border-radius:6px;padding:10px 12px;white-space:pre-wrap}',
+        '.sc-ditems{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}',
+        '.sc-ditems th{font-size:12px;font-weight:500;color:#6F6B66;text-align:left;padding:0 0 6px;border-bottom:1px solid #ECEAE7}',
+        '.sc-ditems td{padding:8px 0;border-bottom:1px solid #F1EFEA;vertical-align:top}',
+        '.sc-ditems .num{text-align:right;padding-left:12px}',
+        '.sc-ditems .tot td{border-bottom:0;font-weight:600}',
+        '.sc-dact{display:grid;grid-template-columns:18px 1fr auto;gap:10px;align-items:start;padding:6px 0;border-bottom:1px solid #F1EFEA}',
+        '.sc-dact .ic{color:#6F6B66;padding-top:1px}',
+        '.sc-dact .mut{font-size:12px;white-space:nowrap}',
+        '.sc-dload{display:flex;flex-direction:column;gap:8px}',
+        '.sc-dload span{height:12px;border-radius:4px;background:#F1EFEA}',
         '.sc-dfoot .sc-err{margin-right:auto}',
+        '.sc-dfoot .sc-cancel{margin-right:0;height:30px;padding:0 12px;border-radius:6px}',
         '.sc-msg{padding:48px 24px;text-align:center;color:#6F6B66}',
         '.sc-msg b{display:block;margin-bottom:4px;font-size:14px;font-weight:500;color:#161513}',
         '.sc-ph{height:48px;border-bottom:1px solid #ECEAE7;padding:0 24px;display:flex;align-items:center}',
@@ -207,7 +251,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-icon{width:30px;height:30px;padding:0;border:0;border-radius:6px;background:none;color:#4A4744;cursor:pointer;display:inline-flex;align-items:center;justify-content:center}',
         '.sc-icon:hover{background:#F5F4F2}',
         '.sc-icon[disabled]{opacity:0.4;cursor:default}',
-        '.sc-drawer{position:fixed;right:0;bottom:16px;width:440px;max-width:100vw;background:#FFFFFF;box-shadow:-1px 0 0 #ECEAE7,-16px 0 32px rgba(22,21,19,0.08);display:flex;flex-direction:column;z-index:20;animation:sc-in 260ms cubic-bezier(0.32,0.72,0,1) both}',
+        '.sc-drawer{position:fixed;right:0;bottom:16px;width:506px;max-width:100vw;background:#FFFFFF;box-shadow:-1px 0 0 #ECEAE7,-16px 0 32px rgba(22,21,19,0.08);display:flex;flex-direction:column;z-index:20;animation:sc-in 260ms cubic-bezier(0.32,0.72,0,1) both}',
         '.sc-drawer.out{animation:sc-out 200ms cubic-bezier(0.32,0.72,0,1) both}',
         '.sc-dhead{display:flex;align-items:center;gap:4px;height:48px;padding:0 8px 0 20px;border-bottom:1px solid #ECEAE7}',
         '.sc-dhead .tools{margin-left:auto;display:flex;gap:2px}',
@@ -681,8 +725,29 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         });
         return seg;
     };
-    const card = (d, h) => {
-        const c = el('div', 'sc-card');
+    const STAGE_COLORS = ['#7C8794', '#2A8C8C', '#3166B0', '#C27A1A', '#3B7D3A', '#7A5AA6'];
+    const svg = (inner, size) => '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+    const PILL_ICON = {
+        bars: '<path d="M6 20v-4M12 20v-9M18 20V5"></path>',
+        user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"></path>',
+        cal: '<rect x="4" y="5" width="16" height="16" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4"></path>'
+    };
+    const wheel = (probability, color) => {
+        const w = el('span', 'sc-wheel');
+        const c = 2 * Math.PI * 6;
+        const filled = (c * Math.max(0, Math.min(100, probability))) / 100;
+        w.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="#E5E2DD" stroke-width="2.5"></circle>' +
+            '<circle cx="8" cy="8" r="6" fill="none" stroke="' + color + '" stroke-width="2.5" stroke-dasharray="' + filled.toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 8 8)"></circle></svg>';
+        return w;
+    };
+    const pill = (icon, text, cls) => {
+        const p = el('span', 'sc-pill' + (cls ? ' ' + cls : ''));
+        p.innerHTML = svg(icon, 13);
+        p.appendChild(document.createTextNode(text));
+        return p;
+    };
+    const card = (d, h, color) => {
+        const c = el('div', 'sc-card sc-pcard');
         c.setAttribute('data-id', d.id);
         c.draggable = true;
         c.addEventListener('dragstart', (e) => {
@@ -693,31 +758,111 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             c.classList.add('dragging');
         });
         c.addEventListener('dragend', () => c.classList.remove('dragging'));
-        const top = el('span', 'sc-ca');
         const pen = button('sc-pen', '', () => h.onEdit(d));
         pen.innerHTML = PEN;
         pen.setAttribute('aria-label', 'Edit ' + (d.title || 'deal'));
         pen.title = 'Edit deal';
-        top.append(el('span', 'sc-clip', d.companyName || 'No customer'), pen);
-        const meta = el('span', 'sc-cm');
-        const close = el('span', '', d.close ? 'Close ' + shortDate(d.close) : 'No close date');
-        if (late(d, h.todayIso))
-            close.style.color = '#B3311F';
-        meta.append(close, el('span', '', d.probability + '%'));
-        c.append(top, el('span', 'sc-cd2 sc-clip', (d.title || 'Untitled') + ' · ' + money(d.amount)), meta);
+        const text = el('span', 'sc-ctext');
+        text.append(el('span', 'sc-ca sc-clip', d.companyName || 'No customer'), el('span', 'sc-cd2 sc-clip', (d.title || 'Untitled') + ' · ' + money(d.amount)));
+        if (d.created)
+            text.appendChild(el('span', 'sc-cm sc-clip', 'Created ' + shortDate(d.created)));
+        const top = el('div', 'sc-ctop');
+        top.append(wheel(d.probability, color), text, pen);
+        const pills = el('div', 'sc-pills');
+        pills.appendChild(pill(PILL_ICON.bars, d.probability + '%'));
+        if (d.rep)
+            pills.appendChild(pill(PILL_ICON.user, d.rep.split(' ')[0]));
+        if (!d.close)
+            pills.appendChild(pill(PILL_ICON.cal, 'No close date'));
+        else if (late(d, h.todayIso))
+            pills.appendChild(pill(PILL_ICON.cal, 'Overdue · ' + shortDate(d.close), 'late'));
+        else
+            pills.appendChild(pill(PILL_ICON.cal, shortDate(d.close)));
+        c.append(top, pills);
         return c;
+    };
+    const SORTS = [['close', 'Close date'], ['amount', 'Amount'], ['probability', 'Probability'], ['account', 'Account']];
+    const columnSort = {};
+    const sortDeals = (deals, by) => {
+        if (by === 'close')
+            return deals;
+        const copy = deals.slice();
+        if (by === 'amount')
+            copy.sort((a, b) => b.amount - a.amount);
+        else if (by === 'probability')
+            copy.sort((a, b) => b.probability - a.probability);
+        else
+            copy.sort((a, b) => a.companyName.localeCompare(b.companyName));
+        return copy;
+    };
+    const DOTS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle></svg>';
+    const columnMenu = (statusName, current, onPick) => {
+        const wrap = el('span', 'sc-cmw');
+        const btn = el('button', 'sc-cmb');
+        btn.type = 'button';
+        btn.innerHTML = DOTS;
+        btn.setAttribute('aria-label', 'Sort ' + statusName);
+        btn.setAttribute('aria-haspopup', 'menu');
+        btn.setAttribute('aria-expanded', 'false');
+        let menu = null;
+        const close = () => {
+            if (!menu)
+                return;
+            menu.remove();
+            menu = null;
+            btn.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('mousedown', outside, true);
+            document.removeEventListener('keydown', onKey, true);
+        };
+        const outside = (e) => { if (!wrap.contains(e.target))
+            close(); };
+        const onKey = (e) => { if (e.key === 'Escape') {
+            e.stopPropagation();
+            close();
+            btn.focus();
+        } };
+        btn.addEventListener('click', () => {
+            if (menu) {
+                close();
+                return;
+            }
+            menu = el('div', 'sc-cmenu');
+            menu.setAttribute('role', 'menu');
+            menu.appendChild(el('div', 'sc-cmh', 'Sort by'));
+            SORTS.forEach(([key, label]) => {
+                const it = el('button', 'sc-cmi', label);
+                it.type = 'button';
+                it.setAttribute('role', 'menuitemradio');
+                it.setAttribute('aria-checked', String(current() === key));
+                it.addEventListener('click', () => { close(); onPick(key); });
+                menu.appendChild(it);
+            });
+            wrap.appendChild(menu);
+            btn.setAttribute('aria-expanded', 'true');
+            document.addEventListener('mousedown', outside, true);
+            document.addEventListener('keydown', onKey, true);
+            menu.querySelector('[aria-checked="true"]')?.focus();
+        });
+        wrap.appendChild(btn);
+        return wrap;
     };
     const board = (p, h) => {
         const cols = el('div', 'sc-cols');
         cols.style.gridTemplateColumns = 'repeat(' + Math.max(1, p.statuses.length) + ', minmax(190px, 1fr))';
-        p.statuses.forEach((s) => {
+        p.statuses.forEach((s, i) => {
             const items = p.deals.filter((d) => d.statusId === s.id);
+            const color = STAGE_COLORS[i % STAGE_COLORS.length];
             const col = el('div', 'sc-col');
             col.setAttribute('data-status', s.id);
             const head = el('div', 'sc-colh');
-            head.append(el('b', '', s.name), el('span', 'cnt', String(items.length)), el('span', 'amt', items.length ? money(sum$1(items)) : ''));
-            col.appendChild(head);
-            items.forEach((d) => col.appendChild(card(d, h)));
+            const cards = el('div', 'sc-ccards');
+            const fill = () => {
+                clear(cards);
+                sortDeals(items, columnSort[s.id] || 'close').forEach((d) => cards.appendChild(card(d, h, color)));
+            };
+            head.append(el('b', '', s.name), el('span', 'cnt', String(items.length)), el('span', 'amt', items.length ? money(sum$1(items)) : ''), columnMenu(s.name, () => columnSort[s.id] || 'close', (by) => { columnSort[s.id] = by; fill(); }));
+            fill();
+            col.append(head, cards);
             col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drop'); });
             col.addEventListener('dragleave', () => col.classList.remove('drop'));
             col.addEventListener('drop', (e) => {
@@ -768,6 +913,72 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             return;
         }
         host.appendChild(h.view === 'list' ? list(p, h) : board(p, h));
+    };
+    const ACT_ICON = {
+        call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
+        task: 'M4 4h16v16H4z M9 12l2 2 4-4',
+        event: 'M4 6h16v14H4z M4 10h16 M8 3v4 M16 3v4'
+    };
+    const ACT_WORD = { call: 'Call', task: 'Task', event: 'Event' };
+    const section$1 = (title, aside) => {
+        const h = el('div', 'sc-dsec');
+        h.append(el('span', '', title), el('i', '', aside));
+        return h;
+    };
+    const daysBetween = (fromIso, toIso) => Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86400000);
+    const renderDealDetail = (host, d, x) => {
+        clear(host);
+        const det = x.details;
+        const age = det.created && det.created <= x.todayIso ? 'Open ' + daysBetween(det.created, x.todayIso) + ' days · ' : '';
+        host.appendChild(section$1('Details', det.created ? age + (age ? 'created ' : 'Created ') + shortDate(det.created) : ''));
+        const kv = el('dl', 'sc-dkv');
+        const range = det.rangeLow || det.rangeHigh ? money(det.rangeLow) + ' – ' + money(det.rangeHigh) : '';
+        [['Sales rep', det.salesRep], ['Lead source', det.leadSource], ['Partner', det.partner],
+            ['Forecast type', det.forecastType], ['Range', range]].forEach(([k, v]) => {
+            kv.append(el('dt', '', k), el('dd', v ? '' : 'mut', v || 'None'));
+        });
+        host.appendChild(kv);
+        if (det.memo)
+            host.appendChild(el('div', 'sc-dmemo', det.memo));
+        host.appendChild(section$1('Items', x.partial.indexOf('items') !== -1 ? 'Could not load' : x.items.length + (x.items.length === 1 ? ' line' : ' lines')));
+        if (x.items.length) {
+            const t = el('table', 'sc-ditems');
+            const head = el('tr');
+            head.append(el('th', '', 'Item'), el('th', 'num', 'Qty'), el('th', 'num', 'Amount'));
+            t.appendChild(head);
+            x.items.forEach((it) => {
+                const r = el('tr');
+                r.append(el('td', '', it.item), el('td', 'num', it.quantity.toLocaleString('en-US')), el('td', 'num', money(it.amount)));
+                t.appendChild(r);
+            });
+            const tot = el('tr', 'tot');
+            tot.append(el('td', '', 'Total'), el('td'), el('td', 'num', money(x.items.reduce((s, it) => s + it.amount, 0))));
+            t.appendChild(tot);
+            host.appendChild(t);
+        }
+        host.appendChild(section$1('Activity', x.activity.length ? 'Last ' + x.activity.length : ''));
+        if (!x.activity.length)
+            host.appendChild(el('div', 'mut', 'No calls, tasks or events on this deal yet.'));
+        x.activity.forEach((a) => {
+            const row = el('div', 'sc-dact');
+            const ic = el('span', 'ic');
+            ic.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + ACT_ICON[a.kind] + '"></path></svg>';
+            row.append(ic, el('span', '', ACT_WORD[a.kind] + ' · ' + (a.title || 'Untitled')), el('span', 'mut', a.date ? shortDate(a.date) : ''));
+            host.appendChild(row);
+        });
+        const all = el('a', 'sc-rec', 'All activity in NetSuite');
+        all.href = '/app/accounting/transactions/opprtnty.nl?id=' + encodeURIComponent(d.id);
+        all.target = '_top';
+        host.appendChild(all);
+    };
+    const loadingDetail = (host) => {
+        clear(host);
+        ['Details', 'Items'].forEach((t) => {
+            host.appendChild(section$1(t, ''));
+            const bars = el('div', 'sc-dload');
+            [70, 55, 62].forEach((w) => { const b = el('span'); b.style.width = w + '%'; bars.appendChild(b); });
+            host.appendChild(bars);
+        });
     };
     const field = (label, input) => {
         const f = el('label', 'sc-fl');
@@ -843,7 +1054,17 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         const foot = el('div', 'sc-dfoot');
         foot.append(err, button('sc-cancel', 'Cancel', h.onClose), save);
         const body = el('div', 'sc-dbody');
-        body.append(title, field('Title', tIn), grid);
+        const more = el('div', 'sc-dmore');
+        loadingDetail(more);
+        h.detail.then((x) => {
+            if (x)
+                renderDealDetail(more, d, x);
+            else {
+                clear(more);
+                more.appendChild(el('div', 'mut', 'Could not load details'));
+            }
+        });
+        body.append(title, field('Title', tIn), grid, more);
         dw.append(bar, body, foot);
         host.appendChild(dw);
         return dw;
@@ -1366,6 +1587,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 top: drawerTop,
                 onClose: () => { dealOpenId = ''; closeDealDrawer(drawerHost); },
                 onAccount: (deal) => { dealOpenId = ''; closeDealDrawer(drawerHost); go({ tab: route.tab, account: deal.companyId }); },
+                detail: post({ action: 'salesCentralDeal', id: d.id })
+                    .then((x) => (x.error ? null : x)).catch(() => null),
                 onSave: (deal, edit) => saveDeal(deal, edit).then((problem) => {
                     if (problem)
                         return problem;
@@ -1412,7 +1635,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             const next = list[i + dir];
             return next ? next.companyId : '';
         };
-        const drawerTop = () => Math.max(0, Math.round(hcard.getBoundingClientRect().bottom));
+        const drawerTop = () => Math.max(0, Math.round(tabBar.getBoundingClientRect().bottom));
         let shownAccount = '';
         const renderDrawer = () => {
             const a = route.account && post ? current() : null;

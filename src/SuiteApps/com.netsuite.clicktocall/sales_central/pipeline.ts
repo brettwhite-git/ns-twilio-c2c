@@ -7,7 +7,7 @@
  */
 
 import {el, clear, money, shortDate} from './dom';
-import type {Deal, DealStatus, PipelineData, DealEdit} from './api';
+import type {Deal, DealStatus, PipelineData, DealEdit, DealDetail} from './api';
 
 export type PipelineView = 'board' | 'list';
 
@@ -43,8 +43,36 @@ export const viewToggle = (view: PipelineView, onView: (v: PipelineView) => void
     return seg;
 };
 
-const card = (d: Deal, h: PipelineHandlers): HTMLElement => {
-    const c = el('div', 'sc-card');
+/** One wheel colour per open status, in the form's order (ORCA ScCards, Pills). */
+const STAGE_COLORS = ['#7C8794', '#2A8C8C', '#3166B0', '#C27A1A', '#3B7D3A', '#7A5AA6'];
+
+const svg = (inner: string, size: number): string =>
+    '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+const PILL_ICON = {
+    bars: '<path d="M6 20v-4M12 20v-9M18 20V5"></path>',
+    user: '<circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"></path>',
+    cal: '<rect x="4" y="5" width="16" height="16" rx="2"></rect><path d="M4 10h16M8 3v4M16 3v4"></path>'
+};
+
+/** The probability as a filled arc, in the status colour. */
+const wheel = (probability: number, color: string): HTMLElement => {
+    const w = el('span', 'sc-wheel');
+    const c = 2 * Math.PI * 6;
+    const filled = (c * Math.max(0, Math.min(100, probability))) / 100;
+    w.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="#E5E2DD" stroke-width="2.5"></circle>' +
+        '<circle cx="8" cy="8" r="6" fill="none" stroke="' + color + '" stroke-width="2.5" stroke-dasharray="' + filled.toFixed(2) + ' ' + c.toFixed(2) + '" transform="rotate(-90 8 8)"></circle></svg>';
+    return w;
+};
+
+const pill = (icon: string, text: string, cls?: string): HTMLElement => {
+    const p = el('span', 'sc-pill' + (cls ? ' ' + cls : ''));
+    p.innerHTML = svg(icon, 13);
+    p.appendChild(document.createTextNode(text));
+    return p;
+};
+
+const card = (d: Deal, h: PipelineHandlers, color: string): HTMLElement => {
+    const c = el('div', 'sc-card sc-pcard');
     c.setAttribute('data-id', d.id);
     c.draggable = true;
     c.addEventListener('dragstart', (e) => {
@@ -52,31 +80,102 @@ const card = (d: Deal, h: PipelineHandlers): HTMLElement => {
         c.classList.add('dragging');
     });
     c.addEventListener('dragend', () => c.classList.remove('dragging'));
-    const top = el('span', 'sc-ca');
     const pen = button('sc-pen', '', () => h.onEdit(d));
     pen.innerHTML = PEN;
     pen.setAttribute('aria-label', 'Edit ' + (d.title || 'deal'));
     pen.title = 'Edit deal';
-    top.append(el('span', 'sc-clip', d.companyName || 'No customer'), pen);
-    const meta = el('span', 'sc-cm');
-    const close = el('span', '', d.close ? 'Close ' + shortDate(d.close) : 'No close date');
-    if (late(d, h.todayIso)) close.style.color = '#B3311F';
-    meta.append(close, el('span', '', d.probability + '%'));
-    c.append(top, el('span', 'sc-cd2 sc-clip', (d.title || 'Untitled') + ' · ' + money(d.amount)), meta);
+    const text = el('span', 'sc-ctext');
+    text.append(el('span', 'sc-ca sc-clip', d.companyName || 'No customer'),
+        el('span', 'sc-cd2 sc-clip', (d.title || 'Untitled') + ' · ' + money(d.amount)));
+    if (d.created) text.appendChild(el('span', 'sc-cm sc-clip', 'Created ' + shortDate(d.created)));
+    const top = el('div', 'sc-ctop');
+    top.append(wheel(d.probability, color), text, pen);
+    const pills = el('div', 'sc-pills');
+    pills.appendChild(pill(PILL_ICON.bars, d.probability + '%'));
+    if (d.rep) pills.appendChild(pill(PILL_ICON.user, d.rep.split(' ')[0]));
+    if (!d.close) pills.appendChild(pill(PILL_ICON.cal, 'No close date'));
+    else if (late(d, h.todayIso)) pills.appendChild(pill(PILL_ICON.cal, 'Overdue · ' + shortDate(d.close), 'late'));
+    else pills.appendChild(pill(PILL_ICON.cal, shortDate(d.close)));
+    c.append(top, pills);
     return c;
+};
+
+/** Column sort (the header's ⋯ menu). Kept per status while the page is open; close date is the server's order. */
+type ColumnSort = 'close' | 'amount' | 'probability' | 'account';
+const SORTS: Array<[ColumnSort, string]> = [['close', 'Close date'], ['amount', 'Amount'], ['probability', 'Probability'], ['account', 'Account']];
+const columnSort: Record<string, ColumnSort> = {};
+const sortDeals = (deals: Deal[], by: ColumnSort): Deal[] => {
+    if (by === 'close') return deals;
+    const copy = deals.slice();
+    if (by === 'amount') copy.sort((a, b) => b.amount - a.amount);
+    else if (by === 'probability') copy.sort((a, b) => b.probability - a.probability);
+    else copy.sort((a, b) => a.companyName.localeCompare(b.companyName));
+    return copy;
+};
+
+const DOTS = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="19" cy="12" r="1.6"></circle></svg>';
+
+/** The ⋯ button and its menu: "Sort by" with one item checked. Esc or a click outside closes it. */
+const columnMenu = (statusName: string, current: () => ColumnSort, onPick: (s: ColumnSort) => void): HTMLElement => {
+    const wrap = el('span', 'sc-cmw');
+    const btn = el('button', 'sc-cmb');
+    btn.type = 'button';
+    btn.innerHTML = DOTS;
+    btn.setAttribute('aria-label', 'Sort ' + statusName);
+    btn.setAttribute('aria-haspopup', 'menu');
+    btn.setAttribute('aria-expanded', 'false');
+    let menu: HTMLElement | null = null;
+    const close = (): void => {
+        if (!menu) return;
+        menu.remove();
+        menu = null;
+        btn.setAttribute('aria-expanded', 'false');
+        document.removeEventListener('mousedown', outside, true);
+        document.removeEventListener('keydown', onKey, true);
+    };
+    const outside = (e: Event): void => { if (!wrap.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') { e.stopPropagation(); close(); btn.focus(); } };
+    btn.addEventListener('click', () => {
+        if (menu) { close(); return; }
+        menu = el('div', 'sc-cmenu');
+        menu.setAttribute('role', 'menu');
+        menu.appendChild(el('div', 'sc-cmh', 'Sort by'));
+        SORTS.forEach(([key, label]) => {
+            const it = el('button', 'sc-cmi', label);
+            it.type = 'button';
+            it.setAttribute('role', 'menuitemradio');
+            it.setAttribute('aria-checked', String(current() === key));
+            it.addEventListener('click', () => { close(); onPick(key); });
+            (menu as HTMLElement).appendChild(it);
+        });
+        wrap.appendChild(menu);
+        btn.setAttribute('aria-expanded', 'true');
+        document.addEventListener('mousedown', outside, true);
+        document.addEventListener('keydown', onKey, true);
+        (menu.querySelector('[aria-checked="true"]') as HTMLElement | null)?.focus();
+    });
+    wrap.appendChild(btn);
+    return wrap;
 };
 
 const board = (p: PipelineData, h: PipelineHandlers): HTMLElement => {
     const cols = el('div', 'sc-cols');
     cols.style.gridTemplateColumns = 'repeat(' + Math.max(1, p.statuses.length) + ', minmax(190px, 1fr))';
-    p.statuses.forEach((s) => {
+    p.statuses.forEach((s, i) => {
         const items = p.deals.filter((d) => d.statusId === s.id);
+        const color = STAGE_COLORS[i % STAGE_COLORS.length];
         const col = el('div', 'sc-col');
         col.setAttribute('data-status', s.id);
         const head = el('div', 'sc-colh');
-        head.append(el('b', '', s.name), el('span', 'cnt', String(items.length)), el('span', 'amt', items.length ? money(sum(items)) : ''));
-        col.appendChild(head);
-        items.forEach((d) => col.appendChild(card(d, h)));
+        const cards = el('div', 'sc-ccards');
+        const fill = (): void => {
+            clear(cards);
+            sortDeals(items, columnSort[s.id] || 'close').forEach((d) => cards.appendChild(card(d, h, color)));
+        };
+        head.append(el('b', '', s.name), el('span', 'cnt', String(items.length)), el('span', 'amt', items.length ? money(sum(items)) : ''),
+            columnMenu(s.name, () => columnSort[s.id] || 'close', (by) => { columnSort[s.id] = by; fill(); }));
+        fill();
+        col.append(head, cards);
         col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('drop'); });
         col.addEventListener('dragleave', () => col.classList.remove('drop'));
         col.addEventListener('drop', (e) => {
@@ -136,7 +235,82 @@ export interface DealDrawerHandlers {
     onClose: () => void;
     onSave: (deal: Deal, edit: DealEdit) => Promise<string>;
     onAccount: (deal: Deal) => void;
+    /** The deal's detail, read when the drawer opens; the sections fill in when it arrives. */
+    detail: Promise<DealDetail | null>;
 }
+
+const ACT_ICON: Record<string, string> = {
+    call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2',
+    task: 'M4 4h16v16H4z M9 12l2 2 4-4',
+    event: 'M4 6h16v14H4z M4 10h16 M8 3v4 M16 3v4'
+};
+const ACT_WORD: Record<string, string> = { call: 'Call', task: 'Task', event: 'Event' };
+
+const section = (title: string, aside: string): HTMLElement => {
+    const h = el('div', 'sc-dsec');
+    h.append(el('span', '', title), el('i', '', aside));
+    return h;
+};
+
+const daysBetween = (fromIso: string, toIso: string): number =>
+    Math.round((Date.parse(toIso) - Date.parse(fromIso)) / 86400000);
+
+/** Details, Items and Activity under the edit fields (ORCA board ScDeal, option A). */
+export const renderDealDetail = (host: HTMLElement, d: Deal, x: DealDetail): void => {
+    clear(host);
+    const det = x.details;
+    const age = det.created && det.created <= x.todayIso ? 'Open ' + daysBetween(det.created, x.todayIso) + ' days · ' : '';
+    host.appendChild(section('Details', det.created ? age + (age ? 'created ' : 'Created ') + shortDate(det.created) : ''));
+    const kv = el('dl', 'sc-dkv');
+    const range = det.rangeLow || det.rangeHigh ? money(det.rangeLow) + ' – ' + money(det.rangeHigh) : '';
+    ([['Sales rep', det.salesRep], ['Lead source', det.leadSource], ['Partner', det.partner],
+        ['Forecast type', det.forecastType], ['Range', range]] as Array<[string, string]>).forEach(([k, v]) => {
+        kv.append(el('dt', '', k), el('dd', v ? '' : 'mut', v || 'None'));
+    });
+    host.appendChild(kv);
+    if (det.memo) host.appendChild(el('div', 'sc-dmemo', det.memo));
+
+    host.appendChild(section('Items', x.partial.indexOf('items') !== -1 ? 'Could not load' : x.items.length + (x.items.length === 1 ? ' line' : ' lines')));
+    if (x.items.length) {
+        const t = el('table', 'sc-ditems');
+        const head = el('tr');
+        head.append(el('th', '', 'Item'), el('th', 'num', 'Qty'), el('th', 'num', 'Amount'));
+        t.appendChild(head);
+        x.items.forEach((it) => {
+            const r = el('tr');
+            r.append(el('td', '', it.item), el('td', 'num', it.quantity.toLocaleString('en-US')), el('td', 'num', money(it.amount)));
+            t.appendChild(r);
+        });
+        const tot = el('tr', 'tot');
+        tot.append(el('td', '', 'Total'), el('td'), el('td', 'num', money(x.items.reduce((s, it) => s + it.amount, 0))));
+        t.appendChild(tot);
+        host.appendChild(t);
+    }
+
+    host.appendChild(section('Activity', x.activity.length ? 'Last ' + x.activity.length : ''));
+    if (!x.activity.length) host.appendChild(el('div', 'mut', 'No calls, tasks or events on this deal yet.'));
+    x.activity.forEach((a) => {
+        const row = el('div', 'sc-dact');
+        const ic = el('span', 'ic');
+        ic.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + ACT_ICON[a.kind] + '"></path></svg>';
+        row.append(ic, el('span', '', ACT_WORD[a.kind] + ' · ' + (a.title || 'Untitled')), el('span', 'mut', a.date ? shortDate(a.date) : ''));
+        host.appendChild(row);
+    });
+    const all = el('a', 'sc-rec', 'All activity in NetSuite');
+    all.href = '/app/accounting/transactions/opprtnty.nl?id=' + encodeURIComponent(d.id);
+    all.target = '_top';
+    host.appendChild(all);
+};
+
+const loadingDetail = (host: HTMLElement): void => {
+    clear(host);
+    ['Details', 'Items'].forEach((t) => {
+        host.appendChild(section(t, ''));
+        const bars = el('div', 'sc-dload');
+        [70, 55, 62].forEach((w) => { const b = el('span'); b.style.width = w + '%'; bars.appendChild(b); });
+        host.appendChild(bars);
+    });
+};
 
 const field = (label: string, input: HTMLElement): HTMLElement => {
     const f = el('label', 'sc-fl');
@@ -205,7 +379,13 @@ export const openDealDrawer = (host: HTMLElement, d: Deal, h: DealDrawerHandlers
     const foot = el('div', 'sc-dfoot');
     foot.append(err, button('sc-cancel', 'Cancel', h.onClose), save);
     const body = el('div', 'sc-dbody');
-    body.append(title, field('Title', tIn), grid);
+    const more = el('div', 'sc-dmore');
+    loadingDetail(more);
+    h.detail.then((x) => {
+        if (x) renderDealDetail(more, d, x);
+        else { clear(more); more.appendChild(el('div', 'mut', 'Could not load details')); }
+    });
+    body.append(title, field('Title', tIn), grid, more);
     dw.append(bar, body, foot);
     host.appendChild(dw);
     return dw;

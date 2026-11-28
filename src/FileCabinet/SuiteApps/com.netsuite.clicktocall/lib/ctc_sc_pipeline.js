@@ -5,7 +5,9 @@
  * Sales Central Pipeline (slice 3, 2026-11-25; ORCA board ScPipeline):
  * open opportunities for customers in the user's book, by NetSuite status
  * (entitystatus), plus the KPIs (open, weighted, won this quarter, past close
- * date); and editing one deal (title, status, expected close, probability).
+ * date); editing one deal (title, status, expected close, probability); and
+ * one deal's detail for the drawer (loadDeal: owner, source, range, memo,
+ * item lines, recent calls / tasks / events linked to it; ORCA board ScDeal A).
  *
  * Columns are the open opportunity statuses: the opportunity form's own
  * Status options, in the form's order, whose default probability (NetSuite
@@ -57,7 +59,8 @@ define(['N/query', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_sco
             id: String(o.id), number: String(o.tranid || ''), title: String(o.title || ''),
             companyId: String(o.entity || ''), companyName: (p.names || {})[String(o.entity || '')] || String(o.entityname || ''),
             statusId: String(o.entitystatus || ''), amount: round2(num(o.projectedtotal)),
-            probability: pctOf(o.probability), close: isoOf(o.expectedclosedate)
+            probability: pctOf(o.probability), close: isoOf(o.expectedclosedate),
+            rep: String(o.salesrepname || ''), created: isoOf(o.createddate)
         })).filter((d) => known[d.statusId]);
         const kpis = { open: 0, openCount: deals.length, weighted: 0, won: 0, wonCount: 0, late: 0, lateCount: 0 };
         deals.forEach((d) => {
@@ -85,7 +88,8 @@ define(['N/query', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_sco
     /** Open statuses (the columns), in the form's order. */
     const loadStatuses = () => formStatuses().filter(isOpen);
 
-    const OPP_COLUMNS = 't.id, t.tranid, t.title, t.entity, t.entitystatus, t.probability, t.projectedtotal, t.expectedclosedate';
+    const OPP_COLUMNS = 't.id, t.tranid, t.title, t.entity, t.entitystatus, t.probability, t.projectedtotal, t.expectedclosedate, ' +
+        'BUILTIN.DF(t.employee) AS salesrepname, t.createddate';
 
     /**
      * Opportunities for the book's customers in the given statuses; with
@@ -180,5 +184,66 @@ define(['N/query', 'N/record', 'N/log', './ctc_workspace_queries', './ctc_rc_sco
         return { ok: true };
     };
 
-    return { isoOf, quarterStart, buildPipeline, loadPipeline, readUpdate, updateDeal };
+    const ACTIVITY_LIMIT = 5;
+    /** Activities linked to an opportunity by their Transaction field, one table per kind. */
+    const ACTIVITY_TABLES = [['call', 'phonecall'], ['task', 'task'], ['event', 'calendarevent']];
+
+    /** Pure: the last few activities, newest first, from the per-kind rows. */
+    const recentActivity = (byKind) => {
+        const all = [];
+        Object.keys(byKind).forEach((kind) => (byKind[kind] || []).forEach((r) => {
+            all.push({ kind: kind, title: String(r.title || ''), date: isoOf(r.startdate) });
+        }));
+        return all.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)).slice(0, ACTIVITY_LIMIT);
+    };
+
+    const textOf = (rec, fieldId) => String(rec.getText({ fieldId: fieldId }) || '');
+    const dateIso = (v) => (v instanceof Date
+        ? v.getFullYear() + '-' + ('0' + (v.getMonth() + 1)).slice(-2) + '-' + ('0' + v.getDate()).slice(-2)
+        : isoOf(v));
+
+    /**
+     * One deal's detail for the drawer (read only). Same access rule as
+     * updateDeal: the customer is in the user's book, or an Administrator.
+     * A failed part (items, an activity kind) is named in `partial`.
+     * @param {{userId: (string|number), isAdmin: boolean, id: string}} p
+     */
+    const loadDeal = (p) => {
+        if (!/^[0-9]{1,12}$/.test(String(p.id || ''))) return { error: 'id required' };
+        const opp = record.load({ type: record.Type.OPPORTUNITY, id: String(p.id), isDynamic: false });
+        if (!p.isAdmin && !wq.isCustomerInBook(opp.getValue({ fieldId: 'entity' }), p.userId)) return { error: 'forbidden' };
+        const partial = [];
+        const attempt = (name, fn, fallback) => {
+            try { return fn(); } catch (e) {
+                log.error({ title: 'CTC SC deal ' + name + ' failed', details: (e && e.message) || String(e) });
+                partial.push(name);
+                return fallback;
+            }
+        };
+        const details = {
+            salesRep: textOf(opp, 'salesrep'), leadSource: textOf(opp, 'leadsource'), partner: textOf(opp, 'partner'),
+            forecastType: textOf(opp, 'forecasttype'), rangeLow: round2(num(opp.getValue({ fieldId: 'rangelow' }))),
+            rangeHigh: round2(num(opp.getValue({ fieldId: 'rangehigh' }))), memo: String(opp.getValue({ fieldId: 'memo' }) || ''),
+            created: dateIso(opp.getValue({ fieldId: 'createddate' }))
+        };
+        const items = attempt('items', () => {
+            const lines = [];
+            for (let i = 0; i < opp.getLineCount({ sublistId: 'item' }); i++) {
+                const at = (f) => opp.getSublistValue({ sublistId: 'item', fieldId: f, line: i });
+                lines.push({ item: String(opp.getSublistText({ sublistId: 'item', fieldId: 'item', line: i }) || ''),
+                    quantity: num(at('quantity')), amount: round2(num(at('amount'))) });
+            }
+            return lines;
+        }, []);
+        const byKind = {};
+        ACTIVITY_TABLES.forEach(([kind, table]) => {
+            byKind[kind] = attempt(kind, () => query.runSuiteQL({
+                query: 'SELECT id, title, startdate FROM ' + table + ' WHERE transaction = ? ORDER BY startdate DESC',
+                params: [Number(p.id)]
+            }).asMappedResults().slice(0, ACTIVITY_LIMIT), []);
+        });
+        return { ok: true, details: details, items: items, activity: recentActivity(byKind), todayIso: rcScope.todayIso(), partial: partial };
+    };
+
+    return { isoOf, quarterStart, buildPipeline, loadPipeline, readUpdate, updateDeal, recentActivity, loadDeal };
 });
