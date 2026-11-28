@@ -130,6 +130,100 @@ export const player = (src: string, knownSeconds: number): HTMLElement => {
     return wrap;
 };
 
+const REP_COLOR = '#1F3550';
+const CUST_COLOR = '#C27A1A';
+const whoOf = (c: CallDetail['call'], speaker: string): string =>
+    speaker === 'rep' ? firstName(c.ownerName) || 'Rep' : speaker === 'customer' ? firstName(c.contactName) || 'Customer' : '';
+const fullWho = (c: CallDetail['call'], speaker: string): string =>
+    speaker === 'rep' ? c.ownerName || 'Rep' : speaker === 'customer' ? c.contactName || c.companyName || 'Customer' : '';
+const initials = (name: string): string => name.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+
+/** Talk time: one bar split rep / customer, names and shares under it (reference card, 2026-11-28). */
+const talkBlock = (c: CallDetail['call'], talk: NonNullable<CallDetail['call']['talk']>): HTMLElement | null => {
+    const total = talk.rep + talk.customer;
+    if (!total) return null;
+    const repPct = Math.round((talk.rep / total) * 100);
+    const wrap = el('div', 'sc-talk');
+    const bar = el('div', 'bar');
+    const r = el('span');
+    r.style.flex = String(repPct);
+    r.style.background = REP_COLOR;
+    const k = el('span');
+    k.style.flex = String(100 - repPct);
+    k.style.background = CUST_COLOR;
+    bar.append(r, k);
+    const leg = el('div', 'leg');
+    ([[fullWho(c, 'rep'), repPct, REP_COLOR], [fullWho(c, 'customer'), 100 - repPct, CUST_COLOR]] as Array<[string, number, string]>).forEach(([n, p, col]) => {
+        const it = el('span');
+        const sq = el('i');
+        sq.style.background = col;
+        it.append(sq, document.createTextNode(n + ' '), el('b', '', p + '%'));
+        leg.appendChild(it);
+    });
+    wrap.append(bar, leg);
+    return wrap;
+};
+
+/** The transcript as turns: who, when (plays the recording from there), what; search; the playing turn is marked. */
+const transcriptBlock = (c: CallDetail['call'], turns: NonNullable<CallDetail['call']['turns']>, audio: HTMLAudioElement | null): HTMLElement => {
+    const box = el('div', 'sc-turns');
+    const timed = turns.some((t) => t.start !== null);
+    box.appendChild(section('Transcript', turns.length + (turns.length === 1 ? ' turn' : ' turns') + (timed && audio ? ' · follows the recording' : '')));
+    const find = el('input', 'sc-field sc-tfind');
+    find.type = 'search';
+    find.placeholder = 'Search the transcript';
+    find.setAttribute('aria-label', 'Search the transcript');
+    box.appendChild(find);
+    const list = el('div', 'sc-tlist');
+    box.appendChild(list);
+    const rows: Array<{ el: HTMLElement; start: number | null; end: number | null }> = [];
+    const draw = (q: string): void => {
+        clear(list);
+        rows.length = 0;
+        turns.forEach((t) => {
+            if (q && !t.lines.some((l) => l.toLowerCase().indexOf(q) !== -1)) return;
+            const row = el('div', 'sc-turn');
+            const dot = el('span', 'dot', initials(fullWho(c, t.speaker)) || '·');
+            dot.style.background = t.speaker === 'rep' ? REP_COLOR : t.speaker === 'customer' ? CUST_COLOR : '#A8A39C';
+            const body = el('div');
+            const h = el('div', 'h');
+            h.appendChild(el('b', '', fullWho(c, t.speaker) || 'Speaker'));
+            if (t.start !== null) {
+                const at = el('button', 'at', clock(Math.floor(t.start)));
+                at.type = 'button';
+                at.setAttribute('aria-label', 'Play from ' + clock(Math.floor(t.start)));
+                at.disabled = !audio;
+                at.addEventListener('click', () => { if (audio) { audio.currentTime = t.start as number; audio.play().catch(() => undefined); } });
+                h.appendChild(at);
+            }
+            body.appendChild(h);
+            t.lines.forEach((l) => {
+                const p = el('p');
+                if (q) {
+                    const i = l.toLowerCase().indexOf(q);
+                    if (i !== -1) {
+                        p.append(document.createTextNode(l.slice(0, i)), el('mark', '', l.slice(i, i + q.length)), document.createTextNode(l.slice(i + q.length)));
+                    } else p.textContent = l;
+                } else p.textContent = l;
+                body.appendChild(p);
+            });
+            row.append(dot, body);
+            list.appendChild(row);
+            rows.push({ el: row, start: t.start, end: t.end });
+        });
+        if (!rows.length) list.appendChild(el('div', 'mut', 'No turn matches.'));
+    };
+    draw('');
+    find.addEventListener('input', () => draw(find.value.trim().toLowerCase()));
+    if (audio && timed) {
+        audio.addEventListener('timeupdate', () => {
+            const now = audio.currentTime;
+            rows.forEach((r) => r.el.classList.toggle('now', r.start !== null && r.end !== null && now >= r.start && now < r.end));
+        });
+    }
+    return box;
+};
+
 /** Fills the drawer body from the call read (pure DOM; no reads). */
 export const renderCallDetail = (host: HTMLElement, row: CallRow, d: CallDetail, h: CallDrawerHandlers): void => {
     clear(host);
@@ -145,23 +239,35 @@ export const renderCallDetail = (host: HTMLElement, row: CallRow, d: CallDetail,
         host.appendChild(el('div', 'mut', final ? 'No summary for this call: there was no transcript to summarise.'
             : 'The summary is on its way. It is written after the transcript is ready.'));
     }
+    if (c.talk && !c.voicemail) {
+        const t = talkBlock(c, c.talk);
+        if (t) {
+            const pct = (x: number): number => Math.round((x / (c.talk!.rep + c.talk!.customer)) * 100);
+            host.appendChild(section('Talk time', firstName(c.ownerName) + ' ' + pct(c.talk.rep) + '% · ' +
+                (firstName(c.contactName) || 'Customer') + ' ' + pct(c.talk.customer) + '%' + (c.talk.basis === 'words' ? ' · by words' : '')));
+            host.appendChild(t);
+        }
+    }
     if (c.audioUrl) {
         host.appendChild(section('Recording', ''));
         host.appendChild(player(c.audioUrl, c.duration));
     }
     followUps(host, d, h);
-    if (c.transcriptLines.length) {
+    const audio = host.querySelector('.sc-player audio') as HTMLAudioElement | null;
+    if (c.turns && c.turns.length) host.appendChild(transcriptBlock(c, c.turns, audio));
+    else if (c.transcriptLines.length) {
         const shown = c.transcriptLines.length;
         host.appendChild(section('Transcript', shown < c.transcriptLineCount ? 'First ' + shown + ' of ' + c.transcriptLineCount + ' lines' : shown + ' lines'));
         const tr = el('div', 'sc-ctr');
-        const who = (s: string): string => (s === 'rep' ? firstName(c.ownerName) || 'Rep' : s === 'customer' ? firstName(c.contactName) || 'Customer' : '');
         c.transcriptLines.forEach((l) => {
             const p = el('p');
-            if (who(l.speaker)) p.appendChild(el('b', '', who(l.speaker)));
+            if (whoOf(c, l.speaker)) p.appendChild(el('b', '', whoOf(c, l.speaker)));
             p.appendChild(document.createTextNode(l.text));
             tr.appendChild(p);
         });
         host.appendChild(tr);
+    }
+    if (c.turns && c.turns.length || c.transcriptLines.length) {
         const all = el('a', 'sc-rec', 'Full transcript in NetSuite');
         all.href = recordUrl(c.id);
         all.target = '_top';

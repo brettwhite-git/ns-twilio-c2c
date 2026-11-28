@@ -31,6 +31,22 @@ export const ago = (iso: string, todayIso: string): string => {
     return shortDate(iso);
 };
 
+/**
+ * The facts group at a table row's right end (table contract, 2026-11-28):
+ * one grid cell holding fixed-width slots 28px apart, so the spare width of
+ * the row never lands inside the group. `slots` are [content, slot class].
+ */
+export const factGroup = (slots: Array<[string | HTMLElement, string]>): HTMLElement => {
+    const g = el('span', 'sc-grp');
+    slots.forEach(([content, cls]) => {
+        const s = el('span', 'sc-g ' + cls);
+        if (typeof content === 'string') s.textContent = content;
+        else s.appendChild(content);
+        g.appendChild(s);
+    });
+    return g;
+};
+
 /** 'Nov 28' (from YYYY-MM-DD); '—' for nothing. */
 export const shortDate = (iso: string): string => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');

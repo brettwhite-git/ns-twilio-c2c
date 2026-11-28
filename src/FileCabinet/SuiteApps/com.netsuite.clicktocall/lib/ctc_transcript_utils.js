@@ -399,8 +399,17 @@ define(['N/https', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis'],
         return all;
     };
 
+    /** One decimal of seconds, or null when Twilio gave no time. */
+    const secondsOf = (v) => {
+        const n = parseFloat(String(v == null ? '' : v));
+        return isFinite(n) && n >= 0 ? Math.round(n * 10) / 10 : null;
+    };
+
     /**
-     * Sentences → "[REP] ..." / "[CUSTOMER] ..." lines.
+     * Sentences → "[REP 12.4-15.9] ..." / "[CUSTOMER 16.0-18.2] ..." lines
+     * (2026-11-28: each sentence keeps Twilio's start / end seconds, so the
+     * call drawer can link a turn to the recording and measure talk time).
+     * A sentence without both times stays "[REP] ..." as before.
      *
      * In a two-channel <Dial> recording, channel 1 is the parent call leg
      * and channel 2 is the child leg. Outbound, the parent leg is the rep's
@@ -408,15 +417,64 @@ define(['N/https', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis'],
      * caller and the rep is the dialed child (channel 2 = rep), so
      * `opts.inbound` swaps the labels.
      *
-     * @param {Array<{media_channel: number, transcript: string}>} sentences
+     * @param {Array<{media_channel: number, transcript: string, start_time?: (number|string|null), end_time?: (number|string|null)}>} sentences
      * @param {{inbound?: boolean}} [opts]
      */
     const formatTranscript = (sentences, opts) => {
         const repChannel = opts && opts.inbound === true ? 2 : 1;
         return sentences.map((s) => {
-            const speaker = s.media_channel === repChannel ? '[REP]' : '[CUSTOMER]';
-            return `${speaker} ${s.transcript}`;
+            const who = s.media_channel === repChannel ? 'REP' : 'CUSTOMER';
+            const start = secondsOf(s.start_time);
+            const end = secondsOf(s.end_time);
+            const tag = start !== null && end !== null ? `[${who} ${start}-${end}]` : `[${who}]`;
+            return `${tag} ${s.transcript}`;
         }).join('\n');
+    };
+
+    const LINE_RE = /^\[(REP|CUSTOMER)(?: ([0-9]+(?:\.[0-9]+)?)-([0-9]+(?:\.[0-9]+)?))?\]\s*/;
+
+    /**
+     * One stored transcript line → { speaker: 'rep' | 'customer' | '', text,
+     * start, end } (seconds or null). Reads both "[REP] …" and "[REP 1.2-3.4] …".
+     * @param {string} line
+     */
+    const parseTranscriptLine = (line) => {
+        const s = String(line);
+        const m = LINE_RE.exec(s);
+        if (!m) return { speaker: '', text: s, start: null, end: null };
+        return { speaker: m[1] === 'REP' ? 'rep' : 'customer', text: s.slice(m[0].length),
+            start: m[2] != null ? parseFloat(m[2]) : null, end: m[3] != null ? parseFloat(m[3]) : null };
+    };
+
+    /**
+     * Stored transcript text → turns (same speaker in a row joins one turn)
+     * and talk time per side. Talk time is measured from sentence times when
+     * every spoken line has them, else from word counts ('words').
+     * @param {string} text
+     * @param {number} [maxTurns]
+     * @returns {{turns: Array<{speaker: string, start: (number|null), end: (number|null), lines: Array<string>}>,
+     *            talk: {rep: number, customer: number, basis: string}}}
+     */
+    const transcriptTurns = (text, maxTurns) => {
+        const lines = String(text || '').split(/\n|<br\s*\/?>/).filter((l) => l.trim()).map(parseTranscriptLine);
+        const turns = [];
+        lines.forEach((l) => {
+            const last = turns[turns.length - 1];
+            if (last && last.speaker === l.speaker && l.speaker) {
+                last.lines.push(l.text);
+                if (l.end !== null) last.end = l.end;
+            } else turns.push({ speaker: l.speaker, start: l.start, end: l.end, lines: [l.text] });
+        });
+        const spoken = lines.filter((l) => l.speaker);
+        const timed = spoken.length > 0 && spoken.every((l) => l.start !== null && l.end !== null);
+        const talk = { rep: 0, customer: 0, basis: timed ? 'seconds' : 'words' };
+        spoken.forEach((l) => {
+            const amount = timed ? Math.max(0, l.end - l.start) : l.text.split(/\s+/).filter(Boolean).length;
+            talk[l.speaker] += amount;
+        });
+        talk.rep = Math.round(talk.rep * 10) / 10;
+        talk.customer = Math.round(talk.customer * 10) / 10;
+        return { turns: maxTurns ? turns.slice(0, maxTurns) : turns, talk: talk };
     };
 
     // Sprint 2c — analyzeTranscript now delegates to lib/ctc_llm_analysis.
@@ -777,6 +835,8 @@ define(['N/https', 'N/log', 'N/record', 'N/search', './ctc_llm_analysis'],
         fetchTranscript,
         fetchSentences,
         formatTranscript,
+        parseTranscriptLine,
+        transcriptTurns,
         analyzeTranscript,
         normalizeActionItems,
         resolveDueDate,

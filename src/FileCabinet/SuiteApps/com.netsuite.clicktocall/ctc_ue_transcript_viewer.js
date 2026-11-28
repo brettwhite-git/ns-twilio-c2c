@@ -135,10 +135,14 @@ define(['N/ui/serverWidget', './lib/ctc_html'], (serverWidget, ctcHtml) => {
 
         let transcriptHtml = '';
         transcriptLines.forEach((line) => {
-            const escaped = escapeHtml(line);
-            if (line.startsWith('[REP]')) {
+            // Lines may carry sentence times ("[REP 12.4-15.9] …", 2026-11-28): show them as "[REP 0:12] …"
+            const m = /^\[(REP|CUSTOMER)(?: ([0-9.]+)-[0-9.]+)?\]/.exec(line);
+            const clock = (s) => Math.floor(s / 60) + ':' + ('0' + Math.floor(s % 60)).slice(-2);
+            const shown = m && m[2] ? '[' + m[1] + ' ' + clock(parseFloat(m[2])) + ']' + line.slice(m[0].length) : line;
+            const escaped = escapeHtml(shown);
+            if (m && m[1] === 'REP') {
                 transcriptHtml += '<div class="ctc-line ctc-rep">' + escaped + '</div>';
-            } else if (line.startsWith('[CUSTOMER]')) {
+            } else if (m && m[1] === 'CUSTOMER') {
                 transcriptHtml += '<div class="ctc-line ctc-cust">' + escaped + '</div>';
             } else {
                 transcriptHtml += '<div class="ctc-line">' + escaped + '</div>';

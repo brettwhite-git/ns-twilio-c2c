@@ -7,8 +7,8 @@
  */
 
 export const STYLES = [
-    // Page margins (2026-11-25, previewed live): 16px above the header row, 56px each side (32 + the rows' own 24)
-    '.sc{position:relative;box-sizing:border-box;min-height:100vh;padding:18px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+    // Page margins (2026-11-25, previewed live; top raised 18 → 28px on 2026-11-28): 56px each side (32 + the rows' own 24)
+    '.sc{position:relative;box-sizing:border-box;min-height:100vh;padding:28px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
     '.sc *{box-sizing:border-box}',
     // Author display rules beat the browser's [hidden] rule: restate it.
     '.sc [hidden]{display:none !important}',
@@ -25,6 +25,8 @@ export const STYLES = [
     // Frame (ORCA ScFrame B; Batchline §2c): ground, white cards with 8px corners
     // (.sc-frame, not .sc-card: .sc-card is the Pipeline deal card)
     '.sc-frame{background:#FFFFFF;border:1px solid #E5E2DD;border-radius:8px;box-shadow:0 1px 2px rgba(26,24,22,0.04);overflow:hidden}',
+    // Page cap (2026-11-28, user-picked in table-spacing-prototype.html): on wide screens the table gaps grow past reading distance
+    '.sc>.sc-frame{max-width:1900px;margin-left:auto;margin-right:auto}',
     '.sc-wcard{margin-top:16px}',
     '.sc-tabbar{display:flex;align-items:center;gap:20px;padding:0 20px 0 12px}',
     '.sc-fold{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:none;color:#5E5952;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;margin-right:-12px}',
@@ -84,8 +86,9 @@ export const STYLES = [
     '.sc-snzrow{display:grid;grid-template-columns:minmax(0,1fr) 120px auto;gap:16px;align-items:center;height:40px;padding:0 24px;border-top:1px solid #F1EFEA}',
     '.sc-snzrow .sc-cancel{margin-right:0;height:28px;padding:0 8px}',
     '.sc-pill.amb{color:#8A5A12;background:#FBF3E4;box-shadow:inset 0 0 0 1px #EBD7B1}',
+    '.sc-pill.slate{color:#3D5470;background:#EEF2F7;box-shadow:inset 0 0 0 1px #D3DCE8}',
     // Table rows with a Call beside them: the row button and the Call button share one line
-    '.sc-rline{display:grid;grid-template-columns:minmax(0,1fr) 56px;align-items:center;border-bottom:1px solid #ECEAE7}',
+    '.sc-rline{position:relative;border-bottom:1px solid #ECEAE7}',
     '.sc-rline .sc-row{border-bottom:0}',
     '.sc-rline:hover{background:#FAFAF9}',
     '.sc-rline:has(.sc-row[aria-current="true"]){background:#F5F4F2}',
@@ -99,21 +102,46 @@ export const STYLES = [
     '.sc-two.num{align-items:flex-end}',
     // Table
     '.sc-thead,.sc-row{display:grid;align-items:center;column-gap:16px;padding:0 24px}',
+    // ---- Table contract (2026-11-28, user-tuned in Claude outputs/table-contract/table-spacing-prototype.html, view B) ----
+    // One grid per table; the header, rows and task rows are subgrids, so every row shares the column widths.
+    // Columns hug their content; the text column wraps at a readable width; the spare width is shared evenly
+    // between the columns (never under 36px); the facts and the action are one cell at the right (.sc-grp).
+    '.sc-grid{display:grid;column-gap:36px;justify-content:space-between}',
+    '.sc-grid>*{grid-column:1/-1}',
+    // Subgrids inherit the parent's gaps (column-gap: normal): their own gap would undo the evenly shared spare width
+    '.sc-grid>.sc-thead,.sc-grid>.sc-row,.sc-grid>.sc-rline,.sc-grid>.sc-trow,.sc-rline>.sc-row,.sc-trow>.sc-tline{display:grid;grid-column:1/-1;grid-template-columns:subgrid;column-gap:normal}',
+    '.sc-grid>.sc-rline,.sc-trow>.sc-tline{padding:0}',
+    '.sc-trow>.sc-tline{padding:0 24px}',
+    '.sc-trow>.sc-topen{grid-column:1/-1}',
+    '.sc-calls .sc-grid{grid-template-columns:max-content minmax(0,max-content) max-content minmax(320px,520px) max-content}',
+    '.sc-needs .sc-grid{grid-template-columns:minmax(240px,420px) max-content minmax(0,max-content) max-content}',
+    '.sc-tasks .sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) minmax(0,320px) max-content}',
+    '.sc-plist.sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) max-content}',
+    '.sc-calls .sc-row,.sc-needs .sc-row{min-height:56px;padding-top:8px;padding-bottom:8px}',
+    '.sc-grp{display:flex;align-items:center;justify-content:flex-end;gap:28px}',
+    '.sc-g{display:flex;align-items:center;flex:none;min-width:0}',
+    '.sc-g.num{justify-content:flex-end;font-variant-numeric:tabular-nums}',
+    '.sc-g.g-len{width:52px}',
+    // Length, Score and the Call button sit 60px apart (user, 2026-11-28), not the group's 28px
+    '.sc-g.g-len,.sc-g.g-score{margin-right:32px}',
+    '.sc-g.g-score{width:52px;justify-content:center}',
+    '.sc-g.g-money{width:88px}',
+    '.sc-g.g-date{width:64px}',
+    '.sc-g.g-pct{width:72px}',
+    '.sc-g.g-verb{width:156px;justify-content:flex-end}',
+    // The row button cannot hold a button: Call sits over the row's empty action slot
+    '.sc-g.g-act{width:30px}',
+    '.sc-rline>.sc-callb{position:absolute;right:24px;top:50%;margin-top:-15px}',
+    '.sc-band .sc-bcount{margin-left:auto;font-weight:400;color:#6F6B66}',
     '.sc-thead{height:40px;border-bottom:1px solid #ECEAE7;font-size:13px;font-weight:500;color:#5E5952}',
     '.sc-row{width:100%;min-height:48px;border:0;border-bottom:1px solid #ECEAE7;background:#FFFFFF;text-align:left;cursor:pointer}',
     '.sc-row:hover{background:#FAFAF9}',
     '.sc-row[aria-current="true"]{background:#F5F4F2}',
-    '.sc-needs .sc-row{grid-template-columns:minmax(0,1.6fr) 140px minmax(0,1fr) 110px 100px 80px;min-height:56px}',
-    '.sc-needs .sc-thead{grid-template-columns:minmax(0,1.6fr) 140px minmax(0,1fr) 110px 100px 80px 56px}',
     // Calls table (needs-calls prototype): day groups, two-line account, call-type pill, 2-line summary, score pill, call back
-    '.sc-calls .sc-row{grid-template-columns:64px minmax(0,220px) 130px minmax(0,1fr) 64px 80px;min-height:60px;padding-top:8px;padding-bottom:8px;padding-right:16px}',
-    '.sc-calls .sc-thead{grid-template-columns:64px minmax(0,220px) 130px minmax(0,1fr) 64px 80px 56px;padding-right:0}',
-    '.sc-ksum{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:18px;color:#2E2C29}',
+    '.sc-ksum{line-height:19px;color:#2E2C29;padding:2px 0}',
     '.sc-kday{display:flex;align-items:center;height:32px;padding:0 24px;background:#FAFAF9;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5E5952}',
     '.sc-kday i{margin-left:auto;font-style:normal;font-weight:400;letter-spacing:0;text-transform:none;color:#6F6B66}',
     '.sc-pill.good{color:#2F6B34;background:#EAF4EC;box-shadow:inset 0 0 0 1px #C9E3CD}',
-    '.sc-needs .sc-row{padding-right:16px}',
-    '.sc-needs .sc-thead{padding-right:0}',
     '.sc-cell2{display:flex;flex-direction:column;min-width:0;padding:6px 0}',
     '.sc-cell2 .l1{display:flex;gap:8px;align-items:baseline}',
     '.sc-cell2 .name{font-size:14px;font-weight:500}',
@@ -122,7 +150,6 @@ export const STYLES = [
     '.sc-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '.sc-strong{font-weight:500}',
     // Tasks (ORCA ScTasks2, variant A): context in columns; an open task splits into context | action
-    '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
     // Summary line (#116): groups styled like the tabs; a click shows one group
     // (#121: a segmented control, not a second row of tabs; same shape as the outcome control)
     '.sc-sumbar{padding:10px 20px;background:#FCFBFA;border-bottom:1px solid #EFEDE9}',
@@ -247,7 +274,6 @@ export const STYLES = [
     '.sc-pen{margin-left:auto;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:none;color:#A8A39C;display:inline-flex;align-items:center;justify-content:center;flex:none;cursor:pointer}',
     '.sc-pen:hover{color:#1F3550;background:#E9EDF2}',
     '.sc-pen:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
-    '.sc-plist .sc-thead,.sc-plist .sc-row{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 110px 90px 90px;column-gap:24px}',
     '.sc-dsub{font-size:12px;color:#6F6B66}',
     '.sc-fl{display:flex;flex-direction:column;gap:4px}',
     '.sc-fl>span:first-child{font-size:12px;font-weight:500;color:#6F6B66}',
@@ -275,6 +301,26 @@ export const STYLES = [
     '.sc-pseek::-moz-range-thumb{width:10px;height:10px;border-radius:999px;background:#1F3550;border:2px solid #FFFFFF}',
     '.sc-ptime{font-size:12px;color:#6F6B66;font-variant-numeric:tabular-nums;white-space:nowrap}',
     '.sc-pspeed{height:26px;min-width:40px;padding:0 8px;border:0;border-radius:6px;background:#F1EFEA;font:inherit;font-size:12px;font-weight:500;color:#3E3B37;cursor:pointer}',
+    // Talk time + the transcript as timed turns (call drawer, 2026-11-28)
+    '.sc-talk{display:flex;flex-direction:column;gap:8px}',
+    '.sc-talk .bar{display:flex;gap:3px;height:6px}',
+    '.sc-talk .bar span{border-radius:3px}',
+    '.sc-talk .leg{display:flex;gap:18px;font-size:12px;color:#4A4744}',
+    '.sc-talk .leg span{display:inline-flex;align-items:center;gap:6px}',
+    '.sc-talk .leg i{width:8px;height:8px;border-radius:2px}',
+    '.sc-talk .leg b{font-weight:600;color:#161513}',
+    '.sc-turns{display:flex;flex-direction:column;gap:10px}',
+    '.sc-tlist{display:flex;flex-direction:column;gap:2px}',
+    '.sc-turn{display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;padding:8px;border-radius:8px;transition:background-color 150ms ease-out}',
+    '.sc-turn.now{background:#F3F6FA}',
+    '.sc-turn .dot{width:24px;height:24px;border-radius:999px;color:#FFFFFF;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center}',
+    '.sc-turn .h{display:flex;align-items:baseline;gap:8px;font-size:12px}',
+    '.sc-turn .h b{font-size:13px;font-weight:600}',
+    '.sc-turn .at{margin-left:auto;padding:0;border:0;background:none;font:inherit;font-size:12px;color:#6F6B66;font-variant-numeric:tabular-nums;cursor:pointer}',
+    '.sc-turn .at:hover:not(:disabled){color:#1F3550;text-decoration:underline}',
+    '.sc-turn .at:disabled{cursor:default}',
+    '.sc-turn p{margin:2px 0 0;line-height:20px;color:#2E2C29}',
+    '.sc-turn mark{background:#FDF0C4;color:inherit;border-radius:2px}',
     '.sc-ctr{display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:18px}',
     '.sc-ctr p{margin:0}',
     '.sc-ctr b{font-weight:600;color:#5E5952;margin-right:6px}',

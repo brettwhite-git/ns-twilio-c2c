@@ -24,6 +24,10 @@ export interface CallDetail {
         ownerName: string; phone: string; date: string; direction: 'inbound' | 'outbound'; duration: number;
         status: string; voicemail: boolean; satisfaction: number | null; toneKeywords: string; summary: string;
         transcriptLines: Array<{ speaker: '' | 'rep' | 'customer'; text: string }>; transcriptLineCount: number;
+        /** The whole transcript as turns (same speaker joined), with sentence times when stored (2026-11-28+). */
+        turns?: Array<{ speaker: '' | 'rep' | 'customer'; start: number | null; end: number | null; lines: string[] }>;
+        /** Talk time per side: seconds from sentence times, else word counts for older transcripts. */
+        talk?: { rep: number; customer: number; basis: 'seconds' | 'words' };
         recordingUrl: string;
         /** The access-checked audio Suitelet for this call; '' when the recording is gone or was never made. */
         audioUrl?: string;

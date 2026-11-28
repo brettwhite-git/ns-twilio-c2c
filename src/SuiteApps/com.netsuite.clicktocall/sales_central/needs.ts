@@ -6,7 +6,7 @@
  * rings the newest call's contact through the dock.
  */
 
-import {el, clear, money, ago, shortDate} from './dom';
+import {el, clear, money, ago, shortDate, factGroup} from './dom';
 import type {NeedsRow, SnoozedRow} from './api';
 
 export interface NeedsView {
@@ -95,6 +95,7 @@ export const renderNeeds = (host: HTMLElement, v: NeedsView): HTMLElement[] => {
     v.rows.slice(0, 3).forEach((r) => grid.appendChild(card(r, v)));
     host.appendChild(grid);
 
+    const table = el('div', 'sc-grid');
     const band = el('div', 'sc-band');
     band.append(el('span', '', 'Everything that needs you '), el('span', 'cnt', String(v.rows.length)));
     if (v.snoozed.length) {
@@ -102,8 +103,9 @@ export const renderNeeds = (host: HTMLElement, v: NeedsView): HTMLElement[] => {
         t.setAttribute('aria-expanded', String(v.showSnoozed));
         band.appendChild(t);
     }
-    band.appendChild(el('span', 'sc-hint', 'Most urgent first'));
-    host.appendChild(band);
+    band.appendChild(el('span', 'sc-bcount', 'Most urgent first'));
+    host.appendChild(table);
+    table.appendChild(band);
     if (v.showSnoozed && v.snoozed.length) {
         const list = el('div', 'sc-snzlist');
         v.snoozed.forEach((s) => {
@@ -112,12 +114,12 @@ export const renderNeeds = (host: HTMLElement, v: NeedsView): HTMLElement[] => {
                 button('sc-cancel', 'Unsnooze', () => v.onUnsnooze(s.companyId)));
             list.appendChild(row);
         });
-        host.appendChild(list);
+        table.appendChild(list);
     }
     const head = el('div', 'sc-thead');
     head.append(el('span', '', 'Account · why now'), el('span', '', 'Status'), el('span', '', 'Contact'),
-        el('span', 'num', 'Open'), el('span', 'num', 'Last touch'), el('span', 'num', 'Next'), el('span'));
-    host.appendChild(head);
+        factGroup([['Open', 'num g-money'], ['Last touch', 'num g-date'], ['Next', 'num g-date'], ['', 'g-act']]));
+    table.appendChild(head);
     v.rows.forEach((r) => {
         // The row opens the drawer; Call is its own button beside it (no button inside a button)
         const line = el('div', 'sc-rline');
@@ -127,8 +129,8 @@ export const renderNeeds = (host: HTMLElement, v: NeedsView): HTMLElement[] => {
         b.setAttribute('data-id', r.companyId);
         if (r.companyId === v.selected) b.setAttribute('aria-current', 'true');
         b.append(two(r.name, whyText(r), 'strong'), el('span', '', ''), two(r.contact || '—', r.phone || ''),
-            two(r.open ? money(r.open) : '$0', 'open', 'num'), two(touchText(r, v.todayIso), 'last touch', 'num'),
-            two(r.next ? shortDate(r.next) : '—', 'next', 'num'));
+            factGroup([[r.open ? money(r.open) : '$0', 'num g-money'], [touchText(r, v.todayIso), 'num g-date'],
+                [r.next ? shortDate(r.next) : '—', 'num g-date'], ['', 'g-act']]));
         b.children[1].appendChild(status(r));
         b.addEventListener('click', () => v.onOpen(r));
         const call = button('sc-callb', '', () => v.onCall(r));
@@ -136,7 +138,7 @@ export const renderNeeds = (host: HTMLElement, v: NeedsView): HTMLElement[] => {
         call.setAttribute('aria-label', 'Call ' + (r.contact || r.name));
         call.disabled = !r.phone;
         line.append(b, call);
-        host.appendChild(line);
+        table.appendChild(line);
         buttons.push(b);
     });
     return buttons;

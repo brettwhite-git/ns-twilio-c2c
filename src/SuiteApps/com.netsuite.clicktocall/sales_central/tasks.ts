@@ -10,7 +10,7 @@
  * text and a Peek icon after it is the only way to the account drawer (#118).
  */
 
-import {el, clear, shortDate} from './dom';
+import {el, clear, shortDate, factGroup} from './dom';
 import type {TaskRow, Outcome, CompletePayload} from './api';
 
 export type TaskGroup = 'all' | 'suggested' | TaskRow['band'];
@@ -214,7 +214,7 @@ const renderRow = (r: TaskRow, v: TasksView): HTMLElement => {
     }
     else verb = el('span', 'sc-verbs');
     if (r.kind === 'task' && !open) verb.appendChild(button('sc-btn gh sm', 'Complete', () => v.onToggle(r.id)));
-    line.append(title, accountCell(r, v), fromCell(r), due, verb);
+    line.append(title, accountCell(r, v), fromCell(r), factGroup([[due, 'num g-date'], [verb, 'g-verb']]));
     if (r.kind === 'task') {
         line.classList.add('tap');
         // The whole row opens the task; its buttons and links keep their own job.
@@ -285,8 +285,13 @@ export const renderTasks = (host: HTMLElement, v: TasksView): HTMLElement[] => {
     bar.appendChild(line);
     host.appendChild(bar);
     const head = el('div', 'sc-thead');
-    head.append(el('span', '', 'Task'), el('span', '', 'Account'), el('span', '', 'From'), el('span', 'num', 'Due'), el('span'));
-    host.appendChild(head);
+    head.append(el('span', '', 'Task'), el('span', '', 'Account'), el('span', '', 'From'),
+        factGroup([['Due', 'num g-date'], ['', 'g-verb']]));
+    // One grid for the table (table contract): header, bands and task rows are subgrids of it
+    const grid = el('div', 'sc-grid');
+    host.appendChild(grid);
+    grid.appendChild(head);
+    host = grid;
     if (suggestions.length && (shown === 'all' || shown === 'suggested')) {
         const capped = shown === 'all' && !v.showAllSuggested && suggestions.length > SUGGESTION_CAP;
         host.appendChild(band('suggested', 'Suggested from your calls', suggestions.length, 'Approve adds it to your tasks'));

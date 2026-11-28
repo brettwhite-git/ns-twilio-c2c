@@ -141,6 +141,9 @@ TRANSCRIPT:
             'The call took place on ' + weekdayOf(callDate) + ', ' + callDate + '.';
     };
 
+    // The stored transcript carries sentence times ("[REP 12.4-15.9] …"); the
+    // model reads the plain "[REP] …" form, as before the times were kept.
+    const withoutTimes = (text) => String(text || '').replace(/^\[(REP|CUSTOMER) [0-9.]+-[0-9.]+\]/gm, '[$1]');
     /**
      * Full prompt: date reference line, instructions, transcript.
      * @param {string} transcriptText
@@ -148,7 +151,7 @@ TRANSCRIPT:
      * @returns {string}
      */
     const buildAnalysisPrompt = (transcriptText, context) =>
-        buildDateLine(context) + '\n\n' + ANALYSIS_PROMPT_PREFIX + transcriptText;
+        buildDateLine(context) + '\n\n' + ANALYSIS_PROMPT_PREFIX + withoutTimes(transcriptText);
 
     /**
      * Default LLM parameters.

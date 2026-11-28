@@ -27,6 +27,18 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             return d + 'd ago';
         return shortDate(iso);
     };
+    const factGroup = (slots) => {
+        const g = el('span', 'sc-grp');
+        slots.forEach(([content, cls]) => {
+            const s = el('span', 'sc-g ' + cls);
+            if (typeof content === 'string')
+                s.textContent = content;
+            else
+                s.appendChild(content);
+            g.appendChild(s);
+        });
+        return g;
+    };
     const shortDate = (iso) => {
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
         return m ? MONTHS[parseInt(m[2], 10) - 1] + ' ' + parseInt(m[3], 10) : '—';
@@ -45,7 +57,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     };
 
     const STYLES = [
-        '.sc{position:relative;box-sizing:border-box;min-height:100vh;padding:18px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
+        '.sc{position:relative;box-sizing:border-box;min-height:100vh;padding:28px 32px 32px;background:#F5F4F2;color:#161513;font:400 13px/19px "Oracle Sans","Helvetica Neue",Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}',
         '.sc *{box-sizing:border-box}',
         '.sc [hidden]{display:none !important}',
         '.sc button{font:inherit;color:inherit}',
@@ -56,6 +68,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-title{margin:0;font-size:17px;line-height:22px;font-weight:600;letter-spacing:-0.01em;white-space:nowrap}',
         '.sc-tsep{width:1px;height:22px;background:#DEDBD7;flex:none}',
         '.sc-frame{background:#FFFFFF;border:1px solid #E5E2DD;border-radius:8px;box-shadow:0 1px 2px rgba(26,24,22,0.04);overflow:hidden}',
+        '.sc>.sc-frame{max-width:1900px;margin-left:auto;margin-right:auto}',
         '.sc-wcard{margin-top:16px}',
         '.sc-tabbar{display:flex;align-items:center;gap:20px;padding:0 20px 0 12px}',
         '.sc-fold{width:28px;height:28px;padding:0;border:0;border-radius:6px;background:none;color:#5E5952;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;margin-right:-12px}',
@@ -109,7 +122,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-snzrow{display:grid;grid-template-columns:minmax(0,1fr) 120px auto;gap:16px;align-items:center;height:40px;padding:0 24px;border-top:1px solid #F1EFEA}',
         '.sc-snzrow .sc-cancel{margin-right:0;height:28px;padding:0 8px}',
         '.sc-pill.amb{color:#8A5A12;background:#FBF3E4;box-shadow:inset 0 0 0 1px #EBD7B1}',
-        '.sc-rline{display:grid;grid-template-columns:minmax(0,1fr) 56px;align-items:center;border-bottom:1px solid #ECEAE7}',
+        '.sc-pill.slate{color:#3D5470;background:#EEF2F7;box-shadow:inset 0 0 0 1px #D3DCE8}',
+        '.sc-rline{position:relative;border-bottom:1px solid #ECEAE7}',
         '.sc-rline .sc-row{border-bottom:0}',
         '.sc-rline:hover{background:#FAFAF9}',
         '.sc-rline:has(.sc-row[aria-current="true"]){background:#F5F4F2}',
@@ -122,20 +136,38 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-two.strong .m{font-weight:500}',
         '.sc-two.num{align-items:flex-end}',
         '.sc-thead,.sc-row{display:grid;align-items:center;column-gap:16px;padding:0 24px}',
+        '.sc-grid{display:grid;column-gap:36px;justify-content:space-between}',
+        '.sc-grid>*{grid-column:1/-1}',
+        '.sc-grid>.sc-thead,.sc-grid>.sc-row,.sc-grid>.sc-rline,.sc-grid>.sc-trow,.sc-rline>.sc-row,.sc-trow>.sc-tline{display:grid;grid-column:1/-1;grid-template-columns:subgrid;column-gap:normal}',
+        '.sc-grid>.sc-rline,.sc-trow>.sc-tline{padding:0}',
+        '.sc-trow>.sc-tline{padding:0 24px}',
+        '.sc-trow>.sc-topen{grid-column:1/-1}',
+        '.sc-calls .sc-grid{grid-template-columns:max-content minmax(0,max-content) max-content minmax(320px,520px) max-content}',
+        '.sc-needs .sc-grid{grid-template-columns:minmax(240px,420px) max-content minmax(0,max-content) max-content}',
+        '.sc-tasks .sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) minmax(0,320px) max-content}',
+        '.sc-plist.sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) max-content}',
+        '.sc-calls .sc-row,.sc-needs .sc-row{min-height:56px;padding-top:8px;padding-bottom:8px}',
+        '.sc-grp{display:flex;align-items:center;justify-content:flex-end;gap:28px}',
+        '.sc-g{display:flex;align-items:center;flex:none;min-width:0}',
+        '.sc-g.num{justify-content:flex-end;font-variant-numeric:tabular-nums}',
+        '.sc-g.g-len{width:52px}',
+        '.sc-g.g-len,.sc-g.g-score{margin-right:32px}',
+        '.sc-g.g-score{width:52px;justify-content:center}',
+        '.sc-g.g-money{width:88px}',
+        '.sc-g.g-date{width:64px}',
+        '.sc-g.g-pct{width:72px}',
+        '.sc-g.g-verb{width:156px;justify-content:flex-end}',
+        '.sc-g.g-act{width:30px}',
+        '.sc-rline>.sc-callb{position:absolute;right:24px;top:50%;margin-top:-15px}',
+        '.sc-band .sc-bcount{margin-left:auto;font-weight:400;color:#6F6B66}',
         '.sc-thead{height:40px;border-bottom:1px solid #ECEAE7;font-size:13px;font-weight:500;color:#5E5952}',
         '.sc-row{width:100%;min-height:48px;border:0;border-bottom:1px solid #ECEAE7;background:#FFFFFF;text-align:left;cursor:pointer}',
         '.sc-row:hover{background:#FAFAF9}',
         '.sc-row[aria-current="true"]{background:#F5F4F2}',
-        '.sc-needs .sc-row{grid-template-columns:minmax(0,1.6fr) 140px minmax(0,1fr) 110px 100px 80px;min-height:56px}',
-        '.sc-needs .sc-thead{grid-template-columns:minmax(0,1.6fr) 140px minmax(0,1fr) 110px 100px 80px 56px}',
-        '.sc-calls .sc-row{grid-template-columns:64px minmax(0,220px) 130px minmax(0,1fr) 64px 80px;min-height:60px;padding-top:8px;padding-bottom:8px;padding-right:16px}',
-        '.sc-calls .sc-thead{grid-template-columns:64px minmax(0,220px) 130px minmax(0,1fr) 64px 80px 56px;padding-right:0}',
-        '.sc-ksum{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:18px;color:#2E2C29}',
+        '.sc-ksum{line-height:19px;color:#2E2C29;padding:2px 0}',
         '.sc-kday{display:flex;align-items:center;height:32px;padding:0 24px;background:#FAFAF9;border-bottom:1px solid #ECEAE7;font-size:12px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#5E5952}',
         '.sc-kday i{margin-left:auto;font-style:normal;font-weight:400;letter-spacing:0;text-transform:none;color:#6F6B66}',
         '.sc-pill.good{color:#2F6B34;background:#EAF4EC;box-shadow:inset 0 0 0 1px #C9E3CD}',
-        '.sc-needs .sc-row{padding-right:16px}',
-        '.sc-needs .sc-thead{padding-right:0}',
         '.sc-cell2{display:flex;flex-direction:column;min-width:0;padding:6px 0}',
         '.sc-cell2 .l1{display:flex;gap:8px;align-items:baseline}',
         '.sc-cell2 .name{font-size:14px;font-weight:500}',
@@ -143,7 +175,6 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-status{display:inline-flex;align-items:center;gap:6px}',
         '.sc-clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
         '.sc-strong{font-weight:500}',
-        '.sc-tasks .sc-thead,.sc-tline{grid-template-columns:minmax(0,1.4fr) minmax(0,0.8fr) minmax(0,1fr) 72px 170px;column-gap:24px}',
         '.sc-sumbar{padding:10px 20px;background:#FCFBFA;border-bottom:1px solid #EFEDE9}',
         '.sc-sumline{display:inline-flex;gap:2px;padding:3px;border-radius:8px;background:#F1EFEA}',
         '.sc-sum{height:28px;padding:0 12px;border:0;border-radius:6px;background:none;display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:12px;color:#4A4744;cursor:pointer}',
@@ -255,7 +286,6 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-pen{margin-left:auto;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:none;color:#A8A39C;display:inline-flex;align-items:center;justify-content:center;flex:none;cursor:pointer}',
         '.sc-pen:hover{color:#1F3550;background:#E9EDF2}',
         '.sc-pen:focus-visible{outline:2px solid #1F3550;outline-offset:2px}',
-        '.sc-plist .sc-thead,.sc-plist .sc-row{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) 110px 90px 90px;column-gap:24px}',
         '.sc-dsub{font-size:12px;color:#6F6B66}',
         '.sc-fl{display:flex;flex-direction:column;gap:4px}',
         '.sc-fl>span:first-child{font-size:12px;font-weight:500;color:#6F6B66}',
@@ -280,6 +310,25 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         '.sc-pseek::-moz-range-thumb{width:10px;height:10px;border-radius:999px;background:#1F3550;border:2px solid #FFFFFF}',
         '.sc-ptime{font-size:12px;color:#6F6B66;font-variant-numeric:tabular-nums;white-space:nowrap}',
         '.sc-pspeed{height:26px;min-width:40px;padding:0 8px;border:0;border-radius:6px;background:#F1EFEA;font:inherit;font-size:12px;font-weight:500;color:#3E3B37;cursor:pointer}',
+        '.sc-talk{display:flex;flex-direction:column;gap:8px}',
+        '.sc-talk .bar{display:flex;gap:3px;height:6px}',
+        '.sc-talk .bar span{border-radius:3px}',
+        '.sc-talk .leg{display:flex;gap:18px;font-size:12px;color:#4A4744}',
+        '.sc-talk .leg span{display:inline-flex;align-items:center;gap:6px}',
+        '.sc-talk .leg i{width:8px;height:8px;border-radius:2px}',
+        '.sc-talk .leg b{font-weight:600;color:#161513}',
+        '.sc-turns{display:flex;flex-direction:column;gap:10px}',
+        '.sc-tlist{display:flex;flex-direction:column;gap:2px}',
+        '.sc-turn{display:grid;grid-template-columns:24px minmax(0,1fr);gap:10px;padding:8px;border-radius:8px;transition:background-color 150ms ease-out}',
+        '.sc-turn.now{background:#F3F6FA}',
+        '.sc-turn .dot{width:24px;height:24px;border-radius:999px;color:#FFFFFF;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center}',
+        '.sc-turn .h{display:flex;align-items:baseline;gap:8px;font-size:12px}',
+        '.sc-turn .h b{font-size:13px;font-weight:600}',
+        '.sc-turn .at{margin-left:auto;padding:0;border:0;background:none;font:inherit;font-size:12px;color:#6F6B66;font-variant-numeric:tabular-nums;cursor:pointer}',
+        '.sc-turn .at:hover:not(:disabled){color:#1F3550;text-decoration:underline}',
+        '.sc-turn .at:disabled{cursor:default}',
+        '.sc-turn p{margin:2px 0 0;line-height:20px;color:#2E2C29}',
+        '.sc-turn mark{background:#FDF0C4;color:inherit;border-radius:2px}',
         '.sc-ctr{display:flex;flex-direction:column;gap:6px;font-size:12px;line-height:18px}',
         '.sc-ctr p{margin:0}',
         '.sc-ctr b{font-weight:600;color:#5E5952;margin-right:6px}',
@@ -454,6 +503,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         const grid = el('div', 'sc-pins');
         v.rows.slice(0, 3).forEach((r) => grid.appendChild(card$1(r, v)));
         host.appendChild(grid);
+        const table = el('div', 'sc-grid');
         const band = el('div', 'sc-band');
         band.append(el('span', '', 'Everything that needs you '), el('span', 'cnt', String(v.rows.length)));
         if (v.snoozed.length) {
@@ -461,8 +511,9 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             t.setAttribute('aria-expanded', String(v.showSnoozed));
             band.appendChild(t);
         }
-        band.appendChild(el('span', 'sc-hint', 'Most urgent first'));
-        host.appendChild(band);
+        band.appendChild(el('span', 'sc-bcount', 'Most urgent first'));
+        host.appendChild(table);
+        table.appendChild(band);
         if (v.showSnoozed && v.snoozed.length) {
             const list = el('div', 'sc-snzlist');
             v.snoozed.forEach((s) => {
@@ -470,11 +521,11 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 row.append(el('span', 'sc-clip', s.name), el('span', 'mut', 'until ' + shortDate(s.until)), button$3('sc-cancel', 'Unsnooze', () => v.onUnsnooze(s.companyId)));
                 list.appendChild(row);
             });
-            host.appendChild(list);
+            table.appendChild(list);
         }
         const head = el('div', 'sc-thead');
-        head.append(el('span', '', 'Account · why now'), el('span', '', 'Status'), el('span', '', 'Contact'), el('span', 'num', 'Open'), el('span', 'num', 'Last touch'), el('span', 'num', 'Next'), el('span'));
-        host.appendChild(head);
+        head.append(el('span', '', 'Account · why now'), el('span', '', 'Status'), el('span', '', 'Contact'), factGroup([['Open', 'num g-money'], ['Last touch', 'num g-date'], ['Next', 'num g-date'], ['', 'g-act']]));
+        table.appendChild(head);
         v.rows.forEach((r) => {
             const line = el('div', 'sc-rline');
             line.setAttribute('data-id', r.companyId);
@@ -483,7 +534,8 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             b.setAttribute('data-id', r.companyId);
             if (r.companyId === v.selected)
                 b.setAttribute('aria-current', 'true');
-            b.append(two(r.name, whyText(r), 'strong'), el('span', '', ''), two(r.contact || '—', r.phone || ''), two(r.open ? money(r.open) : '$0', 'open', 'num'), two(touchText$1(r, v.todayIso), 'last touch', 'num'), two(r.next ? shortDate(r.next) : '—', 'next', 'num'));
+            b.append(two(r.name, whyText(r), 'strong'), el('span', '', ''), two(r.contact || '—', r.phone || ''), factGroup([[r.open ? money(r.open) : '$0', 'num g-money'], [touchText$1(r, v.todayIso), 'num g-date'],
+                [r.next ? shortDate(r.next) : '—', 'num g-date'], ['', 'g-act']]));
             b.children[1].appendChild(status(r));
             b.addEventListener('click', () => v.onOpen(r));
             const call = button$3('sc-callb', '', () => v.onCall(r));
@@ -491,7 +543,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             call.setAttribute('aria-label', 'Call ' + (r.contact || r.name));
             call.disabled = !r.phone;
             line.append(b, call);
-            host.appendChild(line);
+            table.appendChild(line);
             buttons.push(b);
         });
         return buttons;
@@ -499,10 +551,11 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
 
     const PHONE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path></svg>';
     const DIR_ICON = {
-        in: '<path d="M17 7 7 17M7 9v8h8"></path>',
-        out: '<path d="M7 17 17 7M9 7h8v8"></path>',
-        missed: '<path d="M17 7 7 17M7 9v8h8"></path><path d="M14 4l6 6M20 4l-6 6"></path>',
-        vm: '<circle cx="6.5" cy="12" r="3.5"></circle><circle cx="17.5" cy="12" r="3.5"></circle><path d="M6.5 15.5h11"></path>'
+        in: '<path d="M9.75 4.25l-5.5 5.5"></path><path d="M8.75 9.75h-4.5v-4.5"></path>',
+        out: '<path d="M4.25 9.75l5.5-5.5"></path><path d="M5.25 4.25h4.5v4.5"></path>',
+        missed: '<path d="M2.25 4.25l4.75 4.75 4.75-4.75"></path><path d="M8.25 4.25h3.5v3.5"></path>',
+        noans: '<path d="M2.25 7h7"></path><path d="M6.75 4.5 9.25 7l-2.5 2.5"></path><path d="M11.75 3.75v6.5"></path>',
+        vm: '<circle cx="4" cy="7.25" r="2.25"></circle><circle cx="10" cy="7.25" r="2.25"></circle><path d="M4 9.5h6"></path>'
     };
     const summary = (r) => {
         if (r.brief)
@@ -520,10 +573,10 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
     const kindPill = (r) => {
         const [label, icon, tone] = r.voicemail ? ['Voicemail', 'vm', 'amb']
             : r.callStatus === 'Missed' ? ['Missed', 'missed', 'late']
-                : r.callStatus === 'No answer' ? ['No answer', 'out', 'amb']
+                : r.callStatus === 'No answer' ? ['No answer', 'noans', 'slate']
                     : r.direction === 'inbound' ? ['Inbound', 'in', ''] : ['Outbound', 'out', ''];
         const p = el('span', 'sc-pill ' + tone);
-        p.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + DIR_ICON[icon] + '</svg>';
+        p.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + DIR_ICON[icon] + '</svg>';
         p.appendChild(document.createTextNode(label));
         return p;
     };
@@ -543,18 +596,20 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             host.appendChild(m);
             return [];
         }
+        const grid = el('div', 'sc-grid');
+        host.appendChild(grid);
         const head = el('div', 'sc-thead');
-        head.append(el('span', '', 'Time'), el('span', '', 'Account · contact'), el('span', '', 'Call'), el('span', '', 'AI summary'), el('span', 'num', 'Length'), el('span', '', 'Score'), el('span'));
-        host.appendChild(head);
+        head.append(el('span', '', 'Time'), el('span', '', 'Account'), el('span', '', 'Call'), el('span', '', 'AI summary'), factGroup([['Length', 'num g-len'], ['Score', 'g-score'], ['', 'g-act']]));
+        grid.appendChild(head);
         let day = '';
         v.rows.forEach((r) => {
             const iso = nsDateToIso(r.date);
             if (iso !== day) {
                 day = iso;
                 const n = v.rows.filter((x) => nsDateToIso(x.date) === iso).length;
-                const g = el('div', 'sc-kday');
-                g.append(el('span', '', dayLabel(iso, v.todayIso)), el('i', '', n + (n === 1 ? ' call' : ' calls')));
-                host.appendChild(g);
+                const g = el('div', 'sc-band');
+                g.append(el('span', '', dayLabel(iso, v.todayIso)), el('span', 'sc-bcount', n + (n === 1 ? ' call' : ' calls')));
+                grid.appendChild(g);
             }
             const line = el('div', 'sc-rline');
             const b = el('button', 'sc-row');
@@ -568,7 +623,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             kind.appendChild(kindPill(r));
             const score = el('span');
             score.appendChild(scorePill(r.voicemail ? null : r.satisfaction));
-            b.append(el('span', 'num', r.timeOfDay || ''), who, kind, el('span', 'sc-ksum', summary(r)), el('span', 'num', r.duration ? clock(r.duration) : '—'), score);
+            b.append(el('span', 'num', r.timeOfDay || ''), who, kind, el('span', 'sc-ksum', summary(r)), factGroup([[r.duration ? clock(r.duration) : '—', 'num g-len'], [score, 'g-score'], ['', 'g-act']]));
             b.addEventListener('click', () => v.onOpen(r));
             const call = el('button', 'sc-callb');
             call.type = 'button';
@@ -577,7 +632,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             call.disabled = !r.phone;
             call.addEventListener('click', () => v.onCall(r));
             line.append(b, call);
-            host.appendChild(line);
+            grid.appendChild(line);
         });
         return [];
     };
@@ -694,6 +749,103 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         wrap.append(play, seek, time, speed, audio, err);
         return wrap;
     };
+    const REP_COLOR = '#1F3550';
+    const CUST_COLOR = '#C27A1A';
+    const whoOf = (c, speaker) => speaker === 'rep' ? firstName(c.ownerName) || 'Rep' : speaker === 'customer' ? firstName(c.contactName) || 'Customer' : '';
+    const fullWho = (c, speaker) => speaker === 'rep' ? c.ownerName || 'Rep' : speaker === 'customer' ? c.contactName || c.companyName || 'Customer' : '';
+    const initials = (name) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+    const talkBlock = (c, talk) => {
+        const total = talk.rep + talk.customer;
+        if (!total)
+            return null;
+        const repPct = Math.round((talk.rep / total) * 100);
+        const wrap = el('div', 'sc-talk');
+        const bar = el('div', 'bar');
+        const r = el('span');
+        r.style.flex = String(repPct);
+        r.style.background = REP_COLOR;
+        const k = el('span');
+        k.style.flex = String(100 - repPct);
+        k.style.background = CUST_COLOR;
+        bar.append(r, k);
+        const leg = el('div', 'leg');
+        [[fullWho(c, 'rep'), repPct, REP_COLOR], [fullWho(c, 'customer'), 100 - repPct, CUST_COLOR]].forEach(([n, p, col]) => {
+            const it = el('span');
+            const sq = el('i');
+            sq.style.background = col;
+            it.append(sq, document.createTextNode(n + ' '), el('b', '', p + '%'));
+            leg.appendChild(it);
+        });
+        wrap.append(bar, leg);
+        return wrap;
+    };
+    const transcriptBlock = (c, turns, audio) => {
+        const box = el('div', 'sc-turns');
+        const timed = turns.some((t) => t.start !== null);
+        box.appendChild(section$2('Transcript', turns.length + (turns.length === 1 ? ' turn' : ' turns') + (timed && audio ? ' · follows the recording' : '')));
+        const find = el('input', 'sc-field sc-tfind');
+        find.type = 'search';
+        find.placeholder = 'Search the transcript';
+        find.setAttribute('aria-label', 'Search the transcript');
+        box.appendChild(find);
+        const list = el('div', 'sc-tlist');
+        box.appendChild(list);
+        const rows = [];
+        const draw = (q) => {
+            clear(list);
+            rows.length = 0;
+            turns.forEach((t) => {
+                if (q && !t.lines.some((l) => l.toLowerCase().indexOf(q) !== -1))
+                    return;
+                const row = el('div', 'sc-turn');
+                const dot = el('span', 'dot', initials(fullWho(c, t.speaker)) || '·');
+                dot.style.background = t.speaker === 'rep' ? REP_COLOR : t.speaker === 'customer' ? CUST_COLOR : '#A8A39C';
+                const body = el('div');
+                const h = el('div', 'h');
+                h.appendChild(el('b', '', fullWho(c, t.speaker) || 'Speaker'));
+                if (t.start !== null) {
+                    const at = el('button', 'at', clock(Math.floor(t.start)));
+                    at.type = 'button';
+                    at.setAttribute('aria-label', 'Play from ' + clock(Math.floor(t.start)));
+                    at.disabled = !audio;
+                    at.addEventListener('click', () => { if (audio) {
+                        audio.currentTime = t.start;
+                        audio.play().catch(() => undefined);
+                    } });
+                    h.appendChild(at);
+                }
+                body.appendChild(h);
+                t.lines.forEach((l) => {
+                    const p = el('p');
+                    if (q) {
+                        const i = l.toLowerCase().indexOf(q);
+                        if (i !== -1) {
+                            p.append(document.createTextNode(l.slice(0, i)), el('mark', '', l.slice(i, i + q.length)), document.createTextNode(l.slice(i + q.length)));
+                        }
+                        else
+                            p.textContent = l;
+                    }
+                    else
+                        p.textContent = l;
+                    body.appendChild(p);
+                });
+                row.append(dot, body);
+                list.appendChild(row);
+                rows.push({ el: row, start: t.start, end: t.end });
+            });
+            if (!rows.length)
+                list.appendChild(el('div', 'mut', 'No turn matches.'));
+        };
+        draw('');
+        find.addEventListener('input', () => draw(find.value.trim().toLowerCase()));
+        if (audio && timed) {
+            audio.addEventListener('timeupdate', () => {
+                const now = audio.currentTime;
+                rows.forEach((r) => r.el.classList.toggle('now', r.start !== null && r.end !== null && now >= r.start && now < r.end));
+            });
+        }
+        return box;
+    };
     const renderCallDetail = (host, row, d, h) => {
         clear(host);
         const c = d.call;
@@ -708,24 +860,37 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             host.appendChild(el('div', 'mut', final ? 'No summary for this call: there was no transcript to summarise.'
                 : 'The summary is on its way. It is written after the transcript is ready.'));
         }
+        if (c.talk && !c.voicemail) {
+            const t = talkBlock(c, c.talk);
+            if (t) {
+                const pct = (x) => Math.round((x / (c.talk.rep + c.talk.customer)) * 100);
+                host.appendChild(section$2('Talk time', firstName(c.ownerName) + ' ' + pct(c.talk.rep) + '% · ' +
+                    (firstName(c.contactName) || 'Customer') + ' ' + pct(c.talk.customer) + '%' + (c.talk.basis === 'words' ? ' · by words' : '')));
+                host.appendChild(t);
+            }
+        }
         if (c.audioUrl) {
             host.appendChild(section$2('Recording', ''));
             host.appendChild(player(c.audioUrl, c.duration));
         }
         followUps(host, d, h);
-        if (c.transcriptLines.length) {
+        const audio = host.querySelector('.sc-player audio');
+        if (c.turns && c.turns.length)
+            host.appendChild(transcriptBlock(c, c.turns, audio));
+        else if (c.transcriptLines.length) {
             const shown = c.transcriptLines.length;
             host.appendChild(section$2('Transcript', shown < c.transcriptLineCount ? 'First ' + shown + ' of ' + c.transcriptLineCount + ' lines' : shown + ' lines'));
             const tr = el('div', 'sc-ctr');
-            const who = (s) => (s === 'rep' ? firstName(c.ownerName) || 'Rep' : s === 'customer' ? firstName(c.contactName) || 'Customer' : '');
             c.transcriptLines.forEach((l) => {
                 const p = el('p');
-                if (who(l.speaker))
-                    p.appendChild(el('b', '', who(l.speaker)));
+                if (whoOf(c, l.speaker))
+                    p.appendChild(el('b', '', whoOf(c, l.speaker)));
                 p.appendChild(document.createTextNode(l.text));
                 tr.appendChild(p);
             });
             host.appendChild(tr);
+        }
+        if (c.turns && c.turns.length || c.transcriptLines.length) {
             const all = el('a', 'sc-rec', 'Full transcript in NetSuite');
             all.href = recordUrl$1(c.id);
             all.target = '_top';
@@ -981,7 +1146,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
             verb = el('span', 'sc-verbs');
         if (r.kind === 'task' && !open)
             verb.appendChild(button$1('sc-btn gh sm', 'Complete', () => v.onToggle(r.id)));
-        line.append(title, accountCell(r, v), fromCell(r), due, verb);
+        line.append(title, accountCell(r, v), fromCell(r), factGroup([[due, 'num g-date'], [verb, 'g-verb']]));
         if (r.kind === 'task') {
             line.classList.add('tap');
             line.addEventListener('click', (e) => {
@@ -1052,8 +1217,11 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         bar.appendChild(line);
         host.appendChild(bar);
         const head = el('div', 'sc-thead');
-        head.append(el('span', '', 'Task'), el('span', '', 'Account'), el('span', '', 'From'), el('span', 'num', 'Due'), el('span'));
-        host.appendChild(head);
+        head.append(el('span', '', 'Task'), el('span', '', 'Account'), el('span', '', 'From'), factGroup([['Due', 'num g-date'], ['', 'g-verb']]));
+        const grid = el('div', 'sc-grid');
+        host.appendChild(grid);
+        grid.appendChild(head);
+        host = grid;
         if (suggestions.length && (shown === 'all' || shown === 'suggested')) {
             const capped = shown === 'all' && !v.showAllSuggested && suggestions.length > SUGGESTION_CAP;
             host.appendChild(band('suggested', 'Suggested from your calls', suggestions.length, 'Approve adds it to your tasks'));
@@ -1244,16 +1412,17 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
         return cols;
     };
     const list = (p, h) => {
-        const wrap = el('div', 'sc-plist');
+        const wrap = el('div', 'sc-plist sc-grid');
         const head = el('div', 'sc-thead');
-        head.append(el('span', '', 'Deal'), el('span', '', 'Account'), el('span', 'num', 'Amount'), el('span', 'num', 'Close'), el('span', 'num', 'Probability'));
+        head.append(el('span', '', 'Deal'), el('span', '', 'Account'), factGroup([['Close', 'num g-date'], ['Probability', 'num g-pct'], ['Amount', 'num g-money']]));
         wrap.appendChild(head);
         p.statuses.forEach((s) => {
             const items = p.deals.filter((d) => d.statusId === s.id);
             if (!items.length)
                 return;
             const b = el('div', 'sc-band', s.name + ' ');
-            b.appendChild(el('span', 'cnt', items.length + ' · ' + money(sum$1(items))));
+            b.appendChild(el('span', 'cnt', String(items.length)));
+            b.appendChild(el('span', 'sc-bcount', money(sum$1(items))));
             wrap.appendChild(b);
             items.forEach((d) => {
                 const r = button('sc-row', '', () => h.onEdit(d));
@@ -1261,7 +1430,7 @@ define(['exports', '@uif-js/component'], (function (exports, component) { 'use s
                 const close = el('span', 'num', d.close ? shortDate(d.close) : '—');
                 if (late(d, h.todayIso))
                     close.style.color = '#B3311F';
-                r.append(el('span', 'sc-strong sc-clip', d.title || 'Untitled'), el('span', 'sc-clip', d.companyName), el('span', 'num', money(d.amount)), close, el('span', 'num mut', d.probability + '%'));
+                r.append(el('span', 'sc-strong', d.title || 'Untitled'), el('span', 'sc-clip', d.companyName), factGroup([[close, 'num g-date'], [d.probability + '%', 'num mut g-pct'], [money(d.amount), 'num g-money']]));
                 wrap.appendChild(r);
             });
         });

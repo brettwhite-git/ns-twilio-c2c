@@ -6,7 +6,7 @@
  * Won is read only: it comes from a sales order, never from Sales Central.
  */
 
-import {el, clear, money, shortDate} from './dom';
+import {el, clear, money, shortDate, factGroup} from './dom';
 import type {Deal, DealStatus, PipelineData, DealEdit, DealDetail} from './api';
 
 export type PipelineView = 'board' | 'list';
@@ -191,23 +191,25 @@ const board = (p: PipelineData, h: PipelineHandlers): HTMLElement => {
 };
 
 const list = (p: PipelineData, h: PipelineHandlers): HTMLElement => {
-    const wrap = el('div', 'sc-plist');
+    const wrap = el('div', 'sc-plist sc-grid');
     const head = el('div', 'sc-thead');
-    head.append(el('span', '', 'Deal'), el('span', '', 'Account'), el('span', 'num', 'Amount'), el('span', 'num', 'Close'), el('span', 'num', 'Probability'));
+    head.append(el('span', '', 'Deal'), el('span', '', 'Account'),
+        factGroup([['Close', 'num g-date'], ['Probability', 'num g-pct'], ['Amount', 'num g-money']]));
     wrap.appendChild(head);
     p.statuses.forEach((s) => {
         const items = p.deals.filter((d) => d.statusId === s.id);
         if (!items.length) return;
         const b = el('div', 'sc-band', s.name + ' ');
-        b.appendChild(el('span', 'cnt', items.length + ' · ' + money(sum(items))));
+        b.appendChild(el('span', 'cnt', String(items.length)));
+        b.appendChild(el('span', 'sc-bcount', money(sum(items))));
         wrap.appendChild(b);
         items.forEach((d) => {
             const r = button('sc-row', '', () => h.onEdit(d));
             r.setAttribute('data-id', d.id);
             const close = el('span', 'num', d.close ? shortDate(d.close) : '—');
             if (late(d, h.todayIso)) close.style.color = '#B3311F';
-            r.append(el('span', 'sc-strong sc-clip', d.title || 'Untitled'), el('span', 'sc-clip', d.companyName),
-                el('span', 'num', money(d.amount)), close, el('span', 'num mut', d.probability + '%'));
+            r.append(el('span', 'sc-strong', d.title || 'Untitled'), el('span', 'sc-clip', d.companyName),
+                factGroup([[close, 'num g-date'], [d.probability + '%', 'num mut g-pct'], [money(d.amount), 'num g-money']]));
             wrap.appendChild(r);
         });
     });

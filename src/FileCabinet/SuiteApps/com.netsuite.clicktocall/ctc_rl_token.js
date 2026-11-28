@@ -1174,10 +1174,11 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/url', './lib/ctc_twilio
      * @returns {{speaker: string, text: string}}
      */
     const transcriptLine = (line) => {
-        const m = String(line).match(/^\[(REP|CUSTOMER)\]\s*/);
-        if (!m) return { speaker: '', text: String(line) };
-        return { speaker: m[1] === 'REP' ? 'rep' : 'customer', text: String(line).slice(m[0].length) };
+        const l = utils.parseTranscriptLine(line);
+        return { speaker: l.speaker, text: l.text };
     };
+    /** Turns shown in the call drawer (a long call is cut; the full transcript stays on the record). */
+    const CALL_DETAIL_TURNS = 200;
 
     /**
      * getCallDetail — one Phone Call for Reporting Central's call detail.
@@ -1389,6 +1390,9 @@ define(['N/search', 'N/runtime', 'N/log', 'N/record', 'N/url', './lib/ctc_twilio
                     toneKeywords: String(f.custevent_ctc_tone_keywords || ''),
                     summary: String(f.custevent_ctc_ai_summary || ''),
                     transcriptLines: lines.slice(0, CALL_DETAIL_LINES).map(transcriptLine),
+                    // The call drawer: turns with times, and talk time (seconds, or words for older transcripts)
+                    turns: utils.transcriptTurns(f.custevent_ctc_transcript, CALL_DETAIL_TURNS).turns,
+                    talk: utils.transcriptTurns(f.custevent_ctc_transcript).talk,
                     transcriptLineCount: lines.length,
                     recordingUrl: String(f.custevent_ctc_recording_url || ''),
                     // The audio comes from the Transcript's media (it outlives the deleted Recording)
