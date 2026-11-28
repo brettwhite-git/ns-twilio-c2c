@@ -105,7 +105,9 @@ export const STYLES = [
     // ---- Table contract (2026-11-28, user-tuned in Claude outputs/table-contract/table-spacing-prototype.html, view B) ----
     // One grid per table; the header, rows and task rows are subgrids, so every row shares the column widths.
     // Columns hug their content; the text column wraps at a readable width; the spare width is shared evenly
-    // between the columns (never under 36px); the facts and the action are one cell at the right (.sc-grp).
+    // between ALL columns, the facts and the action included (never under 36px). 2026-11-28, user-picked in
+    // Claude outputs/table-contract/table-gap-cap-prototype.html, "Even · all columns": a packed facts group left
+    // the numbers 28px apart beside 300px+ gaps, so .sc-grp is display:contents and each fact is its own column.
     '.sc-grid{display:grid;column-gap:36px;justify-content:space-between}',
     '.sc-grid>*{grid-column:1/-1}',
     // Subgrids inherit the parent's gaps (column-gap: normal): their own gap would undo the evenly shared spare width
@@ -113,17 +115,16 @@ export const STYLES = [
     '.sc-grid>.sc-rline,.sc-trow>.sc-tline{padding:0}',
     '.sc-trow>.sc-tline{padding:0 24px}',
     '.sc-trow>.sc-topen{grid-column:1/-1}',
-    '.sc-calls .sc-grid{grid-template-columns:max-content minmax(0,max-content) max-content minmax(320px,520px) max-content}',
-    '.sc-needs .sc-grid{grid-template-columns:minmax(240px,420px) max-content minmax(0,max-content) max-content}',
-    '.sc-tasks .sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) minmax(0,320px) max-content}',
-    '.sc-plist.sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) max-content}',
+    // Facts tracks: Calls Length · Score · Call; Needs me Open · Last touch · Next · Call; Tasks Due · verb; Pipeline Close · Probability · Amount
+    '.sc-calls .sc-grid{grid-template-columns:max-content minmax(0,max-content) max-content minmax(320px,520px) max-content max-content max-content}',
+    '.sc-needs .sc-grid{grid-template-columns:minmax(240px,420px) max-content minmax(0,max-content) max-content max-content max-content max-content}',
+    '.sc-tasks .sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) minmax(0,320px) max-content max-content}',
+    '.sc-plist.sc-grid{grid-template-columns:minmax(240px,420px) minmax(0,max-content) max-content max-content max-content}',
     '.sc-calls .sc-row,.sc-needs .sc-row{min-height:56px;padding-top:8px;padding-bottom:8px}',
-    '.sc-grp{display:flex;align-items:center;justify-content:flex-end;gap:28px}',
+    '.sc-grp{display:contents}',
     '.sc-g{display:flex;align-items:center;flex:none;min-width:0}',
     '.sc-g.num{justify-content:flex-end;font-variant-numeric:tabular-nums}',
     '.sc-g.g-len{width:52px}',
-    // Length, Score and the Call button sit 60px apart (user, 2026-11-28), not the group's 28px
-    '.sc-g.g-len,.sc-g.g-score{margin-right:32px}',
     '.sc-g.g-score{width:52px;justify-content:center}',
     '.sc-g.g-money{width:88px}',
     '.sc-g.g-date{width:64px}',
